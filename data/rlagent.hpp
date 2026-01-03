@@ -2,14 +2,17 @@
 
 #include <memory>
 #include <cstdint>
+#include "interface.hpp"
 
 namespace ppo::model {
 
 class RLAgent {
 public:
-                RLAgent         (long long state_dim, 
+                RLAgent         (std::string const& modelpath,
+                                 long long state_dim, 
                                  long long action_dim, 
                                  long long buffer_dim,
+                                 PPOParamters const& parameters,
                                  float* const stateVector,
                                  float* const actionVector);
 
@@ -26,6 +29,7 @@ public:
     bool        IsTraining      (void) const noexcept;
     long long   GetCurrentStep  (void) const noexcept;
     long long   GetMaxStep      (void) const noexcept;
+    PPOOutputs const& GetOutputs(void) const noexcept;
 
 private:
     struct Impl;

@@ -1,6 +1,6 @@
 #include "player.hpp"
 #include "utils.hpp"
-#include "serialization.hpp"
+#include "serializer.hpp"
 
 #include <array>
 #include <chrono>
@@ -79,31 +79,45 @@ struct Player::Impl :
         m_name{ name }
     {
         m_playerId = playerId;
+
+        ppo::serialization::Serializer& serializer{ ppo::serialization::Serializer::GetInstance() };
+        serializer.Register(
+            [this](ppo::serialization::TomlReadArchive& ar)
+            {
+                serialize(ar);
+
+                UpdateDoubleBuffer();
+            },
+            [this](ppo::serialization::TomlWriteArchive& ar)
+            {
+                serialize(ar);
+            }
+        );
     };
 
-    void Init(float x, float y);
+    void Init(sEnvironmentState const& env);
     void Run(float dt) noexcept;
     void UpdateDoubleBuffer(void);
+    void ComputeFktKillProbability(void) noexcept;
 
     template<typename Ar>
     void serialize(Ar& ar)
     {
         auto section = ar.begin_section(m_name.c_str());
 
-        section("NoEscapeZoneRange", m_noescapeZoneRange);
-        section("MaxFuel", m_maxfuel);
-        section("MaxMissile", m_maxnbmissiles);
-        section("MaxSpeed", m_maxSpeed);
-        section("MaxRotationAngle", m_rotationAngle);
+        section("MaxNoEscapeZoneRange", m_maxNoescapeZone);
+        section("MaxFuel",              m_maxfuel);
+        section("MaxMissile",           m_maxnbmissiles);
+        section("MaxSpeed",             m_maxSpeed);
+        section("MaxRotationAngle",     m_rotationAngle);
+        section("MaxShootAngle",        m_maxShootAngle);
     };
 
-    ppoArray4f              m_fightingArea{ 0.0, 0.0, 0.0, 0.0 };
     sPlayerState            m_buffers[2];
     std::atomic<uint32_t>   m_index{ 0 };
     std::string             m_name{ "unknown" };
 
     static inline sPlayerState const EMPTY_PLAYER_STATE{};
-    static inline ppoArray2f const   EMPTY_PPO_ARRAY2F{};
 };
 
 void
@@ -112,7 +126,7 @@ Player::Impl::UpdateDoubleBuffer(void)
    const uint32_t next = 1u - m_index.load(std::memory_order_relaxed);
 
     m_buffers[next].m_maxSpeed         = m_maxSpeed;
-    m_buffers[next].m_noescapeZoneRange= m_noescapeZoneRange ;
+    m_buffers[next].m_maxNoescapeZone  = m_maxNoescapeZone;
     m_buffers[next].m_target           = m_target            ;
     m_buffers[next].m_dx               = m_dx                ;
     m_buffers[next].m_dy               = m_dy                ;
@@ -132,23 +146,58 @@ Player::Impl::UpdateDoubleBuffer(void)
     m_buffers[next].m_maxnbmissiles    = m_maxnbmissiles     ;
     m_buffers[next].m_destroyed        = m_destroyed         ;
     m_buffers[next].m_playerId         = m_playerId;
+    m_buffers[next].m_maxShootAngle    = m_maxShootAngle     ;
 
     m_index.store(next, std::memory_order_release);
 }
 
 void
-Player::Impl::Init(float x, float y)
+Player::Impl::Init(sEnvironmentState const& env)
 {
-    m_destroyed = false;
-    m_x = x;
-    m_y = y;
+    RandomGenerator generator{};
+
+    generator.registerAttr(m_dx, -m_maxSpeed, m_maxSpeed);
+    generator.registerAttr(m_dy, -m_maxSpeed, m_maxSpeed);
+
+    generator.registerAttr(m_x, -env.m_maxNorth / 2.F, env.m_maxNorth / 2.F);
+    generator.registerAttr(m_y, -env.m_maxEast / 2.F, env.m_maxEast / 2.F);
+
+    generator.generate();
+
+    m_pk            = 0.F;
+    m_destroyed     = false;
+    m_escapezone    = 2.F * m_maxNoescapeZone;
+    m_noescapezone  = m_maxNoescapeZone;
+    m_fuel          = m_maxfuel;
+    m_nbmissiles    = m_maxnbmissiles;
+    m_target_x      = 0.F;
+    m_target_y      = 0.F;
 
     UpdateDoubleBuffer();
 }
 
 void
+Player::Impl::ComputeFktKillProbability(void) noexcept
+{
+    float const d{ static_cast<float>(sqrt(pow(m_x - m_target_x, 2.F) + pow(m_y - m_target_y, 2.F))) };
+    float const ux{ (m_x - m_target_x) / d };
+    float const uy{ (m_y - m_target_y) / d };
+
+    float az = atan2(uy, ux);
+    az = wrapMinusPi2Pi(az);
+    az = wrapMinusPi2Pi(az - m_rotation);
+
+    if ((-m_maxShootAngle <= az)
+        && (az <= m_maxShootAngle))
+        m_pk = std::clamp(1.F - (d - m_noescapezone) / (m_escapezone - m_noescapezone), 
+                          0.F, 1.F);
+}
+
+void
 Player::Impl::Run(float dt) noexcept
 {
+    m_pk = 0.F;
+
     if (!m_destroyed)
     {
         m_speed = sqrt(m_dx * m_dx + m_dy * m_dy);
@@ -157,7 +206,7 @@ Player::Impl::Run(float dt) noexcept
         {
             float const factor{ m_maxSpeed / m_speed };
 
-            m_speed *= factor;
+            m_speed = m_maxSpeed;
 
             m_dx *= factor;
             m_dy *= factor;
@@ -197,6 +246,9 @@ Player::Impl::Run(float dt) noexcept
         if (m_fuel < std::numeric_limits<float>::epsilon()
         || m_speed < std::numeric_limits<float>::epsilon())
             m_destroyed = true;
+
+        if (!m_destroyed)
+            ComputeFktKillProbability();
     }
 
     UpdateDoubleBuffer();
@@ -216,52 +268,7 @@ Player::Init(sEnvironmentState const& env) noexcept
     if (p_impl == nullptr)
         return;
 
-    RandomGenerator generator{};
-
-    float           northSpeed{ 0.F };
-    float           eastSpeed{ 0.F };
-    float           fuel{ 0.F };
-    float           noescapezone{ 0.F };
-    float           escapeZone{ 0.F };
-    unsigned short  nbmissiles{ 0 };
-    float           x{ 0.F };
-    float           y{ 0.F };
-    float       maxSpeed            { GetMaxSpeed() };
-    auto const  maxFuel             { GetMaxFuel() };
-    auto const& noEscapeZoneRanges  { GetNoEscapeZoneRange() };
-    auto const  maxMissiles         { GetMaxMissiles() };
-    ppoArray4f const fightingArea   { env.m_maxNorth / 2.F,
-                                    -env.m_maxEast / 2.F,
-                                    -env.m_maxNorth / 2.F,
-                                    env.m_maxEast / 2.F };
-
-    generator.registerAttr(northSpeed, -maxSpeed, maxSpeed);
-    generator.registerAttr(eastSpeed,  -maxSpeed, maxSpeed);
-    generator.registerAttr(fuel, maxFuel/5.F, maxFuel);
-
-    generator.registerAttr(noescapezone, noEscapeZoneRanges[0], noEscapeZoneRanges[1]);
-    generator.registerAttr(nbmissiles, (unsigned short)0, maxMissiles);
-    generator.registerAttr(x, fightingArea[2], fightingArea[0]);
-    generator.registerAttr(y, fightingArea[1], fightingArea[3]);
-
-    generator.generate();
-
-    generator.clear();
-
-    generator.registerAttr(escapeZone, 1.5F * noescapezone, 3.F * noescapezone);
-
-    generator.generate();
-
-    p_impl->m_escapezone = 2.F*noEscapeZoneRanges[1];
-    p_impl->m_noescapezone = noEscapeZoneRanges[1];
-    p_impl->m_dx = northSpeed;
-    p_impl->m_dy = eastSpeed;
-    p_impl->m_fuel = maxFuel;
-    p_impl->m_nbmissiles=nbmissiles;
-    p_impl->m_target_x = 0.F;
-    p_impl->m_target_y = 0.F;
-
-    p_impl->Init(x, y);
+    p_impl->Init(env);
 }
 
 void
@@ -310,13 +317,12 @@ Player::SetMaxFuel(float maxFuel)          noexcept
 }
 
 void
-Player::SetNoEscapeZoneRange(float minNEZ, float maxNEZ)  noexcept
+Player::SetMaxNoEscapeZone(float maxNEZ)  noexcept
 {
     if (p_impl == nullptr)
         return;
 
-    p_impl->m_noescapeZoneRange[0] = minNEZ;
-    p_impl->m_noescapeZoneRange[1] = maxNEZ;
+    p_impl->m_maxNoescapeZone = maxNEZ;
 }
 
 void 
@@ -508,6 +514,15 @@ Player::GetPlayerId(void) const noexcept
     return p_impl->m_playerId;
 }
 
+float 
+Player::GetKillProbability(void) const noexcept
+{
+    if (p_impl == nullptr)
+        return 0.F;
+
+    return p_impl->m_pk;
+}
+
 sPlayerState
 Player::GetSnapshot() const noexcept
 {
@@ -515,21 +530,6 @@ Player::GetSnapshot() const noexcept
         return Impl::EMPTY_PLAYER_STATE;
 
     return p_impl->m_buffers[p_impl->m_index.load(std::memory_order_acquire)]; 
-}
-
-void 
-Player::SetFightingArea(float topleftnorth,
-                        float toplefteast,
-                        float bottomrightnorth,
-                        float bottomrighteast) noexcept
-{
-    if (p_impl == nullptr)
-        return;
-
-    p_impl->m_fightingArea[0] = topleftnorth;
-    p_impl->m_fightingArea[1] = toplefteast;
-    p_impl->m_fightingArea[2] = bottomrightnorth;
-    p_impl->m_fightingArea[3] = bottomrighteast;
 }
 
 void
@@ -576,15 +576,6 @@ Player::GetTarget(void)              const noexcept
         return ULLONG_MAX;
 
     return p_impl->m_target;
-}
-
-ppoArray2f const& 
-Player::GetNoEscapeZoneRange(void)   const noexcept
-{
-    if (p_impl == nullptr)
-        return Impl::EMPTY_PPO_ARRAY2F;
-
-    return p_impl->m_noescapeZoneRange;
 }
 
 float 
@@ -680,34 +671,6 @@ Player::ActionSetEastSpeed(float value) noexcept
         return;
 
     p_impl->m_dy = value * p_impl->m_maxSpeed;
-}
-
-void 
-Player::LoadFromFile(std::string const& filepath)
-{
-    if (p_impl == nullptr)
-        return;
-
-    std::string mypath{ filepath };
-    mypath.append("/");
-    mypath.append(p_impl->m_name);
-    mypath.append(".toml");
-
-    serialization::LoadFromToml(mypath, *p_impl);
-}
-
-void 
-Player::SaveToFile(std::string const& filepath)
-{
-    if (p_impl == nullptr)
-        return;
-
-    std::string mypath{ filepath };
-    mypath.append("/");
-    mypath.append(p_impl->m_name);
-    mypath.append(".toml");
-
-    serialization::SaveToToml(mypath, *p_impl);
 }
 
 }

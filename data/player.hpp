@@ -30,15 +30,11 @@ public:
     void              SetMaxSpeed         (float maxSpeed)                           noexcept;
     void              SetNorthSpeed       (float speed)                              noexcept;
     void              SetEastSpeed        (float speed)                              noexcept;
-    void              SetNoEscapeZoneRange(float minNEZ, float maxNEZ)               noexcept;
+    void              SetMaxNoEscapeZone  (float maxNEZ)                             noexcept;
     void              SetEscapeZone       (float ezcapezone)                         noexcept;
     void              SetNoEscapeZone     (float noezcapezone)                       noexcept;
     void              SetMaxFuel          (float maxFuel)                            noexcept;
     void              SetMaxMissiles      (unsigned short maxMissiles)               noexcept;
-    void              SetFightingArea     (float topleftnorth, 
-                                           float toplefteast, 
-                                           float bottomrightnorth, 
-                                           float bottomrighteast)                    noexcept;
     void              SetTargetPosition   (float north, float east)                  noexcept;
     void              SetTarget           (PlayerId targetId)                        noexcept;
 
@@ -57,11 +53,11 @@ public:
     float             GetNoEscapeZone     (void)                               const noexcept;
     float             GetMaxFuel          (void)                               const noexcept; 
     float             GetMaxSpeed         (void)                               const noexcept;
-    ppoArray2f const& GetNoEscapeZoneRange(void)                               const noexcept;
     unsigned short    GetMaxMissiles      (void)                               const noexcept;
     float             GetSpeed            (void)                               const noexcept;
     float             GetNorthSpeed       (void)                               const noexcept;
     float             GetEastSpeed        (void)                               const noexcept;
+    float             GetKillProbability  (void)                               const noexcept;
 
     PlayerId          GetPlayerId         (void)                               const noexcept;
 
@@ -102,9 +98,6 @@ public:
         &Player::ActionSetNorthSpeed,
         &Player::ActionSetEastSpeed
     };
-
-    void LoadFromFile(std::string const& filepath);
-    void SaveToFile(std::string const& filepath);
 
 private:
     struct Impl;

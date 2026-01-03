@@ -1,6 +1,0 @@
-[Rafale]
-MaxFuel = 4.5e+08
-MaxMissile = 8
-MaxRotationAngle = 0.26179900765419006
-MaxSpeed = 600.0
-NoEscapeZoneRange = [ 3000.0, 8000.0 ]

@@ -11,11 +11,12 @@ public:
     using StateVector  = std::array<float, Model::STATES.size()>;
     using ActionVector = std::array<float, Model::ACTIONS.size()>;
 
-    explicit                 Agent(std::string const& name);
+                             Agent                   (std::string const& name, std::string const& modelpath );
 
                              ~Agent                  (void) = default;
     
     void                     Init                    (Env const& env, Model* const model);
+    bool                     SetupTraining           (void);
 
     void                     ChooseAction            (Env const& env, Model* const model);
     void                     SetDone                 (bool done)                noexcept;
@@ -25,19 +26,29 @@ public:
     void                     StartTraining           (long long buffer_dim);
     void                     StopTraining            (void);
     bool                     IsTraining              (void)                  const noexcept;
-    long long                GetCurrentStep          (void)                  const noexcept;
     void                     SetNewState             (Env const& env, Model* const modelid);
+    std::string const&       GetName                 (void)                  const noexcept;
 
-    typename AgentState               GetSnapshot             (void) const noexcept;
+    typename AgentState      GetSnapshot             (void) const noexcept;
 
 private:
+    template<typename Ar>
+    void                        serialize(Ar& ar);
+
+    void                        UpdateDoubleBuffer(void);
+
     StateVector                 m_stateVector   {};
     ActionVector                m_actionVector  {};
     std::unique_ptr<RLAgent>    p_rlagent       {nullptr};
     AgentState                  m_internal      {};
     AgentState                  m_buffers[2];
+    std::atomic<bool>           m_training{ false };
+    std::atomic<long long>      m_maxRolloutBuffer{ 4096 };
+    std::atomic<float>          m_rewardScaling[AgentState::REWARDS.size()];
+    std::atomic<float>          m_rewardClamp{ 5.F };
     std::atomic<uint32_t>       m_index         { 0 };
     std::string                 m_name{ "" };
+    std::string                 m_modelpath{ "" };
 };
 
 } /* ppo::model */

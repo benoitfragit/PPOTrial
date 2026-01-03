@@ -7,8 +7,6 @@ namespace ppo::model {
 
     class Player;
 
-using ppoArray2f = std::array<float, 2>;
-using ppoArray4f = std::array<float, 4>;
 using PlayerId = unsigned long long;
 
 enum class eEnvironmentState : unsigned char {
@@ -27,7 +25,7 @@ struct sEnvironmentState
 
 struct sPlayerState
 {
-    ppoArray2f      m_noescapeZoneRange{ 3000.F, 8000.F };
+    float           m_maxNoescapeZone{8000.F };
     PlayerId        m_target{ ULLONG_MAX };
     PlayerId        m_playerId{ ULLONG_MAX };
     float           m_dx{ 0.F };
@@ -45,6 +43,8 @@ struct sPlayerState
     float           m_escapezone{ 0.F };
     float           m_noescapezone{ 0.F };
     float           m_maxfuel{ 0.F };
+    float           m_maxShootAngle{ 0.F };
+    float           m_pk{ 0.F };
     unsigned short  m_nbmissiles{ 0 };
     unsigned short  m_maxnbmissiles{ 0 };
     bool            m_destroyed{ false };
@@ -52,19 +52,14 @@ struct sPlayerState
 
 class IAgent {
 public:
-    virtual                     ~IAgent                 (void) = default;
+    virtual                     ~IAgent      (void) = default;
 
-    virtual void                Init                    (sEnvironmentState const& environment, Player* const player)             = 0;
-    virtual void                ChooseAction            (sEnvironmentState const& environment, Player* const player)             = 0;
-    virtual void                SetRewardScaling        (unsigned char type, float scaling)                             noexcept = 0;
-    virtual void                AddReward               (unsigned char type, float reward)                                                  noexcept = 0;
-    virtual void                SetDone                 (bool done)                                                     noexcept = 0;
-    virtual void                StartTraining           (long long buffer_dim)                                                   = 0;
-    virtual void                StopTraining            (void)                                                          noexcept = 0;
-    virtual bool                IsTraining              (void)                                                    const noexcept = 0;
-    virtual long long           GetCurrentStep          (void)                                                    const noexcept = 0;
-    virtual void                SetNewState             (sEnvironmentState const& environment, Player* const player)                                                                   = 0;
-    virtual void                SetRewardClampValue     (float clampValue)                                              noexcept = 0;
+    virtual void                Init         (sEnvironmentState const& environment, Player* const player)             = 0;
+    virtual void                ChooseAction (sEnvironmentState const& environment, Player* const player)             = 0;
+    virtual void                AddReward    (unsigned char type, float reward)                                                  noexcept = 0;
+    virtual void                SetDone      (bool done)                                                     noexcept = 0;
+    virtual void                SetNewState  (sEnvironmentState const& environment, Player* const player)                                                                   = 0;
+    virtual bool                SetupTraining(void)  noexcept = 0;
 };
 
 class IPlayerState
@@ -80,9 +75,37 @@ struct sCommonAgentState
     long long m_maxStep{ 0 };
     float     m_reward{ 0.F };
     float     m_rewardClamp{ 3.F };
+    float     m_bestreward{ 0.F };
+    float     m_loss{ 0.F };
+    float     m_actorloss{ 0.F };
+    float     m_entropyloss{ 0.F };
+    float     m_valueloss{ 0.F };
+    unsigned int m_version{ 0 };
     bool      m_done{ false };
     bool      m_training{ false };
-    bool      m_backward{ false };
+};
+
+struct PPOParamters
+{
+    float           m_gamma{ 0.99F };
+    float           m_lambda_gae{ 0.95F };
+    float           m_clip_epsilon{ 0.2F };
+    float           m_value_coef{ 0.5F };
+    float           m_entropy_coef{ 0.02F };
+    float           m_learningReate{ 3e-4F };
+    int             m_K_epochs{ 4 };
+    int             m_batch_size{ 64 };
+    unsigned int    m_checkpoint{ 5 };
+    float           m_bestreward{ 0.F };
+};
+
+struct PPOOutputs {
+    float m_loss{ 0.F };
+    float m_actorloss{ 0.F };
+    float m_valueloss{ 0.F };
+    float m_entropyloss{ 0.F };
+    float m_bestreward{ -FLT_MAX };
+    unsigned int m_version{ 0 };
 };
 
 struct sAgentState:
@@ -90,29 +113,23 @@ struct sAgentState:
 {
     enum RewardType
     {
-        FuelConsumption     = 0,
-        SpeedRange          = 1,
-        TargetDestruction   = 2,
-        TargetInEZ          = 3,
-        OwnshipDestruction  = 4,
-        OwnshipInEZ         = 5,
-        Range               = 6,
-        Missile             = 7
+        TargetDestruction   = 0,
+        TargetInEZ          = 1,
+        OwnshipDestruction  = 2,
+        OwnshipInEZ         = 3,
+        Range               = 4,
     };
 
     /// <summary>
     /// Define a list of possible rewards type at compile time
     /// </summary>                                        
-    constexpr std::array<std::string_view, 8> const static REWARDS
+    constexpr std::array<std::string_view, 5> const static REWARDS
     {
-        "Fuel consumption",
-        "Speed range",
         "Target destruction",
         "Target in EZ",
         "Ownship destruction",
         "Ownship in EZ",
         "Range",
-        "Missile"
     };
 
     using RewardVector = std::array<float, REWARDS.size()>;
@@ -120,7 +137,10 @@ struct sAgentState:
 
     RewardVector    m_rewardVector {};
     RewardScaling   m_rewardScaling{};
+    PPOParamters    m_ppoparameters{};
 };
+
+
 
 
 } /* ppo::model */

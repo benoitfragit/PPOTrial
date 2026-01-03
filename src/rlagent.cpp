@@ -7,7 +7,13 @@ namespace ppo::model {
 struct RLAgent::Impl 
 {
     // Implementation details would go here
-    Impl(long long state_dim, long long action_dim, long long buffer_dim, float* const stateVector, float* const actionVector) :
+    Impl(std::string const& modelpath,
+         long long state_dim,
+         long long action_dim, 
+         long long buffer_dim, 
+         PPOParamters const& parameters,
+         float* const stateVector,
+         float* const actionVector) :
         p_stateVector{ stateVector },
         p_actionVector{ actionVector }
     {
@@ -17,8 +23,7 @@ struct RLAgent::Impl
             m_randomInitTorch = true;
         }
 
-        p_ppo = std::make_unique<PPO>(state_dim, action_dim);
-
+        p_ppo = std::make_unique<PPO>(modelpath, state_dim, action_dim, parameters);
 
         m_maxStep   = buffer_dim;
         m_step      = 0;
@@ -58,6 +63,7 @@ struct RLAgent::Impl
     long long m_step{ 0 };
 
     inline static bool m_randomInitTorch{ false };
+    inline static PPOOutputs const EMPTY_PPO_OUTPUTS{};
 };
 
 void 
@@ -138,8 +144,20 @@ RLAgent::Impl::SetNewState(float reward, bool done)
     }
 }
 
-RLAgent::RLAgent(long long state_dim, long long action_dim, long long buffer_dim, float* const stateVector, float* const actionVector) :
-    p_impl{ std::make_unique<Impl>(state_dim, action_dim, buffer_dim, stateVector, actionVector) }
+RLAgent::RLAgent(std::string const& modelpath,
+    long long state_dim, 
+    long long action_dim, 
+    long long buffer_dim, 
+    PPOParamters const& parameters,
+    float* const stateVector, 
+    float* const actionVector) :
+    p_impl{ std::make_unique<Impl>(modelpath,
+                                   state_dim, 
+                                   action_dim,
+                                   buffer_dim,
+                                   parameters,
+                                   stateVector, 
+                                   actionVector) }
 {
 }
 
@@ -170,6 +188,16 @@ RLAgent::SetNewState(float reward, bool done)
         return;
 
     p_impl->SetNewState(reward, done);
+}
+
+PPOOutputs const& 
+RLAgent::GetOutputs(void) const noexcept
+{
+    if (p_impl == nullptr
+     || p_impl->p_ppo == nullptr)
+        return Impl::EMPTY_PPO_OUTPUTS;
+
+    return p_impl->p_ppo->GetOutputs();
 }
 
 bool 

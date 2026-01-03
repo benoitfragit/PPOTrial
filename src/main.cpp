@@ -4,26 +4,31 @@
 #include "agent.hpp"
 #include "utils.hpp"
 #include "environment.hpp"
+#include "serializer.hpp"
 
 #include "environmentrenderer.hpp"
 
 int main()
 {
+    ppo::serialization::Serializer& serializer{ppo::serialization::Serializer::GetInstance()};
+    std::filesystem::path serializationPath{RESOURCE_TOML_PATH};
+    serializer.SetPath(serializationPath);
+
     ppo::model::Environment environment{};
 
     // create a first player instance
     ppo::model::Player red{ "Rafale", 1};
-    red.LoadFromFile(RESOURCE_TOML_PATH);
     red.SetTarget(2);
 
     // crate a new player instance
     ppo::model::Player blue{ "F35", 2 };
-    blue.LoadFromFile(RESOURCE_TOML_PATH);
     blue.SetTarget(1);
 
     // Create an agent to control the red player
     using ppoAgent = ppo::model::Agent<ppo::model::sEnvironmentState, ppo::model::Player, ppo::model::sAgentState>;
-    ppoAgent redAgent{"FirstGeneration"};
+    ppoAgent redAgent{"FirstGeneration", RESOURCE_PPO_PATH };
+    
+    serializer.Load();
 
     // Append this agent into the environment
     environment.AddAgent(&red, &redAgent);
@@ -47,8 +52,7 @@ int main()
 
     }
 
-    red.SaveToFile(RESOURCE_TOML_PATH);
-    blue.SaveToFile(RESOURCE_TOML_PATH);
+    serializer.Save();
 
     return 0;
 }

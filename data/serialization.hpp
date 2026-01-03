@@ -95,6 +95,9 @@ struct TomlWriteArchive : ArchiveBase<TomlWriteArchive> {
 
 template<typename T>
 void LoadFromToml(const std::string& file, T& obj) {
+    if (!std::filesystem::exists(file))
+        return;
+
     auto tbl = toml::parse_file(file);
     TomlReadArchive ar{ tbl };
     obj.serialize(ar);

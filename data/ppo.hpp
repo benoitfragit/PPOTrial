@@ -3,11 +3,13 @@
 #include <memory>
 #include <tuple>
 
+#include "interface.hpp"
+
 namespace ppo::model {
 
 class PPO {
 public:
-                    PPO(int64_t state_dim, int64_t action_dim);
+                    PPO(std::string const& modelpath, int64_t state_dim, int64_t action_dim, PPOParamters const& parameters);
 
                     ~PPO(void);
 
@@ -16,8 +18,7 @@ public:
                     PPO(PPO&&) = delete;
     PPO&            operator=(PPO&&) = delete;
 
-    std::tuple<float, float, float, float>
-                    UpdatePolicy(
+    void            UpdatePolicy(
                         const torch::Tensor& states,
                         const torch::Tensor& actions,
                         const torch::Tensor& old_logp,
@@ -28,6 +29,8 @@ public:
 
     std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
                     SelectAction(const torch::Tensor& state);
+
+    PPOOutputs const& GetOutputs(void) const noexcept;
 private:
     struct Impl;
     std::unique_ptr<Impl> p_impl;

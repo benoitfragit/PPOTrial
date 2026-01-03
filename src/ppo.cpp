@@ -8,7 +8,7 @@
 #include <filesystem>
 
 #include "utils.hpp"
-
+#include "serializer.hpp"
 
 namespace ppo::model {
 
@@ -122,8 +122,20 @@ EvaluateAction(
 }
 
 struct PPO::Impl {
-    Impl(int64_t state_dim, int64_t action_dim)
+    Impl(std::string const& modelpath, int64_t state_dim, int64_t action_dim, PPOParamters const& parameters):
+        m_modelpath{modelpath}
     {
+        m_gamma         = parameters.m_gamma        ;
+        m_lambda_gae    = parameters.m_lambda_gae   ;
+        m_clip_epsilon  = parameters.m_clip_epsilon ;
+        m_value_coef    = parameters.m_value_coef   ;
+        m_entropy_coef  = parameters.m_entropy_coef ;
+        m_learningReate = parameters.m_learningReate;
+        m_K_epochs      = parameters.m_K_epochs     ;
+        m_batch_size    = parameters.m_batch_size   ;
+        m_checkpoint    = parameters.m_checkpoint   ;
+        m_outputs.m_bestreward    = parameters.m_bestreward   ;
+
         m_policy     = std::make_shared<ActorCriticNet>(state_dim, action_dim);
 
         m_optimizer  = std::make_shared<torch::optim::Adam>(
@@ -131,12 +143,10 @@ struct PPO::Impl {
         );
 
         // load du checkpoint
-        std::string ppopath{ m_ppodirectory };
-        ppopath.append("\\ppoprogress.pt");
-        if (std::filesystem::exists(ppopath))
+        if (std::filesystem::exists(modelpath))
         {
             torch::serialize::InputArchive archive{};
-            archive.load_from(ppopath);
+            archive.load_from(modelpath);
             m_policy->load(archive);
             m_optimizer->load(archive);
         }
@@ -189,27 +199,29 @@ struct PPO::Impl {
     std::shared_ptr<ActorCriticNet>     m_policy;
     std::shared_ptr<torch::optim::Adam> m_optimizer;
 
-    float m_gamma       {0.99F};
-    float m_lambda_gae  {0.95F};
-    float m_clip_epsilon{0.2F};
-    float m_value_coef  {0.5F};
-    float m_entropy_coef{ 0.02F };
+    float m_gamma        { 0.99F };
+    float m_lambda_gae   { 0.95F };
+    float m_clip_epsilon { 0.2F  };
+    float m_value_coef   { 0.5F  };
+    float m_entropy_coef { 0.02F };
     float m_learningReate{ 3e-4F };
 
     int m_K_epochs        { 4 };
     int m_batch_size      { 64 };
     unsigned int m_checkpoint      { 5 };
-    unsigned int m_ppoversion      {0};
-    std::string m_ppodirectory{ "C:\\Users\\33761\\Documents\\Projets\\C++\\PPOTrial\\progress" };
+    std::string m_modelpath{""};
 
+    PPOOutputs m_outputs{};
+
+    inline static PPOOutputs const EMPTY_PPO_OUTPUTS{};
 };
 
-PPO::PPO(int64_t state_dim, int64_t action_dim) :
-    p_impl{ std::make_unique<Impl>(state_dim, action_dim) }{}
+PPO::PPO(std::string const& modelpath, int64_t state_dim, int64_t action_dim, PPOParamters const& parameters) :
+    p_impl{ std::make_unique<Impl>(modelpath, state_dim, action_dim, parameters) }{}
 
 PPO::~PPO() = default;
 
-std::tuple<float, float, float, float>
+void
 PPO::UpdatePolicy(
     const torch::Tensor& states,
     const torch::Tensor& actions,
@@ -220,11 +232,12 @@ PPO::UpdatePolicy(
     const torch::Tensor& last_values) 
 {
     if (p_impl == nullptr)
-        return { 0.0F, 0.0F, 0.0F, 0.0F };
+        return;
 
     int64_t N = states.size(0);
     float L = 0, A = 0, V = 0, E = 0;
     int n = 0;
+    std::vector<float> rewardPerEpisode{};
 
     int64_t maxStep{ rewards.size(0) };
     torch::Tensor advantages = torch::zeros({ maxStep });
@@ -234,6 +247,8 @@ PPO::UpdatePolicy(
     // otherwise we could use detach on values
     {
         torch::NoGradGuard no_grad;
+
+        float episodeReward{ 0.F };
 
         // --- Compute GAE and Returns ---
         float gae = 0.0f;
@@ -250,6 +265,13 @@ PPO::UpdatePolicy(
             float delta = reward + p_impl->m_gamma * next_value * mask - value;
             gae = delta + p_impl->m_gamma * p_impl->m_lambda_gae * mask * gae;
             advantages[t] = gae;
+
+            episodeReward += reward;
+            if (done > 0.5F)
+            {
+                rewardPerEpisode.push_back(episodeReward);
+                episodeReward = 0.F;
+            }
         }
 
         returns = advantages + values;
@@ -280,25 +302,39 @@ PPO::UpdatePolicy(
         }
     }
 
-    if (p_impl->m_ppoversion > 0 
-     && p_impl->m_ppoversion % p_impl->m_checkpoint == 0)
+    if (p_impl->m_outputs.m_version > 0
+     && p_impl->m_outputs.m_version % p_impl->m_checkpoint == 0)
     {
-        if (!std::filesystem::exists(p_impl->m_ppodirectory))
+        // check if th average reward is better than the previous one
+        float meanReward{ 0.F };
+        for (auto const episodreward : rewardPerEpisode)
+            meanReward += episodreward / static_cast<float>(rewardPerEpisode.size());
+
+        //if (p_impl->m_outputs.m_bestreward < meanReward)
         {
-            std::filesystem::create_directories(p_impl->m_ppodirectory);
+            p_impl->m_outputs.m_bestreward = meanReward;
+
+            if (!std::filesystem::exists(p_impl->m_modelpath))
+            {
+                std::filesystem::path parent_directory{ std::filesystem::path(p_impl->m_modelpath).parent_path()};
+                if (!std::filesystem::exists(parent_directory))
+                    std::filesystem::create_directories(parent_directory);
+            }
+
+            torch::serialize::OutputArchive archive{};
+            p_impl->m_policy->save(archive);
+            p_impl->m_optimizer->save(archive);
+
+            archive.save_to(p_impl->m_modelpath);
         }
-
-        torch::serialize::OutputArchive archive{};
-        p_impl->m_policy->save(archive);
-        p_impl->m_optimizer->save(archive);
-
-        std::string ppopath= p_impl->m_ppodirectory ;
-        ppopath.append("\\ppoprogress.pt");
-        archive.save_to(ppopath);
     }
-    ++p_impl->m_ppoversion;
 
-    return { L / n, A / n, V / n, E / n };
+    ++p_impl->m_outputs.m_version;
+
+    p_impl->m_outputs.m_loss = L / n;
+    p_impl->m_outputs.m_actorloss = A / n;
+    p_impl->m_outputs.m_entropyloss = E / n;
+    p_impl->m_outputs.m_valueloss = V / n;
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
@@ -322,5 +358,13 @@ PPO::SelectAction(const torch::Tensor& state)
     return { action, logp, value.view({-1}) };
 }
 
+PPOOutputs const&
+PPO::GetOutputs(void) const noexcept
+{
+    if (p_impl == nullptr)
+        return Impl::EMPTY_PPO_OUTPUTS;
+
+    return p_impl->m_outputs;
+}
 
 }   /* ppo::model */

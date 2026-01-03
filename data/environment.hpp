@@ -22,6 +22,7 @@ public:
         {
             if (m_obj == nullptr)
                 return;
+
             m_obj->Init(environment, player);
         };
 
@@ -30,14 +31,6 @@ public:
             if (m_obj == nullptr)
                 return;
             m_obj->ChooseAction(environment, player);
-        };
-
-        void                SetRewardScaling(unsigned char type, float scaling)            noexcept
-        {
-            if (m_obj == nullptr)
-                return;
-
-            m_obj->SetRewardScaling(type, scaling);
         };
 
         void                AddReward(unsigned char type, float reward)        noexcept
@@ -54,34 +47,6 @@ public:
             m_obj->SetDone(done);
         };
 
-        void                StartTraining(long long buffer_dim)
-        {
-            if (m_obj == nullptr)
-                return;
-            m_obj->StartTraining(buffer_dim);
-        };
-
-        void                StopTraining(void) noexcept
-        {
-            if (m_obj == nullptr)
-                return;
-            m_obj->StopTraining();
-        };
-
-        bool                IsTraining(void)                  const noexcept
-        {
-            if (m_obj == nullptr)
-                return false;
-            return m_obj->IsTraining();
-        };
-
-        long long           GetCurrentStep(void)                  const noexcept
-        {
-            if (m_obj == nullptr)
-                return 0;
-            return m_obj->GetCurrentStep();
-        };
-
         void                SetNewState(sEnvironmentState const& environment, Player* const player)
         {
             if (m_obj == nullptr)
@@ -89,12 +54,12 @@ public:
             m_obj->SetNewState(environment, player);
         };
 
-        void SetRewardClampValue(float clampValue)         noexcept
+        bool                SetupTraining(void)  noexcept
         {
             if (m_obj == nullptr)
-                return;
+                return false;
 
-            m_obj->SetRewardClampValue(clampValue);
+            return m_obj->SetupTraining();
         };
 
     private:
@@ -130,13 +95,6 @@ public:
 
     void              SetMaxRange           (float north, float east);
     void              SetTimeStep           (float timestep);
-
-    void              StartTraining         (long long rolloutBuffSize);
-    void              StopTraining          (void);
-
-    void              SetRewardScaling      (unsigned char type, float scaling);
-
-    void              SetRewardClamp        (float rewarClmp);
 
 private:
     struct Impl;

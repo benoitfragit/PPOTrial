@@ -1,5 +1,6 @@
 #include "environment.hpp"
 #include "utils.hpp"
+#include "serializer.hpp"
 
 #include <map>
 #include <thread>
@@ -22,33 +23,69 @@ struct Environment::Impl :
     void                    Start         (void);
     Player*                 GetPlayerById (PlayerId const id) const noexcept;
     std::shared_ptr<IAgent> GetPlayerAgent(Player* player) const noexcept;
-    float                   GetKillProbability(Player const* const player, 
-                                               Player* const target,
-                                               float minShootingRangeAngle,
-                                               float maxShootingRangeAngle) const noexcept;
+    void                    UpdateDoubbleBuffer(void);
 
-                            Impl          (void) = default;
+                            Impl(void) 
+                            {
+                                ppo::serialization::Serializer& serializer{ ppo::serialization::Serializer::GetInstance() };
+                                serializer.Register(
+                                    [this](ppo::serialization::TomlReadArchive& ar)
+                                    {
+                                        serialize< ppo::serialization::TomlReadArchive>(ar);
+
+                                        UpdateDoubbleBuffer();
+
+                                        m_timestep = m_dt;
+                                        m_maxRangeEast = m_maxEast;
+                                        m_maxRangeNorth = m_maxNorth;
+                                    },
+                                    [this](ppo::serialization::TomlWriteArchive& ar)
+                                    {
+                                        serialize<ppo::serialization::TomlWriteArchive>(ar);
+                                    }
+                                );
+                            };
 
                             ~Impl         (void);
+
+    template<typename Ar>
+    void serialize(Ar& ar)
+    {
+        auto section = ar.begin_section("Env");
+
+        section("MaxNorth", m_maxNorth);
+        section("MaxEast", m_maxEast);
+        section("TimeStep", m_dt);
+    };
 
     Agents                          m_agents            {};
     sEnvironmentState               m_buffers           [2];
     std::atomic<uint32_t>           m_index             { 0 };
     std::thread                     m_thread;
     std::atomic<bool>               m_running           { false };  
-    std::atomic<bool>               m_training          { false };
-    std::atomic<long long>          m_maxRolloutBuffer  { 4096 };
+
     std::atomic<float>              m_timestep          { 0.02F };
     std::atomic<float>              m_maxRangeEast      { 150000.F };
     std::atomic<float>              m_maxRangeNorth     { 112500.F };
-    std::atomic<float>              m_rewardScaling     [sAgentState::REWARDS.size()];
-    std::atomic<float>              m_rewardClamp       { 5.F  };
+
     std::atomic<eEnvironmentState>  m_state             { eEnvironmentState::STOPPED };
 
     eEnvironmentState               m_prevState         { m_state };
 
     static inline sEnvironmentState     EMPTY_ENV_STATE{};
 };
+
+void 
+Environment::Impl::UpdateDoubbleBuffer(void)
+{
+    const uint32_t next = 1u - m_index.load(std::memory_order_relaxed);
+
+    m_buffers[next].m_maxEast = m_maxEast;
+    m_buffers[next].m_maxNorth = m_maxNorth;
+    m_buffers[next].m_dt = m_dt;
+
+    m_index.store(next, std::memory_order_release);
+}
 
 Player*
 Environment::Impl::GetPlayerById(PlayerId const id) const noexcept
@@ -105,58 +142,8 @@ Environment::Impl::ComputeState(Player* const player, float const dt)
        (target != nullptr))
         player->SetTargetPosition(target->GetNorthPosition(), target->GetEastPosition());
     
-
-    player->SetFightingArea( m_maxNorth / 2.F,
-                            -m_maxEast / 2.F,
-                            -m_maxNorth / 2.F,
-                             m_maxEast / 2.F);
-
     // Run the model after the Agent run to apply the action
     player->Run(dt);
-}
-
-float                   
-Environment::Impl::GetKillProbability(Player const* const player,
-                                      Player* const target,
-                                      float minShootingRangeAngle,
-                                      float maxShootingRangeAngle) const noexcept
-{
-    float PK{ 0.F };
-
-    if (player == nullptr
-     || target == nullptr)
-        return PK;
-
-    float x       { player->GetNorthPosition() };
-    float y       { player->GetEastPosition() };
-    float heading { player->GetRotation() };
-    float nez     { player->GetNoEscapeZone() };
-    float ez      { player->GetEscapeZone() };
-    float const tx{ target->GetNorthPosition() };
-    float const ty{ target->GetEastPosition() };
-    float const d { static_cast<float>(sqrt(pow(x - tx, 2.F) + pow(y - ty, 2.F))) };
-    float const ux{ (tx - x) / d };
-    float const uy{ (ty - y) / d };
-
-    float az = atan2(uy, ux);
-    az = wrapMinusPi2Pi(az);
-    az = wrapMinusPi2Pi(az - heading);
-
-    if ((minShootingRangeAngle <= az)
-        && (az <= maxShootingRangeAngle))
-    {
-        if (d <= nez)
-        {
-            target->SetDestroyed(true);
-            PK = 1.F;
-        }
-        else if (nez < d && d <= ez)
-        {
-            PK = std::clamp(1.F-(d - nez) / (ez - nez), 0.F, 1.F);
-        }
-    }
-
-    return PK;
 }
 
 bool
@@ -192,45 +179,43 @@ Environment::Impl::ComputeReward(Player* const player, std::shared_ptr<IAgent> p
 
         R_close = std::clamp((dx * ux + dy * uy) / maxSpeed,-1.F, 1.F);
 
-        pkTarget = GetKillProbability(player, target, -HALFPI, HALFPI);
-        pkPlayer = GetKillProbability(target, player, -HALFPI, HALFPI);
+        pkTarget = player->GetKillProbability();
+        pkPlayer = target->GetKillProbability();
 
         targetDestruction = (1.F <= pkTarget);
     }
 
     bool done{ false };
-    if (pAgent != nullptr)
+    if (pAgent == nullptr)
+        return done;
+
+    if (targetDestruction)
     {
-        if (std::numeric_limits<float>::epsilon() < maxfuel)
-            pAgent->AddReward(sAgentState::RewardType::FuelConsumption, -(fuelconsumption / maxfuel));
-
-        if (targetDestruction)
-        {
-            pAgent->AddReward(sAgentState::RewardType::TargetDestruction, 1.F);
-        }
-        else
-        {
-            // the more the target dives into our somain the more we receive reward
-            pAgent->AddReward(sAgentState::RewardType::TargetInEZ, pkTarget);
-        }
-
-        if (player->GetDestroyed())
-        {
-            pAgent->AddReward(sAgentState::RewardType::OwnshipDestruction, -1.F);
-        }
-        else
-        {
-            // penalty when entering opponent escape zone
-            pAgent->AddReward(sAgentState::RewardType::OwnshipInEZ, -pkPlayer);
-
-            pAgent->AddReward(sAgentState::RewardType::Range, R_close);
-        }
-
-        done = player->GetDestroyed() || targetDestroyed;
-
-        pAgent->SetDone(done);
+        pAgent->AddReward(sAgentState::RewardType::TargetDestruction, 1.F);
+        targetDestroyed = true;
+    }
+    else
+    {
+        // the more the target dives into our somain the more we receive reward
+        pAgent->AddReward(sAgentState::RewardType::TargetInEZ, pkTarget);
     }
 
+    if (player->GetDestroyed())
+    {
+        pAgent->AddReward(sAgentState::RewardType::OwnshipDestruction, -1.F);
+    }
+    else
+    {
+        // penalty when entering opponent escape zone
+        pAgent->AddReward(sAgentState::RewardType::OwnshipInEZ, -pkPlayer);
+
+        pAgent->AddReward(sAgentState::RewardType::Range, R_close);
+    }
+
+    done = player->GetDestroyed() || targetDestroyed;
+
+    pAgent->SetDone(done);
+    
     return done;
 }
 
@@ -238,25 +223,14 @@ void
 Environment::Impl::Run(void)
 {  
     eEnvironmentState state{ eEnvironmentState::INIT };
-    long long maxRolloutBuffer{ 4096 };
-    float clampReward{ 3.F };
     bool reinitrequest{ false };
-    bool enableTraining{ false };
-
-    std::array<float, sAgentState::REWARDS.size()> rewardScaling{};
 
     while (m_running.load(std::memory_order_acquire))
     {
         m_maxNorth      = m_maxRangeNorth.load(std::memory_order_acquire);  
         m_maxEast       = m_maxRangeEast.load(std::memory_order_acquire);   
         m_dt            = m_timestep.load(std::memory_order_acquire);
-        clampReward     = m_rewardClamp.load(std::memory_order_acquire);
-        enableTraining  = m_training.load(std::memory_order_acquire) ;
-        maxRolloutBuffer= m_maxRolloutBuffer.load(std::memory_order_acquire);
         state           = m_state.load(std::memory_order_acquire);
-
-        for (auto i = 0; i < sAgentState::REWARDS.size(); ++i)
-            rewardScaling[i] = m_rewardScaling[i].load(std::memory_order_acquire);
 
         // ensure all agents are in training mode
         for (auto& [_, agent] : m_agents)
@@ -264,23 +238,7 @@ Environment::Impl::Run(void)
             if (agent == nullptr)
                 continue;
 
-            for (auto i = 0; i < sAgentState::REWARDS.size(); ++i)
-                agent->SetRewardScaling(i, rewardScaling[i]);
-            
-            agent->SetRewardClampValue(clampReward);
-
-            if (enableTraining)
-            {
-                if (!agent->IsTraining())
-                {
-                    agent->StartTraining(maxRolloutBuffer);
-                    reinitrequest = true;
-                }
-            }
-            else if (agent->IsTraining())
-            {
-                agent->StopTraining();
-            }
+            reinitrequest |= agent->SetupTraining();
         }
 
         if (state == eEnvironmentState::RUNNING)
@@ -335,13 +293,7 @@ Environment::Impl::Run(void)
 
         m_prevState = state;
 
-        const uint32_t next         = 1u - m_index.load(std::memory_order_relaxed);
-
-        m_buffers[next].m_maxEast   = m_maxEast;
-        m_buffers[next].m_maxNorth  = m_maxNorth;
-        m_buffers[next].m_dt        = m_dt;
-
-        m_index.store(next, std::memory_order_release);
+        UpdateDoubbleBuffer();
 
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
@@ -438,47 +390,6 @@ Environment::Stop(void)
         return;
 
     p_impl->Stop();
-}
-
-void
-Environment::SetRewardScaling(unsigned char type, float scaling)
-{
-    if (p_impl == nullptr
-    || sAgentState::REWARDS.size() <= type)
-        return;
-
-    p_impl->m_rewardScaling[type].store(scaling, std::memory_order_relaxed);
-
-
-}
-
-void              
-Environment::SetRewardClamp(float rewardClmp)
-{
-    if (p_impl == nullptr)
-        return;
-
-    p_impl->m_rewardClamp.store(rewardClmp, std::memory_order_relaxed);
-}
-
-
-void
-Environment::StartTraining(long long rolloutBuffSize)
-{
-    if (p_impl == nullptr)
-        return;
-
-    p_impl->m_maxRolloutBuffer.store(rolloutBuffSize, std::memory_order_release);
-    p_impl->m_training.store(true, std::memory_order_release);
-}
-
-void
-Environment::StopTraining(void)
-{
-    if (p_impl == nullptr)
-        return;
-
-    p_impl->m_training.store(false, std::memory_order_release);
 }
 
 }

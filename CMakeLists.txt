@@ -107,6 +107,8 @@ add_executable(${PROJECT_NAME}
     ${CMAKE_CURRENT_SOURCE_DIR}/data/agent_def.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/rlagent.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/serialization.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/serializer.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/serializer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rlagent.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ppo.cpp
@@ -132,8 +134,10 @@ target_link_libraries(${PROJECT_NAME}
         "${TORCH_LIBRARIES}"
 )
 
-set(RESOURCE_TOML_PATH "${CMAKE_SOURCE_DIR}/resources/toml")
-target_compile_definitions(${PROJECT_NAME} PRIVATE RESOURCE_TOML_PATH="${RESOURCE_TOML_PATH}")
+set(RESOURCE_TOML_PATH "${CMAKE_SOURCE_DIR}/resources/toml/settings.toml")
+set(RESOURCE_PPO_PATH "${CMAKE_SOURCE_DIR}/resources/ppo/model.pt")
+target_compile_definitions(${PROJECT_NAME} PRIVATE RESOURCE_TOML_PATH="${RESOURCE_TOML_PATH}"
+                                                   RESOURCE_PPO_PATH="${RESOURCE_PPO_PATH}")
 
 # For Windows: ensure DLLs are copied
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD

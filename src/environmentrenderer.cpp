@@ -122,6 +122,14 @@ void
 EnvironmentRenderer::SetEnvironment(ppo::model::Environment& env) noexcept
 {
     p_environment = &env;
+
+    if (p_environment != nullptr)
+    {
+        auto const state{ p_environment->GetSnapshot() };
+
+        m_areawidth = state.m_maxEast / GetScaleWorld();
+        m_timestep  = state.m_dt * 1000.F;
+    }
 }
 
 sf::View const& 
@@ -204,33 +212,28 @@ EnvironmentRenderer::DrawSimuControls(void)
 }
 
 void 
-EnvironmentRenderer::DrawEnvControls(void)
+EnvironmentRenderer::DrawEnvControls(model::sEnvironmentState const& state)
 {
     if (p_environment == nullptr)
         return;
 
-    static float areawidth        { 150.F };
-    static float timestep         { 2.F };
-    static int   currentScaleLevel{ 1 };
-    static int   maxStep          { 4096 };
-
     sf::Vector2u const sizes = getSize();
 
     bool refreshMaxRanges{ false };
-    if (ImGui::SliderFloat("Area width (km)", &areawidth, 1.F, 500.F))
+    if (ImGui::SliderFloat("Area width (km)", &m_areawidth, 1.F, 500.F))
         refreshMaxRanges = true;
 
-    if (ImGui::SliderFloat("Time step (ms)", &timestep, 1.F, 200.F))
-        p_environment->SetTimeStep(timestep / 1000.F);
+    if (ImGui::SliderFloat("Time step (ms)", &m_timestep, 1.F, 200.F))
+        p_environment->SetTimeStep(m_timestep / 1000.F);
 
     char const* const scaleLevels[]{ "m", "km", "NM" };
-    if (ImGui::Combo("Scale level", &currentScaleLevel, scaleLevels, IM_ARRAYSIZE(scaleLevels)))
+    if (ImGui::Combo("Scale level", &m_currentScaleLevel, scaleLevels, IM_ARRAYSIZE(scaleLevels)))
     {
-        if (currentScaleLevel == 0)
+        if (m_currentScaleLevel == 0)
             m_scaleKm = 1.F;
-        else if (currentScaleLevel == 1)
+        else if (m_currentScaleLevel == 1)
             m_scaleKm = 1000.F;
-        else if (currentScaleLevel == 2)
+        else if (m_currentScaleLevel == 2)
             m_scaleKm = 1852.F;
         
         refreshMaxRanges = true;
@@ -239,7 +242,7 @@ EnvironmentRenderer::DrawEnvControls(void)
     if (refreshMaxRanges)
     {
         float const ratio{ static_cast<float>(sizes.y) / static_cast<float>(sizes.x) };
-        float const east{ areawidth * GetScaleWorld() };
+        float const east{ m_areawidth * GetScaleWorld() };
         float const north{ east * ratio };
 
         p_environment->SetMaxRange(north, east);
@@ -247,35 +250,37 @@ EnvironmentRenderer::DrawEnvControls(void)
 }
 
 void
-EnvironmentRenderer::DrawRewardControls(void)
+EnvironmentRenderer::DrawRewardControls(std::shared_ptr<IAgentController> agent)
 {
-    static float rewardClamp        { 5.F };
-    static std::array<float, ppo::model::sAgentState::REWARDS.size()> RwardScalings{};
+    if (agent == nullptr)
+        return;
 
-    if (ImGui::SliderFloat("Reward clamp", &rewardClamp, 0.5F, 10.F))
-        p_environment->SetRewardClamp(rewardClamp);
+    if (ImGui::SliderFloat("Reward clamp", &agent->GetRewardClamp(), 0.5F, 10.F))
+        agent->SetRewardClamp();
 
     for (auto i = 0; i < ppo::model::sAgentState::REWARDS.size(); ++i)
     {
-        if (ImGui::SliderFloat(std::string(ppo::model::sAgentState::REWARDS[i]).c_str(), &RwardScalings[i], 0.F, 1.F))
-            p_environment->SetRewardScaling(i, RwardScalings[i]);
+        if (ImGui::SliderFloat(std::string(ppo::model::sAgentState::REWARDS[i]).c_str(), 
+                                &agent->GetRewardScalings()[i], 0.F, 1.F))
+            agent->SetRewardScaling(i);
     }
 }
 
 void
-EnvironmentRenderer::DrawTrainingControls(void)
+EnvironmentRenderer::DrawTrainingControls(std::shared_ptr<IAgentController> agent)
 {
-    int value{ static_cast<int>(m_rolloutBufferSize) };
-    if (ImGui::SliderInt("Rollout Buffer", &value, 1, 10000))
-        m_rolloutBufferSize = value;
+    if (agent == nullptr)
+        return;
 
+    ImGui::SliderInt("Rollout Buffer", &agent->GetRolloutBufferSize(), 1, 10000);
+        
     static bool training{false};
     if (ImGui::Checkbox("Enable training", &training))
     {
         if (training)
-            p_environment->StartTraining(m_rolloutBufferSize);
+            agent->StartTraining();
         else
-            p_environment->StopTraining();
+            agent->StopTraining();
     }
 }
 
@@ -359,15 +364,15 @@ EnvironmentRenderer::DrawPlayerInfo(ppo::model::IPlayerState* const player)
 }
 
 void 
-EnvironmentRenderer::DrawAgentInfo(ppo::model::PlayerId playerId, std::shared_ptr<IAgentRenderer> agent)
+EnvironmentRenderer::DrawAgentInfo(std::shared_ptr<IAgentController> agent)
 {
     if (agent == nullptr)
         return;
 
-    auto const agentState = agent->GetSnapshot();
-    std::string agentLabel{ "Agent-Player" };
-    agentLabel.append(std::to_string(playerId));
-    if (ImGui::BeginTable(agentLabel.c_str(), 2, 
+    std::string const& agentName{ agent->GetName() };
+    ppo::model::sAgentState agentState{ agent->GetSnapshot() };
+
+    if (ImGui::BeginTable("##agentinfo", 2,
         ImGuiTableFlags_SizingStretchProp))
     {
         ImGui::TableSetupColumn("Properties");
@@ -378,7 +383,7 @@ EnvironmentRenderer::DrawAgentInfo(ppo::model::PlayerId playerId, std::shared_pt
         ImGui::TableSetColumnIndex(0);
         ImGui::Text("Agent player");
         ImGui::TableSetColumnIndex(1);
-        ImGui::Text(std::to_string(playerId).c_str());
+        ImGui::Text(agentName.c_str());
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
@@ -406,12 +411,6 @@ EnvironmentRenderer::DrawAgentInfo(ppo::model::PlayerId playerId, std::shared_pt
         ImGui::Text("Agent training");
         ImGui::TableSetColumnIndex(1);
         ImGui::Text("%d", agentState.m_training);
-
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        ImGui::Text("Agent backward");
-        ImGui::TableSetColumnIndex(1);
-        ImGui::Text("%d", agentState.m_backward);
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
@@ -482,6 +481,8 @@ EnvironmentRenderer::Run(void)
     if (p_controlWindow->isOpen())
         ImGui::SFML::Update(*p_controlWindow, dt);
 
+    model::sEnvironmentState state{ p_environment->GetSnapshot() };
+
     if (p_controlWindow->isOpen())
     {
         sf::Vector2u controlSizes{ p_controlWindow->getSize() };
@@ -500,7 +501,7 @@ EnvironmentRenderer::Run(void)
             DrawSimuControls();
 
             if (ImGui::CollapsingHeader("Environment"))
-                DrawEnvControls();
+                DrawEnvControls(state);
 
             if (ImGui::CollapsingHeader("Players"))
             {
@@ -513,17 +514,21 @@ EnvironmentRenderer::Run(void)
                 }
             }
 
-            if (ImGui::CollapsingHeader("Training"))
+            for (auto agent : p_agentControllers)
             {
-                DrawTrainingControls();
-                DrawRewardControls();
-            }
+                if (agent == nullptr)
+                    continue;
 
-            if (ImGui::CollapsingHeader("Agents"))
-            {
-                for (auto const& [playerId, agent] : p_agentRenderers)
-                    DrawAgentInfo(playerId, agent);
+                if (ImGui::CollapsingHeader(agent->GetName().c_str()))
+                {
+                    DrawTrainingControls(agent);
+
+                    DrawRewardControls(agent);
+
+                    DrawAgentInfo(agent);
+                }
             }
+            
         }
         ImGui::End();
     }
@@ -531,7 +536,6 @@ EnvironmentRenderer::Run(void)
     ImGui::SFML::SetCurrentWindow(*this);
     sf::RenderWindow::clear();
 
-    model::sEnvironmentState state{ p_environment->GetSnapshot() };
     sf::Vector2f maxRanges{ state.m_maxNorth, state.m_maxEast };
     maxRanges = maxRanges / GetScaleWorld();
 
