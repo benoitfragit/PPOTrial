@@ -75,7 +75,7 @@ struct sCommonAgentState
     long long m_maxStep{ 0 };
     float     m_reward{ 0.F };
     float     m_rewardClamp{ 3.F };
-    float     m_bestreward{ 0.F };
+    float     m_bestreward{ -FLT_MAX };
     float     m_loss{ 0.F };
     float     m_actorloss{ 0.F };
     float     m_entropyloss{ 0.F };
@@ -96,7 +96,8 @@ struct PPOParamters
     int             m_K_epochs{ 4 };
     int             m_batch_size{ 64 };
     unsigned int    m_checkpoint{ 5 };
-    float           m_bestreward{ 0.F };
+    float           m_bestreward{ -FLT_MAX };
+    float           m_target_kl{ 0.01F };
 };
 
 struct PPOOutputs {

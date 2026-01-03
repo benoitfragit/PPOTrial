@@ -231,6 +231,7 @@ Agent<Env, Model, AgentState>::UpdateDoubleBuffer(void)
     m_buffers[next].m_ppoparameters.m_batch_size    = m_internal.m_ppoparameters.m_batch_size    ;
     m_buffers[next].m_ppoparameters.m_checkpoint    = m_internal.m_ppoparameters.m_checkpoint    ;
     m_buffers[next].m_ppoparameters.m_bestreward    = m_internal.m_ppoparameters.m_bestreward;
+    m_buffers[next].m_ppoparameters.m_target_kl     = m_internal.m_ppoparameters.m_target_kl;
 
     m_index.store(next, std::memory_order_release);
 }
@@ -294,7 +295,9 @@ Agent<Env, Model, AgentState>::serialize(Ar& ar)
     ppoSection("Learning_Rate", m_internal.m_ppoparameters.m_learningReate);
     ppoSection("K_epochs",      m_internal.m_ppoparameters.m_K_epochs     );
     ppoSection("Batch_size",    m_internal.m_ppoparameters.m_batch_size   );
+    ppoSection("Target_KL",     m_internal.m_ppoparameters.m_target_kl    ); 
     ppoSection("Checkpoint",    m_internal.m_ppoparameters.m_checkpoint   );
+
 }
 
 template<typename Env, typename Model, typename AgentState>

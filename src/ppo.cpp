@@ -134,7 +134,8 @@ struct PPO::Impl {
         m_K_epochs      = parameters.m_K_epochs     ;
         m_batch_size    = parameters.m_batch_size   ;
         m_checkpoint    = parameters.m_checkpoint   ;
-        m_outputs.m_bestreward    = parameters.m_bestreward   ;
+        m_target_kl     = parameters.m_target_kl;
+        m_outputs.m_bestreward = parameters.m_bestreward   ;
 
         m_policy     = std::make_shared<ActorCriticNet>(state_dim, action_dim);
 
@@ -168,6 +169,11 @@ struct PPO::Impl {
 
         auto [logp, values, entropy] = EvaluateAction(
             m_policy, states, actions);
+
+        // Kullback–Leibler divergence early stopping
+        float kl_value = (old_logp - logp).mean().item<float>();
+        if (kl_value >= 1.5F* m_target_kl)
+            return {0.F, 0.F, 0.F, 0.F};
 
         auto ratio = torch::exp(logp - old_logp.detach());
 
@@ -205,6 +211,7 @@ struct PPO::Impl {
     float m_value_coef   { 0.5F  };
     float m_entropy_coef { 0.02F };
     float m_learningReate{ 3e-4F };
+    float m_target_kl    { 0.01F };
 
     int m_K_epochs        { 4 };
     int m_batch_size      { 64 };
@@ -267,7 +274,8 @@ PPO::UpdatePolicy(
             advantages[t] = gae;
 
             episodeReward += reward;
-            if (done > 0.5F)
+            if ((done > 0.5F)
+            ||  (t == 0))
             {
                 rewardPerEpisode.push_back(episodeReward);
                 episodeReward = 0.F;
@@ -310,7 +318,7 @@ PPO::UpdatePolicy(
         for (auto const episodreward : rewardPerEpisode)
             meanReward += episodreward / static_cast<float>(rewardPerEpisode.size());
 
-        //if (p_impl->m_outputs.m_bestreward < meanReward)
+        if (p_impl->m_outputs.m_bestreward < meanReward)
         {
             p_impl->m_outputs.m_bestreward = meanReward;
 

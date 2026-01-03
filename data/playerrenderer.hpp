@@ -24,9 +24,8 @@ public:
     void             Run           (void)                   noexcept;
 
 private:
-    void             DrawShootingRanges(model::sPlayerState const& state, float radius, sf::Color const color, unsigned char nbPoint=10, float startangle=-90.F* DEG_TO_RAD, float endangle=90.F * DEG_TO_RAD);
+    void             DrawShootingRanges(model::sPlayerState const& state, float radius, sf::Color const color, float startangle=-90.F* DEG_TO_RAD, float endangle=90.F * DEG_TO_RAD, unsigned char nbPoint = 10);
     void             DrawDestroySymbol (model::sPlayerState const& state);
-    void             DrawPowerLevel    (model::sPlayerState const& state);
 
     float                   m_width { 0.F };
     float                   m_height{ 0.F };

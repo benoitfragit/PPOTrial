@@ -191,7 +191,7 @@ Environment::Impl::ComputeReward(Player* const player, std::shared_ptr<IAgent> p
 
     if (targetDestruction)
     {
-        pAgent->AddReward(sAgentState::RewardType::TargetDestruction, 1.F);
+        pAgent->AddReward(sAgentState::RewardType::TargetDestruction, 10.F);
         targetDestroyed = true;
     }
     else
@@ -202,7 +202,7 @@ Environment::Impl::ComputeReward(Player* const player, std::shared_ptr<IAgent> p
 
     if (player->GetDestroyed())
     {
-        pAgent->AddReward(sAgentState::RewardType::OwnshipDestruction, -1.F);
+        pAgent->AddReward(sAgentState::RewardType::OwnshipDestruction, -10.F);
     }
     else
     {

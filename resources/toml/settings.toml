@@ -23,12 +23,13 @@ Rollout = 512
     K_epochs = 4
     Lambda_GAE = 0.949999988079071
     Learning_Rate = 0.0003000000142492354
+    Target_KL = 0.009999999776482582
     Value_Coef = 0.5
 
     [FirstGeneration.Reward]
-    Best = 0.0
+    Best = 458.0390625
     Clamping = 10.0
-    Scaling = [ 1.0, 0.0, 0.0, 0.0, 0.8169999718666077 ]
+    Scaling = [ 1.0, 0.0, 0.0, 0.0, 1.0 ]
 
 [Rafale]
 MaxFuel = 4.5e+08

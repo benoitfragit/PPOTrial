@@ -188,9 +188,8 @@ Player::Impl::ComputeFktKillProbability(void) noexcept
     az = wrapMinusPi2Pi(az - m_rotation);
 
     if ((-m_maxShootAngle <= az)
-        && (az <= m_maxShootAngle))
-        m_pk = std::clamp(1.F - (d - m_noescapezone) / (m_escapezone - m_noescapezone), 
-                          0.F, 1.F);
+     && (az <= m_maxShootAngle))
+        m_pk = 1.F - tanh((d - m_noescapezone) / (m_escapezone - m_noescapezone));
 }
 
 void
@@ -217,18 +216,12 @@ Player::Impl::Run(float dt) noexcept
         
         // bornage
         float const maxRotationAngle{ m_rotationAngle * dt };
-        if (maxRotationAngle < diffRotation)
-        {
-            m_dx = m_speed * cos(m_rotation + maxRotationAngle);
-            m_dy = m_speed * sin(m_rotation + maxRotationAngle);
-        }
-        else if (diffRotation < -maxRotationAngle)
-        {
-            m_dx = m_speed * cos(m_rotation - maxRotationAngle);
-            m_dy = m_speed * sin(m_rotation - maxRotationAngle);
-        }
+        float const limitDiff{ maxRotationAngle * tanh(diffRotation / maxRotationAngle) };
 
-        m_rotation = wrapMinusPi2Pi(atan2(m_dy, m_dx));
+        m_rotation = wrapMinusPi2Pi(m_rotation + limitDiff);
+
+        m_dx = m_speed * std::cos(m_rotation);
+        m_dy = m_speed * std::sin(m_rotation);
 
         // new position according to rotation and speeds
         m_x += m_dx * dt;

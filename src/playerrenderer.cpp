@@ -33,7 +33,7 @@ DrawQuadBetweenLine(sf::Vector2f const& a, sf::Vector2f const& b, sf::Color cons
 }
 
 void 
-PlayerRenderer::DrawShootingRanges(model::sPlayerState const& state, float radius, sf::Color const color, unsigned char nbpoint, float startangle, float endangle)
+PlayerRenderer::DrawShootingRanges(model::sPlayerState const& state, float radius, sf::Color const color, float startangle, float endangle, unsigned char nbpoint)
 {
     auto&                renderer   { EnvironmentRenderer::GetInstance() };
     auto const&          view       { renderer.GetView() };
@@ -97,43 +97,6 @@ PlayerRenderer::DrawDestroySymbol(model::sPlayerState const& state)
     renderer.draw(vertices);
 }
 
-void 
-PlayerRenderer::DrawPowerLevel(model::sPlayerState const& state)
-{
-    auto& renderer              { EnvironmentRenderer::GetInstance() };
-    auto const& view            { renderer.GetView() };
-    auto const  winSize         { renderer.getSize() };
-    auto const  viewSize        { view.getSize() };
-
-    sf::Vector2f const& position{ sf::ConvexShape::getPosition() };
-    float const lineWidth{ renderer.GetLineWidth() / 2.F };
-
-    if (std::numeric_limits<float>::epsilon() <= state.m_fuel)
-    {
-        sf::FloatRect rect{ getGlobalBounds() };
-        sf::Vector2f position{ rect.getPosition() };
-        position.x += rect.height+4.F*lineWidth;
-        
-        sf::RectangleShape borderpower{};
-        borderpower.setSize({ 2.F * lineWidth , 2*rect.width});
-        borderpower.setOrigin(0.F, 0.F);
-        borderpower.setPosition(position);
-        borderpower.setRotation(180.F);
-        borderpower.setOutlineColor(sf::Color::White);
-        borderpower.setOutlineThickness(lineWidth);
-        borderpower.setFillColor(sf::Color::Transparent);
-        renderer.draw(borderpower);
-
-        sf::RectangleShape power{};
-        power.setSize({ 2.F*lineWidth, 2*rect.width * state.m_fuel / state.m_maxfuel });
-        power.setOrigin(0.F, 0.F);
-        power.setPosition(position);
-        power.setRotation(180.F);
-        power.setFillColor(sf::Color::Green);
-        renderer.draw(power);
-    }
-}
-
 void
 PlayerRenderer::Run(void) noexcept
 {
@@ -173,18 +136,16 @@ PlayerRenderer::Run(void) noexcept
     // shooting ranges
     if (float const escapeZoneValue{ state.m_escapezone };
         std::numeric_limits<float>::epsilon() < escapeZoneValue)
-        DrawShootingRanges(state, escapeZoneValue, sf::Color::Magenta);
+        DrawShootingRanges(state, escapeZoneValue, sf::Color::Magenta, -state.m_maxShootAngle, state.m_maxShootAngle);
 
     if (float const noEscapeZoneValue{ state.m_noescapezone };
         std::numeric_limits<float>::epsilon() < noEscapeZoneValue)
-        DrawShootingRanges(state, noEscapeZoneValue, sf::Color::Red);
+        DrawShootingRanges(state, noEscapeZoneValue, sf::Color::Red, -state.m_maxShootAngle, state.m_maxShootAngle);
 
     renderer.draw(*this);
 
     if (state.m_destroyed)
         DrawDestroySymbol(state);
-
-    //DrawPowerLevel(state);
 }
 
 }
