@@ -134,6 +134,8 @@ Player::Impl::UpdateDoubleBuffer(void)
     m_buffers[next].m_y                = m_y                 ;
     m_buffers[next].m_target_x         = m_target_x          ;
     m_buffers[next].m_target_y         = m_target_y          ;
+    m_buffers[next].m_target_dx        = m_target_dx;
+    m_buffers[next].m_target_dy        = m_target_dy;
     m_buffers[next].m_speed            = m_speed             ;
     m_buffers[next].m_rotation         = m_rotation          ;
     m_buffers[next].m_rotationAngle    = m_rotationAngle     ;
@@ -172,24 +174,36 @@ Player::Impl::Init(sEnvironmentState const& env)
     m_nbmissiles    = m_maxnbmissiles;
     m_target_x      = 0.F;
     m_target_y      = 0.F;
+    m_rotation      = wrapMinusPi2Pi(atan2(m_dy, m_dx));
 
     UpdateDoubleBuffer();
+}
+
+inline static float sigmoid(float x)
+{
+    return 1.F / (1.F + std::exp(-x));
 }
 
 void
 Player::Impl::ComputeFktKillProbability(void) noexcept
 {
     float const d{ static_cast<float>(sqrt(pow(m_x - m_target_x, 2.F) + pow(m_y - m_target_y, 2.F))) };
-    float const ux{ (m_x - m_target_x) / d };
-    float const uy{ (m_y - m_target_y) / d };
+    float const ux{ (m_target_x - m_x) / d };
+    float const uy{ (m_target_y - m_y) / d };
 
     float az = atan2(uy, ux);
     az = wrapMinusPi2Pi(az);
     az = wrapMinusPi2Pi(az - m_rotation);
 
-    if ((-m_maxShootAngle <= az)
-     && (az <= m_maxShootAngle))
-        m_pk = 1.F - tanh((d - m_noescapezone) / (m_escapezone - m_noescapezone));
+    float const k0{ 5.F / m_maxShootAngle };
+    float const pkangle{sigmoid(k0*(m_maxShootAngle - std::fabs(az))) };
+
+    float const dmid{ (m_noescapezone + m_escapezone) / 2.F };
+    float const deltad{ m_escapezone - m_noescapezone + 1e-6F };
+    float const kd{ 8.F / deltad };
+    float const pkrange{sigmoid(kd*(dmid - d))};
+    
+    m_pk = pkrange * pkangle;
 }
 
 void
@@ -211,17 +225,19 @@ Player::Impl::Run(float dt) noexcept
             m_dy *= factor;
         }
 
-        float const newRotation{ static_cast<float>(wrapMinusPi2Pi(atan2(m_dy, m_dx))) };
-        float const diffRotation{static_cast<float>(wrapMinusPi2Pi(newRotation - m_rotation)) };
-        
-        // bornage
-        float const maxRotationAngle{ m_rotationAngle * dt };
-        float const limitDiff{ maxRotationAngle * tanh(diffRotation / maxRotationAngle) };
+        m_rotation = wrapMinusPi2Pi(atan2(m_dy, m_dx));
 
-        m_rotation = wrapMinusPi2Pi(m_rotation + limitDiff);
-
-        m_dx = m_speed * std::cos(m_rotation);
-        m_dy = m_speed * std::sin(m_rotation);
+        //float const newRotation{ static_cast<float>(wrapMinusPi2Pi(atan2(m_dy, m_dx))) };
+        //float const diffRotation{static_cast<float>(wrapMinusPi2Pi(newRotation - m_rotation)) };
+        //
+        //// bornage
+        //float const maxRotationAngle{ m_rotationAngle * dt };
+        //float const limitDiff{ maxRotationAngle * tanh(diffRotation / maxRotationAngle) };
+        //
+        //m_rotation = wrapMinusPi2Pi(m_rotation + limitDiff);
+        //
+        //m_dx = m_speed * std::cos(m_rotation);
+        //m_dy = m_speed * std::sin(m_rotation);
 
         // new position according to rotation and speeds
         m_x += m_dx * dt;
@@ -571,21 +587,14 @@ Player::GetTarget(void)              const noexcept
     return p_impl->m_target;
 }
 
-float 
-Player::GetTargetPositionNorth(void) const noexcept
+void 
+Player::SetTargetSpeed(float north, float east) noexcept
 {
     if (p_impl == nullptr)
-        return 0.F;
+        return;
 
-    return p_impl->m_target_x;
-}
-
-float 
-Player::GetTargetPositionEast(void)  const noexcept
-{
-    if (p_impl == nullptr)
-        return 0.F;
-    return p_impl->m_target_y;
+    p_impl->m_target_dx = north;
+    p_impl->m_target_dy = east;
 }
 
 float
@@ -627,9 +636,59 @@ Player::StateRange(sEnvironmentState const& env) const noexcept
 
     float d = std::sqrt(dx * dx + dy * dy);
 
-    float scale = p_impl->m_maxSpeed * env.m_dt * 20.f;
+    return 1.0F - std::exp(-d / 8000.F);
+}
 
-    return 1.0f - std::exp(-d / scale);
+float
+Player::StateClosingSpeed(sEnvironmentState const& env) const noexcept
+{ 
+    if (p_impl == nullptr)
+        return 0.F;
+
+    float dx = p_impl->m_target_x - p_impl->m_x;
+    float dy = p_impl->m_target_y - p_impl->m_y;
+
+    float d = std::sqrt(dx * dx + dy * dy);
+
+    float ux = dx / (d + 1e-6F);
+    float uy = dy / (d + 1e-6F);
+    
+    float vrx = p_impl->m_dx - p_impl->m_target_dx;
+    float vry = p_impl->m_dy - p_impl->m_target_dy;
+
+    return (vrx * ux + vry * uy) / p_impl->m_maxSpeed;
+}
+
+float
+Player::StateTangeantSpeed( sEnvironmentState const& env ) const noexcept
+{
+    if (p_impl == nullptr)
+        return 0.F;
+
+    float dx = p_impl->m_target_x - p_impl->m_x;
+    float dy = p_impl->m_target_y - p_impl->m_y;
+
+    float d = std::sqrt(dx * dx + dy * dy);
+
+    float ux = dx / (d + 1e-6F);
+    float uy = dy / (d + 1e-6F);
+
+    float tx = -uy;
+    float ty = ux;
+
+    float vrx = p_impl->m_dx - p_impl->m_target_dx;
+    float vry = p_impl->m_dy - p_impl->m_target_dy;
+
+    return (vrx * tx + vry * ty) / p_impl->m_maxSpeed;
+}
+
+float
+Player::StateSpeed(sEnvironmentState const& env) const noexcept
+{
+    if (p_impl == nullptr)
+        return 0.F;
+
+    return p_impl->m_speed / p_impl->m_maxSpeed;
 }
 
 float 
@@ -654,7 +713,7 @@ Player::ActionSetNorthSpeed(float value)                 noexcept
     if (p_impl == nullptr)
         return;
 
-    p_impl->m_dx = value * p_impl->m_maxSpeed;
+    p_impl->m_dx = p_impl->m_maxSpeed * std::clamp(value, -1.F, 1.F);
 }
 
 void 
@@ -663,7 +722,7 @@ Player::ActionSetEastSpeed(float value) noexcept
     if (p_impl == nullptr)
         return;
 
-    p_impl->m_dy = value * p_impl->m_maxSpeed;
+    p_impl->m_dy = p_impl->m_maxSpeed * std::clamp(value, -1.F, 1.F);
 }
 
 }

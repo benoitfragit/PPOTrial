@@ -48,12 +48,14 @@ ActorCriticNet::ActorCriticNet(int64_t state_dim, int64_t action_dim, int64_t hi
     torch::nn::init::orthogonal_(fc2->weight, std::sqrt(2.0));
 
     torch::nn::init::orthogonal_(mu_head->weight, 0.01);
+    torch::nn::init::orthogonal_(logstd_head->weight, 0.01);
     torch::nn::init::orthogonal_(critic->weight, 1.0);
 
-    // Bias à zéro (important)
+    // Bias à zéro
     torch::nn::init::constant_(fc1->bias, 0.0);
     torch::nn::init::constant_(fc2->bias, 0.0);
     torch::nn::init::constant_(mu_head->bias, 0.0);
+    torch::nn::init::constant_(logstd_head->bias, 0.0);
     torch::nn::init::constant_(critic->bias, 0.0);
 }
 
@@ -78,11 +80,11 @@ ActorCriticNet::forward(torch::Tensor state)
     return {mu, log_std, value};
 }
 
-static torch::Tensor 
-gaussian_log_prob_pre_tanh(
+static torch::Tensor
+gaussian_log_prob(
     const torch::Tensor& x,
     const torch::Tensor& mu,
-    const torch::Tensor& log_std) 
+    const torch::Tensor& log_std)
 {
     auto var = torch::exp(2.0 * log_std);
     auto logp =
@@ -90,17 +92,11 @@ gaussian_log_prob_pre_tanh(
     return logp.sum(-1);
 }
 
-static torch::Tensor 
-gaussian_entropy(const torch::Tensor& log_std) 
+static torch::Tensor
+gaussian_entropy(const torch::Tensor& log_std)
 {
     auto c = 0.5 * (1.0 + std::log(2.0 * PI));
     return (log_std + c).sum(-1);
-}
-
-static torch::Tensor 
-tanh_correction(const torch::Tensor& pre_tanh) {
-    auto y = torch::tanh(pre_tanh);
-    return torch::log(1.0 - y.pow(2) + EPS).sum(-1);
 }
 
 static std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
@@ -111,11 +107,7 @@ EvaluateAction(
 {
     auto [mu, log_std, values] = net->forward(states);
 
-    auto clipped = torch::clamp(actions, -1.0 + 1e-6, 1.0 - 1e-6);
-    auto pre_tanh = 0.5 * torch::log((1 + clipped) / (1 - clipped));
-
-    auto logp = gaussian_log_prob_pre_tanh(pre_tanh, mu, log_std)
-        - tanh_correction(pre_tanh);
+    auto logp = gaussian_log_prob(actions, mu, log_std);
 
     auto entropy = gaussian_entropy(log_std);
     return { logp, values.view({-1}), entropy };
@@ -161,7 +153,7 @@ struct PPO::Impl {
             const torch::Tensor& actions,
             const torch::Tensor& old_logp,
             const torch::Tensor& returns,
-            const torch::Tensor& advantages) 
+            const torch::Tensor& advantages)
     {
 
         auto adv = (advantages - advantages.mean()) /
@@ -236,7 +228,7 @@ PPO::UpdatePolicy(
     const torch::Tensor& values,
     const torch::Tensor& rewards,
     const torch::Tensor& dones,
-    const torch::Tensor& last_values) 
+    const torch::Tensor& last_values)
 {
     if (p_impl == nullptr)
         return;
@@ -285,11 +277,11 @@ PPO::UpdatePolicy(
         returns = advantages + values;
     }
 
-    for (int e = 0; e < p_impl->m_K_epochs; ++e) 
+    for (int e = 0; e < p_impl->m_K_epochs; ++e)
     {
         auto idx = torch::randperm(N, states.options().dtype(torch::kLong));
 
-        for (int64_t i = 0; i < N; i += p_impl->m_batch_size) 
+        for (int64_t i = 0; i < N; i += p_impl->m_batch_size)
         {
             auto j = std::min(i + p_impl->m_batch_size, N);
             auto b = idx.slice(0, i, j);
@@ -357,13 +349,11 @@ PPO::SelectAction(const torch::Tensor& state)
     auto std = torch::exp(log_std);
 
     auto eps = torch::randn_like(mu);
-    auto pre = mu + std * eps;
-    auto action = torch::tanh(pre);
+    auto action_raw = mu + std * eps;
 
-    auto logp = gaussian_log_prob_pre_tanh(pre, mu, log_std)
-        - tanh_correction(pre);
+    auto logp = gaussian_log_prob(action_raw, mu, log_std);
 
-    return { action, logp, value.view({-1}) };
+    return { action_raw, logp, value.view({-1}) };
 }
 
 PPOOutputs const&

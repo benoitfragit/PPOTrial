@@ -138,10 +138,13 @@ Environment::Impl::ComputeState(Player* const player, float const dt)
         return;
 
     // build state vector
-    if (Player* const target{ GetPlayerById(player->GetTarget())};
-       (target != nullptr))
+    if (Player* const target{ GetPlayerById(player->GetTarget()) };
+        (target != nullptr))
+    {
         player->SetTargetPosition(target->GetNorthPosition(), target->GetEastPosition());
-    
+        player->SetTargetSpeed(target->GetNorthSpeed(), target->GetEastSpeed());
+    }
+
     // Run the model after the Agent run to apply the action
     player->Run(dt);
 }
@@ -166,23 +169,33 @@ Environment::Impl::ComputeReward(Player* const player, std::shared_ptr<IAgent> p
     float                   pkTarget            { 0.F };
     float                   pkPlayer            { 0.F };
     bool                    targetDestroyed     { false };
-    float                   R_close             (0.F);
+    float                   R_close             {0.F};
 
     if (auto const target{ GetPlayerById(targetId) };
         target != nullptr)
     {
         float const tx{ target->GetNorthPosition() };
         float const ty{ target->GetEastPosition() };
+        float const dtx{ target->GetNorthSpeed() };
+        float const dty{ target->GetEastSpeed() };
         float const d { static_cast<float>(sqrt(pow(x - tx, 2.F) + pow(y - ty, 2.F))) };
         float const ux{ (tx - x)/d };
         float const uy{ (ty - y)/d };
+        float const dvx{ dx - dtx };
+        float const dvy{ dy - dty};     
+        
+        float utx = -uy;
+        float uty = ux;
 
-        R_close = std::clamp((dx * ux + dy * uy) / maxSpeed,-1.F, 1.F);
+        float const closing     {( dx * ux + dy * uy ) / maxSpeed};
+        float const tangeantial {( dvx * utx + dvy * uty)/ maxSpeed };
+        float const wd{ 1.F - std::exp(-d / 8000.F) };
+        R_close = closing;// (closing - 0.5 * std::max(0.F, -closing) * std::fabs(tangeantial));
 
         pkTarget = player->GetKillProbability();
         pkPlayer = target->GetKillProbability();
 
-        targetDestruction = (1.F <= pkTarget);
+        targetDestruction = (0.95F <= pkTarget);
     }
 
     bool done{ false };
@@ -209,7 +222,8 @@ Environment::Impl::ComputeReward(Player* const player, std::shared_ptr<IAgent> p
         // penalty when entering opponent escape zone
         pAgent->AddReward(sAgentState::RewardType::OwnshipInEZ, -pkPlayer);
 
-        pAgent->AddReward(sAgentState::RewardType::Range, R_close);
+        pAgent->AddReward(sAgentState::RewardType::Closing, R_close);
+
     }
 
     done = player->GetDestroyed() || targetDestroyed;

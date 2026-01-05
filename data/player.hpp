@@ -36,11 +36,10 @@ public:
     void              SetMaxFuel          (float maxFuel)                            noexcept;
     void              SetMaxMissiles      (unsigned short maxMissiles)               noexcept;
     void              SetTargetPosition   (float north, float east)                  noexcept;
+    void              SetTargetSpeed      (float north, float east)                  noexcept;
     void              SetTarget           (PlayerId targetId)                        noexcept;
 
-    std::string const& GetName            (void)                             const noexcept;
-    float             GetTargetPositionNorth(void)                             const noexcept;
-    float             GetTargetPositionEast (void)                             const noexcept;
+    std::string const& GetName            (void)                               const noexcept;
     PlayerId          GetTarget           (void)                               const noexcept;
     bool              GetDestroyed        (void)                               const noexcept;
     float             GetRotation         (void)                               const noexcept;
@@ -69,6 +68,9 @@ public:
     float             StateNorthRange           (sEnvironmentState const& env) const noexcept;
     float             StateEastRange            (sEnvironmentState const& env) const noexcept;  
     float             StateRange                (sEnvironmentState const& env) const noexcept;
+    float             StateClosingSpeed         (sEnvironmentState const& env) const noexcept;
+    float             StateTangeantSpeed        (sEnvironmentState const& env) const noexcept;
+    float             StateSpeed                (sEnvironmentState const& env) const noexcept;
 
     float             StateRemainingFuel        (sEnvironmentState const& env) const noexcept;  
     float             StateRemainingMissiles    (sEnvironmentState const& env) const noexcept;
@@ -78,11 +80,14 @@ public:
     /// </summary>
     using State = float(Player::*)(sEnvironmentState const&) const noexcept;
 
-    constexpr std::array<State, 3> const static STATES
+    constexpr std::array<State, 6> const static STATES
     {
         &Player::StateNorthRange,
         &Player::StateEastRange,
-        &Player::StateRange
+        &Player::StateRange,
+        &Player::StateClosingSpeed,
+        &Player::StateTangeantSpeed,
+        &Player::StateSpeed,
     };
 
     /// <summary>

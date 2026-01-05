@@ -34,6 +34,8 @@ struct sPlayerState
     float           m_y{ 0.F  };
     float           m_target_x{ 0.F };
     float           m_target_y{ 0.F };
+    float           m_target_dx{ 0.F };
+    float           m_target_dy{ 0.F };
     float           m_maxSpeed{ 0.F };
     float           m_speed{ 0.F };
     float           m_rotation{ 0.F };
@@ -118,7 +120,7 @@ struct sAgentState:
         TargetInEZ          = 1,
         OwnshipDestruction  = 2,
         OwnshipInEZ         = 3,
-        Range               = 4,
+        Closing             = 4
     };
 
     /// <summary>
@@ -130,7 +132,7 @@ struct sAgentState:
         "Target in EZ",
         "Ownship destruction",
         "Ownship in EZ",
-        "Range",
+        "Closing"
     };
 
     using RewardVector = std::array<float, REWARDS.size()>;
