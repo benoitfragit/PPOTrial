@@ -165,11 +165,14 @@ Environment::Impl::ComputeReward(Player* const player, std::shared_ptr<IAgent> p
     float                   y                   { player->GetEastPosition() };
     float                   dx                  { player->GetNorthSpeed() };
     float                   dy                  { player->GetEastSpeed() };
+    float                   az                  { player->GetRotation()};
+
     bool                    targetDestruction   { false };
     float                   pkTarget            { 0.F };
     float                   pkPlayer            { 0.F };
     bool                    targetDestroyed     { false };
     float                   R_close             {0.F};
+    float                   R_lead              {0.F};
 
     if (auto const target{ GetPlayerById(targetId) };
         target != nullptr)
@@ -183,14 +186,14 @@ Environment::Impl::ComputeReward(Player* const player, std::shared_ptr<IAgent> p
         float const uy{ (ty - y)/d };
         float const dvx{ dx - dtx };
         float const dvy{ dy - dty};     
-        
-        float utx = -uy;
-        float uty = ux;
 
-        float const closing     {( dx * ux + dy * uy ) / maxSpeed};
-        float const tangeantial {( dvx * utx + dvy * uty)/ maxSpeed };
-        float const wd{ 1.F - std::exp(-d / 8000.F) };
+        float const closing     {( dvx * ux + dvy * uy ) / maxSpeed};
+        float const tlead{std::clamp(0.6F * d / std::max(closing, 50.F),0.3F, 1.2F)};
+        float const xtlead = tx + tlead * dtx;
+        float const ytlead = ty + tlead * dty;
+        float const azlead = wrapMinusPi2Pi(atan2(ytlead - y, xtlead - x));
         R_close = closing;// (closing - 0.5 * std::max(0.F, -closing) * std::fabs(tangeantial));
+        R_lead = cos(az - azlead);
 
         pkTarget = player->GetKillProbability();
         pkPlayer = target->GetKillProbability();
@@ -223,6 +226,8 @@ Environment::Impl::ComputeReward(Player* const player, std::shared_ptr<IAgent> p
         pAgent->AddReward(sAgentState::RewardType::OwnshipInEZ, -pkPlayer);
 
         pAgent->AddReward(sAgentState::RewardType::Closing, R_close);
+
+        pAgent->AddReward(sAgentState::RewardType::Interception, R_lead);
 
     }
 

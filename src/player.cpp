@@ -660,35 +660,21 @@ Player::StateClosingSpeed(sEnvironmentState const& env) const noexcept
 }
 
 float
-Player::StateTangeantSpeed( sEnvironmentState const& env ) const noexcept
+Player::StateCosRotation(sEnvironmentState const& env) const noexcept
 {
     if (p_impl == nullptr)
         return 0.F;
 
-    float dx = p_impl->m_target_x - p_impl->m_x;
-    float dy = p_impl->m_target_y - p_impl->m_y;
-
-    float d = std::sqrt(dx * dx + dy * dy);
-
-    float ux = dx / (d + 1e-6F);
-    float uy = dy / (d + 1e-6F);
-
-    float tx = -uy;
-    float ty = ux;
-
-    float vrx = p_impl->m_dx - p_impl->m_target_dx;
-    float vry = p_impl->m_dy - p_impl->m_target_dy;
-
-    return (vrx * tx + vry * ty) / p_impl->m_maxSpeed;
+    return cos(p_impl->m_rotation);
 }
 
 float
-Player::StateSpeed(sEnvironmentState const& env) const noexcept
+Player::StateSinRotation(sEnvironmentState const& env) const noexcept
 {
     if (p_impl == nullptr)
         return 0.F;
 
-    return p_impl->m_speed / p_impl->m_maxSpeed;
+    return sin(p_impl->m_rotation);
 }
 
 float 

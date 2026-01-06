@@ -69,8 +69,8 @@ public:
     float             StateEastRange            (sEnvironmentState const& env) const noexcept;  
     float             StateRange                (sEnvironmentState const& env) const noexcept;
     float             StateClosingSpeed         (sEnvironmentState const& env) const noexcept;
-    float             StateTangeantSpeed        (sEnvironmentState const& env) const noexcept;
-    float             StateSpeed                (sEnvironmentState const& env) const noexcept;
+    float             StateCosRotation          (sEnvironmentState const& env) const noexcept;
+    float             StateSinRotation          (sEnvironmentState const& env) const noexcept;
 
     float             StateRemainingFuel        (sEnvironmentState const& env) const noexcept;  
     float             StateRemainingMissiles    (sEnvironmentState const& env) const noexcept;
@@ -86,8 +86,8 @@ public:
         &Player::StateEastRange,
         &Player::StateRange,
         &Player::StateClosingSpeed,
-        &Player::StateTangeantSpeed,
-        &Player::StateSpeed,
+        &Player::StateCosRotation,
+        &Player::StateSinRotation,
     };
 
     /// <summary>
