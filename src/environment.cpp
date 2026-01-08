@@ -177,6 +177,9 @@ Environment::Impl::ComputeReward(Player* const player, std::shared_ptr<IAgent> p
     float                   R_close             {0.F};
     float                   R_navpn             {0.F};
     float                   R_navapn            {0.F};
+    float const             vref                {300.F};
+    float const             fuelref             {C0 + CV3*vref*vref*vref};
+    float                   R_fuel              { -fuelconsumption / (fuelref*m_dt)};
 
     if (auto const target{ GetPlayerById(targetId) };
         target != nullptr)
@@ -188,7 +191,7 @@ Environment::Impl::ComputeReward(Player* const player, std::shared_ptr<IAgent> p
         float const d { static_cast<float>(sqrt(pow(x - tx, 2.F) + pow(y - ty, 2.F))) };
 
         R_close  = closingSpeed/maxSpeed;
-        R_navpn  = -std::fabs(LOS);
+        R_navpn  = -std::fabs(LOS)*std::exp(-d/8000.F);
         R_navapn = -std::fabs(LOSrate);
 
         pkTarget = player->GetKillProbability();
@@ -226,6 +229,8 @@ Environment::Impl::ComputeReward(Player* const player, std::shared_ptr<IAgent> p
         pAgent->AddReward(sAgentState::RewardType::NavPN, R_navpn);
 
         pAgent->AddReward(sAgentState::RewardType::NavAPN, R_navapn);
+
+        pAgent->AddReward(sAgentState::RewardType::Fuel, R_fuel);
     }
 
     done = player->GetDestroyed() || targetDestroyed;

@@ -125,13 +125,14 @@ struct sAgentState:
         OwnshipInEZ         = 3,
         Closing             = 4,
         NavPN               = 5,
-        NavAPN              = 6
+        NavAPN              = 6,
+        Fuel                = 7
     };
 
     /// <summary>
     /// Define a list of possible rewards type at compile time
     /// </summary>                                        
-    constexpr std::array<std::string_view, 7> const static REWARDS
+    constexpr std::array<std::string_view, 8> const static REWARDS
     {
         "Target destruction",
         "Target in EZ",
@@ -139,7 +140,8 @@ struct sAgentState:
         "Ownship in EZ",
         "Closing",
         "NavPN",
-        "NavAPN"
+        "NavAPN",
+        "Fuel"
     };
 
     using RewardVector = std::array<float, REWARDS.size()>;

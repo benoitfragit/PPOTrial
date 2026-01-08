@@ -14,9 +14,9 @@ constexpr float  MS_TO_KT                = 1.94384F;
 constexpr double EULER                   = 2.7182818284;
 
 constexpr float  MIN_VELOCITY            = 100.F * KT_TO_MS;
-constexpr float  MIN_CONSUMPTION         = 0.5F; // Kg.s-1
-constexpr float  LINEAR_CONSUMPTION      = 0.005F; // Kg.s-1/m.s-1
-constexpr float  QUADRA_CONSUMPTION      = 0.0004F;
+constexpr float  C0                      = 0.6F; // Kg.s-1
+constexpr float  CV3                     = 8e-6F; // Kg.m-3
+constexpr float  CROT                    = 1.5F;    //kg.s-1.rad2
 constexpr double EPS                     = 1e-8;
 
 double wrapMinusPi2Pi(double az);

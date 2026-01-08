@@ -252,7 +252,9 @@ Player::Impl::Run(float dt) noexcept
             m_dy *= factor;
         }
 
+        float const prevRotation{ m_rotation };
         m_rotation = wrapMinusPi2Pi(atan2(m_dy, m_dx));
+        float const diffRotation{ std::fabs(static_cast<float>(wrapMinusPi2Pi(m_rotation - prevRotation))) };
 
         //float const newRotation{ static_cast<float>(wrapMinusPi2Pi(atan2(m_dy, m_dx))) };
         //float const diffRotation{static_cast<float>(wrapMinusPi2Pi(newRotation - m_rotation)) };
@@ -270,9 +272,10 @@ Player::Impl::Run(float dt) noexcept
         m_x += m_dx * dt;
         m_y += m_dy * dt;
 
-        float const consumption{ static_cast<float>(MIN_CONSUMPTION
-                              + m_speed * LINEAR_CONSUMPTION
-                              + m_speed * m_speed * QUADRA_CONSUMPTION) };
+        float const w{ diffRotation / dt };
+        float const consumption{ static_cast<float>(C0
+                                                  + CV3 * m_speed*m_speed*m_speed 
+                                                  + CROT * w*w)};
 
         m_fuelconsumption = consumption * dt;
 
