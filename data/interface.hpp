@@ -36,6 +36,9 @@ struct sPlayerState
     float           m_target_y{ 0.F };
     float           m_target_dx{ 0.F };
     float           m_target_dy{ 0.F };
+    float           m_closingspeed{ 0.F };
+    float           m_target_los{ 0.F };
+    float           m_target_los_rate{ 0.F };
     float           m_maxSpeed{ 0.F };
     float           m_speed{ 0.F };
     float           m_rotation{ 0.F };
@@ -121,20 +124,22 @@ struct sAgentState:
         OwnshipDestruction  = 2,
         OwnshipInEZ         = 3,
         Closing             = 4,
-        Interception        = 5
+        NavPN               = 5,
+        NavAPN              = 6
     };
 
     /// <summary>
     /// Define a list of possible rewards type at compile time
     /// </summary>                                        
-    constexpr std::array<std::string_view, 6> const static REWARDS
+    constexpr std::array<std::string_view, 7> const static REWARDS
     {
         "Target destruction",
         "Target in EZ",
         "Ownship destruction",
         "Ownship in EZ",
         "Closing",
-        "Interception"
+        "NavPN",
+        "NavAPN"
     };
 
     using RewardVector = std::array<float, REWARDS.size()>;

@@ -98,7 +98,7 @@ struct Player::Impl :
     void Init(sEnvironmentState const& env);
     void Run(float dt) noexcept;
     void UpdateDoubleBuffer(void);
-    void ComputeFktKillProbability(void) noexcept;
+    void ComputeFktData(void) noexcept;
 
     template<typename Ar>
     void serialize(Ar& ar)
@@ -149,6 +149,9 @@ Player::Impl::UpdateDoubleBuffer(void)
     m_buffers[next].m_destroyed        = m_destroyed         ;
     m_buffers[next].m_playerId         = m_playerId;
     m_buffers[next].m_maxShootAngle    = m_maxShootAngle     ;
+    m_buffers[next].m_closingspeed     = m_closingspeed;
+    m_buffers[next].m_target_los       = m_target_los;
+    m_buffers[next].m_target_los_rate  = m_target_los_rate;
 
     m_index.store(next, std::memory_order_release);
 }
@@ -166,15 +169,19 @@ Player::Impl::Init(sEnvironmentState const& env)
 
     generator.generate();
 
-    m_pk            = 0.F;
-    m_destroyed     = false;
-    m_escapezone    = 2.F * m_maxNoescapeZone;
-    m_noescapezone  = m_maxNoescapeZone;
-    m_fuel          = m_maxfuel;
-    m_nbmissiles    = m_maxnbmissiles;
-    m_target_x      = 0.F;
-    m_target_y      = 0.F;
-    m_rotation      = wrapMinusPi2Pi(atan2(m_dy, m_dx));
+    m_pk                = 0.F;
+    m_destroyed         = false;
+    m_escapezone        = 2.F * m_maxNoescapeZone;
+    m_noescapezone      = m_maxNoescapeZone;
+    m_fuel              = m_maxfuel;
+    m_nbmissiles        = m_maxnbmissiles;
+    m_target_x          = 0.F;
+    m_target_y          = 0.F;
+    m_rotation          = wrapMinusPi2Pi(atan2(m_dy, m_dx));
+
+    m_closingspeed      = 0.F;
+    m_target_los        = 0.F;
+    m_target_los_rate   = 0.F;
 
     UpdateDoubleBuffer();
 }
@@ -185,12 +192,17 @@ inline static float sigmoid(float x)
 }
 
 void
-Player::Impl::ComputeFktKillProbability(void) noexcept
+Player::Impl::ComputeFktData(void) noexcept
 {
-    float const d{ static_cast<float>(sqrt(pow(m_x - m_target_x, 2.F) + pow(m_y - m_target_y, 2.F))) };
-    float const ux{ (m_target_x - m_x) / d };
-    float const uy{ (m_target_y - m_y) / d };
+    float const dx{m_target_x - m_x};
+    float const dy{m_target_y - m_y};
 
+    float const d{ std::sqrt(dx * dx + dy * dy) };
+
+    float const ux{dx / (d + 1e-6F)};
+    float const uy{dy / (d + 1e-6F)};
+
+    // 1. computing the kill probability
     float az = atan2(uy, ux);
     az = wrapMinusPi2Pi(az);
     az = wrapMinusPi2Pi(az - m_rotation);
@@ -204,6 +216,21 @@ Player::Impl::ComputeFktKillProbability(void) noexcept
     float const pkrange{sigmoid(kd*(dmid - d))};
     
     m_pk = pkrange * pkangle;
+
+    // 2. computing the closing speed
+    float const vrx{m_target_dx - m_dx};
+    float const vry{m_target_dy - m_dy};
+
+    m_closingspeed = -(vrx * ux + vry * uy);
+
+    // 3. compute new LOS value
+    float const LOS{ (ux * vry - uy * vrx)/d };
+
+    // 4. update the LOS rate
+    m_target_los_rate = LOS - m_target_los;
+
+    // 5. compute the LOS
+    m_target_los = LOS;
 }
 
 void
@@ -252,12 +279,11 @@ Player::Impl::Run(float dt) noexcept
         m_fuel -= m_fuelconsumption;
         m_fuel = std::max(m_fuel, 0.F);
 
+        ComputeFktData();
+
         if (m_fuel < std::numeric_limits<float>::epsilon()
         || m_speed < std::numeric_limits<float>::epsilon())
             m_destroyed = true;
-
-        if (!m_destroyed)
-            ComputeFktKillProbability();
     }
 
     UpdateDoubleBuffer();
@@ -587,6 +613,33 @@ Player::GetTarget(void)              const noexcept
     return p_impl->m_target;
 }
 
+float
+Player::GetCLosingSpeed(void) const noexcept
+{
+    if (p_impl == nullptr)
+        return 0.F;
+
+    return p_impl->m_closingspeed;
+}
+
+float 
+Player::GetTargetLOS(void) const noexcept
+{
+    if (p_impl == nullptr)
+        return 0.F;
+
+    return p_impl->m_target_los;
+}
+
+float 
+Player::GetTargetLOSRate(void) const noexcept
+{
+    if (p_impl == nullptr)
+        return 0.F;
+
+    return p_impl->m_target_los_rate;
+}
+
 void 
 Player::SetTargetSpeed(float north, float east) noexcept
 {
@@ -645,18 +698,7 @@ Player::StateClosingSpeed(sEnvironmentState const& env) const noexcept
     if (p_impl == nullptr)
         return 0.F;
 
-    float dx = p_impl->m_target_x - p_impl->m_x;
-    float dy = p_impl->m_target_y - p_impl->m_y;
-
-    float d = std::sqrt(dx * dx + dy * dy);
-
-    float ux = dx / (d + 1e-6F);
-    float uy = dy / (d + 1e-6F);
-    
-    float vrx = p_impl->m_dx - p_impl->m_target_dx;
-    float vry = p_impl->m_dy - p_impl->m_target_dy;
-
-    return (vrx * ux + vry * uy) / p_impl->m_maxSpeed;
+    return GetCLosingSpeed() / p_impl->m_maxSpeed;
 }
 
 float
@@ -675,6 +717,15 @@ Player::StateSinRotation(sEnvironmentState const& env) const noexcept
         return 0.F;
 
     return sin(p_impl->m_rotation);
+}
+
+float 
+Player::StateLOS(sEnvironmentState const& env) const noexcept
+{
+    if (p_impl == nullptr)
+        return 0.F;
+
+    return p_impl->m_target_los * env.m_dt;
 }
 
 float 

@@ -57,6 +57,9 @@ public:
     float             GetNorthSpeed       (void)                               const noexcept;
     float             GetEastSpeed        (void)                               const noexcept;
     float             GetKillProbability  (void)                               const noexcept;
+    float             GetCLosingSpeed     (void)                               const noexcept;
+    float             GetTargetLOS        (void)                               const noexcept;
+    float             GetTargetLOSRate    (void)                               const noexcept;
 
     PlayerId          GetPlayerId         (void)                               const noexcept;
 
@@ -71,6 +74,7 @@ public:
     float             StateClosingSpeed         (sEnvironmentState const& env) const noexcept;
     float             StateCosRotation          (sEnvironmentState const& env) const noexcept;
     float             StateSinRotation          (sEnvironmentState const& env) const noexcept;
+    float             StateLOS                  (sEnvironmentState const& env) const noexcept;
 
     float             StateRemainingFuel        (sEnvironmentState const& env) const noexcept;  
     float             StateRemainingMissiles    (sEnvironmentState const& env) const noexcept;
@@ -80,7 +84,7 @@ public:
     /// </summary>
     using State = float(Player::*)(sEnvironmentState const&) const noexcept;
 
-    constexpr std::array<State, 6> const static STATES
+    constexpr std::array<State, 7> const static STATES
     {
         &Player::StateNorthRange,
         &Player::StateEastRange,
@@ -88,6 +92,7 @@ public:
         &Player::StateClosingSpeed,
         &Player::StateCosRotation,
         &Player::StateSinRotation,
+        &Player::StateLOS
     };
 
     /// <summary>

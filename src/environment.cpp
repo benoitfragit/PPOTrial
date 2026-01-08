@@ -166,13 +166,17 @@ Environment::Impl::ComputeReward(Player* const player, std::shared_ptr<IAgent> p
     float                   dx                  { player->GetNorthSpeed() };
     float                   dy                  { player->GetEastSpeed() };
     float                   az                  { player->GetRotation()};
+    float                   closingSpeed        { player->GetCLosingSpeed()};
+    float                   LOS                 { player->GetTargetLOS()};
+    float                   LOSrate             { player->GetTargetLOSRate()};
 
     bool                    targetDestruction   { false };
     float                   pkTarget            { 0.F };
     float                   pkPlayer            { 0.F };
     bool                    targetDestroyed     { false };
     float                   R_close             {0.F};
-    float                   R_lead              {0.F};
+    float                   R_navpn             {0.F};
+    float                   R_navapn            {0.F};
 
     if (auto const target{ GetPlayerById(targetId) };
         target != nullptr)
@@ -182,18 +186,10 @@ Environment::Impl::ComputeReward(Player* const player, std::shared_ptr<IAgent> p
         float const dtx{ target->GetNorthSpeed() };
         float const dty{ target->GetEastSpeed() };
         float const d { static_cast<float>(sqrt(pow(x - tx, 2.F) + pow(y - ty, 2.F))) };
-        float const ux{ (tx - x)/d };
-        float const uy{ (ty - y)/d };
-        float const dvx{ dx - dtx };
-        float const dvy{ dy - dty};     
 
-        float const closing     {( dvx * ux + dvy * uy ) / maxSpeed};
-        float const tlead{std::clamp(0.6F * d / std::max(closing, 50.F),0.3F, 1.2F)};
-        float const xtlead = tx + tlead * dtx;
-        float const ytlead = ty + tlead * dty;
-        float const azlead = wrapMinusPi2Pi(atan2(ytlead - y, xtlead - x));
-        R_close = closing;// (closing - 0.5 * std::max(0.F, -closing) * std::fabs(tangeantial));
-        R_lead = cos(az - azlead);
+        R_close  = closingSpeed/maxSpeed;
+        R_navpn  = -std::fabs(LOS);
+        R_navapn = -std::fabs(LOSrate);
 
         pkTarget = player->GetKillProbability();
         pkPlayer = target->GetKillProbability();
@@ -227,8 +223,9 @@ Environment::Impl::ComputeReward(Player* const player, std::shared_ptr<IAgent> p
 
         pAgent->AddReward(sAgentState::RewardType::Closing, R_close);
 
-        pAgent->AddReward(sAgentState::RewardType::Interception, R_lead);
+        pAgent->AddReward(sAgentState::RewardType::NavPN, R_navpn);
 
+        pAgent->AddReward(sAgentState::RewardType::NavAPN, R_navapn);
     }
 
     done = player->GetDestroyed() || targetDestroyed;
