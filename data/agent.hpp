@@ -26,6 +26,7 @@ public:
     void                     StartTraining           (long long buffer_dim);
     void                     StopTraining            (void);
     bool                     IsTraining              (void)                  const noexcept;
+    bool                     IsLastStep              (void)                  const noexcept;
     void                     SetNewState             (Env const& env, Model* const modelid);
     std::string const&       GetName                 (void)                  const noexcept;
 

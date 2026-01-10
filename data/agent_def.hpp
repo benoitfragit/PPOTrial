@@ -307,5 +307,15 @@ Agent<Env, Model, AgentState>::GetName(void)                  const noexcept
     return m_name;
 }
 
+template<typename Env, typename Model, typename AgentState>
+bool
+Agent<Env, Model, AgentState>::IsLastStep(void)                  const noexcept
+{
+    if (p_rlagent == nullptr)
+        return false;
+
+    return (p_rlagent->GetMaxStep() - p_rlagent->GetCurrentStep()) == 1;
+}
+
 
 } /* ppo::model */

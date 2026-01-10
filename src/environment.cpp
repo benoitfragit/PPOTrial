@@ -143,6 +143,10 @@ Environment::Impl::ComputeState(Player* const player, float const dt)
     {
         player->SetTargetPosition(target->GetNorthPosition(), target->GetEastPosition());
         player->SetTargetSpeed(target->GetNorthSpeed(), target->GetEastSpeed());
+
+        if (float  pkTarget{ player->GetKillProbability() };
+            0.95F < pkTarget)
+            target->SetDestroyed(true);
     }
 
     // Run the model after the Agent run to apply the action
@@ -154,32 +158,29 @@ Environment::Impl::ComputeReward(Player* const player, std::shared_ptr<IAgent> p
 {
     bool ret{ false };
 
-    if (player == nullptr)
+    if (player == nullptr
+    ||  pAgent == nullptr)
         return ret;
 
     float                   fuelconsumption     { player->GetFuelConsumption() };
-    float                   maxfuel             { player->GetMaxFuel() };
-    float                   maxSpeed            { player->GetMaxSpeed() };
+    float                   closingSpeed        { player->GetCLosingSpeed()};
     PlayerId const          targetId            { player->GetTarget() };
     float                   x                   { player->GetNorthPosition() };
     float                   y                   { player->GetEastPosition() };
-    float                   dx                  { player->GetNorthSpeed() };
-    float                   dy                  { player->GetEastSpeed() };
-    float                   az                  { player->GetRotation()};
-    float                   closingSpeed        { player->GetCLosingSpeed()};
     float                   LOS                 { player->GetTargetLOS()};
     float                   LOSrate             { player->GetTargetLOSRate()};
-
-    bool                    targetDestruction   { false };
-    float                   pkTarget            { 0.F };
-    float                   pkPlayer            { 0.F };
-    bool                    targetDestroyed     { false };
-    float                   R_close             {0.F};
-    float                   R_navpn             {0.F};
-    float                   R_navapn            {0.F};
+    float                   pkTarget            { player->GetKillProbability() };
+    float                   maxSpeed            { player->GetMaxSpeed() };
+    bool                    targetDestroyed     { 0.95F <= pkTarget };
     float const             vref                {300.F};
     float const             fuelref             {C0 + CV3*vref*vref*vref};
-    float                   R_fuel              { -fuelconsumption / (fuelref*m_dt)};
+    float                   R_fuel              { std::clamp( - fuelconsumption / (fuelref * m_dt), -1.F, 0.F)};
+    float                   R_close             { closingSpeed/maxSpeed };
+    float                   R_navpn             { -std::fabs(LOS) };
+    float                   R_navpn_act         { 0.F };
+    float                   R_navapn            { -std::fabs(LOSrate) };
+    bool                    done                { false };
+    float                   pkPlayer            {0.F};
 
     if (auto const target{ GetPlayerById(targetId) };
         target != nullptr)
@@ -188,39 +189,25 @@ Environment::Impl::ComputeReward(Player* const player, std::shared_ptr<IAgent> p
         float const ty{ target->GetEastPosition() };
         float const dtx{ target->GetNorthSpeed() };
         float const dty{ target->GetEastSpeed() };
-        float const d { static_cast<float>(sqrt(pow(x - tx, 2.F) + pow(y - ty, 2.F))) };
+        float const d{ static_cast<float>(sqrt(pow(x - tx, 2.F) + pow(y - ty, 2.F))) };
 
-        R_close  = closingSpeed/maxSpeed;
-        R_navpn  = -std::fabs(LOS)*std::exp(-d/8000.F);
-        R_navapn = -std::fabs(LOSrate);
-
-        pkTarget = player->GetKillProbability();
+        R_navpn_act = std::exp(-d / 8000.F);   
         pkPlayer = target->GetKillProbability();
-
-        targetDestruction = (0.95F <= pkTarget);
     }
 
-    bool done{ false };
-    if (pAgent == nullptr)
-        return done;
-
-    if (targetDestruction)
-    {
+    // big positive reward mission succeed
+    if (targetDestroyed)
         pAgent->AddReward(sAgentState::RewardType::TargetDestruction, 10.F);
-        targetDestroyed = true;
-    }
-    else
-    {
-        // the more the target dives into our somain the more we receive reward
-        pAgent->AddReward(sAgentState::RewardType::TargetInEZ, pkTarget);
-    }
 
+    // big negative reward on mission failure
     if (player->GetDestroyed())
-    {
+    { 
         pAgent->AddReward(sAgentState::RewardType::OwnshipDestruction, -10.F);
     }
     else
     {
+        pAgent->AddReward(sAgentState::RewardType::TargetInEZ, pkTarget);
+
         // penalty when entering opponent escape zone
         pAgent->AddReward(sAgentState::RewardType::OwnshipInEZ, -pkPlayer);
 
@@ -232,6 +219,9 @@ Environment::Impl::ComputeReward(Player* const player, std::shared_ptr<IAgent> p
 
         pAgent->AddReward(sAgentState::RewardType::Fuel, R_fuel);
     }
+
+    if (pAgent->IsLastStep() && !targetDestroyed)
+        pAgent->AddReward(sAgentState::RewardType::MissionFailure, -5.F);
 
     done = player->GetDestroyed() || targetDestroyed;
 
@@ -276,7 +266,7 @@ Environment::Impl::Run(void)
                     if (agent != nullptr)
                         agent->Init(*this, player);
                 }
-                
+
                 reinitrequest = false;
             }
 

@@ -28,6 +28,8 @@ struct sPlayerState
     float           m_maxNoescapeZone{8000.F };
     PlayerId        m_target{ ULLONG_MAX };
     PlayerId        m_playerId{ ULLONG_MAX };
+    float           m_an{ 0.F };
+    float           m_at{ 0.F };
     float           m_dx{ 0.F };
     float           m_dy{ 0.F };
     float           m_x{ 0.F  };
@@ -39,7 +41,10 @@ struct sPlayerState
     float           m_closingspeed{ 0.F };
     float           m_target_los{ 0.F };
     float           m_target_los_rate{ 0.F };
+    float           m_maxAccT{ 60.F };
+    float           m_maxAccN{ 15.F };
     float           m_maxSpeed{ 0.F };
+    float           m_minSpeed{ 0.F };
     float           m_speed{ 0.F };
     float           m_rotation{ 0.F };
     float           m_rotationAngle{ 0.F };
@@ -57,14 +62,15 @@ struct sPlayerState
 
 class IAgent {
 public:
-    virtual                     ~IAgent      (void) = default;
+    virtual                     ~IAgent         (void) = default;
 
-    virtual void                Init         (sEnvironmentState const& environment, Player* const player)             = 0;
-    virtual void                ChooseAction (sEnvironmentState const& environment, Player* const player)             = 0;
-    virtual void                AddReward    (unsigned char type, float reward)                                                  noexcept = 0;
-    virtual void                SetDone      (bool done)                                                     noexcept = 0;
-    virtual void                SetNewState  (sEnvironmentState const& environment, Player* const player)                                                                   = 0;
-    virtual bool                SetupTraining(void)  noexcept = 0;
+    virtual void                Init            (sEnvironmentState const& environment, Player* const player)             = 0;
+    virtual void                ChooseAction    (sEnvironmentState const& environment, Player* const player)             = 0;
+    virtual void                AddReward       (unsigned char type, float reward)                          noexcept = 0;
+    virtual void                SetDone         (bool done)                                                 noexcept = 0;
+    virtual void                SetNewState     (sEnvironmentState const& environment, Player* const player)                                                                   = 0;
+    virtual bool                SetupTraining   (void)                                                      noexcept = 0;
+    virtual bool                IsLastStep      (void)                                              const   noexcept = 0;
 };
 
 class IPlayerState
@@ -126,13 +132,14 @@ struct sAgentState:
         Closing             = 4,
         NavPN               = 5,
         NavAPN              = 6,
-        Fuel                = 7
+        Fuel                = 7,
+        MissionFailure      = 8
     };
 
     /// <summary>
     /// Define a list of possible rewards type at compile time
     /// </summary>                                        
-    constexpr std::array<std::string_view, 8> const static REWARDS
+    constexpr std::array<std::string_view, 9> const static REWARDS
     {
         "Target destruction",
         "Target in EZ",
@@ -141,7 +148,8 @@ struct sAgentState:
         "Closing",
         "NavPN",
         "NavAPN",
-        "Fuel"
+        "Fuel",
+        "MissionFailure"
     };
 
     using RewardVector = std::array<float, REWARDS.size()>;

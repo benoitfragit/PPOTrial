@@ -109,8 +109,11 @@ struct Player::Impl :
         section("MaxFuel",              m_maxfuel);
         section("MaxMissile",           m_maxnbmissiles);
         section("MaxSpeed",             m_maxSpeed);
+        section("MinSpeed",             m_minSpeed);
         section("MaxRotationAngle",     m_rotationAngle);
         section("MaxShootAngle",        m_maxShootAngle);
+        section("MaxNormalAcceleration",m_maxAccN); 
+        section("MaxTangeantAcceleration", m_maxAccT);
     };
 
     sPlayerState            m_buffers[2];
@@ -126,6 +129,7 @@ Player::Impl::UpdateDoubleBuffer(void)
    const uint32_t next = 1u - m_index.load(std::memory_order_relaxed);
 
     m_buffers[next].m_maxSpeed         = m_maxSpeed;
+    m_buffers[next].m_minSpeed         = m_minSpeed;
     m_buffers[next].m_maxNoescapeZone  = m_maxNoescapeZone;
     m_buffers[next].m_target           = m_target            ;
     m_buffers[next].m_dx               = m_dx                ;
@@ -152,7 +156,10 @@ Player::Impl::UpdateDoubleBuffer(void)
     m_buffers[next].m_closingspeed     = m_closingspeed;
     m_buffers[next].m_target_los       = m_target_los;
     m_buffers[next].m_target_los_rate  = m_target_los_rate;
-
+    m_buffers[next].m_maxAccN          = m_maxAccN;
+    m_buffers[next].m_maxAccT          = m_maxAccT;
+    m_buffers[next].m_an               = m_an;
+    m_buffers[next].m_at               = m_at;
     m_index.store(next, std::memory_order_release);
 }
 
@@ -161,14 +168,16 @@ Player::Impl::Init(sEnvironmentState const& env)
 {
     RandomGenerator generator{};
 
-    generator.registerAttr(m_dx, -m_maxSpeed, m_maxSpeed);
-    generator.registerAttr(m_dy, -m_maxSpeed, m_maxSpeed);
+    generator.registerAttr(m_dx, -m_minSpeed, m_maxSpeed);
+    generator.registerAttr(m_dy, -m_minSpeed, m_maxSpeed);
 
     generator.registerAttr(m_x, -env.m_maxNorth / 2.F, env.m_maxNorth / 2.F);
     generator.registerAttr(m_y, -env.m_maxEast / 2.F, env.m_maxEast / 2.F);
 
     generator.generate();
 
+    m_an                = 0.F;
+    m_at                = 0.F;
     m_pk                = 0.F;
     m_destroyed         = false;
     m_escapezone        = 2.F * m_maxNoescapeZone;
@@ -242,6 +251,28 @@ Player::Impl::Run(float dt) noexcept
     {
         m_speed = sqrt(m_dx * m_dx + m_dy * m_dy);
 
+        float vhat_x{ 1.F };
+        float vhat_y{ 0.F };
+        float nhat_x{ 0.F };
+        float nhat_y{ 1.F };
+
+        if (std::numeric_limits<float>::epsilon() < m_speed)
+        {
+            vhat_x = m_dx / (m_speed + 1e-6F);
+            vhat_y = m_dy / (m_speed + 1e-6F);
+            nhat_x = -vhat_y;
+            nhat_y = vhat_x;
+        }
+
+        float const ax{m_at * vhat_x + m_an * nhat_x};
+        float const ay{m_at * vhat_y + m_an * nhat_y };
+
+
+        m_dx += ax * dt;
+        m_dy += ay * dt;
+
+        m_speed = sqrt(m_dx * m_dx + m_dy * m_dy);
+
         if (m_maxSpeed < m_speed)
         {
             float const factor{ m_maxSpeed / m_speed };
@@ -252,25 +283,15 @@ Player::Impl::Run(float dt) noexcept
             m_dy *= factor;
         }
 
+        // new position according to rotation and speeds
+        m_x += m_dx * dt;
+        m_y += m_dy * dt;
+
         float const prevRotation{ m_rotation };
         m_rotation = wrapMinusPi2Pi(atan2(m_dy, m_dx));
         float const diffRotation{ std::fabs(static_cast<float>(wrapMinusPi2Pi(m_rotation - prevRotation))) };
 
-        //float const newRotation{ static_cast<float>(wrapMinusPi2Pi(atan2(m_dy, m_dx))) };
-        //float const diffRotation{static_cast<float>(wrapMinusPi2Pi(newRotation - m_rotation)) };
-        //
-        //// bornage
-        //float const maxRotationAngle{ m_rotationAngle * dt };
-        //float const limitDiff{ maxRotationAngle * tanh(diffRotation / maxRotationAngle) };
-        //
-        //m_rotation = wrapMinusPi2Pi(m_rotation + limitDiff);
-        //
-        //m_dx = m_speed * std::cos(m_rotation);
-        //m_dy = m_speed * std::sin(m_rotation);
 
-        // new position according to rotation and speeds
-        m_x += m_dx * dt;
-        m_y += m_dy * dt;
 
         float const w{ diffRotation / dt };
         float const consumption{ static_cast<float>(C0
@@ -285,7 +306,7 @@ Player::Impl::Run(float dt) noexcept
         ComputeFktData();
 
         if (m_fuel < std::numeric_limits<float>::epsilon()
-        || m_speed < std::numeric_limits<float>::epsilon())
+        || (2.F*m_speed) < m_minSpeed)
             m_destroyed = true;
     }
 
@@ -430,15 +451,6 @@ Player::GetEastPosition(void)               const noexcept
 }
 
 float
-Player::GetRemainingFuel(void)          const noexcept
-{
-    if (p_impl == nullptr)
-        return 0.F;
-
-    return p_impl->m_fuel;
-}
-
-float
 Player::GetFuelConsumption(void)                const noexcept
 {
     if (p_impl == nullptr)
@@ -463,42 +475,6 @@ Player::SetMaxMissiles(unsigned short maxMissiles) noexcept
     p_impl->m_maxnbmissiles = maxMissiles;
 }
 
-unsigned short   
-Player::GetRemainingMissiles(void) const noexcept
-{
-    if (p_impl == nullptr)
-        return 0;
-
-    return p_impl->m_nbmissiles;
-}
-
-float 
-Player::GetEscapeZone(void)     const noexcept
-{
-    if (p_impl == nullptr)
-        return 0;
-
-    return p_impl->m_escapezone;
-}
-
-float                                         
-Player::GetNoEscapeZone(void)   const noexcept
-{
-    if (p_impl == nullptr)
-        return 0;
-
-    return p_impl->m_noescapezone;
-}
-
-float                                         
-Player::GetMaxFuel(void)        const noexcept
-{
-    if (p_impl == nullptr)
-        return 0;
-
-    return p_impl->m_maxfuel;
-}
-
 float
 Player::GetMaxSpeed(void)    const noexcept
 {
@@ -506,24 +482,6 @@ Player::GetMaxSpeed(void)    const noexcept
         return 0.F;
 
     return p_impl->m_maxSpeed;
-}
-
-unsigned short                                
-Player::GetMaxMissiles(void)   const noexcept 
-{
-    if (p_impl == nullptr)
-        return 0;
-
-    return p_impl->m_maxnbmissiles;
-}
-
-float
-Player::GetSpeed(void) const noexcept
-{
-    if (p_impl == nullptr)
-        return 0.F;
-
-    return p_impl->m_speed;
 }
 
 float
@@ -625,7 +583,7 @@ Player::GetCLosingSpeed(void) const noexcept
     return p_impl->m_closingspeed;
 }
 
-float 
+float
 Player::GetTargetLOS(void) const noexcept
 {
     if (p_impl == nullptr)
@@ -701,7 +659,7 @@ Player::StateClosingSpeed(sEnvironmentState const& env) const noexcept
     if (p_impl == nullptr)
         return 0.F;
 
-    return GetCLosingSpeed() / p_impl->m_maxSpeed;
+    return p_impl->m_closingspeed / p_impl->m_maxSpeed;
 }
 
 float
@@ -731,38 +689,22 @@ Player::StateLOS(sEnvironmentState const& env) const noexcept
     return p_impl->m_target_los * env.m_dt;
 }
 
-float 
-Player::StateRemainingFuel(sEnvironmentState const& env) const noexcept
-{
-    if (p_impl == nullptr)
-        return 0.F;
-    return p_impl->m_fuel / p_impl->m_maxfuel;
-}
-
-float
-Player::StateRemainingMissiles(sEnvironmentState const& env) const noexcept
-{
-    if (p_impl == nullptr)
-        return 0.F;
-    return static_cast<float>(p_impl->m_nbmissiles) / static_cast<float>(p_impl->m_maxnbmissiles);
-}
-
 void
-Player::ActionSetNorthSpeed(float value)                 noexcept
+Player::ActionSetNormalAcceleration(float value)                 noexcept
 {
     if (p_impl == nullptr)
         return;
 
-    p_impl->m_dx = p_impl->m_maxSpeed * std::clamp(value, -1.F, 1.F);
+    p_impl->m_an=  p_impl->m_maxAccN * std::clamp(value, -1.F, 1.F);
 }
 
 void 
-Player::ActionSetEastSpeed(float value) noexcept
+Player::ActionSetTangeantAcceleration(float value) noexcept
 {
     if (p_impl == nullptr)
         return;
 
-    p_impl->m_dy = p_impl->m_maxSpeed * std::clamp(value, -1.F, 1.F);
+    p_impl->m_at = p_impl->m_maxAccT * std::clamp(value, -1.F, 1.F);
 }
 
 }

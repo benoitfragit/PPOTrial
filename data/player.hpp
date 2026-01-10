@@ -45,15 +45,8 @@ public:
     float             GetRotation         (void)                               const noexcept;
     float             GetNorthPosition    (void)                               const noexcept;
     float             GetEastPosition     (void)                               const noexcept;
-    float             GetRemainingFuel    (void)                               const noexcept;
     float             GetFuelConsumption  (void)                               const noexcept;
-    unsigned short    GetRemainingMissiles(void)                               const noexcept;
-    float             GetEscapeZone       (void)                               const noexcept;
-    float             GetNoEscapeZone     (void)                               const noexcept;
-    float             GetMaxFuel          (void)                               const noexcept; 
     float             GetMaxSpeed         (void)                               const noexcept;
-    unsigned short    GetMaxMissiles      (void)                               const noexcept;
-    float             GetSpeed            (void)                               const noexcept;
     float             GetNorthSpeed       (void)                               const noexcept;
     float             GetEastSpeed        (void)                               const noexcept;
     float             GetKillProbability  (void)                               const noexcept;
@@ -65,8 +58,8 @@ public:
 
     sPlayerState      GetSnapshot         (void)                               const noexcept final;
 
-    void              ActionSetNorthSpeed       (float value)                              noexcept;
-    void              ActionSetEastSpeed        (float value)                              noexcept;  
+    void              ActionSetNormalAcceleration    (float value)                  noexcept;
+    void              ActionSetTangeantAcceleration (float value)                  noexcept;  
 
     float             StateNorthRange           (sEnvironmentState const& env) const noexcept;
     float             StateEastRange            (sEnvironmentState const& env) const noexcept;  
@@ -105,8 +98,8 @@ public:
     /// </summary>
     constexpr  std::array<Action, 2> const static ACTIONS
     {
-        &Player::ActionSetNorthSpeed,
-        &Player::ActionSetEastSpeed
+        &Player::ActionSetNormalAcceleration,
+        &Player::ActionSetTangeantAcceleration
     };
 
 private:

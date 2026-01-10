@@ -62,6 +62,14 @@ public:
             return m_obj->SetupTraining();
         };
 
+        bool IsLastStep(void)                  const noexcept
+        {
+            if (m_obj == nullptr)
+                return false;
+
+            return m_obj->IsLastStep();
+        };
+
     private:
         Obj* const m_obj;
     };
