@@ -1,0 +1,24 @@
+cmake_minimum_required(VERSION 3.15)
+project(GenericRenderer LANGUAGES CXX)
+
+add_library(${PROJECT_NAME}	
+	STATIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/playerrenderer.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/environmentrenderer.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/playerrenderer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/environmentrenderer.cpp)
+
+target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/data)
+
+target_link_libraries(${PROJECT_NAME}
+    PUBLIC
+        imgui
+        imgui-sfml
+        sfml-system 
+        sfml-window 
+        sfml-graphics
+        opengl32
+        glu32
+        GenericEnv
+        GenericPPO)
+

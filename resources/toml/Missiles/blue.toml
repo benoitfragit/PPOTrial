@@ -1,0 +1,9 @@
+[blue]
+MaxAcceleration = 100.0
+MaxFuel = 4.5e+08
+MaxMissile = 8
+MaxNoEscapeZoneRange = 8000.0
+MaxRotAcceleration = 0.4000000059604645
+MaxShootAngle = 1.0471980571746826
+MaxSpeed = 600.0
+MinSpeed = 10.0

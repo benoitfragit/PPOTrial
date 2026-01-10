@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(PPO LANGUAGES CXX)
+project(TopPPO LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -95,60 +95,11 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(tomlplusplus)
 
-add_executable(${PROJECT_NAME}
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/player.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/environment.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/interface.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/playerrenderer.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/environmentrenderer.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/ppo.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/utils.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/agent.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/agent_def.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/rlagent.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/serialization.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/serializer.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/serializer.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/rlagent.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/utils.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/ppo.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/player.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/environment.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/playerrenderer.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/environmentrenderer.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
-)
 
-target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/data)
+add_subdirectory(Serialization)
+add_subdirectory(Env)
+add_subdirectory(PPO)
+add_subdirectory(Renderer)
+add_subdirectory(Models)
+add_subdirectory(Main)
 
-target_link_libraries(${PROJECT_NAME}
-    PRIVATE
-        imgui
-        imgui-sfml
-        sfml-system 
-        sfml-window 
-        sfml-graphics
-        tomlplusplus::tomlplusplus
-        opengl32
-        glu32
-        "${TORCH_LIBRARIES}"
-)
-
-set(RESOURCE_TOML_PATH "${CMAKE_SOURCE_DIR}/resources/toml/settings.toml")
-set(RESOURCE_PPO_PATH "${CMAKE_SOURCE_DIR}/resources/ppo/model.pt")
-target_compile_definitions(${PROJECT_NAME} PRIVATE RESOURCE_TOML_PATH="${RESOURCE_TOML_PATH}"
-                                                   RESOURCE_PPO_PATH="${RESOURCE_PPO_PATH}")
-
-# For Windows: ensure DLLs are copied
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    $<TARGET_FILE_DIR:sfml-graphics>
-    $<TARGET_FILE_DIR:${PROJECT_NAME}>
-)
-
-# Copier les DLL automatiquement
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_BINARY_DIR}/libtorch/lib"
-            "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-)
