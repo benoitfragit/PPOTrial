@@ -1,0 +1,108 @@
+#include "objectiverenderer.hpp"
+
+#include "environmentrenderer.hpp"
+
+namespace ppo::environment {
+
+static void
+DrawQuadBetweenLine(sf::Vector2f const& a, sf::Vector2f const& b, sf::Color const color, float const linewidth, sf::VertexArray& vertices)
+{
+    sf::Vector2f d{ b - a };
+    float const length{ std::hypot(d.x, d.y) };
+    if (length <= std::numeric_limits<float>::epsilon())
+        return;
+
+    // normalized direction
+    d /= length;
+    sf::Vector2f ortho{ -d.y, d.x };
+    sf::Vector2f offset{ ortho * linewidth / 2.F };
+
+    vertices.append(sf::Vertex(a + offset, color));
+    vertices.append(sf::Vertex(a - offset, color));
+    vertices.append(sf::Vertex(b - offset, color));
+    vertices.append(sf::Vertex(b + offset, color));
+}
+
+ObjectiveRenderer::ObjectiveRenderer(model::IPlayerState* player, int radius, bool filled) :
+    m_radius{ static_cast<float>(radius) },
+    m_filled{ filled },
+    p_player{ player }
+{
+    if (p_player == nullptr)
+        return;
+
+    auto state = p_player->GetSnapshot();
+    switch (state.m_side)
+    {
+    case ppo::model::ePlayerSide::Friend:  m_color = sf::Color::Blue;           break;
+    case ppo::model::ePlayerSide::Hostile: m_color = sf::Color::Red;            break;
+    case ppo::model::ePlayerSide::Unknown: m_color = sf::Color::White;          break;
+    default:                               m_color = sf::Color::Transparent;    break;
+    }
+}
+
+void
+ObjectiveRenderer::Run(void) noexcept
+{
+    if (p_player == nullptr)
+        return;
+
+    model::sPlayerState state{ p_player->GetSnapshot() };
+
+    auto&       renderer{ EnvironmentRenderer::GetInstance() };
+    auto const& view    { renderer.GetView() };
+    auto const  winSize { renderer.getSize() };
+    auto const  viewSize{ view.getSize() };
+    float const ratioNorth  { viewSize.x / winSize.y };
+    float const ratioEast   { viewSize.y / winSize.x };
+
+    // position
+    setRadius(m_radius * ratioNorth / 2.F);
+    setPosition(state.m_x / renderer.GetScaleWorld(), state.m_y / renderer.GetScaleWorld());
+    setOrigin(0.F, 0.F);
+
+    sf::CircleShape::setOutlineColor(m_color);
+    if (m_filled)
+        sf::CircleShape::setFillColor(m_color);
+
+    renderer.draw(*this);
+
+    if (state.m_destroyed)
+        DrawDestroySymbol(state);
+}
+
+void
+ObjectiveRenderer::DrawDestroySymbol(model::sPlayerState const& state)
+{
+    auto& renderer{ EnvironmentRenderer::GetInstance() };
+    auto const& view{ renderer.GetView() };
+    auto const  winSize{ renderer.getSize() };
+    auto const  viewSize{ view.getSize() };
+
+    float const ratioNorth{ viewSize.x / winSize.y };
+    float const ratioEast{ viewSize.y / winSize.x };
+
+    sf::Vector2f const& position{ sf::CircleShape::getPosition() };
+    float const lineWidth{ renderer.GetLineWidth() };
+
+    sf::VertexArray vertices(sf::Quads);
+
+    sf::Vector2f a{ position.x + m_radius * ratioNorth / 2.F,
+                    position.y - m_radius * ratioEast / 2.F };
+
+    sf::Vector2f b{ position.x - m_radius * ratioNorth / 2.F,
+                    position.y + m_radius * ratioEast / 2.F };
+
+    DrawQuadBetweenLine(a, b, sf::Color::White, lineWidth, vertices);
+
+    a = sf::Vector2f(position.x + m_radius * ratioNorth / 2.F,
+        position.y + m_radius * ratioEast / 2.F);
+    b = sf::Vector2f(position.x - m_radius * ratioNorth / 2.F,
+        position.y - m_radius * ratioEast / 2.F);
+
+    DrawQuadBetweenLine(a, b, sf::Color::White, lineWidth, vertices);
+
+    renderer.draw(vertices);
+}
+
+} /* ppo::environment */

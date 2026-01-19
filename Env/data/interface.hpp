@@ -23,6 +23,14 @@ enum class ePlayerSide :
     Friend = 2
 };
 
+enum class ePlayerType :
+    unsigned char
+{
+    Objective = 0,
+    Missile = 1,
+    Aircraft = 2
+};
+
 struct sEnvironmentState
 {
     float           m_maxNorth  { 112500.F };
@@ -33,7 +41,8 @@ struct sEnvironmentState
 struct sPlayerState
 {
     float           m_maxNoescapeZone{8000.F };
-    PlayerId        m_target{ ULLONG_MAX };
+    float           m_escapezone{ 0.F };
+    float           m_noescapezone{ 0.F };
     PlayerId        m_playerId{ ULLONG_MAX };
     float           m_acc{ 0.F };
     float           m_accpsi{ 0.F };
@@ -41,13 +50,6 @@ struct sPlayerState
     float           m_dy{ 0.F };
     float           m_x{ 0.F  };
     float           m_y{ 0.F  };
-    float           m_target_x{ 0.F };
-    float           m_target_y{ 0.F };
-    float           m_target_dx{ 0.F };
-    float           m_target_dy{ 0.F };
-    float           m_closingspeed{ 0.F };
-    float           m_target_los{ 0.F };
-    float           m_target_los_rate{ 0.F };
     float           m_maxAcc{ 0.F };
     float           m_maxAccRot{ 0.F };
     float           m_maxSpeed{ 0.F };
@@ -56,14 +58,13 @@ struct sPlayerState
     float           m_rotation{ 0.F };
     float           m_fuel{ 0.F };
     float           m_fuelconsumption{ 0.F };
-    float           m_escapezone{ 0.F };
-    float           m_noescapezone{ 0.F };
     float           m_maxfuel{ 0.F };
-    float           m_maxShootAngle{ 0.F };
+    float           m_maxShootAngle{ 0.F };   
     float           m_pk{ 0.F };
     unsigned short  m_nbmissiles{ 0 };
     unsigned short  m_maxnbmissiles{ 0 };
     ePlayerSide     m_side{ ePlayerSide::Unknown };
+    ePlayerType     m_type{ ePlayerType::Objective };
     bool            m_destroyed{ false };
 };
 

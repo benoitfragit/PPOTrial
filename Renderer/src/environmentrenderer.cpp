@@ -163,9 +163,23 @@ EnvironmentRenderer::Display(model::Player& player, int height, int width, bool 
     if (p_environment == nullptr)
         return;
 
-    auto Iter{ p_renderers.find(&player)};
-    if (Iter == p_renderers.end())
-        p_renderers[&player] = std::make_shared<PlayerRenderer>(&player, height, width, filled);
+    if (auto Iter{ p_renderers.find(&player) };
+        Iter == p_renderers.end())
+    {
+        switch (auto const state{ player.GetSnapshot() };
+                state.m_type)
+        {
+            case ppo::model::ePlayerType::Aircraft:
+            case ppo::model::ePlayerType::Missile:
+                p_renderers[&player] = std::make_shared<PlayerRenderer>(&player, height, width, filled);
+                break;       
+            case ppo::model::ePlayerType::Objective:
+                p_renderers[&player] = std::make_shared<ObjectiveRenderer>(&player, width, filled);
+                break;
+            default:
+                break;
+        }
+    }
 }
 
 void 

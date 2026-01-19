@@ -2,6 +2,7 @@
 #include <SFML/Graphics.hpp>
 
 #include "player.hpp"
+#include "irenderer.hpp"
 
 #include <memory>
 
@@ -11,6 +12,7 @@ constexpr double DEG_TO_RAD = 0.01745329252;
 constexpr double RAD_TO_DEG = 57.295779513;
 
 class PlayerRenderer :
+    public IRenderer,
     public sf::ConvexShape
 {
 public:
@@ -21,7 +23,7 @@ public:
     PlayerRenderer&  operator=     (PlayerRenderer&)  = delete;
     PlayerRenderer&  operator=     (PlayerRenderer&&) = delete;
 
-    void             Run           (void)                   noexcept;
+    void             Run           (void) noexcept final;
 
 private:
     void             DrawShootingRanges(model::sPlayerState const& state, float radius, sf::Color const color, float startangle=-90.F* DEG_TO_RAD, float endangle=90.F * DEG_TO_RAD, unsigned char nbPoint = 10);

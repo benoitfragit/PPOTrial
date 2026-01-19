@@ -7,6 +7,8 @@ add_library(${PROJECT_NAME}
     ${CMAKE_CURRENT_SOURCE_DIR}/data/environment.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/interface.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/utils.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/objective.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/objective.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/player.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/environment.cpp)

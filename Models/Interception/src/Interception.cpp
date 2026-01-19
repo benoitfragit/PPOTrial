@@ -23,11 +23,150 @@ UpdateEnv(ppo::model::Environment& env, ppo::model::IPlayer* player)
         target->SetDestroyed(true);
 }
 
+inline static float
+sigmoid(float x)
+{
+    return 1.F / (1.F + std::exp(-x));
+}
+
+void 
+Missile::OnRun(void)
+{
+    ppo::model::Player::OnRun();
+
+    m_pk = 0.F;
+
+    if (p_env == nullptr
+    ||  m_destroyed)
+        return;
+
+    if (ppo::model::Player* const target{ p_env->GetPlayerById(m_target) };
+        target != nullptr)
+    {
+        m_target_x = target->GetNorthPosition();
+        m_target_y = target->GetEastPosition();
+        m_target_dx = target->GetNorthSpeed();
+        m_target_dy = target->GetEastSpeed();
+
+        float const dx{ m_target_x - m_x };
+        float const dy{ m_target_y - m_y };
+
+        float const d{ std::sqrt(dx * dx + dy * dy) };
+
+        float const ux{ dx / (d + 1e-6F) };
+        float const uy{ dy / (d + 1e-6F) };
+
+        // 1. computing the kill probability
+        float az = atan2(uy, ux);
+        az = ppo::model::wrapMinusPi2Pi(az);
+        az = ppo::model::wrapMinusPi2Pi(az - m_rotation);
+
+        float const k0{ 5.F / m_maxShootAngle };
+        float const pkangle{ sigmoid(k0 * (m_maxShootAngle - std::fabs(az))) };
+
+        float const dmid{ (m_noescapezone + m_escapezone) / 2.F };
+        float const deltad{ m_escapezone - m_noescapezone + 1e-6F };
+        float const kd{ 8.F / deltad };
+        float const pkrange{ sigmoid(kd * (dmid - d)) };
+
+        m_pk = pkrange * pkangle;
+
+        // 2. computing the closing speed
+        float const vrx{ m_target_dx - m_dx };
+        float const vry{ m_target_dy - m_dy };
+
+        m_closingspeed = -(vrx * ux + vry * uy);
+
+        // 3. compute new LOS value
+        float const LOS{ (ux * vry - uy * vrx) / d };
+
+        // 4. update the LOS rate
+        m_target_los_rate = LOS - m_target_los;
+
+        // 5. compute the LOS
+        m_target_los = LOS;
+    }
+    else
+    {
+        m_target = 0;
+        m_target_dx = 0.F;
+        m_target_dy = 0.F;
+        m_target_los = 0.F;
+        m_target_los_rate = 0.F;
+        m_target_x = 0.F;
+        m_target_y = 0.F;
+        m_closingspeed = 0.F;
+    }
+}
+
+void
+Missile::OnInit(void)
+{
+    m_pk = 0.F;
+    m_target_x = 0.F;
+    m_target_y = 0.F;
+    m_closingspeed = 0.F;
+    m_target_los = 0.F;
+    m_target_los_rate = 0.F;
+
+    Player::OnInit();
+}
+
+float
+Missile::GetKillProbability(void) const noexcept
+{
+    return m_pk;
+}
+
+void
+Missile::SetTargetPosition(float north, float east) noexcept
+{
+    m_target_x = north;
+    m_target_y = east;
+}
+
+void
+Missile::SetTarget(ppo::model::PlayerId targetId)       noexcept
+{
+    m_target = targetId;
+}
+
+ppo::model::PlayerId
+Missile::GetTarget(void) const noexcept
+{
+    return m_target;
+}
+
+float
+Missile::GetCLosingSpeed(void) const noexcept
+{
+    return m_closingspeed;
+}
+
+float
+Missile::GetTargetLOS(void) const noexcept
+{
+    return m_target_los;
+}
+
+float
+Missile::GetTargetLOSRate(void) const noexcept
+{
+    return m_target_los_rate;
+}
+
+void
+Missile::SetTargetSpeed(float north, float east) noexcept
+{
+    m_target_dx = north;
+    m_target_dy = east;
+}
+
 float
 Missile::StateNorthRange(void) const noexcept
 {
-    float       dx{ GetTargetNorthPosition() - GetNorthPosition() };
-    float const dy{ GetTargetEastPosition() - GetEastPosition() };
+    float       dx{ m_target_x - m_x};
+    float const dy{ m_target_y - m_y};
     float const d{ sqrt(dx * dx + dy * dy) };
     dx /= std::max(d, 1e-6F);
 
@@ -37,8 +176,8 @@ Missile::StateNorthRange(void) const noexcept
 float
 Missile::StateEastRange(void) const noexcept
 {
-    float const dx{ GetTargetNorthPosition() - GetNorthPosition() };
-    float       dy{ GetTargetEastPosition() - GetEastPosition() };
+    float const dx{ m_target_x - m_x};
+    float       dy{ m_target_y - m_y};
     float const d{ sqrt(dx * dx + dy * dy) };
     dy /= std::max(d, 1e-6F);
 
@@ -48,8 +187,8 @@ Missile::StateEastRange(void) const noexcept
 float
 Missile::StateRange(void) const noexcept
 {
-    float const dx{ GetTargetNorthPosition() - GetNorthPosition() };
-    float const dy{ GetTargetEastPosition() - GetEastPosition() };
+    float const dx{ m_target_x - m_x };
+    float const dy{ m_target_y - m_y};
 
     float d = std::sqrt(dx * dx + dy * dy);
 
@@ -59,14 +198,14 @@ Missile::StateRange(void) const noexcept
 float
 Missile::StateClosingSpeed(void) const noexcept
 {
-    return std::clamp(GetCLosingSpeed() / 300.F, -1.F, 1.F);
+    return std::clamp(m_closingspeed / 300.F, -1.F, 1.F);
 }
 
 float
 Missile::StateCosRotation(void) const noexcept
 {
-    float const dx{ GetTargetNorthPosition() - GetNorthPosition() };
-    float const dy{ GetTargetEastPosition() - GetEastPosition() };
+    float const dx{m_target_x - m_x };
+    float const dy{m_target_y - m_y};
 
     float const d{ std::sqrt(dx * dx + dy * dy) };
 
@@ -76,7 +215,7 @@ Missile::StateCosRotation(void) const noexcept
     // 1. computing the kill probability
     float az = atan2(uy, ux);
     az = ppo::model::wrapMinusPi2Pi(az);
-    az = ppo::model::wrapMinusPi2Pi(az - GetRotation());
+    az = ppo::model::wrapMinusPi2Pi(az - m_rotation);
 
     return cos(az);
 }
@@ -84,11 +223,8 @@ Missile::StateCosRotation(void) const noexcept
 float
 Missile::StateSinRotation(void) const noexcept
 {
-    if (p_impl == nullptr)
-        return 0.F;
-
-    float const dx{ GetTargetNorthPosition() - GetNorthPosition() };
-    float const dy{ GetTargetEastPosition() - GetEastPosition() };
+    float const dx{ m_target_x - m_x };
+    float const dy{ m_target_y - m_y};
 
     float const d{ std::sqrt(dx * dx + dy * dy) };
 
@@ -98,7 +234,7 @@ Missile::StateSinRotation(void) const noexcept
     // 1. computing the kill probability
     float az = atan2(uy, ux);
     az = ppo::model::wrapMinusPi2Pi(az);
-    az = ppo::model::wrapMinusPi2Pi(az - GetRotation());
+    az = ppo::model::wrapMinusPi2Pi(az - m_rotation);
 
     return sin(az);
 }
@@ -106,37 +242,34 @@ Missile::StateSinRotation(void) const noexcept
 void
 Missile::ActionSetRotSpeed(float value)                 noexcept
 {
-    SetRotSpeed(GetMaxRotSpeed() * std::clamp(value, -1.F, 1.F));
+    m_accpsi =  m_maxAccRot * std::clamp(value, -1.F, 1.F);
 }
 
 void
 Missile::ActionSetAcceleration(float value) noexcept
 {
-    if (p_impl == nullptr)
-        return;
-
-    SetLongitudinalAcc(GetMaxLongitudinalAcc() * std::clamp(value, -1.F, 1.F));
+    m_acc = m_maxAcc * std::clamp(value, -1.F, 1.F);
 }
 
 bool
-RewardingFunction(ppo::model::Environment& environment, ppo::model::Player* const player, MissileTrainingAgent& pAgent)
+RewardingFunction(ppo::model::Environment& environment,Missile* const missile, MissileTrainingAgent& pAgent)
 {
     bool ret{ false };
 
-    if (player == nullptr)
+    if (missile == nullptr)
         return ret;
 
 
     float                   dt{ environment.GetTimeStep() };
-    float                   fuelconsumption{ player->GetFuelConsumption() };
-    float                   closingSpeed{ player->GetCLosingSpeed() };
-    ppo::model::PlayerId    targetId{ player->GetTarget() };
-    float                   x{ player->GetNorthPosition() };
-    float                   y{ player->GetEastPosition() };
-    float                   LOS{ player->GetTargetLOS() };
-    float                   LOSrate{ player->GetTargetLOSRate() };
-    float                   pkTarget{ player->GetKillProbability() };
-    float                   maxSpeed{ player->GetMaxSpeed() };
+    float                   fuelconsumption{ missile->GetFuelConsumption() };
+    float                   closingSpeed{ missile->GetCLosingSpeed() };
+    ppo::model::PlayerId    targetId{ missile->GetTarget() };
+    float                   x{ missile->GetNorthPosition() };
+    float                   y{ missile->GetEastPosition() };
+    float                   LOS{ missile->GetTargetLOS() };
+    float                   LOSrate{ missile->GetTargetLOSRate() };
+    float                   pkTarget{ missile->GetKillProbability() };
+    float                   maxSpeed{ missile->GetMaxSpeed() };
     bool                    targetDestroyed{ 0.95F <= pkTarget };
     float const             vref{ 300.F };
     float const             fuelref{ ppo::model::C0 + ppo::model::CV3 * vref * vref * vref };
@@ -160,7 +293,6 @@ RewardingFunction(ppo::model::Environment& environment, ppo::model::Player* cons
 
         R_navpn_act = std::exp(-d / 20000.F);
         R_navapn_act = std::exp(-d / 7000.F);
-        pkPlayer = target->GetKillProbability();
     }
 
     // big positive reward mission succeed
@@ -168,16 +300,13 @@ RewardingFunction(ppo::model::Environment& environment, ppo::model::Player* cons
         pAgent.AddReward(sAgentState::RewardType::TargetDestruction, 10.F);
 
     // big negative reward on mission failure
-    if (player->GetDestroyed())
+    if (missile->GetDestroyed())
     {
         pAgent.AddReward(sAgentState::RewardType::OwnshipDestruction, -10.F);
     }
     else
     {
         pAgent.AddReward(sAgentState::RewardType::TargetInEZ, pkTarget);
-
-        // penalty when entering opponent escape zone
-        pAgent.AddReward(sAgentState::RewardType::OwnshipInEZ, -pkPlayer);
 
         pAgent.AddReward(sAgentState::RewardType::Closing, R_close);
 
@@ -191,7 +320,7 @@ RewardingFunction(ppo::model::Environment& environment, ppo::model::Player* cons
     if (pAgent.IsLastStep() && !targetDestroyed)
         pAgent.AddReward(sAgentState::RewardType::MissionFailure, -5.F);
 
-    done = player->GetDestroyed() || targetDestroyed;
+    done = missile->GetDestroyed() || targetDestroyed;
 
     pAgent.SetDone(done);
 

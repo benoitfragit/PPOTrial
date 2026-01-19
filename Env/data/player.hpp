@@ -48,8 +48,9 @@ public:
                       Player             (std::string const& datapath, 
                                           std::string const& name, 
                                           ePlayerSide side,
+                                          ePlayerType type,
                                           Ty& env)  :
-                          Player(datapath, name, side, env.GetNewPlayerId(), std::make_shared<EnvironmentWrapper<Ty>>(env))
+                          Player(datapath, name, side, type, env.GetNewPlayerId(), std::make_shared<EnvironmentWrapper<Ty>>(env))
                       {
                       
                       };
@@ -65,7 +66,6 @@ public:
     void              Init                (void)                                     noexcept;
     void              Run                 (void)                                     noexcept;
                       
-
     std::string const& GetName            (void)                               const noexcept;
     bool              GetDestroyed        (void)                               const noexcept;
     float             GetRotation         (void)                               const noexcept;
@@ -79,21 +79,8 @@ public:
     float             GetMaxLongitudinalAcc(void)                              const noexcept;
     void              SetRotSpeed         (float value)                              noexcept;
     void              SetLongitudinalAcc  (float value)                              noexcept;
-
     void              SetDestroyed          (bool destroyed)                         noexcept;
-    void              SetTargetPosition     (float north, float east)                noexcept;
-    void              SetTargetSpeed        (float north, float east)                noexcept;
-    void              SetTarget             (PlayerId targetId)                      noexcept;
-    PlayerId          GetTarget             (void)                             const noexcept;
-    float             GetKillProbability    (void)                             const noexcept;
-    float             GetCLosingSpeed       (void)                             const noexcept;
-    float             GetTargetLOS          (void)                             const noexcept;
-    float             GetTargetLOSRate      (void)                             const noexcept;
-    float             GetTargetNorthPosition(void)                             const noexcept;
-    float             GetTargetEastPosition (void)                             const noexcept;
-    float             GetTargetNorthSpeed   (void)                             const noexcept;
-    float             GetTargetEastSpeed    (void)                             const noexcept;
-
+    
     PlayerId          GetPlayerId         (void)                               const noexcept;
 
     sPlayerState      GetSnapshot         (void)                               const noexcept final;
@@ -102,10 +89,62 @@ public:
     void              SetCheckpoint       (CheckPointBuffer const& buffer)     noexcept final;
 
 protected:
-    Player(std::string const& datapath, std::string const& name, ePlayerSide side, PlayerId playerID, std::shared_ptr<IEnvironment> pEnv);
+    Player(std::string const& datapath, 
+           std::string const& name, 
+           ePlayerSide side, 
+           ePlayerType type, 
+           PlayerId playerID, 
+           std::shared_ptr<IEnvironment> pEnv);
 
-    struct Impl;
-    std::unique_ptr<Impl> p_impl;
+    virtual void OnInit             (void);
+    virtual void OnRun              (void);
+    virtual void UpdateDoubleBuffer (void);
+
+    template<typename Ar>
+    void serialize(Ar& ar)
+    {
+        auto section = ar.begin_section(m_name.c_str());
+
+        section("MaxNoEscapeZoneRange", m_maxNoescapeZone);
+        section("MaxFuel", m_maxfuel);
+        section("MaxMissile", m_maxnbmissiles);
+        section("MaxSpeed", m_maxSpeed);
+        section("MinSpeed", m_minSpeed);
+        section("MaxShootAngle", m_maxShootAngle);
+        section("MaxRotAcceleration", m_maxAccRot);
+        section("MaxAcceleration", m_maxAcc);
+    };
+
+    float           m_maxNoescapeZone{8000.F };
+    PlayerId        m_playerId{ ULLONG_MAX };
+    float           m_acc{ 0.F };
+    float           m_accpsi{ 0.F };
+    float           m_dx{ 0.F };
+    float           m_dy{ 0.F };
+    float           m_x{ 0.F  };
+    float           m_y{ 0.F  };
+    float           m_maxAcc{ 0.F };
+    float           m_maxAccRot{ 0.F };
+    float           m_maxSpeed{ 0.F };
+    float           m_minSpeed{ 0.F };
+    float           m_speed{ 0.F };
+    float           m_rotation{ 0.F };
+    float           m_fuel{ 0.F };
+    float           m_fuelconsumption{ 0.F };
+    float           m_escapezone{ 0.F };
+    float           m_noescapezone{ 0.F };
+    float           m_maxfuel{ 0.F };
+    float           m_maxShootAngle{ 0.F };
+    unsigned short  m_nbmissiles{ 0 };
+    unsigned short  m_maxnbmissiles{ 0 };
+    ePlayerSide     m_side{ ePlayerSide::Unknown };
+    ePlayerType     m_type{ ePlayerType::Objective };
+    bool            m_destroyed{ false };
+
+    std::shared_ptr<IEnvironment>   p_env{ nullptr };
+    sPlayerState                    m_buffers[2];
+    std::atomic<uint32_t>           m_index{ 0 };
+    std::string                     m_name{ "unknown" };
 };
 
 

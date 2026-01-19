@@ -31,21 +31,33 @@ public:
                                     ppo::model::ePlayerSide side,
                                     Ty& env, 
                                     std::shared_ptr<Evaluator> evaluator = nullptr) :
-        ppo::model::Player("Missiles", name, side, env),
+        ppo::model::Player("Missiles", name, side, ppo::model::ePlayerType::Missile, env),
         p_evaluator{ evaluator }
     {};
+
+    void OnRun                      (void) override;
+    void OnInit                     (void) override;
+
+    void     SetTargetPosition      (float north, float east)                noexcept;
+    void     SetTargetSpeed         (float north, float east)                noexcept;
+    void     SetTarget              (ppo::model::PlayerId targetId)          noexcept;
+    ppo::model::PlayerId GetTarget  (void)                             const noexcept;
+    float    GetKillProbability     (void)                             const noexcept;
+    float    GetCLosingSpeed        (void)                             const noexcept;
+    float    GetTargetLOS           (void)                             const noexcept;
+    float    GetTargetLOSRate       (void)                             const noexcept;
 
     /// <summary>
     /// Define the actions-state space
     /// </summary>
-    float StateNorthRange      (void)          const noexcept;
-    float StateEastRange       (void)          const noexcept;
-    float StateRange           (void)          const noexcept;
-    float StateClosingSpeed    (void)          const noexcept;
-    float StateCosRotation     (void)          const noexcept;
-    float StateSinRotation     (void)          const noexcept;
-    void  ActionSetRotSpeed    (float value)         noexcept;
-    void  ActionSetAcceleration(float value)         noexcept;
+    float StateNorthRange           (void)          const noexcept;
+    float StateEastRange            (void)          const noexcept;
+    float StateRange                (void)          const noexcept;
+    float StateClosingSpeed         (void)          const noexcept;
+    float StateCosRotation          (void)          const noexcept;
+    float StateSinRotation          (void)          const noexcept;
+    void  ActionSetRotSpeed         (float value)         noexcept;
+    void  ActionSetAcceleration     (float value)         noexcept;
 
     /// <summary>
     /// This is a state to be registered in an array
@@ -77,6 +89,16 @@ public:
     };
 
 private:
+    ppo::model::PlayerId m_target{ ULLONG_MAX };
+    float                m_pk{ 0.F };
+    float                m_target_x{ 0.F };
+    float                m_target_y{ 0.F };
+    float                m_target_dx{ 0.F };
+    float                m_target_dy{ 0.F };
+    float                m_closingspeed{ 0.F };
+    float                m_target_los{ 0.F };
+    float                m_target_los_rate{ 0.F };
+
     std::shared_ptr<Evaluator> p_evaluator{ nullptr };
 };
 
@@ -94,23 +116,21 @@ struct sAgentState :
         TargetDestruction = 0,
         TargetInEZ = 1,
         OwnshipDestruction = 2,
-        OwnshipInEZ = 3,
-        Closing = 4,
-        NavPN = 5,
-        NavAPN = 6,
-        Fuel = 7,
-        MissionFailure = 8
+        Closing = 3,
+        NavPN = 4,
+        NavAPN = 5,
+        Fuel = 6,
+        MissionFailure = 7
     };
 
     /// <summary>
     /// Define a list of possible rewards type at compile time
     /// </summary>                                        
-    constexpr std::array<std::string_view, 9> const static REWARDS
+    constexpr std::array<std::string_view, 8> const static REWARDS
     {
         "Target destruction",
         "Target in EZ",
         "Ownship destruction",
-        "Ownship in EZ",
         "Closing",
         "NavPN",
         "NavAPN",
@@ -139,10 +159,10 @@ using MissileProdAgent = ppo::model::ProdAgent<ActorCriticNetProd, Missile>;
 /// This is the function we used to reward our agent
 /// </summary>
 /// <param name="environment">this is the environment</param>
-/// <param name="player">this is the entity</param>
+/// <param name="missile">this is the entity</param>
 /// <param name="pAgent">this is the agent</param>
 /// <returns>true when done</returns>
-bool RewardingFunction(ppo::model::Environment& environment, ppo::model::Player* const player, MissileTrainingAgent& pAgent);
+bool RewardingFunction(ppo::model::Environment& environment, Missile* const player, MissileTrainingAgent& pAgent);
 
 template<typename Ty>
 std::shared_ptr<Missile>

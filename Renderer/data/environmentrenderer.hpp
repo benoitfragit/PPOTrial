@@ -8,6 +8,7 @@
 
 #include "environment.hpp"
 #include "playerrenderer.hpp"
+#include "objectiverenderer.hpp"
 #include "trainingnet.hpp"
 
 namespace ppo::environment {
@@ -171,7 +172,7 @@ private:
     sf::RectangleShape                  m_fightingArea  {};
     float                               m_scaleKm       { 1000.F };
     ppo::model::Environment*            p_environment   {nullptr};
-    using Renderers = std::map<model::IPlayerState*, std::shared_ptr<PlayerRenderer>>;
+    using Renderers = std::map<model::IPlayerState*, std::shared_ptr<IRenderer>>;
     Renderers                           p_renderers     {};
     using AgentControllers = std::vector<std::shared_ptr<IAgentController>>;
     AgentControllers                    p_agentControllers{};
