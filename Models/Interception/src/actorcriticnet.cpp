@@ -1,6 +1,28 @@
 #include "actorcriticnet.hpp"
+#include <math.h>
 
 namespace ppo::interception {
+
+constexpr double PI = 3.1415926536;
+
+static torch::Tensor
+gaussian_log_prob(
+    const torch::Tensor& x,
+    const torch::Tensor& mu,
+    const torch::Tensor& log_std)
+{
+    auto var = torch::exp(2.0 * log_std);
+    auto logp =
+        -0.5 * (((x - mu).pow(2) / var) + 2.0 * log_std + std::log(2.0 * PI));
+    return logp.sum(-1);
+}
+
+static torch::Tensor
+gaussian_entropy(const torch::Tensor& log_std)
+{
+    auto c = 0.5 * (1.0 + std::log(2.0 * PI));
+    return (log_std + c).sum(-1);
+}
 
 ActorCriticNet::ActorCriticNet(int64_t state_dim, int64_t action_dim, int64_t hidden_dim)
 {
@@ -26,12 +48,43 @@ ActorCriticNet::ActorCriticNet(int64_t state_dim, int64_t action_dim, int64_t hi
     torch::nn::init::orthogonal_(logstd_head->weight, 0.01);
     torch::nn::init::orthogonal_(critic->weight, 1.0);
 
-    // Bias à zéro
+    // Bias ï¿½ zï¿½ro
     torch::nn::init::constant_(fc1->bias, 0.0);
     torch::nn::init::constant_(fc2->bias, 0.0);
     torch::nn::init::constant_(mu_head->bias, 0.0);
     torch::nn::init::constant_(logstd_head->bias, 0.0);
     torch::nn::init::constant_(critic->bias, 0.0);
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> 
+ActorCriticNet::evaluate(const torch::Tensor& states, const torch::Tensor& actions)
+{
+    auto [mu, log_std, values] = forward(states);
+
+    auto logp = gaussian_log_prob(actions, mu, log_std);
+
+    auto entropy = gaussian_entropy(log_std);
+    
+    return { logp, values.view({-1}), entropy };
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+ActorCriticNet::selectaction(const torch::Tensor& state)
+{
+    torch::NoGradGuard no_grad;
+
+    if (p_impl == nullptr)
+        return { {}, {}, {} };
+
+    auto [mu, log_std, value] = forward(state);
+    auto std = torch::exp(log_std);
+
+    auto eps = torch::randn_like(mu);
+    auto action_raw = mu + std * eps;
+
+    auto logp = gaussian_log_prob(action_raw, mu, log_std);
+
+    return { action_raw, logp, value.view({-1}) };
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>

@@ -8,41 +8,6 @@
 
 namespace ppo::model {
 
- constexpr double PI = 3.1415926536;
-
-static torch::Tensor
-gaussian_log_prob(
-    const torch::Tensor& x,
-    const torch::Tensor& mu,
-    const torch::Tensor& log_std)
-{
-    auto var = torch::exp(2.0 * log_std);
-    auto logp =
-        -0.5 * (((x - mu).pow(2) / var) + 2.0 * log_std + std::log(2.0 * PI));
-    return logp.sum(-1);
-}
-
-static torch::Tensor
-gaussian_entropy(const torch::Tensor& log_std)
-{
-    auto c = 0.5 * (1.0 + std::log(2.0 * PI));
-    return (log_std + c).sum(-1);
-}
-
-static std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
-EvaluateAction(
-    std::shared_ptr<ITrainingNet> net,
-    const torch::Tensor& states,
-    const torch::Tensor& actions)
-{
-    auto [mu, log_std, values] = net->forward(states);
-
-    auto logp = gaussian_log_prob(actions, mu, log_std);
-
-    auto entropy = gaussian_entropy(log_std);
-    return { logp, values.view({-1}), entropy };
-}
-
 struct PPO::Impl {
     Impl(std::shared_ptr<ITrainingNet> policy, std::string const& modelpath, int64_t state_dim, int64_t action_dim, PPOParamters const& parameters)
     {
@@ -84,14 +49,15 @@ struct PPO::Impl {
             const torch::Tensor& returns,
             const torch::Tensor& advantages)
     {
-
+        if (m_policy == nullptr)
+            return;
+        
         auto adv = (advantages - advantages.mean()) /
             (advantages.std(false) + 1e-8);
 
-        auto [logp, values, entropy] = EvaluateAction(
-            m_policy, states, actions);
+        auto [logp, values, entropy] = m_policy->evaluate(states, actions);
 
-        // Kullback–Leibler divergence early stopping
+        // Kullbackï¿½Leibler divergence early stopping
         float kl_value = (old_logp - logp).mean().item<float>();
         if (kl_value >= 1.5F* m_target_kl)
             return {0.F, 0.F, 0.F, 0.F};
@@ -231,15 +197,7 @@ PPO::SelectAction(const torch::Tensor& state)
     if (p_impl == nullptr)
         return { {}, {}, {} };
 
-    auto [mu, log_std, value] = p_impl->m_policy->forward(state);
-    auto std = torch::exp(log_std);
-
-    auto eps = torch::randn_like(mu);
-    auto action_raw = mu + std * eps;
-
-    auto logp = gaussian_log_prob(action_raw, mu, log_std);
-
-    return { action_raw, logp, value.view({-1}) };
+    return p_impl->m_policy->selectaction(state);
 }
 
 void  

@@ -52,6 +52,8 @@ public:
     virtual ~ITrainingNet(void) = default;
 
     virtual std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> forward(torch::Tensor x) = 0;
+    virtual std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> evaluate(const torch::Tensor& states, const torch::Tensor& actions) = 0;
+    virtual std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> selectaction(const torch::Tensor& state) = 0;
 };
 
 }
