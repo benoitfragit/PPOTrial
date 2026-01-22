@@ -8,6 +8,8 @@ add_library(${PROJECT_NAME}
     ${CMAKE_CURRENT_SOURCE_DIR}/data/interface.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/utils.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/objective.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/sna.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/sna.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/objective.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/player.cpp

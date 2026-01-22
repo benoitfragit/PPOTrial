@@ -106,9 +106,10 @@ public:
 class IPlayer {
 public:
     virtual          ~IPlayer(void) = default;
-    virtual void     Init(void) = 0;
-    virtual void     Run(void) = 0;
+    virtual void     Init       (void) = 0;
+    virtual void     Run        (void) = 0;
     virtual PlayerId GetPlayerId(void) const noexcept = 0;
+    virtual void     UpdateEnv  (void) const noexcept = 0;
 };
 
 class IAgent {

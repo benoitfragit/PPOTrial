@@ -50,7 +50,7 @@ struct PPO::Impl {
             const torch::Tensor& advantages)
     {
         if (m_policy == nullptr)
-            return;
+            return { 0.F, 0.F, 0.F, 0.F };
         
         auto adv = (advantages - advantages.mean()) /
             (advantages.std(false) + 1e-8);

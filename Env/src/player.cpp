@@ -48,7 +48,7 @@ public:
             });
     }
 
-    // Spécialisation pour bool
+    // Spï¿½cialisation pour bool
     template<typename T>
     std::enable_if_t<std::is_same_v<T, bool>>
         registerAttr(T& attr, double probability = 0.5) {
@@ -58,14 +58,14 @@ public:
             });
     }
 
-    // Génère toutes les valeurs aléatoires
+    // Gï¿½nï¿½re toutes les valeurs alï¿½atoires
     void generate() {
         for (auto& gen : m_generators) {
             gen();
         }
     }
 
-    // Réinitialise les générateurs enregistrés
+    // Rï¿½initialise les gï¿½nï¿½rateurs enregistrï¿½s
     void clear() {
         m_generators.clear();
     }
@@ -220,6 +220,12 @@ Player::OnRun(void)
             || (2.F * m_speed) < m_minSpeed)
             m_destroyed = true;
     }
+}
+
+void 
+Player::UpdateEnv(void) const noexcept 
+{
+    // by default this model has any impact on the environment
 }
 
 void

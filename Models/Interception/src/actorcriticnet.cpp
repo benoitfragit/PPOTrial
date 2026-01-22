@@ -73,9 +73,6 @@ ActorCriticNet::selectaction(const torch::Tensor& state)
 {
     torch::NoGradGuard no_grad;
 
-    if (p_impl == nullptr)
-        return { {}, {}, {} };
-
     auto [mu, log_std, value] = forward(state);
     auto std = torch::exp(log_std);
 

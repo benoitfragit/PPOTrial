@@ -21,9 +21,7 @@ public:
     Environment&      operator=             (Environment&)  = delete;
     Environment&      operator=             (Environment&&) = delete;
 
-    using UpdateEnvFunction = std::function<void(Environment&, IPlayer*)>;
-
-    void              AddAgent(std::shared_ptr<IPlayer> player, UpdateEnvFunction updater, std::shared_ptr<IAgent> pAgent = nullptr);
+    void              AddAgent(std::shared_ptr<IPlayer> player, std::shared_ptr<IAgent> pAgent = nullptr);
 
     static PlayerId   GetNewPlayerId(void);
 

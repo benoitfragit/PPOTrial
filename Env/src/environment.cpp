@@ -13,7 +13,6 @@
 namespace ppo::model {
 
 using Agents = std::map<std::shared_ptr<IPlayer>, std::shared_ptr<IAgent>>;
-using UpdateEnvFunctions = std::map<IPlayer*, Environment::UpdateEnvFunction>;
 
 struct Environment::Impl :
     public sEnvironmentState
@@ -73,10 +72,7 @@ struct Environment::Impl :
 
     eEnvironmentState               m_prevState         { m_state };
 
-    UpdateEnvFunctions              m_updates           {};
-
     Environment&                    m_env;
-
 
     static inline sEnvironmentState     EMPTY_ENV_STATE{};
 };
@@ -181,14 +177,13 @@ Environment::Impl::Run(void)
                 player->Run();
             }
 
-            // update the whole environment in a generic way
-            for (auto& [player, updater] : m_updates)
+            // update the whole environment after all player have been updated
+            for (auto& [player, _] : m_agents)
             {
-                if (player == nullptr
-                ||  updater == nullptr)
+                if (player == nullptr)
                     continue;
 
-                updater(m_env, player);
+                player->UpdateEnv();
             }
 
             // here we know that all players have been processed for this step
@@ -219,7 +214,7 @@ Environment::Environment(void):
 Environment::~Environment(void) = default;
 
 void 
-Environment::AddAgent(std::shared_ptr<IPlayer> player, UpdateEnvFunction updater, std::shared_ptr<IAgent> pAgent)
+Environment::AddAgent(std::shared_ptr<IPlayer> player, std::shared_ptr<IAgent> pAgent)
 {
     if (p_impl == nullptr
     ||  player == nullptr)
@@ -230,10 +225,7 @@ Environment::AddAgent(std::shared_ptr<IPlayer> player, UpdateEnvFunction updater
     auto const previous{ p_impl->GetPlayerById(playerId) };
 
     if (previous == nullptr)
-    {
         p_impl->m_agents[player] = pAgent;
-        p_impl->m_updates[player.get()] = updater;
-    }
 }
 
 void

@@ -1,6 +1,6 @@
 #pragma once
 #include "environment.hpp"
-#include "player.hpp"
+#include "sna.hpp"
 #include "evaluator.hpp"
 #include "actorcriticnet.hpp"
 #include "trainingagent.hpp"
@@ -18,10 +18,9 @@ namespace ppo::interception {
 /// This is missile model controlled by an AI agent
 /// </summary>
 class Missile :
-    public ppo::model::Player
+    public ppo::model::SNA
 {
 public:       
-    
     /// <summary>
     ///  This is a template constructor
     /// to be able to use a environment or something else
@@ -31,21 +30,9 @@ public:
                                     ppo::model::ePlayerSide side,
                                     Ty& env, 
                                     std::shared_ptr<Evaluator> evaluator = nullptr) :
-        ppo::model::Player("Missiles", name, side, ppo::model::ePlayerType::Missile, env),
+        ppo::model::SNA("Missiles", name, side, ppo::model::ePlayerType::Missile, env),
         p_evaluator{ evaluator }
     {};
-
-    void OnRun                      (void) override;
-    void OnInit                     (void) override;
-
-    void     SetTargetPosition      (float north, float east)                noexcept;
-    void     SetTargetSpeed         (float north, float east)                noexcept;
-    void     SetTarget              (ppo::model::PlayerId targetId)          noexcept;
-    ppo::model::PlayerId GetTarget  (void)                             const noexcept;
-    float    GetKillProbability     (void)                             const noexcept;
-    float    GetCLosingSpeed        (void)                             const noexcept;
-    float    GetTargetLOS           (void)                             const noexcept;
-    float    GetTargetLOSRate       (void)                             const noexcept;
 
     /// <summary>
     /// Define the actions-state space
@@ -89,20 +76,8 @@ public:
     };
 
 private:
-    ppo::model::PlayerId m_target{ ULLONG_MAX };
-    float                m_pk{ 0.F };
-    float                m_target_x{ 0.F };
-    float                m_target_y{ 0.F };
-    float                m_target_dx{ 0.F };
-    float                m_target_dy{ 0.F };
-    float                m_closingspeed{ 0.F };
-    float                m_target_los{ 0.F };
-    float                m_target_los_rate{ 0.F };
-
     std::shared_ptr<Evaluator> p_evaluator{ nullptr };
 };
-
-void UpdateEnv(ppo::model::Environment& env, ppo::model::IPlayer* player);
 
 /// <summary>
 /// This is the Agent state used for the training
@@ -172,7 +147,7 @@ GetNewRandomMissile(std::string const& name, ppo::model::ePlayerSide side, Ty& e
 
     if constexpr (std::is_same_v<Ty, ppo::model::Environment>)
     {
-        env.AddAgent(missile, &UpdateEnv);
+        env.AddAgent(missile);
     }
 
     return missile;
@@ -202,7 +177,6 @@ GetNewTrainingMissile(std::string const& name, ppo::model::ePlayerSide side, Ty&
     if constexpr (std::is_same_v<Ty, ppo::model::Environment>)
     {
         env.AddAgent(missile,
-            &UpdateEnv,
             agent);
     }
 
@@ -223,7 +197,6 @@ GetNewProductionMissile(std::string const& name, ppo::model::ePlayerSide side, T
     if constexpr (std::is_same_v<Ty, ppo::model::Environment>)
     {
         env.AddAgent(missile,
-            &UpdateEnv,
             agent);
     }
 

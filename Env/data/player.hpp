@@ -65,6 +65,7 @@ public:
                       
     void              Init                (void)                                     noexcept;
     void              Run                 (void)                                     noexcept;
+    void              UpdateEnv           (void)                               const noexcept override;
                       
     std::string const& GetName            (void)                               const noexcept;
     bool              GetDestroyed        (void)                               const noexcept;
