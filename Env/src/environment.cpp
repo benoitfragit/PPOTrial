@@ -154,14 +154,16 @@ Environment::Impl::Run(void)
             if (m_prevState == eEnvironmentState::STOPPED
             ||  reinitrequest)
             {
-                for (auto& [player, agent] : m_agents)
+                for (auto& [player, _] : m_agents)
                 {
                     if (player != nullptr)
                         player->Init();
+                }
 
+                // all players must be initialized before initliazing agents
+                for (auto& [_, agent] : m_agents)
                     if (agent != nullptr)
                         agent->Init();
-                }
 
                 reinitrequest = false;
             }
