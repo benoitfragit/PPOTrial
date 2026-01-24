@@ -2,7 +2,7 @@
 
 #include "environmentrenderer.hpp"
 
-namespace ppo::environment {
+namespace ppo::renderer {
 
 static void
 DrawQuadBetweenLine(sf::Vector2f const& a, sf::Vector2f const& b, sf::Color const color, float const linewidth, sf::VertexArray& vertices)
@@ -23,22 +23,11 @@ DrawQuadBetweenLine(sf::Vector2f const& a, sf::Vector2f const& b, sf::Color cons
     vertices.append(sf::Vertex(b + offset, color));
 }
 
-ObjectiveRenderer::ObjectiveRenderer(model::IPlayerState* player, int radius, bool filled) :
+ObjectiveRenderer::ObjectiveRenderer(model::IEntityState* player, int radius, bool filled) :
     m_radius{ static_cast<float>(radius) },
     m_filled{ filled },
     p_player{ player }
 {
-    if (p_player == nullptr)
-        return;
-
-    auto state = p_player->GetSnapshot();
-    switch (state.m_side)
-    {
-    case ppo::model::ePlayerSide::Friend:  m_color = sf::Color::Blue;           break;
-    case ppo::model::ePlayerSide::Hostile: m_color = sf::Color::Red;            break;
-    case ppo::model::ePlayerSide::Unknown: m_color = sf::Color::White;          break;
-    default:                               m_color = sf::Color::Transparent;    break;
-    }
 }
 
 void
@@ -47,7 +36,7 @@ ObjectiveRenderer::Run(void) noexcept
     if (p_player == nullptr)
         return;
 
-    model::sPlayerState state{ p_player->GetSnapshot() };
+    model::sEntityState state{ p_player->GetSnapshot() };
 
     auto&       renderer{ EnvironmentRenderer::GetInstance() };
     auto const& view    { renderer.GetView() };
@@ -61,6 +50,14 @@ ObjectiveRenderer::Run(void) noexcept
     setPosition(state.m_x / renderer.GetScaleWorld(), state.m_y / renderer.GetScaleWorld());
     setOrigin(0.F, 0.F);
 
+    switch (state.m_side)
+    {
+        case ppo::model::eEntitySide::Friend:  m_color = sf::Color::Blue;           break;
+        case ppo::model::eEntitySide::Hostile: m_color = sf::Color::Red;            break;
+        case ppo::model::eEntitySide::Unknown: m_color = sf::Color::White;          break;
+        default:                               m_color = sf::Color::Transparent;    break;
+    }
+
     sf::CircleShape::setOutlineColor(m_color);
     if (m_filled)
         sf::CircleShape::setFillColor(m_color);
@@ -72,7 +69,7 @@ ObjectiveRenderer::Run(void) noexcept
 }
 
 void
-ObjectiveRenderer::DrawDestroySymbol(model::sPlayerState const& state)
+ObjectiveRenderer::DrawDestroySymbol(model::sEntityState const& state)
 {
     auto& renderer{ EnvironmentRenderer::GetInstance() };
     auto const& view{ renderer.GetView() };

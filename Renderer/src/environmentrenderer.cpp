@@ -2,7 +2,7 @@
 #include <imgui.h>
 #include <imgui-SFML.h>
 
-namespace ppo::environment {
+namespace ppo::renderer {
 
 void 
 SetupModernDarkTheme(void)
@@ -158,7 +158,7 @@ EnvironmentRenderer::GetLineWidth(void) const noexcept
 }
 
 void
-EnvironmentRenderer::Display(model::Player& player, int height, int width, bool filled)
+EnvironmentRenderer::Display(model::Entity& player, int height, int width, bool filled)
 {
     if (p_environment == nullptr)
         return;
@@ -169,11 +169,11 @@ EnvironmentRenderer::Display(model::Player& player, int height, int width, bool 
         switch (auto const state{ player.GetSnapshot() };
                 state.m_type)
         {
-            case ppo::model::ePlayerType::Aircraft:
-            case ppo::model::ePlayerType::Missile:
-                p_renderers[&player] = std::make_shared<PlayerRenderer>(&player, height, width, filled);
+            case ppo::model::eEntityType::Aircraft:
+            case ppo::model::eEntityType::Missile:
+                p_renderers[&player] = std::make_shared<EntityRenderer>(&player, height, width, filled);
                 break;       
-            case ppo::model::ePlayerType::Objective:
+            case ppo::model::eEntityType::Objective:
                 p_renderers[&player] = std::make_shared<ObjectiveRenderer>(&player, width, filled);
                 break;
             default:
@@ -320,14 +320,14 @@ EnvironmentRenderer::DrawTrainingControls(std::shared_ptr<IAgentController> agen
 }
 
 void
-EnvironmentRenderer::DrawPlayerInfo(ppo::model::IPlayerState* const player)
+EnvironmentRenderer::DrawEntityInfo(ppo::model::IEntityState* const player)
 {
     if (player == nullptr)
         return;
 
     auto const playerState = player->GetSnapshot();
-    std::string playerLabel{ "Player" };
-    playerLabel.append(std::to_string(playerState.m_playerId));
+    std::string playerLabel{ "Entity" };
+    playerLabel.append(std::to_string(playerState.m_entityId));
     if (ImGui::BeginTable(playerLabel.c_str(), 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
     {
         ImGui::TableSetupColumn("Properties");
@@ -336,9 +336,9 @@ EnvironmentRenderer::DrawPlayerInfo(ppo::model::IPlayerState* const player)
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
-        ImGui::Text("Player");
+        ImGui::Text("Entity");
         ImGui::TableSetColumnIndex(1);
-        ImGui::Text(std::to_string(playerState.m_playerId).c_str());
+        ImGui::Text(std::to_string(playerState.m_entityId).c_str());
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
@@ -364,11 +364,16 @@ EnvironmentRenderer::DrawPlayerInfo(ppo::model::IPlayerState* const player)
         ImGui::TableSetColumnIndex(1);
         ImGui::Text("%.3f", playerState.m_dy);
 
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        ImGui::Text("Fuel");
-        ImGui::TableSetColumnIndex(1);
-        ImGui::ProgressBar(playerState.m_fuel/playerState.m_maxfuel, ImVec2(-1, 0));
+        if (player->GetIFlightModel() != nullptr)
+        {
+            auto const flightmodelstate{ player->GetIFlightModel()->GetSnapshot() };
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("Fuel");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::ProgressBar(flightmodelstate.m_fuel / flightmodelstate.m_maxfuel, ImVec2(-1, 0));
+        }
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
@@ -382,17 +387,22 @@ EnvironmentRenderer::DrawPlayerInfo(ppo::model::IPlayerState* const player)
         ImGui::TableSetColumnIndex(1);
         ImGui::Text("%.3f", playerState.m_speed);
 
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        ImGui::Text("NoEscZone");
-        ImGui::TableSetColumnIndex(1);
-        ImGui::Text("%.3f", playerState.m_noescapezone);
+        if (player->GetISNA() != nullptr)
+        {
+            auto const snastate{ player->GetISNA()->GetSnapshot() };
 
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        ImGui::Text("EscZone");
-        ImGui::TableSetColumnIndex(1);
-        ImGui::Text("%.3f", playerState.m_escapezone);
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("NoEscZone");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%.3f", snastate.m_noescapezone);
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("EscZone");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%.3f", snastate.m_escapezone);
+        }
 
         ImGui::EndTable();
     }
@@ -560,14 +570,14 @@ EnvironmentRenderer::Run(void)
             if (ImGui::CollapsingHeader("Environment"))
                 DrawEnvControls(state);
 
-            if (ImGui::CollapsingHeader("Players"))
+            if (ImGui::CollapsingHeader("Entitys"))
             {
                 for (auto const& [player, _] : p_renderers)
                 {
                     if (player == nullptr)
                         continue;
 
-                    DrawPlayerInfo(player);
+                    DrawEntityInfo(player);
                 }
             }
 

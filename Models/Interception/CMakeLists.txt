@@ -16,5 +16,5 @@ target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/da
 target_link_libraries(${PROJECT_NAME} 
 						PUBLIC GenericEnv GenericPPO)
 
-set(RESOURCE_MISSILEMODEL_PATH "${CMAKE_SOURCE_DIR}/resources/model/missile")
-target_compile_definitions(${PROJECT_NAME} PUBLIC RESOURCE_MISSILEMODEL_PATH="${RESOURCE_MISSILEMODEL_PATH}")
+set(RESOURCE_RLSNAMODEL_PATH "${CMAKE_SOURCE_DIR}/resources/model/RLSNA")
+target_compile_definitions(${PROJECT_NAME} PUBLIC RESOURCE_RLSNAMODEL_PATH="${RESOURCE_RLSNAMODEL_PATH}")

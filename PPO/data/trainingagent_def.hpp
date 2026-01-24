@@ -12,11 +12,9 @@ template<typename Policy, typename Model, typename AgentState>
 TrainingAgent<Policy, Model, AgentState>::TrainingAgent(Model* model, 
                                                      std::string const& name, 
                                                      std::string const& modelpath, 
-                                                     RewardFunction rewardFunction,
                                                      IEvaluator* const evaluator):
     p_model{model},
     p_policy{ std::make_shared<Policy>(Model::STATES.size(), Model::ACTIONS.size()) },
-    m_rewardFunction{rewardFunction},
     m_name{name},
     m_modelpath{modelpath},
     p_evaluator{evaluator}
@@ -186,8 +184,7 @@ TrainingAgent<Policy, Model, AgentState>::SetNewState(void)
     if (p_model == nullptr)
         return ret;
 
-    if (m_rewardFunction != nullptr)
-        ret = m_rewardFunction(p_model, *this);
+    ret = RewardFunction();
 
     // building the new state  vetor
     for (int i = 0; i < Model::STATES.size(); ++i)

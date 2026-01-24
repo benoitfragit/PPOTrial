@@ -1,6 +1,6 @@
 #pragma once
 
-namespace ppo::environment {
+namespace ppo::renderer {
 
 class IRenderer
 {
@@ -10,4 +10,4 @@ public:
     virtual void Run(void) noexcept = 0;
 };
 
-} /* ppo::environment */
+} /* ppo::renderer */

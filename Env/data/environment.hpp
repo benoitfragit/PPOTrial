@@ -1,6 +1,6 @@
 #pragma once 
 #include "interface.hpp"
-#include "player.hpp"
+#include "entity.hpp"
 
 #include<string>
 #include <memory>
@@ -21,9 +21,11 @@ public:
     Environment&      operator=             (Environment&)  = delete;
     Environment&      operator=             (Environment&&) = delete;
 
-    void              AddAgent(std::shared_ptr<IPlayer> player, std::shared_ptr<IAgent> pAgent = nullptr);
+    void              AddEntity             (std::shared_ptr<IEntity> entity);
 
-    static PlayerId   GetNewPlayerId(void);
+    void              AddAgent              (std::shared_ptr<IAgent> pAgent);
+
+    static EntityId   GetNewEntityId(void);
 
     sEnvironmentState GetSnapshot           (void) const noexcept;
 
@@ -34,7 +36,7 @@ public:
 
     float             GetTimeStep           (void) const noexcept;
 
-    IPlayer*          GetIPlayerById        (PlayerId playerId) noexcept;
+    IEntity*          GetIEntityById        (EntityId playerId) noexcept;
 
     float             GetMaxNorth           (void) const noexcept;
     float             GetMaxEast            (void) const noexcept;

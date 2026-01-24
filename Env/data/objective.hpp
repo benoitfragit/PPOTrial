@@ -1,23 +1,19 @@
 #pragma once
 
-#include "Player.hpp"
+#include "Entity.hpp"
 #include <string>
 
 namespace ppo::model {
 
-class Objective :
-    public Player
+class Objective : public Entity
 {
 public:
     template <typename Ty>
-    Objective(std::string name, ePlayerSide side, Ty& env):
-        Player("Objectives", name, side, ePlayerType::Objective, env)
+    Objective(std::string name, eEntitySide side, Ty& env):
+        Entity(name, side, eEntityType::Objective, env)
     {
 
     };
-
-private:
-    void OnRun(void) final;
 };
 
 } /* ppo::model */

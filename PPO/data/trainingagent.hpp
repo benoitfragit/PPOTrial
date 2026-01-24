@@ -14,18 +14,18 @@ class TrainingAgent:
 public:
     using StateVector  = std::array<float, Model::STATES.size()>;
     using ActionVector = std::array<float, Model::ACTIONS.size()>;
-    using RewardFunction = std::function<bool(Model*, TrainingAgent&)>;
 
                              TrainingAgent           (Model* const model,
                                                       std::string const& name, 
                                                       std::string const& modelpath, 
-                                                      RewardFunction rewardFunction,
                                                       IEvaluator* const evaluator = nullptr);
     
     void                     Init                    (void) override;
     bool                     Update                  (void) noexcept override;
     bool                     SetNewState             (void) override;
     void                     ChooseAction            (void) override;
+
+    virtual bool             RewardFunction          (void) noexcept = 0;
 
     void                     SetDone                 (bool done)                noexcept;
     void                     SetRewardClampValue     (float clampValue)         noexcept;
@@ -43,17 +43,18 @@ public:
 
     typename AgentState      GetSnapshot             (std::vector<float>& rewards) const noexcept;
 
+protected:    
+    Model*                      p_model{ nullptr };
+
 private:
     template<typename Ar>
     void                        serialize(Ar& ar);
 
     void                        UpdateDoubleBuffer(void);
 
-    Model*                      p_model         {nullptr};
     std::shared_ptr<Policy>     p_policy        {nullptr};
     StateVector                 m_stateVector   {};
     ActionVector                m_actionVector  {};
-    RewardFunction              m_rewardFunction{nullptr};
     std::unique_ptr<RLAgent>    p_rlagent       {nullptr};
     AgentState                  m_internal      {};
     AgentState                  m_buffers[2];

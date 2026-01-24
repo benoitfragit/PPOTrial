@@ -1,5 +1,5 @@
 #include "Interception.hpp"
-#include "player.hpp"
+#include "entity.hpp"
 #include "utils.hpp"
 
 #include <array>
@@ -7,10 +7,13 @@
 namespace ppo::interception {
 
 float
-Missile::StateNorthRange(void) const noexcept
+RLSNA::StateNorthRange(void) const noexcept
 {
-    float       dx{ m_target_x - m_x};
-    float const dy{ m_target_y - m_y};
+    if (p_entityState == nullptr)
+        return 0.F;
+
+    float       dx{ GetTargetNorthPosition() - p_entityState->m_x};
+    float const dy{ GetTargetEastPosition() - p_entityState->m_y};
     float const d{ sqrt(dx * dx + dy * dy) };
     dx /= std::max(d, 1e-6F);
 
@@ -18,10 +21,13 @@ Missile::StateNorthRange(void) const noexcept
 }
 
 float
-Missile::StateEastRange(void) const noexcept
+RLSNA::StateEastRange(void) const noexcept
 {
-    float const dx{ m_target_x - m_x};
-    float       dy{ m_target_y - m_y};
+    if (p_entityState == nullptr)
+        return 0.F;
+
+    float const dx{ GetTargetNorthPosition() - p_entityState->m_x };
+    float       dy{ GetTargetEastPosition() - p_entityState->m_y };
     float const d{ sqrt(dx * dx + dy * dy) };
     dy /= std::max(d, 1e-6F);
 
@@ -29,10 +35,13 @@ Missile::StateEastRange(void) const noexcept
 }
 
 float
-Missile::StateRange(void) const noexcept
+RLSNA::StateRange(void) const noexcept
 {
-    float const dx{ m_target_x - m_x };
-    float const dy{ m_target_y - m_y};
+    if (p_entityState == nullptr)
+        return 0.F;
+
+    float const dx{ GetTargetNorthPosition() - p_entityState->m_x };
+    float const dy{ GetTargetEastPosition() - p_entityState->m_y };
 
     float d = std::sqrt(dx * dx + dy * dy);
 
@@ -40,16 +49,19 @@ Missile::StateRange(void) const noexcept
 }
 
 float
-Missile::StateClosingSpeed(void) const noexcept
+RLSNA::StateClosingSpeed(void) const noexcept
 {
-    return std::clamp(m_closingspeed / 300.F, -1.F, 1.F);
+    return std::clamp(GetCLosingSpeed() / 300.F, -1.F, 1.F);
 }
 
 float
-Missile::StateCosRotation(void) const noexcept
+RLSNA::StateCosRotation(void) const noexcept
 {
-    float const dx{m_target_x - m_x };
-    float const dy{m_target_y - m_y};
+    if (p_entityState == nullptr)
+        return 0.F;
+
+    float const dx{ GetTargetNorthPosition() - p_entityState->m_x };
+    float const dy{ GetTargetEastPosition() - p_entityState->m_y };
 
     float const d{ std::sqrt(dx * dx + dy * dy) };
 
@@ -59,16 +71,19 @@ Missile::StateCosRotation(void) const noexcept
     // 1. computing the kill probability
     float az = atan2(uy, ux);
     az = ppo::model::wrapMinusPi2Pi(az);
-    az = ppo::model::wrapMinusPi2Pi(az - m_rotation);
+    az = ppo::model::wrapMinusPi2Pi(az - p_entityState->m_rotation);
 
     return cos(az);
 }
 
 float
-Missile::StateSinRotation(void) const noexcept
+RLSNA::StateSinRotation(void) const noexcept
 {
-    float const dx{ m_target_x - m_x };
-    float const dy{ m_target_y - m_y};
+    if (p_entityState == nullptr)
+        return 0.F;
+
+    float const dx{ GetTargetNorthPosition() - p_entityState->m_x };
+    float const dy{ GetTargetEastPosition() - p_entityState->m_y };
 
     float const d{ std::sqrt(dx * dx + dy * dy) };
 
@@ -78,42 +93,48 @@ Missile::StateSinRotation(void) const noexcept
     // 1. computing the kill probability
     float az = atan2(uy, ux);
     az = ppo::model::wrapMinusPi2Pi(az);
-    az = ppo::model::wrapMinusPi2Pi(az - m_rotation);
+    az = ppo::model::wrapMinusPi2Pi(az - p_entityState->m_rotation);
 
     return sin(az);
 }
 
 void
-Missile::ActionSetRotSpeed(float value)                 noexcept
+RLSNA::ActionSetRotSpeed(float value)                 noexcept
 {
-    m_accpsi =  m_maxAccRot * std::clamp(value, -1.F, 1.F);
+    m_state.m_rotSpeedCmd = std::clamp(value, -1.F, 1.F);
 }
 
 void
-Missile::ActionSetAcceleration(float value) noexcept
+RLSNA::ActionSetAcceleration(float value) noexcept
 {
-    m_acc = m_maxAcc * std::clamp(value, -1.F, 1.F);
+    m_state.m_accCmd = std::clamp(value, -1.F, 1.F);
 }
 
 bool
-RewardingFunction(ppo::model::Environment& environment,Missile* const missile, MissileTrainingAgent& pAgent)
+SNATrainingAgent::RewardFunction(void) noexcept
 {
     bool ret{ false };
 
-    if (missile == nullptr)
+    if (p_model == nullptr
+    ||  p_environment == nullptr)
+        return ret;
+                   
+    ppo::model::Aircraft const* const aircraft{ p_model->GetAircraft() };
+    if (aircraft == nullptr)
         return ret;
 
+    ppo::model::FlightModel const& flightModel{ aircraft->GetFlightModel() };
 
-    float                   dt{ environment.GetTimeStep() };
-    float                   fuelconsumption{ missile->GetFuelConsumption() };
-    float                   closingSpeed{ missile->GetCLosingSpeed() };
-    ppo::model::PlayerId    targetId{ missile->GetTarget() };
-    float                   x{ missile->GetNorthPosition() };
-    float                   y{ missile->GetEastPosition() };
-    float                   LOS{ missile->GetTargetLOS() };
-    float                   LOSrate{ missile->GetTargetLOSRate() };
-    float                   pkTarget{ missile->GetKillProbability() };
-    float                   maxSpeed{ missile->GetMaxSpeed() };
+    float                   dt{ p_environment->GetTimeStep() };
+    float                   fuelconsumption{ flightModel.GetFuelConsumption() };
+    float                   closingSpeed{ p_model->GetCLosingSpeed() };
+    ppo::model::EntityId    targetId{ p_model->GetTarget() };
+    float                   x{ aircraft->GetNorthPosition() };
+    float                   y{ aircraft->GetEastPosition() };
+    float                   LOS{ p_model->GetTargetLOS() };
+    float                   LOSrate{ p_model->GetTargetLOSRate() };
+    float                   pkTarget{ p_model->GetKillProbability() };
+    float                   maxSpeed{ flightModel.GetMaxSpeed() };
     bool                    targetDestroyed{ 0.95F <= pkTarget };
     float const             vref{ 300.F };
     float const             fuelref{ ppo::model::C0 + ppo::model::CV3 * vref * vref * vref };
@@ -124,9 +145,9 @@ RewardingFunction(ppo::model::Environment& environment,Missile* const missile, M
     float                   R_navapn_act{ 0.F };
     float                   R_navapn{ -std::fabs(LOSrate) };
     bool                    done{ false };
-    float                   pkPlayer{ 0.F };
+    float                   pkEntity{ 0.F };
 
-    if (auto const target{ dynamic_cast<ppo::model::Player*>(environment.GetIPlayerById(targetId)) };
+    if (auto const target{ dynamic_cast<ppo::model::Entity*>(p_environment->GetIEntityById(targetId)) };
         target != nullptr)
     {
         float const tx{ target->GetNorthPosition() };
@@ -141,32 +162,32 @@ RewardingFunction(ppo::model::Environment& environment,Missile* const missile, M
 
     // big positive reward mission succeed
     if (targetDestroyed)
-        pAgent.AddReward(sAgentState::RewardType::TargetDestruction, 10.F);
+        AddReward(sAgentState::RewardType::TargetDestruction, 10.F);
 
     // big negative reward on mission failure
-    if (missile->GetDestroyed())
+    if (aircraft->GetDestroyed())
     {
-        pAgent.AddReward(sAgentState::RewardType::OwnshipDestruction, -10.F);
+        AddReward(sAgentState::RewardType::OwnshipDestruction, -10.F);
     }
     else
     {
-        pAgent.AddReward(sAgentState::RewardType::TargetInEZ, pkTarget);
+        AddReward(sAgentState::RewardType::TargetInEZ, pkTarget);
 
-        pAgent.AddReward(sAgentState::RewardType::Closing, R_close);
+        AddReward(sAgentState::RewardType::Closing, R_close);
 
-        pAgent.AddReward(sAgentState::RewardType::NavPN, R_navpn * R_navpn_act);
+        AddReward(sAgentState::RewardType::NavPN, R_navpn * R_navpn_act);
 
-        pAgent.AddReward(sAgentState::RewardType::NavAPN, R_navapn * R_navapn_act);
+        AddReward(sAgentState::RewardType::NavAPN, R_navapn * R_navapn_act);
 
-        pAgent.AddReward(sAgentState::RewardType::Fuel, R_fuel);
+        AddReward(sAgentState::RewardType::Fuel, R_fuel);
     }
 
-    if (pAgent.IsLastStep() && !targetDestroyed)
-        pAgent.AddReward(sAgentState::RewardType::MissionFailure, -5.F);
+    if (IsLastStep() && !targetDestroyed)
+        AddReward(sAgentState::RewardType::MissionFailure, -5.F);
 
-    done = missile->GetDestroyed() || targetDestroyed;
+    done = aircraft->GetDestroyed() || targetDestroyed;
 
-    pAgent.SetDone(done);
+    SetDone(done);
 
     return done;
 }

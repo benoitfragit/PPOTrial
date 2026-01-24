@@ -12,7 +12,8 @@
 
 namespace ppo::model {
 
-using Agents = std::map<std::shared_ptr<IPlayer>, std::shared_ptr<IAgent>>;
+using Entities = std::vector<std::shared_ptr<IEntity>>;
+using Agents = std::vector<std::shared_ptr<IAgent>>;
 
 struct Environment::Impl :
     public sEnvironmentState
@@ -20,7 +21,7 @@ struct Environment::Impl :
     void                    Run           (void);
     void                    Stop          (void);
     void                    Start         (void);
-    IPlayer*                GetPlayerById (PlayerId const id) const noexcept;
+    IEntity*                GetEntityById (EntityId const id) const noexcept;
     void                    UpdateDoubbleBuffer(void);
 
     explicit                Impl(Environment& env):
@@ -58,6 +59,7 @@ struct Environment::Impl :
         section("TimeStep", m_dt);
     };
 
+    Entities                        m_entities          {};    
     Agents                          m_agents            {};
     sEnvironmentState               m_buffers           [2];
     std::atomic<uint32_t>           m_index             { 0 };
@@ -89,13 +91,13 @@ Environment::Impl::UpdateDoubbleBuffer(void)
     m_index.store(next, std::memory_order_release);
 }
 
-IPlayer*
-Environment::Impl::GetPlayerById(PlayerId const id) const noexcept
+IEntity*
+Environment::Impl::GetEntityById(EntityId const id) const noexcept
 {
-    for (auto const& pair : m_agents)
+    for (auto const& entity : m_entities)
     {
-        if (pair.first->GetPlayerId() == id)
-            return pair.first.get();
+        if (entity->GetEntityId() == id)
+            return entity.get();
     }
     return nullptr;
 }
@@ -136,7 +138,7 @@ Environment::Impl::Run(void)
         state           = m_state.load(std::memory_order_acquire);
 
         // ensure all agents are in training mode
-        for (auto& [_, agent] : m_agents)
+        for (auto& agent : m_agents)
         {
             if (agent == nullptr)
                 continue;
@@ -150,47 +152,57 @@ Environment::Impl::Run(void)
             if (m_prevState == eEnvironmentState::STOPPED
             ||  reinitrequest)
             {
-                for (auto& [player, _] : m_agents)
+                for (auto& entity : m_entities)
                 {
-                    if (player != nullptr)
-                        player->Init();
+                    if (entity == nullptr)
+                        continue;
+                        
+                    entity->Init();
                 }
 
                 // all players must be initialized before initliazing agents
-                for (auto& [_, agent] : m_agents)
-                    if (agent != nullptr)
-                        agent->Init();
+                for (auto& agent : m_agents)
+                {
+                    if (agent == nullptr)
+                        continue;
+                 
+                    agent->Init();
+                }
 
                 reinitrequest = false;
             }
 
-            for (auto& [player, agent] : m_agents)
+            for (auto& agent : m_agents)
             {
-                if (player == nullptr)
+                // according to the current state select an action
+                if (agent == nullptr)
+                    continue;
+                    
+                agent->ChooseAction();
+            }
+
+            for (auto& entity : m_entities)
+            {
+                if (entity == nullptr)
                     continue;
 
-                // according to the current state select an action
-                if (agent!= nullptr)
-                    agent->ChooseAction();
-
                 // according to the action compute the new state
-                player->Run();
+                entity->Run();
             }
 
             // update the whole environment after all player have been updated
-            for (auto& [player, _] : m_agents)
+            for (auto& entity: m_entities)
             {
-                if (player == nullptr)
+                if (entity == nullptr)
                     continue;
 
-                player->UpdateEnv();
+                entity->UpdateEnv();
             }
 
             // here we know that all players have been processed for this step
-            for (auto& [player, agent] : m_agents)
+            for (auto& agent : m_agents)
             {
-                if (player == nullptr
-                ||  agent == nullptr)
+                if (agent == nullptr)
                     continue;
 
                 reinitrequest |= agent->SetNewState();
@@ -213,19 +225,40 @@ Environment::Environment(void):
 
 Environment::~Environment(void) = default;
 
-void 
-Environment::AddAgent(std::shared_ptr<IPlayer> player, std::shared_ptr<IAgent> pAgent)
+void              
+Environment::AddEntity(std::shared_ptr<IEntity> entity)
 {
     if (p_impl == nullptr
-    ||  player == nullptr)
+    ||  entity == nullptr)
         return;
 
-    PlayerId const playerId{ player->GetPlayerId() };
+    auto Iter = std::find(
+        p_impl->m_entities.begin(),
+        p_impl->m_entities.end(), 
+        entity);    
 
-    auto const previous{ p_impl->GetPlayerById(playerId) };
+    if (Iter != p_impl->m_entities.end())
+        return;
 
-    if (previous == nullptr)
-        p_impl->m_agents[player] = pAgent;
+    p_impl->m_entities.push_back(entity);
+}
+
+void 
+Environment::AddAgent(std::shared_ptr<IAgent> pAgent)
+{
+    if (p_impl == nullptr
+    ||  pAgent == nullptr)
+        return;
+
+    auto Iter = std::find(
+        p_impl->m_agents.begin(),
+        p_impl->m_agents.end(),
+        pAgent);
+
+    if (Iter != p_impl->m_agents.end())
+        return;
+
+    p_impl->m_agents.push_back(pAgent);
 }
 
 void
@@ -297,13 +330,13 @@ Environment::Stop(void)
     p_impl->Stop();
 }
 
-IPlayer* 
-Environment::GetIPlayerById(PlayerId playerId) noexcept
+IEntity* 
+Environment::GetIEntityById(EntityId playerId) noexcept
 {
     if (p_impl == nullptr)
         return nullptr;
 
-    return p_impl->GetPlayerById(playerId);
+    return p_impl->GetEntityById(playerId);
 }
 
 float
@@ -333,10 +366,10 @@ Environment::GetMaxEast(void) const noexcept
     return p_impl->m_maxEast;
 }
 
-PlayerId 
-Environment::GetNewPlayerId(void)
+EntityId 
+Environment::GetNewEntityId(void)
 {
-    static std::atomic<PlayerId> g_id{ 0 };
+    static std::atomic<EntityId> g_id{ 0 };
     return g_id.fetch_add(1, std::memory_order_relaxed);
 }
 

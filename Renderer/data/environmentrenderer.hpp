@@ -7,11 +7,11 @@
 #include <vector>
 
 #include "environment.hpp"
-#include "playerrenderer.hpp"
+#include "entityrenderer.hpp"
 #include "objectiverenderer.hpp"
 #include "trainingnet.hpp"
 
-namespace ppo::environment {
+namespace ppo::renderer {
 
 class EnvironmentRenderer : 
     public sf::RenderWindow
@@ -146,7 +146,7 @@ public:
     };
 
     template<typename Obj>
-    void                        Display(ppo::model::Player& player, Obj* obj = nullptr, int height = 30, int width = 30, bool filled = true)
+    void                        Display(ppo::model::Entity& player, Obj* obj = nullptr, int height = 30, int width = 30, bool filled = true)
     {
         if (obj != nullptr)
             p_agentControllers.push_back(std::make_shared<AgentController<Obj>>(obj));
@@ -154,7 +154,7 @@ public:
         Display(player, height, width, filled);
     };
 
-    void                        Display(model::Player& player, int height = 30, int width = 30, bool filled = true);
+    void                        Display(model::Entity& player, int height = 30, int width = 30, bool filled = true);
 
 private:
                                 EnvironmentRenderer (int width, int height, std::string const& title = "PLAYER ENVIRONMENT");
@@ -163,7 +163,7 @@ private:
     void                        DrawEnvControls     (model::sEnvironmentState const& state);
     void                        DrawRewardControls  (std::shared_ptr<IAgentController> agent);
     void                        DrawTrainingControls(std::shared_ptr<IAgentController> agent);
-    void                        DrawPlayerInfo      (ppo::model::IPlayerState* const player);
+    void                        DrawEntityInfo      (ppo::model::IEntityState* const player);
     void                        DrawAgentInfo       (std::shared_ptr<IAgentController> agent);
 
     std::unique_ptr<sf::RenderWindow>   p_controlWindow {nullptr};
@@ -172,7 +172,7 @@ private:
     sf::RectangleShape                  m_fightingArea  {};
     float                               m_scaleKm       { 1000.F };
     ppo::model::Environment*            p_environment   {nullptr};
-    using Renderers = std::map<model::IPlayerState*, std::shared_ptr<IRenderer>>;
+    using Renderers = std::map<model::IEntityState*, std::shared_ptr<IRenderer>>;
     Renderers                           p_renderers     {};
     using AgentControllers = std::vector<std::shared_ptr<IAgentController>>;
     AgentControllers                    p_agentControllers{};
@@ -182,4 +182,4 @@ private:
     float                               m_timestep         {20};
 };
 
-}   /* ppo::environment */
+}   /* ppo::renderer */

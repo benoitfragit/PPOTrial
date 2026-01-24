@@ -1,9 +1,9 @@
-#include "playerrenderer.hpp"
+#include "entityrenderer.hpp"
 #include "environmentrenderer.hpp"
 
-namespace ppo::environment {
+namespace ppo::renderer {
 
-PlayerRenderer::PlayerRenderer(model::IPlayerState* player, int height, int width, bool filled) :
+EntityRenderer::EntityRenderer(model::IEntityState* player, int height, int width, bool filled) :
     m_width{ static_cast<float>(width) },
     m_height { static_cast<float>(height) },
     m_filled { filled },
@@ -15,9 +15,9 @@ PlayerRenderer::PlayerRenderer(model::IPlayerState* player, int height, int widt
     auto state = p_player->GetSnapshot();
     switch (state.m_side)
     {
-        case ppo::model::ePlayerSide::Friend:  m_color = sf::Color::Blue;           break;
-        case ppo::model::ePlayerSide::Hostile: m_color = sf::Color::Red;            break;
-        case ppo::model::ePlayerSide::Unknown: m_color = sf::Color::White;          break;
+        case ppo::model::eEntitySide::Friend:  m_color = sf::Color::Blue;           break;
+        case ppo::model::eEntitySide::Hostile: m_color = sf::Color::Red;            break;
+        case ppo::model::eEntitySide::Unknown: m_color = sf::Color::White;          break;
         default:                               m_color = sf::Color::Transparent;    break;
     }
 }
@@ -42,7 +42,7 @@ DrawQuadBetweenLine(sf::Vector2f const& a, sf::Vector2f const& b, sf::Color cons
 }
 
 void 
-PlayerRenderer::DrawShootingRanges(model::sPlayerState const& state, float radius, sf::Color const color, float startangle, float endangle, unsigned char nbpoint)
+EntityRenderer::DrawShootingRanges(model::sEntityState const& state, float radius, sf::Color const color, float startangle, float endangle, unsigned char nbpoint)
 {
     auto&                renderer   { EnvironmentRenderer::GetInstance() };
     auto const&          view       { renderer.GetView() };
@@ -73,7 +73,7 @@ PlayerRenderer::DrawShootingRanges(model::sPlayerState const& state, float radiu
 }
 
 void
-PlayerRenderer::DrawDestroySymbol(model::sPlayerState const& state)
+EntityRenderer::DrawDestroySymbol(model::sEntityState const& state)
 {
     auto& renderer              { EnvironmentRenderer::GetInstance() };
     auto const& view            { renderer.GetView() };
@@ -107,12 +107,12 @@ PlayerRenderer::DrawDestroySymbol(model::sPlayerState const& state)
 }
 
 void
-PlayerRenderer::Run(void) noexcept
+EntityRenderer::Run(void) noexcept
 {
     if (p_player == nullptr)
         return;
 
-    model::sPlayerState state{ p_player->GetSnapshot() };
+    model::sEntityState state{ p_player->GetSnapshot() };
 
     auto&       renderer{ EnvironmentRenderer::GetInstance() };
     auto const& view    { renderer.GetView() };
@@ -142,14 +142,19 @@ PlayerRenderer::Run(void) noexcept
     // orientation
     setRotation(static_cast<float>(state.m_rotation * RAD_TO_DEG));
 
-    // shooting ranges
-    if (float const escapeZoneValue{ state.m_escapezone };
-        std::numeric_limits<float>::epsilon() < escapeZoneValue)
-        DrawShootingRanges(state, escapeZoneValue, sf::Color::Magenta, -state.m_maxShootAngle, state.m_maxShootAngle);
+    if (p_player->GetISNA() != nullptr)
+    {
+        auto const isnastate{ p_player->GetISNA()->GetSnapshot() };
 
-    if (float const noEscapeZoneValue{ state.m_noescapezone };
-        std::numeric_limits<float>::epsilon() < noEscapeZoneValue)
-        DrawShootingRanges(state, noEscapeZoneValue, sf::Color::Red, -state.m_maxShootAngle, state.m_maxShootAngle);
+        // shooting ranges
+        if (float const escapeZoneValue{ isnastate.m_escapezone };
+            std::numeric_limits<float>::epsilon() < escapeZoneValue)
+            DrawShootingRanges(state, escapeZoneValue, sf::Color::Magenta, -isnastate.m_maxShootAngle, isnastate.m_maxShootAngle);
+
+        if (float const noEscapeZoneValue{ isnastate.m_noescapezone };
+            std::numeric_limits<float>::epsilon() < noEscapeZoneValue)
+            DrawShootingRanges(state, noEscapeZoneValue, sf::Color::Red, -isnastate.m_maxShootAngle, isnastate.m_maxShootAngle);
+    }
 
     renderer.draw(*this);
 

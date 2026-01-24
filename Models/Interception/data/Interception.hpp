@@ -1,6 +1,6 @@
 #pragma once
 #include "environment.hpp"
-#include "sna.hpp"
+#include "aircraft.hpp"
 #include "evaluator.hpp"
 #include "actorcriticnet.hpp"
 #include "trainingagent.hpp"
@@ -15,24 +15,21 @@
 namespace ppo::interception {
 
 /// <summary>
-/// This is missile model controlled by an AI agent
+/// This is SNA model controlled by an AI agent
 /// </summary>
-class Missile :
-    public ppo::model::SNA
+class RLSNA : public ppo::model::SNA
 {
 public:       
     /// <summary>
     ///  This is a template constructor
     /// to be able to use a environment or something else
     /// </summary>
-    template <typename Ty>
-    Missile                         (std::string const name, 
-                                    ppo::model::ePlayerSide side,
-                                    Ty& env, 
-                                    std::shared_ptr<Evaluator> evaluator = nullptr) :
-        ppo::model::SNA("Missiles", name, side, ppo::model::ePlayerType::Missile, env),
-        p_evaluator{ evaluator }
-    {};
+    explicit RLSNA(std::shared_ptr<Evaluator> evaluator = nullptr) : 
+        ppo::model::SNA(),
+        p_evaluator{ evaluator }{};
+
+    void                  SetAircraft(ppo::model::Aircraft* aircraft)         noexcept { p_aircraft = aircraft; };
+    ppo::model::Aircraft* GetAircraft(void)                             const noexcept { return p_aircraft; };
 
     /// <summary>
     /// Define the actions-state space
@@ -49,7 +46,7 @@ public:
     /// <summary>
     /// This is a state to be registered in an array
     /// </summary>
-    using State = float(Missile::*)(void) const noexcept;
+    using State = float(RLSNA::*)(void) const noexcept;
 
     constexpr std::array<State, 6> const static STATES
     {
@@ -64,7 +61,7 @@ public:
     /// <summary>
     /// this is an action to be registered in an array
     /// </summary>
-    using Action = void(Missile::*)(float);
+    using Action = void(RLSNA::*)(float);
 
     /// <summary>
     /// This is a list of action to be registered in an agent
@@ -76,6 +73,7 @@ public:
     };
 
 private:
+    ppo::model::Aircraft*       p_aircraft{ nullptr };
     std::shared_ptr<Evaluator> p_evaluator{ nullptr };
 };
 
@@ -123,84 +121,111 @@ struct sAgentState :
 /// <summary>
 /// This is the definitionn of the agent used for training
 /// </summary>
-using MissileTrainingAgent = ppo::model::TrainingAgent<ActorCriticNet, Missile, sAgentState>;
+class SNATrainingAgent :
+    public ppo::model::TrainingAgent<ActorCriticNet, RLSNA, sAgentState>
+{
+public:
+    using Base = ppo::model::TrainingAgent<ActorCriticNet, RLSNA, sAgentState>;
+
+    SNATrainingAgent(
+        ppo::model::Environment* const pEnvironment,
+        RLSNA* const model,
+        std::string const& name,
+        std::string const& modelpath,
+        ppo::model::IEvaluator* const evaluator = nullptr) :
+        Base(model, name, modelpath, evaluator) ,
+        p_environment{pEnvironment}{}
+
+private:
+    /// <summary>
+    /// this function is used to compute the reward at each step
+    /// </summary>
+    /// <param name=""></param>
+    /// <returns></returns>
+    bool RewardFunction(void) noexcept final;
+
+    /// <summary>
+    /// this is the environment pointer used to get the time and the other entities
+    /// </summary>
+    ppo::model::Environment* p_environment{ nullptr };
+};
 
 /// <summary>
 /// This is the definition of the agent used for production
 /// </summary>
-using MissileProdAgent = ppo::model::ProdAgent<ActorCriticNetProd, Missile>;
-
-/// <summary>
-/// This is the function we used to reward our agent
-/// </summary>
-/// <param name="environment">this is the environment</param>
-/// <param name="missile">this is the entity</param>
-/// <param name="pAgent">this is the agent</param>
-/// <returns>true when done</returns>
-bool RewardingFunction(ppo::model::Environment& environment, Missile* const player, MissileTrainingAgent& pAgent);
+using SNAProdAgent = ppo::model::ProdAgent<ActorCriticNetProd, RLSNA>;
 
 template<typename Ty>
-std::shared_ptr<Missile>
-GetNewRandomMissile(std::string const& name, ppo::model::ePlayerSide side, Ty& env)
+std::shared_ptr<ppo::model::Aircraft>
+GetNewRandomAircraft(std::string const& name, ppo::model::eEntitySide side, Ty& env)
 {
-    std::shared_ptr<Missile> missile{ std::make_shared<Missile>(name, side, env) };
+    // create the SNA
+    std::shared_ptr<RLSNA> sna{ std::make_shared<RLSNA>() };
+
+    std::shared_ptr<ppo::model::Aircraft> aircraft{ 
+        std::make_shared<ppo::model::Aircraft>(name, side, env, sna) };
+
+    sna->SetAircraft(aircraft.get());
 
     if constexpr (std::is_same_v<Ty, ppo::model::Environment>)
-    {
-        env.AddAgent(missile);
-    }
+        env.AddEntity(aircraft);
 
-    return missile;
+    return aircraft;
 }
 
 template<typename Ty>
-std::pair<std::shared_ptr<Missile>, std::shared_ptr<MissileTrainingAgent>>
-GetNewTrainingMissile(std::string const& name, ppo::model::ePlayerSide side, Ty& env)
+std::pair<std::shared_ptr<ppo::model::Aircraft>, std::shared_ptr<SNATrainingAgent>>
+GetNewTrainingAircraft(std::string const& name, ppo::model::eEntitySide side, Ty& env)
 {
     // create the evaluation
     std::shared_ptr<Evaluator> evaluator{ std::make_shared<Evaluator>() };
 
-    // create the missile
-    std::shared_ptr<Missile> missile{ std::make_shared<Missile>(name, side, env, evaluator) };
+    std::shared_ptr<RLSNA> sna{ std::make_shared<RLSNA>(evaluator) };
+
+    // create the aircraft
+    std::shared_ptr<ppo::model::Aircraft> aircraft{ std::make_shared<ppo::model::Aircraft>(name, side, env, sna) };
+                                  
+    sna->SetAircraft(aircraft.get());
 
     // Create the agent
-    std::shared_ptr<MissileTrainingAgent> agent{ std::make_shared<MissileTrainingAgent>(
-                        missile.get(),
-                        "Missile",
-                        RESOURCE_MISSILEMODEL_PATH,
-                        [&](Missile* player, MissileTrainingAgent& agent)
-                        {
-                            return RewardingFunction(env, player, agent);
-                        },
+    std::shared_ptr<SNATrainingAgent> agent{ std::make_shared<SNATrainingAgent>(
+                        &env,
+                        sna.get(),
+                        "RLSNA",
+                        RESOURCE_RLSNAMODEL_PATH,
                         evaluator.get()) };
 
     if constexpr (std::is_same_v<Ty, ppo::model::Environment>)
     {
-        env.AddAgent(missile,
-            agent);
+        env.AddEntity(aircraft);
+        env.AddAgent(agent);
     }
 
-    return std::make_pair(missile, agent);
+    return std::make_pair(aircraft, agent);
 }
 
 template<typename Ty>
-std::pair<std::shared_ptr<Missile>, std::shared_ptr<MissileProdAgent>>
-GetNewProductionMissile(std::string const& name, ppo::model::ePlayerSide side, Ty& env, std::string const& version = "prod")
+std::pair<std::shared_ptr<ppo::model::Aircraft>, std::shared_ptr<SNAProdAgent>>
+GetNewProductionAircraft(std::string const& name, ppo::model::eEntitySide side, Ty& env, std::string const& version = "prod")
 {
-    // create the missile
-    std::shared_ptr<Missile> missile{ std::make_shared<Missile>(name, side, env) };
+    std::shared_ptr<RLSNA> sna{ std::make_shared<RLSNA>() };
 
-    std::filesystem::path modelpath{ RESOURCE_MISSILEMODEL_PATH };
+    // create the aircraft
+    std::shared_ptr<ppo::model::Aircraft> aircraft{ std::make_shared<ppo::model::Aircraft>(name, side, env, sna) };
+
+    sna->SetAircraft(aircraft.get());
+
+    std::filesystem::path modelpath{ RESOURCE_RLSNAMODEL_PATH };
     modelpath = modelpath / version / "model.pt";
-    std::shared_ptr<MissileProdAgent> agent{ std::make_shared<MissileProdAgent>(missile.get(), "ProdAgent",modelpath) };
+    std::shared_ptr<SNAProdAgent> agent{ std::make_shared<SNAProdAgent>(sna.get(), "ProdAgent",modelpath) };
 
     if constexpr (std::is_same_v<Ty, ppo::model::Environment>)
     {
-        env.AddAgent(missile,
-            agent);
+        env.AddEntity(aircraft);
+        env.AddAgent(agent);
     }
 
-    return std::make_pair(missile, agent);
+    return std::make_pair(aircraft, agent);
 }
 
 } /* ppo::interception */

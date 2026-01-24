@@ -1,43 +1,53 @@
 #pragma once 
 
-#include "player.hpp"
+#include "entity.hpp"
 
 namespace ppo::model {
 
-class SNA : public ppo::model::Player
+class SNA:
+    public ISNAState
 {
 public:
-    template <typename Ty>
-    SNA                         (std::string const& datapath, std::string const& name, 
-                                    ePlayerSide side,
-                                    ePlayerType type,
-                                    Ty& env) :
-        Player(datapath, name, side,type, env)
-    {};
+             SNA                    (void) = default;                       
+                                                              
+    void     Run                    (void);                   
+    void     Init                   (void);                   
+                         
+    void     SetEntityState         (sEntityState const* pState) noexcept;
+    void     SetTargetPosition      (float north, float east)       noexcept;
+    void     SetTargetSpeed         (float north, float east)       noexcept;
+    void     SetTarget              (EntityId targetId)             noexcept;
+    EntityId GetTarget              (void)                    const noexcept;
+    float    GetKillProbability     (void)                    const noexcept;
+    float    GetCLosingSpeed        (void)                    const noexcept;
+    float    GetTargetLOS           (void)                    const noexcept;
+    float    GetTargetLOSRate       (void)                    const noexcept;
+    float    GetTargetNorthPosition (void)                    const noexcept;
+    float    GetTargetEastPosition  (void)                    const noexcept;
+    float    GetAccCmd              (void)                    const noexcept;     
+    float    GetRotSpeedCmd         (void)                    const noexcept;
 
-    void OnRun                      (void) override;
-    void OnInit                     (void) override;
-    void UpdateEnv                  (void) const noexcept override;
+    template<typename Ar>
+    void serialize(Ar& ar)
+    {
+        auto section = ar.begin_section("SNA");
 
-    void     SetTargetPosition      (float north, float east)                noexcept;
-    void     SetTargetSpeed         (float north, float east)                noexcept;
-    void     SetTarget              (PlayerId targetId)                      noexcept;
-    PlayerId GetTarget              (void)                             const noexcept;
-    float    GetKillProbability     (void)                             const noexcept;
-    float    GetCLosingSpeed        (void)                             const noexcept;
-    float    GetTargetLOS           (void)                             const noexcept;
-    float    GetTargetLOSRate       (void)                             const noexcept;
+        section("MaxNoEscapeZoneRange", m_state.m_maxNoescapeZone);
+        section("MaxMissile",           m_state.m_maxnbmissiles);
+        section("MaxShootAngle",        m_state.m_maxShootAngle);
+
+        UpdateDoubleBuffer();
+    };
+
+    sSNAState   GetSnapshot         (void)                   const noexcept final;
 
 protected:
-    PlayerId             m_target{ ULLONG_MAX };
-    float                m_pk{ 0.F };
-    float                m_target_x{ 0.F };
-    float                m_target_y{ 0.F };
-    float                m_target_dx{ 0.F };
-    float                m_target_dy{ 0.F };
-    float                m_closingspeed{ 0.F };
-    float                m_target_los{ 0.F };
-    float                m_target_los_rate{ 0.F };
+    void        UpdateDoubleBuffer  (void);
+
+    sEntityState const*     p_entityState{ nullptr };
+    sSNAState               m_state{};
+    sSNAState               m_buffers[2];
+    std::atomic<uint32_t>   m_index{ 0 };
 };
 
 } /*  ppo::model */

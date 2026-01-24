@@ -6,7 +6,7 @@
 
 namespace ppo::model {
 
-using PlayerId = unsigned long long;
+using EntityId = unsigned long long;
 
 enum class eEnvironmentState : unsigned char {
     INIT = 0,
@@ -15,7 +15,7 @@ enum class eEnvironmentState : unsigned char {
     STOPPED = 3
 };
 
-enum class ePlayerSide : 
+enum class eEntitySide : 
     unsigned char 
 {
     Unknown = 0,
@@ -23,7 +23,7 @@ enum class ePlayerSide :
     Friend = 2
 };
 
-enum class ePlayerType :
+enum class eEntityType :
     unsigned char
 {
     Objective = 0,
@@ -38,41 +38,74 @@ struct sEnvironmentState
     float           m_dt        { 0.02F };
 };
 
-struct sPlayerState
+struct sEntityState
 {
-    float           m_maxNoescapeZone{8000.F };
-    float           m_escapezone{ 0.F };
-    float           m_noescapezone{ 0.F };
-    PlayerId        m_playerId{ ULLONG_MAX };
-    float           m_acc{ 0.F };
-    float           m_accpsi{ 0.F };
-    float           m_dx{ 0.F };
-    float           m_dy{ 0.F };
-    float           m_x{ 0.F  };
-    float           m_y{ 0.F  };
-    float           m_maxAcc{ 0.F };
-    float           m_maxAccRot{ 0.F };
-    float           m_maxSpeed{ 0.F };
-    float           m_minSpeed{ 0.F };
-    float           m_speed{ 0.F };
-    float           m_rotation{ 0.F };
-    float           m_fuel{ 0.F };
-    float           m_fuelconsumption{ 0.F };
-    float           m_maxfuel{ 0.F };
-    float           m_maxShootAngle{ 0.F };   
-    float           m_pk{ 0.F };
-    unsigned short  m_nbmissiles{ 0 };
-    unsigned short  m_maxnbmissiles{ 0 };
-    ePlayerSide     m_side{ ePlayerSide::Unknown };
-    ePlayerType     m_type{ ePlayerType::Objective };
-    bool            m_destroyed{ false };
+    EntityId        m_entityId  { ULLONG_MAX };
+    float           m_x         { 0.F  };
+    float           m_y         { 0.F  };  
+    float           m_dx        { 0.F };
+    float           m_dy        { 0.F };
+    float           m_speed     { 0.F };
+    float           m_rotation  { 0.F };
+    eEntitySide     m_side      { eEntitySide::Unknown };
+    eEntityType     m_type      { eEntityType::Objective };
+    bool            m_destroyed { false };
 };
 
-class IPlayerState
+struct sSNAState {
+    EntityId        m_target{ ULLONG_MAX };
+    float           m_pk{ 0.F };
+    float           m_target_x{ 0.F };
+    float           m_target_y{ 0.F };
+    float           m_target_dx{ 0.F };
+    float           m_target_dy{ 0.F };
+    float           m_closingspeed{ 0.F };
+    float           m_target_los{ 0.F };
+    float           m_target_los_rate{ 0.F };
+    float           m_maxNoescapeZone{ 8000.F };
+    float           m_escapezone{ 0.F };
+    float           m_noescapezone{ 0.F };
+    float           m_maxShootAngle{ 0.F };
+    float           m_accCmd{ 0.F };
+    float           m_rotSpeedCmd{ 0.F };
+    unsigned short  m_nbmissiles{ 0 };
+    unsigned short  m_maxnbmissiles{ 0 };
+};
+
+struct sFlightModelState
+{
+    float m_acc{ 0.F };
+    float m_accpsi{ 0.F };
+    float m_maxAcc{ 0.F };
+    float m_maxAccRot{ 0.F };
+    float m_maxSpeed{ 0.F };
+    float m_minSpeed{ 0.F };
+    float m_fuel{ 0.F };
+    float m_fuelconsumption{ 0.F };
+    float m_maxfuel{ 0.F };
+};
+
+class ISNAState
 {
 public:
-    virtual                   ~IPlayerState(void) = default;
-    virtual sPlayerState      GetSnapshot(void) const noexcept = 0;
+    virtual                   ~ISNAState(void) = default;
+    virtual sSNAState        GetSnapshot(void) const noexcept = 0;
+};
+
+class IFlightModelState
+{
+public:
+    virtual                   ~IFlightModelState(void) = default;
+    virtual sFlightModelState    GetSnapshot(void) const noexcept = 0;
+};
+
+class IEntityState
+{
+public:
+    virtual                    ~IEntityState(void) = default;
+    virtual sEntityState       GetSnapshot(void) const noexcept = 0;
+    virtual ISNAState*         GetISNA(void) noexcept = 0;
+    virtual IFlightModelState* GetIFlightModel(void) noexcept = 0;
 };
 
 static constexpr int const CHECKPOINT_DIMENSION = 6;
@@ -85,8 +118,7 @@ public:
     virtual void             SetCheckpoint(CheckPointBuffer const& buffer) noexcept = 0;
 };
 
-struct sEvaluatorState:
-    public sEnvironmentState
+struct sEvaluatorState:  public sEnvironmentState
 {
     unsigned int m_nbstep{ 0 };
     unsigned int m_nbtests{ 0 };
@@ -103,12 +135,12 @@ public:
     virtual sEvaluatorState GetSnapshot(void) const noexcept = 0;
 };
 
-class IPlayer {
+class IEntity {
 public:
-    virtual          ~IPlayer(void) = default;
+    virtual          ~IEntity(void) = default;
     virtual void     Init       (void) = 0;
     virtual void     Run        (void) = 0;
-    virtual PlayerId GetPlayerId(void) const noexcept = 0;
+    virtual EntityId GetEntityId(void) const noexcept = 0;
     virtual void     UpdateEnv  (void) const noexcept = 0;
 };
 

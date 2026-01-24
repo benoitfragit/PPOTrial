@@ -16,21 +16,21 @@ int main()
 
     ppo::model::Environment environment{};
 
-    std::shared_ptr<ppo::model::Objective> objective{ std::make_shared<ppo::model::Objective>("red", ppo::model::ePlayerSide::Hostile, environment) };
-    environment.AddAgent(objective, nullptr);
+    std::shared_ptr<ppo::model::Objective> objective{ std::make_shared<ppo::model::Objective>("red", ppo::model::eEntitySide::Hostile, environment) };
+    environment.AddEntity(objective);
 
-    auto [blue1, blueAgent1] = ppo::interception::GetNewTrainingMissile("blue",  ppo::model::ePlayerSide::Friend,  environment);
+    auto [blue1, blueAgent1] = ppo::interception::GetNewTrainingAircraft("blue",  ppo::model::eEntitySide::Friend,  environment);
 
-    auto [red1, redAgent1]   = ppo::interception::GetNewProductionMissile("red", ppo::model::ePlayerSide::Hostile, environment);
+    auto [red1, redAgent1]   = ppo::interception::GetNewProductionAircraft("red", ppo::model::eEntitySide::Hostile, environment);
 
     // create a first player instance
-    blue1->SetTarget(red1->GetPlayerId());
-    red1->SetTarget(blue1->GetPlayerId());
+    blue1->SetTarget(red1->GetEntityId());
+    red1->SetTarget(blue1->GetEntityId());
 
     serializer.Load();
 
     // Get the environment renderer instance
-    ppo::environment::EnvironmentRenderer& environmentRenderer { ppo::environment::EnvironmentRenderer::GetInstance( 1280, 960, "PLAYGROUND") };
+    ppo::renderer::EnvironmentRenderer& environmentRenderer { ppo::renderer::EnvironmentRenderer::GetInstance( 1280, 960, "PLAYGROUND") };
     
     // attach the renderer to the environment
     environmentRenderer.SetEnvironment(environment);

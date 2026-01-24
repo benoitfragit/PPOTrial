@@ -1,0 +1,13 @@
+[red]
+
+	[red.FlightModel]
+	MaxAcceleration = 100.0
+	MaxFuel = 4.5e+08
+	MaxRotAcceleration = 0.40000006556510925
+	MaxSpeed = 300.0
+	MinSpeed = 10.0
+	
+	[red.SNA]
+	MaxMissile = 8
+	MaxNoEscapeZoneRange = 4000.0
+	MaxShootAngle = 1.0471980571746826

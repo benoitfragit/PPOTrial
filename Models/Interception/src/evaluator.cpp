@@ -1,5 +1,5 @@
 #include "evaluator.hpp"
-#include "player.hpp"
+#include "entity.hpp"
 #include "serializer.hpp"
 #include "prodagent.hpp"
 #include "interception.hpp"
@@ -11,7 +11,7 @@
 
 namespace ppo::interception {
 
-using Agents = std::map<std::shared_ptr<Missile>, std::shared_ptr<MissileProdAgent>>;
+using Agents = std::map<std::shared_ptr<ppo::model::Aircraft>, std::shared_ptr<SNAProdAgent>>;
 
 struct sCheckPointGenerator {
     sCheckPointGenerator(Agents const& agents,
@@ -81,12 +81,12 @@ struct Evaluator::Impl :
 
     float             GetTimeStep(void) const noexcept { return m_dt; };
     
-    ppo::model::Player*
-    GetIPlayerById(ppo::model::PlayerId const id) const noexcept
+    ppo::model::Entity*
+    GetIEntityById(ppo::model::EntityId const id) const noexcept
     {
         for (auto const& pair : m_agents)
         {
-            if (pair.first->GetPlayerId() == id)
+            if (pair.first->GetEntityId() == id)
                 return pair.first.get();
         }
         return nullptr;
@@ -95,10 +95,10 @@ struct Evaluator::Impl :
     float             GetMaxNorth(void) const noexcept { return m_maxNorth; };
     float             GetMaxEast(void) const noexcept { return m_maxEast; };
 
-    static ppo::model::PlayerId
-    GetNewPlayerId(void)
+    static ppo::model::EntityId
+    GetNewEntityId(void)
     {
-        static std::atomic<ppo::model::PlayerId> g_id{ 0 };
+        static std::atomic<ppo::model::EntityId> g_id{ 0 };
         return g_id.fetch_add(1, std::memory_order_relaxed);
     }
 
@@ -108,8 +108,8 @@ struct Evaluator::Impl :
     // a variable to detect stopping
     std::atomic<bool>  m_running{ false };
 
-    std::shared_ptr<Missile> p_blue{nullptr};
-    std::shared_ptr<Missile> p_red {nullptr};
+    std::shared_ptr<ppo::model::Aircraft> p_blue{nullptr};
+    std::shared_ptr<ppo::model::Aircraft> p_red {nullptr};
     Agents m_agents{};
 
     std::filesystem::path m_modelpath{};
@@ -194,8 +194,8 @@ Evaluator::Impl::Start(std::string const& name, std::filesystem::path const& mod
     if (!std::filesystem::exists(evalpath))
         return;
 
-    p_red->SetTarget(p_blue->GetPlayerId());
-    p_blue->SetTarget(p_red->GetPlayerId());
+    p_red->SetTarget(p_blue->GetEntityId());
+    p_blue->SetTarget(p_red->GetEntityId());
 
     m_running.store(true, std::memory_order_release);
     m_thread = std::thread(&Evaluator::Impl::Run, this);
@@ -266,30 +266,16 @@ Evaluator::Impl::Run(void)
                 if (player == nullptr)
                     continue;
 
-                // build state vector
-                if (ppo::model::Player* const target{ player.get() == p_red.get() ? p_blue.get() : p_red.get()};
-                    (target != nullptr))
-                {
-                    player->SetTargetPosition(target->GetNorthPosition(), target->GetEastPosition());
-                    player->SetTargetSpeed(target->GetNorthSpeed(), target->GetEastSpeed());
-
-                    if (float  pkTarget{ player->GetKillProbability() };
-                        0.95F < pkTarget)
-                    {
-                        target->SetDestroyed(true);
-                        if (agent != nullptr)
-                            targetDestruction = true;
-                    }
-                }
-
                 // Run the model after the Agent run to apply the action
                 player->Run();
             }
 
-            for (auto& [_, agent] : m_agents)
+            for (auto& [player, agent] : m_agents)
             {
                 if (agent == nullptr)
                     continue;
+
+                player->UpdateEnv();
 
                 agent->SetNewState();
             }
@@ -301,11 +287,17 @@ Evaluator::Impl::Run(void)
                  || agent == nullptr)
                     continue;
 
-                ppo::model::Player* const target{ player.get() == p_red.get() ? p_blue.get() : p_red.get()};
+                ppo::model::Entity* const target{ player.get() == p_red.get() ? p_blue.get() : p_red.get()};
                 if (target == nullptr)
                     continue;
 
-                pk = std::max(pk, player->GetKillProbability());
+                ppo::model::SNA const& sna{ player->GetSNA() };
+
+                float const newpk{ sna.GetKillProbability() };
+                if (0.95F < newpk)
+                    targetDestruction = true;
+               
+                pk = std::max(pk,newpk);
 
                 if (player->GetDestroyed())
                 {
@@ -361,8 +353,8 @@ Evaluator::Impl::Run(void)
 Evaluator::Evaluator(void) :
     p_impl{ std::make_unique<Impl>() }
 {
-    auto [missileblue, prodblue] = GetNewProductionMissile("blueeval", ppo::model::ePlayerSide::Friend, *p_impl.get());
-    auto missilered = GetNewRandomMissile("redeval", ppo::model::ePlayerSide::Hostile, *p_impl.get());
+    auto [missileblue, prodblue] = GetNewProductionAircraft("blueeval", ppo::model::eEntitySide::Friend, *p_impl.get());
+    auto missilered = GetNewRandomAircraft("redeval", ppo::model::eEntitySide::Hostile, *p_impl.get());
     p_impl->p_blue = missileblue;
     p_impl->p_red = missilered;
 
