@@ -110,7 +110,7 @@ EnvironmentRenderer::EnvironmentRenderer(int width, int height, std::string cons
 
     if (p_controlWindow == nullptr)
     {
-        p_controlWindow = std::make_unique<sf::RenderWindow>(sf::VideoMode(640, height), "Training controls");
+        p_controlWindow = std::make_unique<sf::RenderWindow>(sf::VideoMode(480, height), "Training controls");
         
         if (ImGui::SFML::Init(*p_controlWindow))
             p_controlWindow->setFramerateLimit(60.F);
@@ -122,7 +122,7 @@ EnvironmentRenderer::EnvironmentRenderer(int width, int height, std::string cons
 
     if (p_plotWindow == nullptr)
     {
-        p_plotWindow = std::make_unique<sf::RenderWindow>(sf::VideoMode(640, height), "Training plots");
+        p_plotWindow = std::make_unique<sf::RenderWindow>(sf::VideoMode(480, height), "Training plots");
         
         if (ImGui::SFML::Init(*p_plotWindow))
             p_plotWindow->setFramerateLimit(60.F);
@@ -213,7 +213,13 @@ EnvironmentRenderer::DrawSimuControls(void)
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.8f, 0.3f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.1f, 0.6f, 0.1f, 1.0f));
     if (ImGui::Button("Play"))
+    {
+        for (auto& agent: p_agentControllers)
+            if (agent != nullptr)
+                agent->Start();
+
         p_environment->Play();
+    }
 
     ImGui::PopStyleColor(3);
 
@@ -224,8 +230,14 @@ EnvironmentRenderer::DrawSimuControls(void)
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.95f, 0.75f, 0.3f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.75f, 0.55f, 0.15f, 1.0f));
     if (ImGui::Button("Pause"))
+    {
+        for (auto& agent : p_agentControllers)
+            if (agent != nullptr)
+                agent->Stop();
+
         p_environment->Pause();
-    
+    }
+
     ImGui::PopStyleColor(3);
 
     ImGui::SameLine();
@@ -234,9 +246,14 @@ EnvironmentRenderer::DrawSimuControls(void)
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.75f, 0.25f, 0.25f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.35f, 0.35f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.65f, 0.15f, 0.15f, 1.0f));
-    if (ImGui::Button("Stop")) 
+    if (ImGui::Button("Stop"))
+    {
+        for (auto& agent : p_agentControllers)
+            if (agent != nullptr)
+                agent->Stop();
+
         p_environment->Stop();
-    
+    }
     ImGui::PopStyleColor(3);
 
     ImGui::PopStyleVar(2);
@@ -297,6 +314,7 @@ EnvironmentRenderer::DrawRewardControls(std::shared_ptr<IAgentController> agent)
         ImGui::TableSetColumnIndex(0);
         ImGui::Text("Reward clamp");
         ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(-FLT_MIN);
         if (ImGui::SliderFloat("##clamp", &agent->GetRewardClamp(), 0.5F, 10.F))
             agent->SetRewardClamp();
 
@@ -307,6 +325,7 @@ EnvironmentRenderer::DrawRewardControls(std::shared_ptr<IAgentController> agent)
             ImGui::Text(agent->GetRewardName(i).c_str());
             ImGui::TableSetColumnIndex(1);
             ImGui::PushID(i);
+            ImGui::SetNextItemWidth(-FLT_MIN);
             if (ImGui::SliderFloat("##i",
                 &(agent->GetRewardScaling(i)), 0.F, 1.F))
                 agent->SetRewardScaling(i);
@@ -324,16 +343,8 @@ EnvironmentRenderer::DrawTrainingControls(std::shared_ptr<IAgentController> agen
     if (agent == nullptr)
         return;
 
-    ImGui::SliderInt("Rollout Buffer", &agent->GetRolloutBufferSize(), 1, 10000);
-        
-    static bool training{false};
-    if (ImGui::Checkbox("Enable training", &training))
-    {
-        if (training)
-            agent->StartTraining();
-        else
-            agent->StopTraining();
-    }
+    if (ImGui::SliderInt("Rollout Buffer", &agent->GetRolloutBufferSize(), 1, 10000))
+        agent->SetRolloutBufferSize();
 }
 
 void

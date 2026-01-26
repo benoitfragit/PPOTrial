@@ -170,4 +170,11 @@ Entity::SetCheckpoint(CheckPointBuffer const& buffer) noexcept
     OnInit();
 }
 
+sEntityState& 
+Entity::GetEntityState(void)   noexcept
+{ 
+    return m_state; 
+}
+
+
 }

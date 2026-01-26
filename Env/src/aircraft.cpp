@@ -3,6 +3,14 @@
 namespace ppo::model {
 
 void
+Aircraft::SetSNA(std::shared_ptr<SNA> sna) noexcept
+{
+    p_sna = sna;
+    if (p_sna != nullptr)
+        p_sna->SetAircraft(this);
+};
+
+void
 Aircraft::Init(void) noexcept
 {
     // Init the flight model

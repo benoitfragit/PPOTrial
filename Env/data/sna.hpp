@@ -2,18 +2,23 @@
 
 #include "entity.hpp"
 
+
 namespace ppo::model {
+
+class Aircraft;
 
 class SNA:
     public ISNAState
 {
 public:
-             SNA                    (void) = default;                       
-                                                              
+    SNA(void) = default;
+
+    void        SetAircraft         (Aircraft* aircraft)            noexcept;
+    Aircraft*   GetAircraft         (void)                    const noexcept { return p_aircraft; };
+
     void     Run                    (void);                   
     void     Init                   (void);                   
                          
-    void     SetEntityState         (sEntityState const* pState) noexcept;
     void     SetTargetPosition      (float north, float east)       noexcept;
     void     SetTargetSpeed         (float north, float east)       noexcept;
     void     SetTarget              (EntityId targetId)             noexcept;
@@ -44,7 +49,8 @@ public:
 protected:
     void        UpdateDoubleBuffer  (void);
 
-    sEntityState const*     p_entityState{ nullptr };
+    Aircraft*               p_aircraft;    
+    
     sSNAState               m_state{};
     sSNAState               m_buffers[2];
     std::atomic<uint32_t>   m_index{ 0 };

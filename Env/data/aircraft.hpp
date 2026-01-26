@@ -13,13 +13,9 @@ class Aircraft:
 {
 public:
     template <typename Ty>
-    Aircraft(std::string const& name, eEntitySide side, Ty& env, std::shared_ptr<SNA> sna):
-        Entity(name, side, eEntityType::Aircraft, env)  ,
-        p_sna{sna}
-    {
-        if (p_sna != nullptr)
-             p_sna->SetEntityState(&m_state);
-        
+    Aircraft(std::string const& name, eEntitySide side, Ty& env):
+        Entity(name, side, eEntityType::Aircraft, env) 
+    {        
         std::filesystem::path filepath{ "Aircrafts" };
         filepath = filepath / name;
         filepath.replace_extension(".toml");
@@ -49,6 +45,8 @@ public:
             p_sna->serialize         (section);
     };
 
+
+    void              SetSNA        (std::shared_ptr<SNA> sna)                noexcept;
     void              Init          (void)                                    noexcept final;
     void              Run           (void)                                    noexcept final;
     void              UpdateEnv     (void)                              const noexcept final;

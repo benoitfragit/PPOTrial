@@ -9,11 +9,13 @@ namespace ppo::interception {
 float
 RLSNA::StateNorthRange(void) const noexcept
 {
-    if (p_entityState == nullptr)
+    if (p_aircraft == nullptr)
         return 0.F;
 
-    float       dx{ GetTargetNorthPosition() - p_entityState->m_x};
-    float const dy{ GetTargetEastPosition() - p_entityState->m_y};
+    auto const& entityState{ p_aircraft->GetEntityState() };
+
+    float       dx{ GetTargetNorthPosition() - entityState.m_x};
+    float const dy{ GetTargetEastPosition() - entityState.m_y};
     float const d{ sqrt(dx * dx + dy * dy) };
     dx /= std::max(d, 1e-6F);
 
@@ -23,11 +25,13 @@ RLSNA::StateNorthRange(void) const noexcept
 float
 RLSNA::StateEastRange(void) const noexcept
 {
-    if (p_entityState == nullptr)
+    if (p_aircraft == nullptr)
         return 0.F;
 
-    float const dx{ GetTargetNorthPosition() - p_entityState->m_x };
-    float       dy{ GetTargetEastPosition() - p_entityState->m_y };
+    auto const& entityState{ p_aircraft->GetEntityState() };
+
+    float const dx{ GetTargetNorthPosition() - entityState.m_x };
+    float       dy{ GetTargetEastPosition() - entityState.m_y };
     float const d{ sqrt(dx * dx + dy * dy) };
     dy /= std::max(d, 1e-6F);
 
@@ -37,11 +41,13 @@ RLSNA::StateEastRange(void) const noexcept
 float
 RLSNA::StateRange(void) const noexcept
 {
-    if (p_entityState == nullptr)
+    if (p_aircraft == nullptr)
         return 0.F;
 
-    float const dx{ GetTargetNorthPosition() - p_entityState->m_x };
-    float const dy{ GetTargetEastPosition() - p_entityState->m_y };
+    auto const& entityState{ p_aircraft->GetEntityState() };
+
+    float const dx{ GetTargetNorthPosition() - entityState.m_x };
+    float const dy{ GetTargetEastPosition() - entityState.m_y };
 
     float d = std::sqrt(dx * dx + dy * dy);
 
@@ -57,11 +63,13 @@ RLSNA::StateClosingSpeed(void) const noexcept
 float
 RLSNA::StateCosRotation(void) const noexcept
 {
-    if (p_entityState == nullptr)
+    if (p_aircraft == nullptr)
         return 0.F;
 
-    float const dx{ GetTargetNorthPosition() - p_entityState->m_x };
-    float const dy{ GetTargetEastPosition() - p_entityState->m_y };
+    auto const& entityState{ p_aircraft->GetEntityState() };
+
+    float const dx{ GetTargetNorthPosition() - entityState.m_x };
+    float const dy{ GetTargetEastPosition() - entityState.m_y };
 
     float const d{ std::sqrt(dx * dx + dy * dy) };
 
@@ -71,7 +79,7 @@ RLSNA::StateCosRotation(void) const noexcept
     // 1. computing the kill probability
     float az = atan2(uy, ux);
     az = ppo::model::wrapMinusPi2Pi(az);
-    az = ppo::model::wrapMinusPi2Pi(az - p_entityState->m_rotation);
+    az = ppo::model::wrapMinusPi2Pi(az - entityState.m_rotation);
 
     return cos(az);
 }
@@ -79,11 +87,13 @@ RLSNA::StateCosRotation(void) const noexcept
 float
 RLSNA::StateSinRotation(void) const noexcept
 {
-    if (p_entityState == nullptr)
+    if (p_aircraft == nullptr)
         return 0.F;
 
-    float const dx{ GetTargetNorthPosition() - p_entityState->m_x };
-    float const dy{ GetTargetEastPosition() - p_entityState->m_y };
+    auto const& entityState{ p_aircraft->GetEntityState() };
+
+    float const dx{ GetTargetNorthPosition() - entityState.m_x };
+    float const dy{ GetTargetEastPosition() - entityState.m_y };
 
     float const d{ std::sqrt(dx * dx + dy * dy) };
 
@@ -93,7 +103,7 @@ RLSNA::StateSinRotation(void) const noexcept
     // 1. computing the kill probability
     float az = atan2(uy, ux);
     az = ppo::model::wrapMinusPi2Pi(az);
-    az = ppo::model::wrapMinusPi2Pi(az - p_entityState->m_rotation);
+    az = ppo::model::wrapMinusPi2Pi(az - entityState.m_rotation);
 
     return sin(az);
 }
@@ -162,28 +172,28 @@ SNATrainingAgent::RewardFunction(void) noexcept
 
     // big positive reward mission succeed
     if (targetDestroyed)
-        AddReward(sAgentState::RewardType::TargetDestruction, 10.F);
+        AddReward(RLSNA::RewardType::TargetDestruction, 10.F);
 
     // big negative reward on mission failure
     if (aircraft->GetDestroyed())
     {
-        AddReward(sAgentState::RewardType::OwnshipDestruction, -10.F);
+        AddReward(RLSNA::RewardType::OwnshipDestruction, -10.F);
     }
     else
     {
-        AddReward(sAgentState::RewardType::TargetInEZ, pkTarget);
+        AddReward(RLSNA::RewardType::TargetInEZ, pkTarget);
 
-        AddReward(sAgentState::RewardType::Closing, R_close);
+        AddReward(RLSNA::RewardType::Closing, R_close);
 
-        AddReward(sAgentState::RewardType::NavPN, R_navpn * R_navpn_act);
+        AddReward(RLSNA::RewardType::NavPN, R_navpn * R_navpn_act);
 
-        AddReward(sAgentState::RewardType::NavAPN, R_navapn * R_navapn_act);
+        AddReward(RLSNA::RewardType::NavAPN, R_navapn * R_navapn_act);
 
-        AddReward(sAgentState::RewardType::Fuel, R_fuel);
+        AddReward(RLSNA::RewardType::Fuel, R_fuel);
     }
 
     if (IsLastStep() && !targetDestroyed)
-        AddReward(sAgentState::RewardType::MissionFailure, -5.F);
+        AddReward(RLSNA::RewardType::MissionFailure, -5.F);
 
     done = aircraft->GetDestroyed() || targetDestroyed;
 

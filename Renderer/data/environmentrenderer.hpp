@@ -85,11 +85,13 @@ public:
 
         virtual int&                    GetRolloutBufferSize(void) noexcept = 0;
         virtual ppo::model::sCommonAgentState GetSnapshot (std::vector<float>& rewards) noexcept = 0;
-        virtual void                    StartTraining(void) noexcept = 0;
-        virtual void                    StopTraining(void) noexcept = 0;
+        virtual void                    SetRolloutBufferSize(void) noexcept = 0;
         using Plot = CircularBuffer<5000>;
         using Plots = std::array<Plot, 4>;
         virtual Plots const& GetPlots(void) const noexcept = 0;
+
+        virtual void Start(void) noexcept = 0;
+        virtual void Stop(void) noexcept = 0;   
     };
 
     template <typename Obj>
@@ -163,7 +165,7 @@ public:
         {
             auto const snapshot{ p_obj->GetSnapshot(rewards) };
 
-            if (snapshot.m_training)
+            if (m_started && !snapshot.m_training)
             {
                 m_plots[0].push(snapshot.m_loss);
                 m_plots[1].push(snapshot.m_actorloss);
@@ -175,32 +177,28 @@ public:
         };
 
         void 
-            StartTraining(void) noexcept
+            SetRolloutBufferSize(void) noexcept
         {
             if (p_obj != nullptr)
-                p_obj->StartTraining(m_rolloutBufferSize);
+                p_obj->SetRolloutBufferSize(m_rolloutBufferSize);
         };
-
-        void StopTraining(void) noexcept
-        {
-            if (p_obj != nullptr)
-                p_obj->StopTraining();
-        };
-
 
         Plots const& GetPlots(void) const noexcept
         {
             return m_plots;
         };
 
+        void Start(void) noexcept final { m_started = true;};
+        void Stop (void) noexcept final { m_started = false;};
     private:
-        Obj* p_obj{ nullptr };
-        std::string m_name{ "" };
-        float m_rewardClamp{0.F};
-        int m_rolloutBufferSize{ 4096 };
-        std::vector<float> m_rewardScalings{};
+        Obj*                     p_obj{ nullptr };
+        std::string              m_name{ "" };
+        float                    m_rewardClamp{0.F};
+        int                      m_rolloutBufferSize{ 4096 };
+        std::vector<float>       m_rewardScalings{};
         std::vector<std::string> m_rewardNames{};       
-        Plots  m_plots{};
+        Plots                    m_plots{};
+        bool                     m_started{ false };
     };
 
     template<typename Obj>

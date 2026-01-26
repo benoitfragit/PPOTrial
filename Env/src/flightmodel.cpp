@@ -17,6 +17,8 @@ FlightModel::Init(void)
     generator.registerAttr(m_state.m_accpsi, -m_state.m_maxAccRot / 2.F, m_state.m_maxAccRot / 2.F);
     generator.registerAttr(m_state.m_acc, -m_state.m_maxAcc / 2.F, m_state.m_maxAcc / 2.F);
 
+    generator.generate();
+
     m_state.m_fuel        = m_state.m_maxfuel;
     m_entityState.m_dx    = m_entityState.m_speed * cos(m_entityState.m_rotation);
     m_entityState.m_dy    = m_entityState.m_speed * sin(m_entityState.m_rotation);

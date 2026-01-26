@@ -1,5 +1,6 @@
 #include "sna.hpp"
 #include "utils.hpp"
+#include "aircraft.hpp"
 
 namespace ppo::model { 
 
@@ -9,10 +10,10 @@ sigmoid(float x)
     return 1.F / (1.F + std::exp(-x));
 }
 
-void    
-SNA::SetEntityState(sEntityState const* pState) noexcept
+void
+SNA::SetAircraft(Aircraft* aircraft)         noexcept
 {
-    p_entityState = pState;
+    p_aircraft = aircraft;
 }
 
 void 
@@ -20,15 +21,17 @@ SNA::Run(void)
 {
     m_state.m_pk = 0.F;
 
-    if (p_entityState ==nullptr  ||
-        p_entityState->m_destroyed)
+    if (p_aircraft == nullptr)
         return;
 
-    if (0 < m_state.m_target
+    sEntityState const& entityState{ p_aircraft->GetEntityState() };
+
+    if (!entityState.m_destroyed
+    &&  0 < m_state.m_target
     &&  m_state.m_target < ULLONG_MAX)
     {
-        float const dx{ m_state.m_target_x - p_entityState->m_x };
-        float const dy{ m_state.m_target_y - p_entityState->m_y };
+        float const dx{ m_state.m_target_x - entityState.m_x };
+        float const dy{ m_state.m_target_y - entityState.m_y };
 
         float const d{ std::sqrt(dx * dx + dy * dy) };
 
@@ -38,7 +41,7 @@ SNA::Run(void)
         // 1. computing the kill probability
         float az = atan2(uy, ux);
         az = ppo::model::wrapMinusPi2Pi(az);
-        az = ppo::model::wrapMinusPi2Pi(az - p_entityState->m_rotation);
+        az = ppo::model::wrapMinusPi2Pi(az - entityState.m_rotation);
 
         float const k0{ 5.F / m_state.m_maxShootAngle };
         float const pkangle{ sigmoid(k0 * (m_state.m_maxShootAngle - std::fabs(az))) };
@@ -51,8 +54,8 @@ SNA::Run(void)
         m_state.m_pk = pkrange * pkangle;
 
         // 2. computing the closing speed
-        float const vrx{ m_state.m_target_dx - p_entityState->m_dx };
-        float const vry{ m_state.m_target_dy - p_entityState->m_dy };
+        float const vrx{ m_state.m_target_dx - entityState.m_dx };
+        float const vry{ m_state.m_target_dy - entityState.m_dy };
 
         m_state.m_closingspeed = -(vrx * ux + vry * uy);
 

@@ -207,5 +207,5 @@ MaxEast = 40000.0
 MaxNorth = 30000.0
 NbSteps = 512
 NbTests = 100
-Notation = 2708.2607421875
+Notation = 2665.2783203125
 TimeStep = 0.20000000298023224

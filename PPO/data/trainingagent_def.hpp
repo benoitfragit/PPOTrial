@@ -8,11 +8,11 @@
 
 namespace ppo::model {
 
-template<typename Policy, typename Model, typename AgentState>
-TrainingAgent<Policy, Model, AgentState>::TrainingAgent(Model* model, 
-                                                     std::string const& name, 
-                                                     std::string const& modelpath, 
-                                                     IEvaluator* const evaluator):
+template<typename Policy, typename Model>
+TrainingAgent<Policy, Model>::TrainingAgent(Model* model, 
+                                            std::string const& name, 
+                                            std::string const& modelpath, 
+                                            IEvaluator* const evaluator):
     p_model{model},
     p_policy{ std::make_shared<Policy>(Model::STATES.size(), Model::ACTIONS.size()) },
     m_name{name},
@@ -31,8 +31,8 @@ TrainingAgent<Policy, Model, AgentState>::TrainingAgent(Model* model,
         {
             serialize(ar);
 
-            for (auto i = 0; i < AgentState::REWARDS.size(); ++i)
-                m_rewardScaling[i] = m_internal.m_rewardScaling[i];
+            for (auto i = 0; i < Model::REWARDS.size(); ++i)
+                m_rewardScaling[i] = m_rewardScalings[i];
 
             m_rewardClamp = m_internal.m_rewardClamp;
             m_maxRolloutBuffer = m_internal.m_maxStep;
@@ -46,9 +46,9 @@ TrainingAgent<Policy, Model, AgentState>::TrainingAgent(Model* model,
     );
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 void
-TrainingAgent<Policy, Model, AgentState>::Init(void)
+TrainingAgent<Policy, Model>::Init(void)
 {
     if (p_model == nullptr)
         return;
@@ -56,72 +56,63 @@ TrainingAgent<Policy, Model, AgentState>::Init(void)
     m_internal.m_reward = 0.F;
     m_internal.m_done = false;
 
-    for (auto& reward : m_internal.m_rewardVector)
+    for (auto& reward : m_rewardVector)
         reward = 0.F;
 
     for (int i = 0; i < Model::STATES.size(); ++i)
         m_stateVector[i] = (p_model->*Model::STATES[i])();
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 bool
-TrainingAgent<Policy, Model, AgentState>::Update(void) noexcept
+TrainingAgent<Policy, Model>::Update(void) noexcept
 {
     bool reinitRequest{ false };
 
-    bool const enableTraining { m_training.load(std::memory_order_acquire) };
-    std::array<float, AgentState::REWARDS.size()> rewardScaling{};
+    std::array<float, Model::REWARDS.size()> rewardScaling{};
 
     m_internal.m_maxStep     = m_maxRolloutBuffer.load(std::memory_order_acquire);
     m_internal.m_rewardClamp = m_rewardClamp.load(std::memory_order_acquire);
 
-    for (auto i = 0; i < AgentState::REWARDS.size(); ++i)
-        m_internal.m_rewardScaling[i] = m_rewardScaling[i].load(std::memory_order_acquire);
+    for (auto i = 0; i < Model::REWARDS.size(); ++i)
+        m_rewardScalings[i] = m_rewardScaling[i].load(std::memory_order_acquire);
 
-    if (enableTraining)
+    if (p_rlagent != nullptr
+        && m_internal.m_maxStep != p_rlagent->GetMaxStep())
     {
-        if (p_rlagent != nullptr
-            && m_internal.m_maxStep != p_rlagent->GetMaxStep())
-        {
-            p_rlagent.reset();
-        }
-
-        // if the RL agent is not create thent create one
-        if (p_rlagent == nullptr)
-        {
-            p_rlagent = std::make_unique<RLAgent>(
-                p_policy,
-                m_modelpath,
-                Model::STATES.size(),
-                Model::ACTIONS.size(),
-                static_cast<int64_t>(m_internal.m_maxStep),
-                m_internal,
-                m_stateVector.data(),
-                m_actionVector.data());
-            
-            reinitRequest = true;
-        }
-
-        if (p_rlagent != nullptr)
-        {
-            reinitRequest |= !p_rlagent->IsTraining();
-            
-            if (reinitRequest)
-                p_rlagent->Init();
-        }
+        p_rlagent.reset();
     }
-    else
+
+    // if the RL agent is not create thent create one
+    if (p_rlagent == nullptr)
     {
-        if (p_rlagent != nullptr)
-            p_rlagent.reset();
+        p_rlagent = std::make_unique<RLAgent>(
+            p_policy,
+            m_modelpath,
+            Model::STATES.size(),
+            Model::ACTIONS.size(),
+            static_cast<int64_t>(m_internal.m_maxStep),
+            m_internal,
+            m_stateVector.data(),
+            m_actionVector.data());
+            
+        reinitRequest = true;
+    }
+
+    if (p_rlagent != nullptr)
+    {
+        reinitRequest |= !p_rlagent->IsTraining();
+            
+        if (reinitRequest)
+            p_rlagent->Init();
     }
 
     return reinitRequest;
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 void
-TrainingAgent<Policy, Model, AgentState>::ChooseAction(void)
+TrainingAgent<Policy, Model>::ChooseAction(void)
 {
     // Compute the input state vector to pass to the model before selecting action
     m_internal.m_reward = 0.F;
@@ -138,46 +129,43 @@ TrainingAgent<Policy, Model, AgentState>::ChooseAction(void)
         (p_model->*Model::ACTIONS[i])(m_actionVector[i]);
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 void
-TrainingAgent<Policy, Model, AgentState>::SetDone(bool done)         noexcept
+TrainingAgent<Policy, Model>::SetDone(bool done)         noexcept
 {
     m_internal.m_done |= done;
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 void
-TrainingAgent<Policy, Model, AgentState>::AddReward(unsigned char type, float reward)      noexcept
+TrainingAgent<Policy, Model>::AddReward(unsigned char type, float reward)      noexcept
 {
-    if (type >= AgentState::REWARDS.size())
+    if (type >= Model::REWARDS.size())
         return;
 
-    m_internal.m_reward += m_internal.m_rewardScaling[type]*reward;
+    m_internal.m_reward += m_rewardScalings[type]*reward;
 
-    m_internal.m_rewardVector[type] += m_internal.m_rewardScaling[type] * reward;
+    m_rewardVector[type] += m_rewardScalings[type] * reward;
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 void 
-TrainingAgent<Policy, Model, AgentState>::StartTraining(long long buffer_dim)
+TrainingAgent<Policy, Model>::SetRolloutBufferSize(long long buffer_dim)
 {
     m_maxRolloutBuffer.store(buffer_dim, std::memory_order_release);
-    m_training.store(true, std::memory_order_release);
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 void
-TrainingAgent<Policy, Model, AgentState>::StopTraining(void)
+TrainingAgent<Policy, Model>::StopTraining(void)
 {
-    m_training.store(false, std::memory_order_release);
-
     if (p_evaluator != nullptr)
         p_evaluator->Stop();
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 bool
-TrainingAgent<Policy, Model, AgentState>::SetNewState(void)
+TrainingAgent<Policy, Model>::SetNewState(void)
 {
     bool ret{ false };
 
@@ -241,9 +229,9 @@ TrainingAgent<Policy, Model, AgentState>::SetNewState(void)
     return ret;
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 void
-TrainingAgent<Policy, Model, AgentState>::UpdateDoubleBuffer(void)
+TrainingAgent<Policy, Model>::UpdateDoubleBuffer(void)
 {
     const uint32_t next = 1u - m_index.load(std::memory_order_relaxed);
 
@@ -267,10 +255,10 @@ TrainingAgent<Policy, Model, AgentState>::UpdateDoubleBuffer(void)
         m_buffers[next].m_entropyloss = m_internal.m_entropyloss;
     }
 
-    for (auto i = 0; i < AgentState::REWARDS.size(); ++i)
+    for (auto i = 0; i < Model::REWARDS.size(); ++i)
     {
-        m_buffers[next].m_rewardVector[i] = m_internal.m_rewardVector[i];
-        m_buffers[next].m_rewardScaling[i] = m_internal.m_rewardScaling[i];
+        m_bufferRewardVector[next][i]  = m_rewardVector[i];
+        m_bufferRewardScaling[next][i] = m_rewardScalings[i];
     }
 
     m_buffers[next].m_gamma         = m_internal.m_gamma         ;
@@ -286,9 +274,9 @@ TrainingAgent<Policy, Model, AgentState>::UpdateDoubleBuffer(void)
     m_index.store(next, std::memory_order_release);
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 bool      
-TrainingAgent<Policy, Model, AgentState>::IsTraining(void)                  const noexcept
+TrainingAgent<Policy, Model>::IsTraining(void)                  const noexcept
 {
     if (p_rlagent == nullptr)
         return false;
@@ -296,44 +284,45 @@ TrainingAgent<Policy, Model, AgentState>::IsTraining(void)                  cons
     return p_rlagent->IsTraining();
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 bool
-TrainingAgent<Policy, Model, AgentState>::IsTrained(void)                  const noexcept
+TrainingAgent<Policy, Model>::IsTrained(void)                  const noexcept
 {
     return false;
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 void
-TrainingAgent<Policy, Model, AgentState>::SetRewardClampValue(float clampValue)         noexcept
+TrainingAgent<Policy, Model>::SetRewardClampValue(float clampValue)         noexcept
 {
     m_rewardClamp.store(clampValue, std::memory_order_relaxed);
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 void
-TrainingAgent<Policy, Model, AgentState>::SetRewardScaling(unsigned char type, float scaling)            noexcept
+TrainingAgent<Policy, Model>::SetRewardScaling(unsigned char type, float scaling)            noexcept
 {
-    if (type < AgentState::REWARDS.size())
+    if (type < Model::REWARDS.size())
         m_rewardScaling[type].store(scaling, std::memory_order_relaxed);
 }
 
-template<typename Policy, typename Model, typename AgentState>
-typename AgentState 
-TrainingAgent<Policy, Model, AgentState>::GetSnapshot(std::vector<float>& rewards) const noexcept
+template<typename Policy, typename Model>
+sCommonAgentState
+TrainingAgent<Policy, Model>::GetSnapshot(std::vector<float>& rewards) const noexcept
 {
-    AgentState state = m_buffers[m_index.load(std::memory_order_acquire)];
+    uint32_t idx = m_index.load(std::memory_order_acquire);
+    sCommonAgentState state = m_buffers[idx];
 
-    for (auto i = 0; i < AgentState::REWARDS.size(); ++i)
-        rewards.push_back(state.m_rewardVector[i]);
+    for (auto i = 0; i < Model::REWARDS.size(); ++i)
+        rewards.push_back(m_bufferRewardVector[idx][i]);
 
     return state;
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 template<typename Ar>
 void 
-TrainingAgent<Policy, Model, AgentState>::serialize(Ar& ar)
+TrainingAgent<Policy, Model>::serialize(Ar& ar)
 {
     auto agentSection = ar.begin_section(m_name.c_str());
 
@@ -345,7 +334,7 @@ TrainingAgent<Policy, Model, AgentState>::serialize(Ar& ar)
 
     rewardSection("Clamping", m_internal.m_rewardClamp);
 
-    rewardSection("Scaling", m_internal.m_rewardScaling);
+    rewardSection("Scaling", m_rewardScalings);
 
     auto ppoSection = agentSection.begin_section("PPO");
 
@@ -361,16 +350,16 @@ TrainingAgent<Policy, Model, AgentState>::serialize(Ar& ar)
 
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 std::string const& 
-TrainingAgent<Policy, Model, AgentState>::GetName(void)                  const noexcept
+TrainingAgent<Policy, Model>::GetName(void)                  const noexcept
 {
     return m_name;
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 bool
-TrainingAgent<Policy, Model, AgentState>::IsLastStep(void)                  const noexcept
+TrainingAgent<Policy, Model>::IsLastStep(void)                  const noexcept
 {
     if (p_rlagent == nullptr)
         return false;
@@ -378,25 +367,25 @@ TrainingAgent<Policy, Model, AgentState>::IsLastStep(void)                  cons
     return (p_rlagent->GetMaxStep() - p_rlagent->GetCurrentStep()) == 1;
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 std::vector<float>       
-TrainingAgent<Policy, Model, AgentState>::GetRewardScalings(void) const noexcept
+TrainingAgent<Policy, Model>::GetRewardScalings(void) const noexcept
 {
     std::vector<float> scalings{};
 
-    for (auto const val : m_internal.m_rewardScaling)
+    for (auto const val : m_rewardScalings)
         scalings.push_back(val);
 
     return scalings;
 }
 
-template<typename Policy, typename Model, typename AgentState>
+template<typename Policy, typename Model>
 std::vector<std::string> 
-TrainingAgent<Policy, Model, AgentState>::GetRewardNames(void) const noexcept
+TrainingAgent<Policy, Model>::GetRewardNames(void) const noexcept
 {
     std::vector<std::string> names{};
 
-    for (auto const& name : AgentState::REWARDS)
+    for (auto const& name : Model::REWARDS)
         names.push_back(std::string(name));
 
     return names;

@@ -82,6 +82,8 @@ public:
     CheckPointBuffer   GetCheckpoint       (void)                               noexcept override;
     void               SetCheckpoint       (CheckPointBuffer const& buffer)     noexcept override;
 
+    sEntityState&      GetEntityState(void)  noexcept;
+
 protected:
     Entity(std::string const& name, 
            eEntitySide side, 

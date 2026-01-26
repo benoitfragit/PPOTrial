@@ -24,12 +24,7 @@ public:
     ///  This is a template constructor
     /// to be able to use a environment or something else
     /// </summary>
-    explicit RLSNA(std::shared_ptr<Evaluator> evaluator = nullptr) : 
-        ppo::model::SNA(),
-        p_evaluator{ evaluator }{};
-
-    void                  SetAircraft(ppo::model::Aircraft* aircraft)         noexcept { p_aircraft = aircraft; };
-    ppo::model::Aircraft* GetAircraft(void)                             const noexcept { return p_aircraft; };
+    RLSNA(void) : ppo::model::SNA(){};
 
     /// <summary>
     /// Define the actions-state space
@@ -72,18 +67,6 @@ public:
         &ActionSetAcceleration
     };
 
-private:
-    ppo::model::Aircraft*       p_aircraft{ nullptr };
-    std::shared_ptr<Evaluator> p_evaluator{ nullptr };
-};
-
-/// <summary>
-/// This is the Agent state used for the training
-/// extend generic state with rewards
-/// </summary>
-struct sAgentState :
-    public ppo::model::sCommonAgentState
-{
     enum RewardType
     {
         TargetDestruction = 0,
@@ -110,31 +93,25 @@ struct sAgentState :
         "Fuel",
         "MissionFailure"
     };
-
-    using RewardVector = std::array<float, REWARDS.size()>;
-    using RewardScaling = std::array<float, REWARDS.size()>;
-
-    RewardVector    m_rewardVector{};
-    RewardScaling   m_rewardScaling{};
 };
 
 /// <summary>
 /// This is the definitionn of the agent used for training
 /// </summary>
 class SNATrainingAgent :
-    public ppo::model::TrainingAgent<ActorCriticNet, RLSNA, sAgentState>
+    public ppo::model::TrainingAgent<ActorCriticNet, RLSNA>
 {
 public:
-    using Base = ppo::model::TrainingAgent<ActorCriticNet, RLSNA, sAgentState>;
+    using Base = ppo::model::TrainingAgent<ActorCriticNet, RLSNA>;
 
     SNATrainingAgent(
         ppo::model::Environment* const pEnvironment,
         RLSNA* const model,
         std::string const& name,
-        std::string const& modelpath,
-        ppo::model::IEvaluator* const evaluator = nullptr) :
-        Base(model, name, modelpath, evaluator) ,
-        p_environment{pEnvironment}{}
+        std::string const& modelpath) :
+        Base(model, name, modelpath, &m_evaluator) ,
+        p_environment{pEnvironment}
+    {}
 
 private:
     /// <summary>
@@ -148,6 +125,11 @@ private:
     /// this is the environment pointer used to get the time and the other entities
     /// </summary>
     ppo::model::Environment* p_environment{ nullptr };
+
+    /// <summary>
+    /// This is an evaluator periodically launch by the training agent
+    /// </summary>
+    Evaluator m_evaluator{};
 };
 
 /// <summary>
@@ -163,9 +145,9 @@ GetNewRandomAircraft(std::string const& name, ppo::model::eEntitySide side, Ty& 
     std::shared_ptr<RLSNA> sna{ std::make_shared<RLSNA>() };
 
     std::shared_ptr<ppo::model::Aircraft> aircraft{ 
-        std::make_shared<ppo::model::Aircraft>(name, side, env, sna) };
-
-    sna->SetAircraft(aircraft.get());
+        std::make_shared<ppo::model::Aircraft>(name, side, env) };
+    
+    aircraft->SetSNA(sna);
 
     if constexpr (std::is_same_v<Ty, ppo::model::Environment>)
         env.AddEntity(aircraft);
@@ -177,23 +159,19 @@ template<typename Ty>
 std::pair<std::shared_ptr<ppo::model::Aircraft>, std::shared_ptr<SNATrainingAgent>>
 GetNewTrainingAircraft(std::string const& name, ppo::model::eEntitySide side, Ty& env)
 {
-    // create the evaluation
-    std::shared_ptr<Evaluator> evaluator{ std::make_shared<Evaluator>() };
-
-    std::shared_ptr<RLSNA> sna{ std::make_shared<RLSNA>(evaluator) };
+    std::shared_ptr<RLSNA> sna{ std::make_shared<RLSNA>() };
 
     // create the aircraft
-    std::shared_ptr<ppo::model::Aircraft> aircraft{ std::make_shared<ppo::model::Aircraft>(name, side, env, sna) };
-                                  
-    sna->SetAircraft(aircraft.get());
+    std::shared_ptr<ppo::model::Aircraft> aircraft{ std::make_shared<ppo::model::Aircraft>(name, side, env) };
+                                 
+    aircraft->SetSNA(sna);
 
     // Create the agent
     std::shared_ptr<SNATrainingAgent> agent{ std::make_shared<SNATrainingAgent>(
                         &env,
                         sna.get(),
                         "RLSNA",
-                        RESOURCE_RLSNAMODEL_PATH,
-                        evaluator.get()) };
+                        RESOURCE_RLSNAMODEL_PATH) };
 
     if constexpr (std::is_same_v<Ty, ppo::model::Environment>)
     {
@@ -211,9 +189,9 @@ GetNewProductionAircraft(std::string const& name, ppo::model::eEntitySide side, 
     std::shared_ptr<RLSNA> sna{ std::make_shared<RLSNA>() };
 
     // create the aircraft
-    std::shared_ptr<ppo::model::Aircraft> aircraft{ std::make_shared<ppo::model::Aircraft>(name, side, env, sna) };
+    std::shared_ptr<ppo::model::Aircraft> aircraft{ std::make_shared<ppo::model::Aircraft>(name, side, env) };
 
-    sna->SetAircraft(aircraft.get());
+    aircraft->SetSNA(sna);
 
     std::filesystem::path modelpath{ RESOURCE_RLSNAMODEL_PATH };
     modelpath = modelpath / version / "model.pt";
