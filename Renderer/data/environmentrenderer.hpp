@@ -30,6 +30,44 @@ public:
     float                       GetScaleWorld       (void) const noexcept;
     float                       GetLineWidth        (void) const noexcept;
     
+    template<std::size_t N>
+    struct CircularBuffer
+    {
+        CircularBuffer() {
+            m_data.reserve(N);
+            m_data.resize(N);
+        };
+           
+        void push(float value)
+        {
+            if (m_size < N)
+            {
+                m_data[m_size] = value;
+                ++m_size;
+            }
+            else
+            {
+                std::move(m_data.begin() + 1, m_data.end(), m_data.begin());
+                m_data.back() = value;
+            }
+        }
+
+        float const* data() const noexcept
+        {
+            return m_data.data();
+        }
+
+        std::size_t size() const noexcept
+        {
+            return m_size;
+        }
+
+        std::vector<float> m_data{};
+        std::size_t m_size{ 0 };
+        std::size_t m_index{ 0 };
+
+    };
+
     class IAgentController
     {
     public:
@@ -46,9 +84,12 @@ public:
         virtual std::string const&      GetRewardName(unsigned char type) noexcept = 0;
 
         virtual int&                    GetRolloutBufferSize(void) noexcept = 0;
-        virtual ppo::model::sCommonAgentState GetSnapshot (std::vector<float>& rewards) const noexcept = 0;
+        virtual ppo::model::sCommonAgentState GetSnapshot (std::vector<float>& rewards) noexcept = 0;
         virtual void                    StartTraining(void) noexcept = 0;
         virtual void                    StopTraining(void) noexcept = 0;
+        using Plot = CircularBuffer<5000>;
+        using Plots = std::array<Plot, 4>;
+        virtual Plots const& GetPlots(void) const noexcept = 0;
     };
 
     template <typename Obj>
@@ -118,9 +159,19 @@ public:
         };
 
         ppo::model::sCommonAgentState 
-            GetSnapshot(std::vector<float>& rewards) const noexcept
+            GetSnapshot(std::vector<float>& rewards) noexcept
         {
-            return p_obj->GetSnapshot(rewards);
+            auto const snapshot{ p_obj->GetSnapshot(rewards) };
+
+            if (snapshot.m_training)
+            {
+                m_plots[0].push(snapshot.m_loss);
+                m_plots[1].push(snapshot.m_actorloss);
+                m_plots[2].push(snapshot.m_valueloss);
+                m_plots[3].push(snapshot.m_entropyloss);
+            }
+
+            return snapshot;
         };
 
         void 
@@ -136,13 +187,20 @@ public:
                 p_obj->StopTraining();
         };
 
+
+        Plots const& GetPlots(void) const noexcept
+        {
+            return m_plots;
+        };
+
     private:
         Obj* p_obj{ nullptr };
         std::string m_name{ "" };
         float m_rewardClamp{0.F};
         int m_rolloutBufferSize{ 4096 };
         std::vector<float> m_rewardScalings{};
-        std::vector<std::string> m_rewardNames{};
+        std::vector<std::string> m_rewardNames{};       
+        Plots  m_plots{};
     };
 
     template<typename Obj>
@@ -165,8 +223,10 @@ private:
     void                        DrawTrainingControls(std::shared_ptr<IAgentController> agent);
     void                        DrawEntityInfo      (ppo::model::IEntityState* const player);
     void                        DrawAgentInfo       (std::shared_ptr<IAgentController> agent);
+    void                        DrawAgentPlot       (std::shared_ptr<IAgentController> agent); 
 
     std::unique_ptr<sf::RenderWindow>   p_controlWindow {nullptr};
+    std::unique_ptr<sf::RenderWindow>   p_plotWindow    { nullptr };    
     sf::Clock                           m_deltaClock    {};
     sf::View                            m_view          {};
     sf::RectangleShape                  m_fightingArea  {};

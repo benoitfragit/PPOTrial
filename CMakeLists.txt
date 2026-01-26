@@ -28,6 +28,22 @@ file(GLOB IMGUI_SRC
 add_library(imgui STATIC ${IMGUI_SRC})
 target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR})
 
+FetchContent_Declare(
+    implot
+    GIT_REPOSITORY https://github.com/epezent/implot.git
+    GIT_TAG v0.16
+)
+FetchContent_MakeAvailable(implot)
+
+add_library(implot STATIC
+    ${implot_SOURCE_DIR}/implot.cpp
+    ${implot_SOURCE_DIR}/implot_items.cpp
+)
+
+target_include_directories(implot PUBLIC ${implot_SOURCE_DIR})
+
+target_link_libraries(implot PUBLIC imgui)
+
 # --- LIBTORCH ---
 # ZIP LibTorch précompilé (CPU + MSVC)
 set (DEBUG_VERSION_LIBTORCH "libtorch-win-shared-with-deps-debug-2.9.1%2Bcpu.zip")

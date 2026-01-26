@@ -2,6 +2,8 @@
 #include <imgui.h>
 #include <imgui-SFML.h>
 
+#include <implot.h>
+
 namespace ppo::renderer {
 
 void 
@@ -115,6 +117,21 @@ EnvironmentRenderer::EnvironmentRenderer(int width, int height, std::string cons
     }
 
     ImGui::StyleColorsDark();
+
+    SetupModernDarkTheme();
+
+    if (p_plotWindow == nullptr)
+    {
+        p_plotWindow = std::make_unique<sf::RenderWindow>(sf::VideoMode(640, height), "Training plots");
+        
+        if (ImGui::SFML::Init(*p_plotWindow))
+            p_plotWindow->setFramerateLimit(60.F);
+    }
+
+    ImPlot::CreateContext();
+
+    ImGui::StyleColorsDark();
+
     SetupModernDarkTheme();
 }
 
@@ -498,6 +515,58 @@ EnvironmentRenderer::DrawAgentInfo(std::shared_ptr<IAgentController> agent)
     }
 }
 
+void
+EnvironmentRenderer::DrawAgentPlot(std::shared_ptr<IAgentController> agent)
+{
+    if (agent == nullptr)
+        return;
+
+    auto const& plots{ agent->GetPlots() };
+
+    if (ImGui::CollapsingHeader(agent->GetName().c_str()))
+    {
+        std::string plotTitle{agent->GetName()};
+        plotTitle.append("-Loss");
+
+        if (ImPlot::BeginPlot(plotTitle.c_str()))
+        {
+            ImPlot::SetupAxes("t", "y", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+            ImPlot::PlotLine("Loss", plots[0].data(), plots[0].size());
+            ImPlot::EndPlot();
+        }
+
+        plotTitle = agent->GetName();
+        plotTitle.append("-ActorLoss");
+
+        if (ImPlot::BeginPlot(plotTitle.c_str()))
+        {
+            ImPlot::SetupAxes("t", "y", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+            ImPlot::PlotLine("Loss", plots[1].data(), plots[1].size());
+            ImPlot::EndPlot();
+        }
+
+        plotTitle = agent->GetName();
+        plotTitle.append("-ValueLoss");
+
+        if (ImPlot::BeginPlot(plotTitle.c_str()))
+        {
+            ImPlot::SetupAxes("t", "y", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+            ImPlot::PlotLine("Loss", plots[2].data(), plots[2].size());
+            ImPlot::EndPlot();
+        }     
+
+        plotTitle = agent->GetName();
+        plotTitle.append("-EntropyLoss");
+
+        if (ImPlot::BeginPlot(plotTitle.c_str()))
+        {
+            ImPlot::SetupAxes("t", "y", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+            ImPlot::PlotLine("Loss", plots[3].data(), plots[3].size());
+            ImPlot::EndPlot();
+        }
+    }
+}
+
 bool
 EnvironmentRenderer::Run(void)
 {
@@ -515,7 +584,11 @@ EnvironmentRenderer::Run(void)
             if (p_controlWindow->isOpen())
                 p_controlWindow->close();
 
+            if (p_plotWindow->isOpen())
+                p_plotWindow->close();
+
             sf::RenderWindow::close();
+            ImPlot::DestroyContext();
             ImGui::SFML::Shutdown();
             return false;
         }
@@ -542,16 +615,29 @@ EnvironmentRenderer::Run(void)
             }
         }
     }
+
+    if (p_plotWindow->isOpen())
+    {
+        while (p_plotWindow->pollEvent(event))
+        {
+            ImGui::SFML::ProcessEvent(*p_plotWindow, event);
+            if (event.type == sf::Event::Closed)
+            {
+                p_plotWindow->close();
+                ImGui::SFML::Shutdown(*p_plotWindow);
+            }
+        }
+    }
     
     sf::Time const dt{ m_deltaClock.restart() };
     ImGui::SFML::Update(*this, dt);
-    if (p_controlWindow->isOpen())
-        ImGui::SFML::Update(*p_controlWindow, dt);
 
     model::sEnvironmentState state{ p_environment->GetSnapshot() };
 
     if (p_controlWindow->isOpen())
     {
+        ImGui::SFML::Update(*p_controlWindow, dt);
+
         sf::Vector2u controlSizes{ p_controlWindow->getSize() };
         ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2((float)controlSizes.x, (float)controlSizes.y), ImGuiCond_Always);
@@ -600,6 +686,35 @@ EnvironmentRenderer::Run(void)
         ImGui::End();
     }
 
+    if (p_plotWindow->isOpen())
+    {
+        ImGui::SFML::Update(*p_plotWindow, dt);
+
+        sf::Vector2u plotSizes{ p_plotWindow->getSize() };
+        ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2((float)plotSizes.x, (float)plotSizes.y), ImGuiCond_Always);
+
+        ImGuiWindowFlags flags{ ImGuiWindowFlags_NoTitleBar
+                            | ImGuiWindowFlags_NoResize
+                            | ImGuiWindowFlags_NoMove
+                            | ImGuiWindowFlags_NoCollapse };
+
+        if (ImGui::Begin("Plots Displays", nullptr, flags))
+        {
+            ImGui::SFML::SetCurrentWindow(*p_plotWindow);
+
+            for (auto agent : p_agentControllers)
+            {
+                if (agent == nullptr)
+                    continue;
+
+                DrawAgentPlot(agent);
+            }
+        }
+
+        ImGui::End();
+    }
+
     ImGui::SFML::SetCurrentWindow(*this);
     sf::RenderWindow::clear();
 
@@ -635,6 +750,13 @@ EnvironmentRenderer::Run(void)
         p_controlWindow->clear();
         ImGui::SFML::Render(*p_controlWindow);
         p_controlWindow->display();
+    }
+
+    if (p_plotWindow->isOpen())
+    {
+        p_plotWindow->clear();
+        ImGui::SFML::Render(*p_plotWindow);
+        p_plotWindow->display();
     }
     return true;
 }
