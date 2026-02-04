@@ -17,7 +17,7 @@ class EnvironmentRenderer :
     public sf::RenderWindow
 {
 public:                                      
-    static EnvironmentRenderer& GetInstance        (int width=0, int height=0, std::string const& title = "PLAYER ENVIRONMENT");
+    static EnvironmentRenderer& GetInstance        (std::string const& title = "PLAYER ENVIRONMENT");
 
                                 EnvironmentRenderer (EnvironmentRenderer&)  = delete;
                                 EnvironmentRenderer (EnvironmentRenderer&&) = delete;
@@ -213,7 +213,7 @@ public:
     void                        Display(model::Entity& player, int height = 30, int width = 30, bool filled = true);
 
 private:
-                                EnvironmentRenderer (int width, int height, std::string const& title = "PLAYER ENVIRONMENT");
+                                EnvironmentRenderer (std::string const& title = "PLAYER ENVIRONMENT");
     
     void                        DrawSimuControls    (void);
     void                        DrawEnvControls     (model::sEnvironmentState const& state);

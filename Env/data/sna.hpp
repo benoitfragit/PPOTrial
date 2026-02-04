@@ -7,8 +7,7 @@ namespace ppo::model {
 
 class Aircraft;
 
-class SNA:
-    public ISNAState
+class SNA: public ISNAState
 {
 public:
     SNA(void) = default;
@@ -47,7 +46,7 @@ public:
     sSNAState   GetSnapshot         (void)                   const noexcept final;
 
 protected:
-    void        UpdateDoubleBuffer  (void);
+    void                    UpdateDoubleBuffer  (void);
 
     Aircraft*               p_aircraft;    
     

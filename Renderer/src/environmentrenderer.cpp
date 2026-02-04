@@ -96,21 +96,22 @@ SetupModernDarkTheme(void)
 }
 
 EnvironmentRenderer&
-EnvironmentRenderer::GetInstance(int width, int height, std::string const& title)
+EnvironmentRenderer::GetInstance(std::string const& title)
 {
-    static EnvironmentRenderer renderer{ width, height, title };
+    static EnvironmentRenderer renderer{ title };
     return renderer;
 }
 
-EnvironmentRenderer::EnvironmentRenderer(int width, int height, std::string const& title):
-    sf::RenderWindow(sf::VideoMode(width, height), title)
+EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
+    sf::RenderWindow(sf::VideoMode(1280, 980), title)
 {
     if (ImGui::SFML::Init(*this))
         setFramerateLimit(60.F);
 
+
     if (p_controlWindow == nullptr)
     {
-        p_controlWindow = std::make_unique<sf::RenderWindow>(sf::VideoMode(480, height), "Training controls");
+        p_controlWindow = std::make_unique<sf::RenderWindow>(sf::VideoMode(320, 980), "Training controls");
         
         if (ImGui::SFML::Init(*p_controlWindow))
             p_controlWindow->setFramerateLimit(60.F);
@@ -122,7 +123,7 @@ EnvironmentRenderer::EnvironmentRenderer(int width, int height, std::string cons
 
     if (p_plotWindow == nullptr)
     {
-        p_plotWindow = std::make_unique<sf::RenderWindow>(sf::VideoMode(480, height), "Training plots");
+        p_plotWindow = std::make_unique<sf::RenderWindow>(sf::VideoMode(320,980), "Training plots");
         
         if (ImGui::SFML::Init(*p_plotWindow))
             p_plotWindow->setFramerateLimit(60.F);

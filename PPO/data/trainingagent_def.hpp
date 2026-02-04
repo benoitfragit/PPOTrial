@@ -14,7 +14,7 @@ TrainingAgent<Policy, Model>::TrainingAgent(Model* model,
                                             std::string const& modelpath, 
                                             IEvaluator* const evaluator):
     p_model{model},
-    p_policy{ std::make_shared<Policy>(Model::STATES.size(), Model::ACTIONS.size()) },
+    p_policy{ std::make_shared<Policy>(m_stateVector.size(), m_actionVector.size()) },
     m_name{name},
     m_modelpath{modelpath},
     p_evaluator{evaluator}
@@ -59,8 +59,7 @@ TrainingAgent<Policy, Model>::Init(void)
     for (auto& reward : m_rewardVector)
         reward = 0.F;
 
-    for (int i = 0; i < Model::STATES.size(); ++i)
-        m_stateVector[i] = (p_model->*Model::STATES[i])();
+    p_model->SetNewState(m_stateVector);
 }
 
 template<typename Policy, typename Model>
@@ -89,8 +88,8 @@ TrainingAgent<Policy, Model>::Update(void) noexcept
         p_rlagent = std::make_unique<RLAgent>(
             p_policy,
             m_modelpath,
-            Model::STATES.size(),
-            Model::ACTIONS.size(),
+            m_stateVector.size(),
+            m_actionVector.size(),
             static_cast<int64_t>(m_internal.m_maxStep),
             m_internal,
             m_stateVector.data(),
@@ -125,8 +124,7 @@ TrainingAgent<Policy, Model>::ChooseAction(void)
         p_rlagent->ChooseAction();
 
     // Apply the action to the player
-    for (int i = 0; i < Model::ACTIONS.size(); ++i)
-        (p_model->*Model::ACTIONS[i])(m_actionVector[i]);
+    p_model->SetNextAction(m_actionVector);
 }
 
 template<typename Policy, typename Model>
@@ -174,9 +172,8 @@ TrainingAgent<Policy, Model>::SetNewState(void)
 
     ret = RewardFunction();
 
-    // building the new state  vetor
-    for (int i = 0; i < Model::STATES.size(); ++i)
-        m_stateVector[i] = (p_model->*Model::STATES[i])();
+    // building the new state  vetor    
+    p_model->SetNewState(m_stateVector);
     
     float const clampedReward{ std::clamp(m_internal.m_reward, -m_internal.m_rewardClamp, m_internal.m_rewardClamp) };
 

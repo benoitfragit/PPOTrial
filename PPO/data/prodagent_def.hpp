@@ -15,7 +15,7 @@ ProdAgent<Policy, Model>::ProdAgent(Model* model, std::string const& name, std::
     p_model{model},
     m_name{name},
     m_modelpath{modelpath},
-    p_policy{ std::make_shared<Policy>(Model::STATES.size(), Model::ACTIONS.size()) }
+    p_policy{ std::make_shared<Policy>(m_stateVector.size(), m_actionVector.size()) }
 {
     if (p_policy == nullptr)
         return;
@@ -37,8 +37,7 @@ ProdAgent<Policy, Model>::Init(void)
     if (p_model == nullptr)
         return;
 
-    for (int i = 0; i < Model::STATES.size(); ++i)
-        m_stateVector[i] = (p_model->*Model::STATES[i])();
+    p_model->SetNewState(m_stateVector);
 }
 
 template<typename Policy,  typename Model>
@@ -55,8 +54,7 @@ ProdAgent<Policy, Model>::ChooseAction(void)
     float const* srcActionPtr = actions_t.data_ptr<float>();
     std::memcpy(m_actionVector.data(), srcActionPtr, sizeof(float) * actions_t.size(1));
 
-    for (int k = 0; k < Model::ACTIONS.size(); ++k)
-        (p_model->*Model::ACTIONS[k])(m_actionVector[k]);
+    p_model->SetNextAction(m_actionVector);
 }
 
 template<typename Policy, typename Model>
@@ -66,9 +64,7 @@ ProdAgent<Policy, Model>::SetNewState(void)
     if (p_model == nullptr)
         return false;
 
-    // building the new state  vetor
-    for (int i = 0; i < Model::STATES.size(); ++i)
-        m_stateVector[i] = (p_model->*Model::STATES[i])();
+    p_model->SetNewState(m_stateVector);
 
     return false;
 }

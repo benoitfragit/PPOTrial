@@ -12,8 +12,8 @@ class TrainingAgent:
     public IAgent
 {
 public:
-    using StateVector  = std::array<float, Model::STATES.size()>;
-    using ActionVector = std::array<float, Model::ACTIONS.size()>;
+    using StateVector  = typename Model::STATES;
+    using ActionVector = typename Model::ACTIONS;
 
                              TrainingAgent           (Model* const model,
                                                       std::string const& name, 

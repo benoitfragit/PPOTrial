@@ -5,6 +5,8 @@ add_library(${PROJECT_NAME}
 	STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/data/actorcriticcategorical.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/actorcriticcategorical.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/data/targetselector.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/targetselector.cpp
 	)
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/data)

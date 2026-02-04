@@ -29,8 +29,7 @@ int main()
 
     serializer.Load();
 
-    // Get the environment renderer instance
-    ppo::renderer::EnvironmentRenderer& environmentRenderer { ppo::renderer::EnvironmentRenderer::GetInstance( 1280, 960, "PLAYGROUND") };
+    ppo::renderer::EnvironmentRenderer& environmentRenderer { ppo::renderer::EnvironmentRenderer::GetInstance("PLAYGROUND") };
     
     // attach the renderer to the environment
     environmentRenderer.SetEnvironment(environment);

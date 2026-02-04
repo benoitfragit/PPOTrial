@@ -12,7 +12,16 @@ class ActorCriticCategoricalNet :
     public ppo::model::ITrainingNet
 {
 public:
-    ActorCriticCategoricalNet(int64_t M_,
+    /// <summary>
+    /// An actor critic network to select a main target among N tracks
+    /// </summary>
+    /// <param name="N_">number of tracks</param>
+    /// <param name="M_">number of features per track</param>
+    /// <param name="actor_dim"></param>
+    /// <param name="critic_dim"></param>
+    /// <param name="d_model_"></param>
+    ActorCriticCategoricalNet(int64_t N_,
+                              int64_t M_,
                               int64_t actor_dim = 64,
                               int64_t critic_dim = 64,
                               int64_t d_model_ = 32);
@@ -27,11 +36,22 @@ public:
     std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
     selectaction(const torch::Tensor& state) final;
 
+    int64_t get_nb_categories(void) const noexcept
+    {
+        return N;
+    };
+
+    int64_t get_nb_features(void) const noexcept
+    {
+        return M;
+    };
+
 private:
     torch::Tensor masked_attention_context(const torch::Tensor& kv,
                                            const torch::Tensor& query,
                                            const torch::Tensor& mask);
-    int64_t M;
+    int64_t N;           // number of tracks
+    int64_t M;           // number of features per track
 
     int64_t d_model;        // per-track latent dim
     int64_t pooled_dim;     // = 2 * d_model
@@ -63,7 +83,8 @@ private:
 class ActorCriticCategoricalNetProd
 {
 public:
-    ActorCriticCategoricalNetProd(int64_t M_,
+    ActorCriticCategoricalNetProd(int64_t N_,
+                                  int64_t M_,
                                   int64_t actor_dim = 64,
                                   int64_t critic_dim = 64,
                                   int64_t d_model = 32);

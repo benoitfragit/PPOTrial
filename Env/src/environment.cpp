@@ -373,6 +373,23 @@ Environment::GetNewEntityId(void)
     return g_id.fetch_add(1, std::memory_order_relaxed);
 }
 
+unsigned int
+Environment::GetNumberOfEntities(void) const noexcept
+{ 
+    if (p_impl == nullptr)
+        return 0;
+
+    return p_impl->m_entities.size();
+}
+
+IEntity* 
+Environment::GetEntityAtIndex(unsigned int index) noexcept
+{
+    if (index >= GetNumberOfEntities())
+        return nullptr;
+
+    return p_impl->m_entities[index].get();
+}
 
 }
 

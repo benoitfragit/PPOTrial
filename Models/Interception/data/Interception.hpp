@@ -26,46 +26,8 @@ public:
     /// </summary>
     RLSNA(void) : ppo::model::SNA(){};
 
-    /// <summary>
-    /// Define the actions-state space
-    /// </summary>
-    float StateNorthRange           (void)          const noexcept;
-    float StateEastRange            (void)          const noexcept;
-    float StateRange                (void)          const noexcept;
-    float StateClosingSpeed         (void)          const noexcept;
-    float StateCosRotation          (void)          const noexcept;
-    float StateSinRotation          (void)          const noexcept;
-    void  ActionSetRotSpeed         (float value)         noexcept;
-    void  ActionSetAcceleration     (float value)         noexcept;
-
-    /// <summary>
-    /// This is a state to be registered in an array
-    /// </summary>
-    using State = float(RLSNA::*)(void) const noexcept;
-
-    constexpr std::array<State, 6> const static STATES
-    {
-        &StateNorthRange,
-        &StateEastRange,
-        &StateRange,
-        &StateClosingSpeed,
-        &StateCosRotation,
-        &StateSinRotation
-    };
-
-    /// <summary>
-    /// this is an action to be registered in an array
-    /// </summary>
-    using Action = void(RLSNA::*)(float);
-
-    /// <summary>
-    /// This is a list of action to be registered in an agent
-    /// </summary>
-    constexpr  std::array<Action, 2> const static ACTIONS
-    {
-        &ActionSetRotSpeed,
-        &ActionSetAcceleration
-    };
+    using STATES = std::array<float, 6>;
+    using ACTIONS = std::array<float, 2>;
 
     enum RewardType
     {
@@ -93,6 +55,9 @@ public:
         "Fuel",
         "MissionFailure"
     };
+
+    void SetNextAction  (ACTIONS const& action) noexcept;
+    void SetNewState    (STATES& state) noexcept;
 };
 
 /// <summary>
@@ -149,8 +114,7 @@ GetNewRandomAircraft(std::string const& name, ppo::model::eEntitySide side, Ty& 
     
     aircraft->SetSNA(sna);
 
-    if constexpr (std::is_same_v<Ty, ppo::model::Environment>)
-        env.AddEntity(aircraft);
+    env.AddEntity(aircraft);
 
     return aircraft;
 }
@@ -173,12 +137,10 @@ GetNewTrainingAircraft(std::string const& name, ppo::model::eEntitySide side, Ty
                         "RLSNA",
                         RESOURCE_RLSNAMODEL_PATH) };
 
-    if constexpr (std::is_same_v<Ty, ppo::model::Environment>)
-    {
-        env.AddEntity(aircraft);
-        env.AddAgent(agent);
-    }
 
+    env.AddEntity(aircraft);
+    env.AddAgent(agent);
+    
     return std::make_pair(aircraft, agent);
 }
 
@@ -197,12 +159,9 @@ GetNewProductionAircraft(std::string const& name, ppo::model::eEntitySide side, 
     modelpath = modelpath / version / "model.pt";
     std::shared_ptr<SNAProdAgent> agent{ std::make_shared<SNAProdAgent>(sna.get(), "ProdAgent",modelpath) };
 
-    if constexpr (std::is_same_v<Ty, ppo::model::Environment>)
-    {
-        env.AddEntity(aircraft);
-        env.AddAgent(agent);
-    }
-
+    env.AddEntity(aircraft);
+    env.AddAgent(agent);
+    
     return std::make_pair(aircraft, agent);
 }
 

@@ -45,18 +45,21 @@ static torch::Tensor masked_mean_max_pool(const torch::Tensor& x,
 namespace ppo::mission {
 
 ActorCriticCategoricalNet::ActorCriticCategoricalNet(
+    int64_t N_,
     int64_t M_,
     int64_t actor_hidden_,
     int64_t critic_hidden_,
-    int64_t d_model_)
-    : M(M_),
-      d_model(d_model_),
-      pooled_dim(2 * d_model_),
-      actor_in_dim(4 * d_model_),
-      critic_in_dim(3 * d_model_),
-      actor_hidden(actor_hidden_),
-      critic_hidden(critic_hidden_)
+    int64_t d_model_) :
+    N{ N_ },
+    M{ M_ },
+    d_model{ d_model_ },
+    pooled_dim{ 2 * d_model_ },
+    actor_in_dim{4 * d_model_},
+    critic_in_dim{3 * d_model_},
+    actor_hidden{actor_hidden_},
+    critic_hidden{critic_hidden_}
 {
+    if (N <= 0) throw std::invalid_argument("N must be > 0");
     if (M <= 0) throw std::invalid_argument("M must be > 0");
 
     enc1 = register_module("enc1", torch::nn::Linear(M, 64));
@@ -131,50 +134,76 @@ ActorCriticCategoricalNet::masked_attention_context(
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
 ActorCriticCategoricalNet::forward(torch::Tensor tracks)
 {
-    const auto B = tracks.size(0);
-    const auto N = tracks.size(1);
+    // tracks : [B, N*M]
+    TORCH_CHECK(tracks.dim() == 2, "tracks must be [B, N*M]");
+    TORCH_CHECK(tracks.size(1) == N * M, "tracks second dim must be N*M");
 
-    auto present = tracks.index({ torch::indexing::Slice(),
-                                  torch::indexing::Slice(),
-                                  M - 1 });
+    const auto B = tracks.size(0);
+
+    // reshape sûr vers [B,N,M]
+    auto tracks3d = tracks.contiguous().view({ B, N, M });
+
+    // ---- mask depuis la feature 'present' (dernière feature) ----
+    auto present = tracks3d.index({
+        torch::indexing::Slice(),
+        torch::indexing::Slice(),
+        M - 1
+        }); // [B,N]
 
     auto mask = present.to(torch::kFloat32).clamp(0.0f, 1.0f);
 
-    auto flat = tracks.contiguous().view({ B * N, M });
+    TORCH_CHECK(mask.sum(1).min().item<float>() > 0.5f,
+        "At least one track must be present per batch sample");
 
-    auto feat = torch::relu(enc2->forward(
-                    torch::relu(enc1->forward(flat))))
-                    .contiguous()
-                    .view({ B, N, d_model });
+    // ---- encoder per-track ----
+    auto flat = tracks3d.contiguous().view({ B * N, M }); // [B*N,M]
 
-    auto pooled = masked_mean_max_pool(feat, mask);
+    auto h1 = torch::relu(enc1->forward(flat)); // [B*N,64]
+    auto feat = torch::relu(enc2->forward(h1))    // [B*N,32]
+        .contiguous()
+        .view({ B, N, d_model });     // [B,N,32]
 
-    auto query = pooled.index({ torch::indexing::Slice(),
-                                torch::indexing::Slice(0, d_model) });
+    // ---- pooling masqué ----
+    auto pooled = masked_mean_max_pool(feat, mask); // [B,64]
 
-    auto ctx = masked_attention_context(feat, query, mask);
+    // ---- query initiale ----
+    auto query = pooled.index({
+        torch::indexing::Slice(),
+        torch::indexing::Slice(0, d_model)
+        }); // [B,32]
 
-    auto actor_in = torch::cat({
-        feat,
-        pooled.unsqueeze(1).expand({ B, N, pooled_dim }),
-        ctx.unsqueeze(1).expand({ B, N, d_model })
-    }, -1);
+    // ---- attention ----
+    auto ctx = masked_attention_context(feat, query, mask); // [B,32]
+
+    // ---- actor ----
+    auto pooled_expand = pooled.unsqueeze(1).expand({ B, N, pooled.size(1) }); // [B,N,64]
+    auto ctx_expand = ctx.unsqueeze(1).expand({ B, N, ctx.size(1) });       // [B,N,32]
+
+    auto actor_in = torch::cat(
+        { feat, pooled_expand, ctx_expand }, -1); // [B,N,128]
 
     auto logits = actor2->forward(
-        torch::relu(actor1->forward(
-            actor_in.contiguous().view({ B * N, actor_in_dim })
-        ))
-    ).view({ B, N });
+        torch::relu(
+            actor1->forward(
+                actor_in.contiguous().view({ B * N, d_model * 4 })
+            )
+        )
+    ).contiguous().view({ B, N }); // [B,N]
 
+    // masque final
     logits = logits + (1.0f - mask) * (-1e9f);
 
+    // ---- critic ----
     auto value = critic2->forward(
-        torch::relu(critic1->forward(
-            torch::cat({ pooled, ctx }, -1)
-        ))
-    );
+        torch::relu(
+            critic1->forward(
+                torch::cat({ pooled, ctx }, -1) // [B,96]
+            )
+        )
+    ); // [B,1]
 
     auto dummy = torch::zeros({ B, 1 }, logits.options());
+
     return { logits, dummy, value };
 }
 
@@ -203,13 +232,14 @@ ActorCriticCategoricalNet::evaluate(
 }
 
 ActorCriticCategoricalNetProd::ActorCriticCategoricalNetProd(
+    int64_t N_,
     int64_t M_,
     int64_t actor_dim,
     int64_t critic_dim,
     int64_t d_model)
 {
     p_policy = std::make_shared<ActorCriticCategoricalNet>(
-        M_, actor_dim, critic_dim, d_model);
+        N_, M_, actor_dim, critic_dim, d_model);
 }
 
 void ActorCriticCategoricalNetProd::load(
@@ -224,7 +254,11 @@ void ActorCriticCategoricalNetProd::load(
 torch::Tensor
 ActorCriticCategoricalNetProd::forward(torch::Tensor state)
 {
+    if (p_policy == nullptr)
+        return {};
+
     torch::NoGradGuard no_grad;
+
     auto [logits, dummy, value] = p_policy->forward(state);
     return logits;
 }

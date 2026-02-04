@@ -6,118 +6,33 @@
 
 namespace ppo::interception {
 
-float
-RLSNA::StateNorthRange(void) const noexcept
+void 
+RLSNA::SetNextAction(ACTIONS const& action) noexcept
 {
-    if (p_aircraft == nullptr)
-        return 0.F;
-
-    auto const& entityState{ p_aircraft->GetEntityState() };
-
-    float       dx{ GetTargetNorthPosition() - entityState.m_x};
-    float const dy{ GetTargetEastPosition() - entityState.m_y};
-    float const d{ sqrt(dx * dx + dy * dy) };
-    dx /= std::max(d, 1e-6F);
-
-    return dx;
+    m_state.m_rotSpeedCmd   = std::clamp(action[0], -1.F, 1.F);
+    m_state.m_accCmd        = std::clamp(action[1], -1.F, 1.F);
 }
 
-float
-RLSNA::StateEastRange(void) const noexcept
+void 
+RLSNA::SetNewState(STATES& state) noexcept
 {
-    if (p_aircraft == nullptr)
-        return 0.F;
-
-    auto const& entityState{ p_aircraft->GetEntityState() };
-
-    float const dx{ GetTargetNorthPosition() - entityState.m_x };
-    float       dy{ GetTargetEastPosition() - entityState.m_y };
-    float const d{ sqrt(dx * dx + dy * dy) };
-    dy /= std::max(d, 1e-6F);
-
-    return dy;
-}
-
-float
-RLSNA::StateRange(void) const noexcept
-{
-    if (p_aircraft == nullptr)
-        return 0.F;
-
     auto const& entityState{ p_aircraft->GetEntityState() };
 
     float const dx{ GetTargetNorthPosition() - entityState.m_x };
     float const dy{ GetTargetEastPosition() - entityState.m_y };
-
-    float d = std::sqrt(dx * dx + dy * dy);
-
-    return 1.0F - std::exp(-d / 24000.F);
-}
-
-float
-RLSNA::StateClosingSpeed(void) const noexcept
-{
-    return std::clamp(GetCLosingSpeed() / 300.F, -1.F, 1.F);
-}
-
-float
-RLSNA::StateCosRotation(void) const noexcept
-{
-    if (p_aircraft == nullptr)
-        return 0.F;
-
-    auto const& entityState{ p_aircraft->GetEntityState() };
-
-    float const dx{ GetTargetNorthPosition() - entityState.m_x };
-    float const dy{ GetTargetEastPosition() - entityState.m_y };
-
-    float const d{ std::sqrt(dx * dx + dy * dy) };
-
+    float const d{ sqrt(dx * dx + dy * dy) };
     float const ux{ dx / (d + 1e-6F) };
     float const uy{ dy / (d + 1e-6F) };
-
-    // 1. computing the kill probability
     float az = atan2(uy, ux);
     az = ppo::model::wrapMinusPi2Pi(az);
     az = ppo::model::wrapMinusPi2Pi(az - entityState.m_rotation);
 
-    return cos(az);
-}
-
-float
-RLSNA::StateSinRotation(void) const noexcept
-{
-    if (p_aircraft == nullptr)
-        return 0.F;
-
-    auto const& entityState{ p_aircraft->GetEntityState() };
-
-    float const dx{ GetTargetNorthPosition() - entityState.m_x };
-    float const dy{ GetTargetEastPosition() - entityState.m_y };
-
-    float const d{ std::sqrt(dx * dx + dy * dy) };
-
-    float const ux{ dx / (d + 1e-6F) };
-    float const uy{ dy / (d + 1e-6F) };
-
-    // 1. computing the kill probability
-    float az = atan2(uy, ux);
-    az = ppo::model::wrapMinusPi2Pi(az);
-    az = ppo::model::wrapMinusPi2Pi(az - entityState.m_rotation);
-
-    return sin(az);
-}
-
-void
-RLSNA::ActionSetRotSpeed(float value)                 noexcept
-{
-    m_state.m_rotSpeedCmd = std::clamp(value, -1.F, 1.F);
-}
-
-void
-RLSNA::ActionSetAcceleration(float value) noexcept
-{
-    m_state.m_accCmd = std::clamp(value, -1.F, 1.F);
+    state[0] = dx / std::max(d, 1e-6F);
+    state[1] = dy / std::max(d, 1e-6F);
+    state[2] = 1.0F - std::exp(-d / 24000.F);
+    state[3] = std::clamp(GetCLosingSpeed() / 300.F, -1.F, 1.F);
+    state[4] = cos(az);
+    state[5] = sin(az);
 }
 
 bool

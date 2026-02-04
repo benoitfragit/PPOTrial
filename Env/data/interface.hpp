@@ -53,6 +53,7 @@ struct sEntityState
 };
 
 struct sSNAState {
+    EntityId        m_mainTarget{ ULLONG_MAX };
     EntityId        m_target{ ULLONG_MAX };
     float           m_pk{ 0.F };
     float           m_target_x{ 0.F };

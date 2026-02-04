@@ -41,6 +41,9 @@ public:
     float             GetMaxNorth           (void) const noexcept;
     float             GetMaxEast            (void) const noexcept;
 
+    unsigned int      GetNumberOfEntities   (void) const noexcept;
+    IEntity*          GetEntityAtIndex      (unsigned int index) noexcept;
+
     void              SetMaxRange           (float north, float east);
     void              SetTimeStep           (float timestep);
     

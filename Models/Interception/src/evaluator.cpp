@@ -102,6 +102,9 @@ struct Evaluator::Impl :
         return g_id.fetch_add(1, std::memory_order_relaxed);
     }
 
+    void AddEntity(std::shared_ptr<ppo::model::IEntity> entity) {};
+    void AddAgent(std::shared_ptr<ppo::model::IAgent> agent) {};
+
     // this is the thread launch to perform the evaluation
     std::thread  m_thread;
 

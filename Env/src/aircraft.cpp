@@ -102,7 +102,6 @@ Aircraft::SetTarget(EntityId targetId) noexcept
     p_sna->SetTarget(targetId);
 }
 
-
 SNA const& 
 Aircraft::GetSNA(void)                             const noexcept 
 {
