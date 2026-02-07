@@ -1,0 +1,48 @@
+{
+    "Scenario" : {
+        "entities": {
+
+            "blue": {
+                "type": "Aircraft",
+                "side": "Friend",
+                "target": "red",
+                "agent": "SNATrainingAgent"
+            },
+
+            "red": {
+                "type": "Aircraft",
+                "side": "Hostile",
+                "target": "obj1",
+                "agent": "SNAProdAgent"
+            },
+
+            "red2": {
+                "type": "Aircraft",
+                "side": "Hostile",
+                "target": "blue",
+                "agent": "SNAProdAgent"
+            },
+
+            "obj1": {
+                "type": "Objective",
+                "side": "Friend",
+                "target": "",
+                "agent": ""
+            },
+
+            "obj2": {
+                "type": "Objective",
+                "side": "Neutral",
+                "target": "",
+                "agent": ""
+            },
+
+            "samred": {
+                "type": "SAM",
+                "side": "Hostile",
+                "target": "",
+                "agent": ""
+            }
+        }
+    }
+}

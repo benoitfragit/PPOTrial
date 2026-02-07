@@ -23,20 +23,19 @@ DrawQuadBetweenLine(sf::Vector2f const& a, sf::Vector2f const& b, sf::Color cons
     vertices.append(sf::Vertex(b + offset, color));
 }
 
-ObjectiveRenderer::ObjectiveRenderer(model::IEntityState* player, int radius, bool filled) :
+ObjectiveRenderer::ObjectiveRenderer(int radius, bool filled) :
     m_radius{ static_cast<float>(radius) },
-    m_filled{ filled },
-    p_player{ player }
+    m_filled{ filled }
 {
 }
 
 void
-ObjectiveRenderer::Run(void) noexcept
+ObjectiveRenderer::Run(entt::registry& registry, entt::entity entity) noexcept
 {
-    if (p_player == nullptr)
+    if (!registry.any_of<ppo::model::sEntityState>(entity))
         return;
 
-    model::sEntityState state{ p_player->GetSnapshot() };
+    auto const [state] = registry.view<ppo::model::sEntityState>().get(entity);
 
     auto&       renderer{ EnvironmentRenderer::GetInstance() };
     auto const& view    { renderer.GetView() };

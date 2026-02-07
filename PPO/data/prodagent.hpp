@@ -25,9 +25,10 @@ public:
     void                     ChooseAction(void) override;
     bool                     IsTrained(void)                  const noexcept;
     bool                     SetNewState(void) override;
-    std::string const& GetName(void)                  const noexcept;
 
-    bool                     Update(void) noexcept override { return false; };
+    void                     ProcessCommand(sAgentRealTimeCommand const&) noexcept override { return; };
+
+    sAgentStateSnaphot       GetSnapshot(void) const noexcept override;
 
 private:
     Model*                              p_model         { nullptr };
@@ -37,6 +38,7 @@ private:
     std::filesystem::path               m_modelpath     { "" };
     std::shared_ptr<Policy>             p_policy         { nullptr };
     torch::Tensor                       m_states_t      { torch::from_blob(m_stateVector.data(), {1, std::tuple_size<StateVector>::value}, torch::kFloat) };
+    unsigned long long                  m_id            {GetNewUniqId()};
 };
 
 } /* ppo::model */

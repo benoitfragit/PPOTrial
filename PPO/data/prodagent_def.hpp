@@ -78,10 +78,11 @@ ProdAgent<Policy, Model>::IsTrained(void)                  const noexcept
 
 
 template<typename Policy, typename Model>
-std::string const& 
-ProdAgent<Policy, Model>::GetName(void)                  const noexcept
+sAgentStateSnaphot
+ProdAgent<Policy, Model>::GetSnapshot(void) const noexcept
 {
-    return m_name;
+    static const sAgentStateSnaphot snapshot{};
+    return snapshot;
 }
 
 } /* ppo::model */

@@ -1,15 +1,20 @@
 #include "serializer.hpp"
-#include "serialization.hpp"
 #include <unordered_map>
 #include <vector>
 
 namespace ppo::serialization {
 
+json 
+Serializer::Parse(std::filesystem::path file)
+{
+    return json::parse(std::ifstream(file));
+}
+
 struct Serializer::Impl 
 {
     std::filesystem::path                                                    m_path{};
-    std::unordered_map<std::filesystem::path, std::vector<TomlLoadFunction>> m_loadfunctions{};
-    std::unordered_map<std::filesystem::path, std::vector<TomlSaveFunction>> m_savefunctions{};
+    std::unordered_map<std::filesystem::path, std::vector<JsonLoadFunction>> m_loadfunctions{};
+    std::unordered_map<std::filesystem::path, std::vector<JsonSaveFunction>> m_savefunctions{};
 };
 
 Serializer::Serializer(void) :
@@ -36,7 +41,7 @@ Serializer::SetPath(std::filesystem::path path)
 }
 
 void 
-Serializer::Register(std::filesystem::path path, TomlLoadFunction load, TomlSaveFunction save)
+Serializer::Register(std::filesystem::path path, JsonLoadFunction load, JsonSaveFunction save)
 {
     if (p_impl == nullptr)
         return;
@@ -84,11 +89,10 @@ Serializer::Load(void)
         if (!std::filesystem::exists(filepath))
             continue;
 
-        auto tbl = toml::parse_file(filepath.c_str());
-        TomlReadArchive ar{ tbl };
+        auto content = Parse(filepath.string());
 
         for (auto& load : loads)
-            load(ar);
+            load(content);
     }
 }
 
@@ -105,13 +109,12 @@ Serializer::Save(void)
     // crearte an archive
     for (auto& [filepath, saves] : p_impl->m_savefunctions)
     {
-        toml::table tbl;
-        TomlWriteArchive ar{ tbl };
+        json doc{};
 
         for (auto& save : saves)
-            save(ar);
+            save(doc);
 
-        std::ofstream(filepath) << tbl;
+        std::ofstream(filepath) << doc.dump(4);
     }
 }
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "entt/entt.hpp"
+
 namespace ppo::renderer {
 
 class IRenderer
@@ -7,7 +9,7 @@ class IRenderer
 public:
     virtual ~IRenderer(void) = default;
 
-    virtual void Run(void) noexcept = 0;
+    virtual void Run(entt::registry& registry, entt::entity entity) noexcept = 0;
 };
 
 } /* ppo::renderer */

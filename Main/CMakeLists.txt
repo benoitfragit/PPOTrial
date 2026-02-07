@@ -9,14 +9,22 @@ target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/da
 
 target_link_libraries(${PROJECT_NAME}
     PUBLIC
-		GenericEnv
+        GenericEntities
 		GenericSerializer
 		GenericPPO
+        GenericEnv
 		GenericRenderer
 		Interception)
+		
+add_dependencies(${PROJECT_NAME} GenericEntities 
+								 GenericSerializer 
+								 GenericPPO
+								 GenericEnv
+								 GenericRenderer
+								 Interception)
 
-set(RESOURCE_TOML_PATH "${CMAKE_SOURCE_DIR}/resources/toml")
-target_compile_definitions(${PROJECT_NAME} PRIVATE RESOURCE_TOML_PATH="${RESOURCE_TOML_PATH}")
+set(RESOURCE_PATH "${CMAKE_SOURCE_DIR}/resources/settings")
+target_compile_definitions(${PROJECT_NAME} PRIVATE RESOURCE_PATH="${RESOURCE_PATH}")
 
 # For Windows: ensure DLLs are copied
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD

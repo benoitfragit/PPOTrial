@@ -23,6 +23,7 @@ target_link_libraries(${PROJECT_NAME}
         sfml-graphics
         opengl32
         glu32
+        GenericEntities
         GenericEnv
         GenericPPO)
 

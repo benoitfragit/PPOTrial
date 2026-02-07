@@ -3,7 +3,6 @@ project(GenericSerializer LANGUAGES CXX)
 
 add_library(${PROJECT_NAME}
 	STATIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/serialization.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/serializer.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/serializer.cpp
 )
@@ -12,5 +11,5 @@ target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/da
 
 target_link_libraries(${PROJECT_NAME}
     PUBLIC
-        tomlplusplus::tomlplusplus
+        nlohmann_json::nlohmann_json
 )

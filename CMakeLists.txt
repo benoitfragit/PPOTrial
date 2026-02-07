@@ -102,19 +102,30 @@ target_link_libraries(imgui-sfml PUBLIC
 )
 
 # ---------------------------------------------------------
-#                Fetch TOML++
+#                Fetch JSON
 # ---------------------------------------------------------
 FetchContent_Declare(
-    tomlplusplus
-    GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
-    GIT_TAG v3.0.1
+    json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.12.0
 )
-FetchContent_MakeAvailable(tomlplusplus)
+FetchContent_MakeAvailable(json)
 
+# ---------------------------------------------------------
+#                Fetch ENTT
+# ---------------------------------------------------------
+FetchContent_Declare(
+    entt
+    GIT_REPOSITORY https://github.com/skypjack/entt.git
+    GIT_TAG        v3.16.0
+)
+
+FetchContent_MakeAvailable(entt)
 
 add_subdirectory(Serialization)
-add_subdirectory(Env)
+add_subdirectory(Entities)
 add_subdirectory(PPO)
+add_subdirectory(Env)
 add_subdirectory(Renderer)
 add_subdirectory(Models)
 add_subdirectory(Main)

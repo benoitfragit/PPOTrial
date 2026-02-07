@@ -4,9 +4,11 @@
 #include <string>
 #include <filesystem>
 
+#include "entt/entt.hpp"
+
 namespace ppo::model {
 
-using EntityId = unsigned long long;
+using EntityId = entt::entity;
 
 enum class eEnvironmentState : unsigned char {
     INIT = 0,
@@ -26,9 +28,11 @@ enum class eEntitySide :
 enum class eEntityType :
     unsigned char
 {
-    Objective = 0,
-    Missile = 1,
-    Aircraft = 2
+    None = 0,
+    Objective = 1,
+    Missile = 2,
+    Aircraft = 3,
+    SAM = 4
 };
 
 struct sEnvironmentState
@@ -40,7 +44,7 @@ struct sEnvironmentState
 
 struct sEntityState
 {
-    EntityId        m_entityId  { ULLONG_MAX };
+    EntityId        m_entityId  { entt::null };
     float           m_x         { 0.F  };
     float           m_y         { 0.F  };  
     float           m_dx        { 0.F };
@@ -53,8 +57,7 @@ struct sEntityState
 };
 
 struct sSNAState {
-    EntityId        m_mainTarget{ ULLONG_MAX };
-    EntityId        m_target{ ULLONG_MAX };
+    EntityId        m_target{ entt::null };
     float           m_pk{ 0.F };
     float           m_target_x{ 0.F };
     float           m_target_y{ 0.F };
@@ -67,10 +70,13 @@ struct sSNAState {
     float           m_escapezone{ 0.F };
     float           m_noescapezone{ 0.F };
     float           m_maxShootAngle{ 0.F };
-    float           m_accCmd{ 0.F };
-    float           m_rotSpeedCmd{ 0.F };
     unsigned short  m_nbmissiles{ 0 };
     unsigned short  m_maxnbmissiles{ 0 };
+};
+
+struct sSNAControlState {
+    float m_accCmd{ 0.F };
+    float m_rotSpeedCmd{ 0.F };
 };
 
 struct sFlightModelState
@@ -86,40 +92,20 @@ struct sFlightModelState
     float m_maxfuel{ 0.F };
 };
 
-class ISNAState
-{
-public:
-    virtual                   ~ISNAState(void) = default;
-    virtual sSNAState        GetSnapshot(void) const noexcept = 0;
-};
-
-class IFlightModelState
-{
-public:
-    virtual                   ~IFlightModelState(void) = default;
-    virtual sFlightModelState    GetSnapshot(void) const noexcept = 0;
-};
-
-class IEntityState
-{
-public:
-    virtual                    ~IEntityState(void) = default;
-    virtual sEntityState       GetSnapshot(void) const noexcept = 0;
-    virtual ISNAState*         GetISNA(void) noexcept = 0;
-    virtual IFlightModelState* GetIFlightModel(void) noexcept = 0;
-};
-
 static constexpr int const CHECKPOINT_DIMENSION = 6;
 using CheckPointBuffer = std::array<float, CHECKPOINT_DIMENSION>;
-class ICheckPointBuffer
-{
-public:
-    virtual                   ~ICheckPointBuffer(void) = default;
-    virtual CheckPointBuffer GetCheckpoint(void) noexcept = 0;
-    virtual void             SetCheckpoint(CheckPointBuffer const& buffer) noexcept = 0;
+
+struct sEntityCheckPoint {
+    std::string                                 m_name{ "" };
+    int                                         m_index{ 0 };
+    std::vector<ppo::model::CheckPointBuffer>   m_buffers{};
 };
 
-struct sEvaluatorState:  public sEnvironmentState
+struct sEvaluatorName {
+    std::string  m_filename{ "" };
+};
+
+struct sEvaluatorState
 {
     unsigned int m_nbstep{ 0 };
     unsigned int m_nbtests{ 0 };
@@ -135,26 +121,5 @@ public:
     virtual void Stop(void) = 0;
     virtual sEvaluatorState GetSnapshot(void) const noexcept = 0;
 };
-
-class IEntity {
-public:
-    virtual          ~IEntity(void) = default;
-    virtual void     Init       (void) = 0;
-    virtual void     Run        (void) = 0;
-    virtual EntityId GetEntityId(void) const noexcept = 0;
-    virtual void     UpdateEnv  (void) const noexcept = 0;
-};
-
-class IAgent {
-public:
-    virtual                     ~IAgent(void) = default;
-
-    virtual void                Init(void) = 0;
-    virtual void                ChooseAction(void) = 0;
-    virtual bool                SetNewState(void) = 0;
-    virtual bool                Update(void)  noexcept = 0;
-};
-
-
 
 } /* ppo::model */

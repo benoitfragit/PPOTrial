@@ -16,14 +16,14 @@ class EntityRenderer :
     public sf::ConvexShape
 {
 public:
-                     EntityRenderer(model::IEntityState* player, int height, int width, bool filled = true);
+                     EntityRenderer(int height, int width, bool filled = true);
 
                      EntityRenderer(EntityRenderer&)  = delete;
                      EntityRenderer(EntityRenderer&&) = delete;
     EntityRenderer&  operator=     (EntityRenderer&)  = delete;
     EntityRenderer&  operator=     (EntityRenderer&&) = delete;
 
-    void             Run           (void) noexcept final;
+    void             Run           (entt::registry& registry, entt::entity entity) noexcept final;
 
 private:
     void             DrawShootingRanges(model::sEntityState const& state, float radius, sf::Color const color, float startangle=-90.F* DEG_TO_RAD, float endangle=90.F * DEG_TO_RAD, unsigned char nbPoint = 10);
@@ -33,8 +33,6 @@ private:
     float                   m_height{ 0.F };
     sf::Color               m_color { sf::Color::Transparent};
     bool                    m_filled{ false };
-
-    model::IEntityState*    p_player{ nullptr };
 };
 
 

@@ -6,7 +6,7 @@
 #include <memory>
 #include <filesystem>
 
-namespace ppo::interception {
+namespace rl {
 
 /// <summary>
 /// This class is written to evaluate an agent 
@@ -31,10 +31,9 @@ public:
 
     ppo::model::sEvaluatorState GetSnapshot(void) const noexcept final;
 
-
 private:
     struct Impl;
     std::unique_ptr<Impl> p_impl{ nullptr };
 };
 
-} /* ppo::interception */
+} /* rl */

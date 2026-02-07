@@ -7,7 +7,7 @@
 
 #include <torch/torch.h>
 
-namespace ppo::interception {
+namespace rl {
 
 /// <summary>
 /// This network is going to be use by the training agent for the training
@@ -49,4 +49,4 @@ private:
     std::shared_ptr<ActorCriticNet> p_policy{ nullptr };
 };
 
-} /* ppo::interception */
+} /* rl */

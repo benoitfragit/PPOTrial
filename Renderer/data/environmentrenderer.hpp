@@ -68,160 +68,29 @@ public:
 
     };
 
-    class IAgentController
-    {
-    public:
-
-        virtual ~IAgentController(void) = default;
-
-        virtual std::string const&      GetName     (void) const noexcept = 0;
-        virtual void                    SetRewardClamp(void) noexcept = 0;
-        virtual float&                  GetRewardClamp(void) noexcept = 0;
-
-        virtual void                    SetRewardScaling(unsigned char type) noexcept = 0;
-        virtual int                     GetNumberOfRewards(void) const noexcept = 0;
-        virtual float&                  GetRewardScaling(int type) noexcept = 0;
-        virtual std::string const&      GetRewardName(unsigned char type) noexcept = 0;
-
-        virtual int&                    GetRolloutBufferSize(void) noexcept = 0;
-        virtual ppo::model::sCommonAgentState GetSnapshot (std::vector<float>& rewards) noexcept = 0;
-        virtual void                    SetRolloutBufferSize(void) noexcept = 0;
+    struct AgentController {
         using Plot = CircularBuffer<5000>;
         using Plots = std::array<Plot, 4>;
-        virtual Plots const& GetPlots(void) const noexcept = 0;
 
-        virtual void Start(void) noexcept = 0;
-        virtual void Stop(void) noexcept = 0;   
+        Plots               m_plots{};
+        bool                m_started{ false };
+        std::vector<float>  m_scalings{};
+        int                 m_rollout{ 0 };
+        float               m_clamp{ 0.F };
+        unsigned long long  m_id{ 0 };
     };
-
-    template <typename Obj>
-    class AgentController final :
-        public IAgentController
-    {
-    public:
-        explicit AgentController(Obj* obj):
-            p_obj{obj}
-        {
-            if (p_obj)
-            {
-                m_name = p_obj->GetName();
-
-                std::vector<float> rewards{};
-                auto const state = p_obj->GetSnapshot(rewards);
-                m_rewardScalings = p_obj->GetRewardScalings();
-                m_rewardNames    = p_obj->GetRewardNames();
-                m_rewardClamp = state.m_rewardClamp;
-                m_rolloutBufferSize = state.m_maxStep;
-            }
-        };
-
-        std::string const& 
-            GetName(void) const noexcept
-        {
-            return m_name;
-        };
-
-        void                    SetRewardClamp(void) noexcept
-        {
-            if (p_obj != nullptr)
-                p_obj->SetRewardClampValue(m_rewardClamp);
-        };
-
-        float& 
-            GetRewardClamp(void) noexcept
-        {
-            return m_rewardClamp;
-        };
-
-        void                    SetRewardScaling(unsigned char type) noexcept
-        {
-            if (p_obj != nullptr)
-                p_obj->SetRewardScaling(type, m_rewardScalings[type]);
-        };
-
-        float& GetRewardScaling(int type) noexcept
-        {
-            return m_rewardScalings[type];
-        };
-
-        std::string const& GetRewardName(unsigned char type) noexcept
-        {
-            return m_rewardNames[type];
-        };
-
-        int                 GetNumberOfRewards(void) const noexcept
-        {
-            return m_rewardScalings.size();
-        };
-
-        int& 
-            GetRolloutBufferSize(void) noexcept
-        {
-            return m_rolloutBufferSize;
-        };
-
-        ppo::model::sCommonAgentState 
-            GetSnapshot(std::vector<float>& rewards) noexcept
-        {
-            auto const snapshot{ p_obj->GetSnapshot(rewards) };
-
-            if (m_started && !snapshot.m_training)
-            {
-                m_plots[0].push(snapshot.m_loss);
-                m_plots[1].push(snapshot.m_actorloss);
-                m_plots[2].push(snapshot.m_valueloss);
-                m_plots[3].push(snapshot.m_entropyloss);
-            }
-
-            return snapshot;
-        };
-
-        void 
-            SetRolloutBufferSize(void) noexcept
-        {
-            if (p_obj != nullptr)
-                p_obj->SetRolloutBufferSize(m_rolloutBufferSize);
-        };
-
-        Plots const& GetPlots(void) const noexcept
-        {
-            return m_plots;
-        };
-
-        void Start(void) noexcept final { m_started = true;};
-        void Stop (void) noexcept final { m_started = false;};
-    private:
-        Obj*                     p_obj{ nullptr };
-        std::string              m_name{ "" };
-        float                    m_rewardClamp{0.F};
-        int                      m_rolloutBufferSize{ 4096 };
-        std::vector<float>       m_rewardScalings{};
-        std::vector<std::string> m_rewardNames{};       
-        Plots                    m_plots{};
-        bool                     m_started{ false };
-    };
-
-    template<typename Obj>
-    void                        Display(ppo::model::Entity& player, Obj* obj = nullptr, int height = 30, int width = 30, bool filled = true)
-    {
-        if (obj != nullptr)
-            p_agentControllers.push_back(std::make_shared<AgentController<Obj>>(obj));
-
-        Display(player, height, width, filled);
-    };
-
-    void                        Display(model::Entity& player, int height = 30, int width = 30, bool filled = true);
 
 private:
                                 EnvironmentRenderer (std::string const& title = "PLAYER ENVIRONMENT");
     
+    std::shared_ptr<AgentController> GetAgentController(unsigned long long id);
     void                        DrawSimuControls    (void);
-    void                        DrawEnvControls     (model::sEnvironmentState const& state);
-    void                        DrawRewardControls  (std::shared_ptr<IAgentController> agent);
-    void                        DrawTrainingControls(std::shared_ptr<IAgentController> agent);
-    void                        DrawEntityInfo      (ppo::model::IEntityState* const player);
-    void                        DrawAgentInfo       (std::shared_ptr<IAgentController> agent);
-    void                        DrawAgentPlot       (std::shared_ptr<IAgentController> agent); 
+    void                        DrawEnvControls     (void);
+    void                        DrawRewardControls  (std::shared_ptr<AgentController> agent,  ppo::model::sAgentStateSnaphot const& state);
+    void                        DrawTrainingControls(std::shared_ptr<AgentController> agent, ppo::model::sAgentStateSnaphot const& state);
+    void                        DrawEntityInfo      (entt::registry const& snapshot, entt::entity entity);
+    void                        DrawAgentInfo       (ppo::model::sAgentStateSnaphot const& state);
+    void                        DrawAgentPlot       (std::shared_ptr<AgentController> agent, ppo::model::sAgentStateSnaphot const& state);
 
     std::unique_ptr<sf::RenderWindow>   p_controlWindow {nullptr};
     std::unique_ptr<sf::RenderWindow>   p_plotWindow    { nullptr };    
@@ -230,14 +99,14 @@ private:
     sf::RectangleShape                  m_fightingArea  {};
     float                               m_scaleKm       { 1000.F };
     ppo::model::Environment*            p_environment   {nullptr};
-    using Renderers = std::map<model::IEntityState*, std::shared_ptr<IRenderer>>;
+    using Renderers = std::map<entt::entity, std::shared_ptr<IRenderer>>;
     Renderers                           p_renderers     {};
-    using AgentControllers = std::vector<std::shared_ptr<IAgentController>>;
-    AgentControllers                    p_agentControllers{};
+    std::map<unsigned long long, std::shared_ptr<AgentController>> p_agents{};
 
     int                                 m_currentScaleLevel{1};
     float                               m_areawidth        {150};
     float                               m_timestep         {20};
+    float                               m_linewidth        {1.F};
 };
 
 }   /* ppo::renderer */

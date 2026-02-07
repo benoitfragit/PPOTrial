@@ -143,10 +143,13 @@ EnvironmentRenderer::SetEnvironment(ppo::model::Environment& env) noexcept
 
     if (p_environment != nullptr)
     {
-        auto const state{ p_environment->GetSnapshot() };
-
-        m_areawidth = state.m_maxEast / GetScaleWorld();
-        m_timestep  = state.m_dt * 1000.F;
+        entt::registry const& snapshot{ p_environment->GetSnapshot() };
+        if (snapshot.ctx().contains<ppo::model::sEnvironmentState>())
+        {
+            auto const& envState{ snapshot.ctx().get<ppo::model::sEnvironmentState>() };
+            m_areawidth = envState.m_maxEast / GetScaleWorld();
+            m_timestep = envState.m_dt * 1000.F;
+        }
     }
 }
 
@@ -165,39 +168,7 @@ EnvironmentRenderer::GetScaleWorld(void) const noexcept
 float 
 EnvironmentRenderer::GetLineWidth(void) const noexcept
 {
-    float linewidth{ 1.F };
-    if (p_environment == nullptr)
-        return linewidth;
-
-    model::sEnvironmentState state{ p_environment->GetSnapshot() };
-    float sx{ state.m_maxEast / GetScaleWorld() };
-    linewidth = sx / 250.F;
-    return linewidth;
-}
-
-void
-EnvironmentRenderer::Display(model::Entity& player, int height, int width, bool filled)
-{
-    if (p_environment == nullptr)
-        return;
-
-    if (auto Iter{ p_renderers.find(&player) };
-        Iter == p_renderers.end())
-    {
-        switch (auto const state{ player.GetSnapshot() };
-                state.m_type)
-        {
-            case ppo::model::eEntityType::Aircraft:
-            case ppo::model::eEntityType::Missile:
-                p_renderers[&player] = std::make_shared<EntityRenderer>(&player, height, width, filled);
-                break;       
-            case ppo::model::eEntityType::Objective:
-                p_renderers[&player] = std::make_shared<ObjectiveRenderer>(&player, width, filled);
-                break;
-            default:
-                break;
-        }
-    }
+    return m_linewidth;
 }
 
 void 
@@ -215,9 +186,9 @@ EnvironmentRenderer::DrawSimuControls(void)
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.1f, 0.6f, 0.1f, 1.0f));
     if (ImGui::Button("Play"))
     {
-        for (auto& agent: p_agentControllers)
+        for (auto [_, agent] : p_agents)
             if (agent != nullptr)
-                agent->Start();
+                agent->m_started = true;
 
         p_environment->Play();
     }
@@ -232,9 +203,9 @@ EnvironmentRenderer::DrawSimuControls(void)
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.75f, 0.55f, 0.15f, 1.0f));
     if (ImGui::Button("Pause"))
     {
-        for (auto& agent : p_agentControllers)
+        for (auto [_, agent] : p_agents)
             if (agent != nullptr)
-                agent->Stop();
+                agent->m_started = false;
 
         p_environment->Pause();
     }
@@ -249,9 +220,9 @@ EnvironmentRenderer::DrawSimuControls(void)
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.65f, 0.15f, 0.15f, 1.0f));
     if (ImGui::Button("Stop"))
     {
-        for (auto& agent : p_agentControllers)
+        for (auto [_, agent] : p_agents)
             if (agent != nullptr)
-                agent->Stop();
+                agent->m_started = false;
 
         p_environment->Stop();
     }
@@ -261,7 +232,7 @@ EnvironmentRenderer::DrawSimuControls(void)
 }
 
 void 
-EnvironmentRenderer::DrawEnvControls(model::sEnvironmentState const& state)
+EnvironmentRenderer::DrawEnvControls(void)
 {
     if (p_environment == nullptr)
         return;
@@ -299,10 +270,13 @@ EnvironmentRenderer::DrawEnvControls(model::sEnvironmentState const& state)
 }
 
 void
-EnvironmentRenderer::DrawRewardControls(std::shared_ptr<IAgentController> agent)
+EnvironmentRenderer::DrawRewardControls(std::shared_ptr<AgentController> agent, ppo::model::sAgentStateSnaphot const& state)
 {
-    if (agent == nullptr)
+    if (p_environment == nullptr || agent == nullptr)
         return;
+
+    agent->m_clamp    = state.m_common.m_rewardClamp;
+    agent->m_scalings = state.m_scalings;
 
     if (ImGui::BeginTable("##agentinfo", 2,
         ImGuiTableFlags_SizingStretchProp))
@@ -316,20 +290,33 @@ EnvironmentRenderer::DrawRewardControls(std::shared_ptr<IAgentController> agent)
         ImGui::Text("Reward clamp");
         ImGui::TableSetColumnIndex(1);
         ImGui::SetNextItemWidth(-FLT_MIN);
-        if (ImGui::SliderFloat("##clamp", &agent->GetRewardClamp(), 0.5F, 10.F))
-            agent->SetRewardClamp();
+        if (ImGui::SliderFloat("##clamp", &agent->m_clamp, 0.5F, 10.F))
+        {
+            ppo::model::sAgentRealTimeCommand command{};
+            command.m_id = agent->m_id;
+            command.m_rewardClamp = agent->m_clamp;
+            command.m_type = ppo::model::sAgentRealTimeCommand::eTypeCommand::RewardClamp;
+            p_environment->AddAgentCommand(command);
+        }
 
-        for (auto i = 0; i < agent->GetNumberOfRewards(); ++i)
+        for (auto i = 0; i < state.m_scalings.size(); ++i)
         {
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
-            ImGui::Text(agent->GetRewardName(i).c_str());
+            ImGui::Text(state.m_rewardnames[i].c_str());
             ImGui::TableSetColumnIndex(1);
             ImGui::PushID(i);
             ImGui::SetNextItemWidth(-FLT_MIN);
             if (ImGui::SliderFloat("##i",
-                &(agent->GetRewardScaling(i)), 0.F, 1.F))
-                agent->SetRewardScaling(i);
+                &agent->m_scalings[i], 0.F, 1.F))
+            {
+                ppo::model::sAgentRealTimeCommand command{};
+                command.m_id = agent->m_id;
+                command.m_rewardScaling = agent->m_scalings[i];
+                command.m_rewardScalingType = i;
+                command.m_type = ppo::model::sAgentRealTimeCommand::eTypeCommand::RewardScaling;
+                p_environment->AddAgentCommand(command);
+            }
             ImGui::PopID();
         }
 
@@ -339,24 +326,33 @@ EnvironmentRenderer::DrawRewardControls(std::shared_ptr<IAgentController> agent)
 }
 
 void
-EnvironmentRenderer::DrawTrainingControls(std::shared_ptr<IAgentController> agent)
+EnvironmentRenderer::DrawTrainingControls(std::shared_ptr<AgentController> agent, ppo::model::sAgentStateSnaphot const& state)
 {
-    if (agent == nullptr)
+    if (agent == nullptr || p_environment == nullptr)
         return;
 
-    if (ImGui::SliderInt("Rollout Buffer", &agent->GetRolloutBufferSize(), 1, 10000))
-        agent->SetRolloutBufferSize();
+    agent->m_rollout = state.m_common.m_maxStep;
+
+    if (ImGui::SliderInt("Rollout Buffer", &agent->m_rollout, 1, 10000))
+    {
+        ppo::model::sAgentRealTimeCommand command{};
+        command.m_id = agent->m_id;
+        command.m_rolloutBuffer = agent->m_rollout;
+        command.m_type = ppo::model::sAgentRealTimeCommand::eTypeCommand::RolloutBuffer;
+        p_environment->AddAgentCommand(command);
+    }
 }
 
 void
-EnvironmentRenderer::DrawEntityInfo(ppo::model::IEntityState* const player)
+EnvironmentRenderer::DrawEntityInfo(entt::registry const& snapshot, entt::entity entity)
 {
-    if (player == nullptr)
+    if (!snapshot.any_of<ppo::model::sEntityState>(entity))
         return;
 
-    auto const playerState = player->GetSnapshot();
+    auto const [playerState] = snapshot.view<ppo::model::sEntityState>().get(entity);
+
     std::string playerLabel{ "Entity" };
-    playerLabel.append(std::to_string(playerState.m_entityId));
+    playerLabel.append(std::to_string(static_cast<entt::id_type>(playerState.m_entityId)));
     if (ImGui::BeginTable(playerLabel.c_str(), 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
     {
         ImGui::TableSetupColumn("Properties");
@@ -367,7 +363,7 @@ EnvironmentRenderer::DrawEntityInfo(ppo::model::IEntityState* const player)
         ImGui::TableSetColumnIndex(0);
         ImGui::Text("Entity");
         ImGui::TableSetColumnIndex(1);
-        ImGui::Text(std::to_string(playerState.m_entityId).c_str());
+        ImGui::Text(std::to_string(static_cast<entt::id_type>(playerState.m_entityId)).c_str());
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
@@ -393,9 +389,9 @@ EnvironmentRenderer::DrawEntityInfo(ppo::model::IEntityState* const player)
         ImGui::TableSetColumnIndex(1);
         ImGui::Text("%.3f", playerState.m_dy);
 
-        if (player->GetIFlightModel() != nullptr)
+        if (snapshot.any_of<ppo::model::sFlightModelState>(entity))
         {
-            auto const flightmodelstate{ player->GetIFlightModel()->GetSnapshot() };
+            auto const [flightmodelstate] = snapshot.view<ppo::model::sFlightModelState>().get(entity);
 
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
@@ -416,9 +412,9 @@ EnvironmentRenderer::DrawEntityInfo(ppo::model::IEntityState* const player)
         ImGui::TableSetColumnIndex(1);
         ImGui::Text("%.3f", playerState.m_speed);
 
-        if (player->GetISNA() != nullptr)
+        if (snapshot.any_of<ppo::model::sSNAState>(entity))
         {
-            auto const snastate{ player->GetISNA()->GetSnapshot() };
+            auto const [snastate] = snapshot.view<ppo::model::sSNAState>().get(entity);
 
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
@@ -438,14 +434,10 @@ EnvironmentRenderer::DrawEntityInfo(ppo::model::IEntityState* const player)
 }
 
 void 
-EnvironmentRenderer::DrawAgentInfo(std::shared_ptr<IAgentController> agent)
+EnvironmentRenderer::DrawAgentInfo(ppo::model::sAgentStateSnaphot const& agentState)
 {
-    if (agent == nullptr)
-        return;
-
-    std::string const& agentName{ agent->GetName() };
+    std::string const& agentName{ agentState.m_name };
     std::vector<float> rewards{};
-    auto const agentState{ agent->GetSnapshot(rewards) };
 
     if (ImGui::BeginTable("##agentinfo", 2,
         ImGuiTableFlags_SizingStretchProp))
@@ -464,63 +456,63 @@ EnvironmentRenderer::DrawAgentInfo(std::shared_ptr<IAgentController> agent)
         ImGui::TableSetColumnIndex(0);
         ImGui::Text("Agent version");
         ImGui::TableSetColumnIndex(1);
-        ImGui::Text("%lld", agentState.m_version);
+        ImGui::Text("%lld", agentState.m_common.m_version);
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         ImGui::Text("Agent maxstep");
         ImGui::TableSetColumnIndex(1);
-        ImGui::Text("%lld", agentState.m_maxStep);
+        ImGui::Text("%lld", agentState.m_common.m_maxStep);
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         ImGui::Text("Agent step");
         ImGui::TableSetColumnIndex(1);
-        ImGui::Text("%lld", agentState.m_step);
+        ImGui::Text("%lld", agentState.m_common.m_step);
 
-        if (0 < agentState.m_maxStep)
+        if (0 < agentState.m_common.m_maxStep)
         {
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
             ImGui::Text("Agent rollout");
             ImGui::TableSetColumnIndex(1);
-            ImGui::ProgressBar(static_cast<float>(agentState.m_step) / static_cast<float>(agentState.m_maxStep), ImVec2(-1, 0));
+            ImGui::ProgressBar(static_cast<float>(agentState.m_common.m_step) / static_cast<float>(agentState.m_common.m_maxStep), ImVec2(-1, 0));
         }
 
-        if (agentState.m_evaluationinprogress)
+        if (agentState.m_common.m_evaluationinprogress)
         {
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
             ImGui::Text("Evaluation progress");
             ImGui::TableSetColumnIndex(1);
-            ImGui::ProgressBar(agentState.m_evaluationprogress, ImVec2(-1, 0));
+            ImGui::ProgressBar(agentState.m_common.m_evaluationprogress, ImVec2(-1, 0));
         }
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         ImGui::Text("Evaluation");
         ImGui::TableSetColumnIndex(1);
-        ImGui::Text("%lf", agentState.m_notation);
+        ImGui::Text("%lf", agentState.m_common.m_notation);
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         ImGui::Text("Agent training");
         ImGui::TableSetColumnIndex(1);
-        ImGui::Text("%d", agentState.m_training);
+        ImGui::Text("%d", agentState.m_common.m_training);
 
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
         ImGui::Text("Agent reward");
         ImGui::TableSetColumnIndex(1);
-        ImGui::Text("%.3f", agentState.m_reward);
+        ImGui::Text("%.3f", agentState.m_common.m_reward);
 
-        for (auto i = 0; i < agent->GetNumberOfRewards(); ++i)
+        for (auto i = 0; i <agentState.m_rewards.size(); ++i)
         {
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
-            ImGui::Text(agent->GetRewardName(i).data());
+            ImGui::Text(agentState.m_rewardnames[i].data());
             ImGui::TableSetColumnIndex(1);
-            ImGui::Text("%.3f", rewards[i]);
+            ImGui::Text("%.3f", agentState.m_rewards[i]);
         }
 
         ImGui::EndTable();
@@ -528,55 +520,84 @@ EnvironmentRenderer::DrawAgentInfo(std::shared_ptr<IAgentController> agent)
 }
 
 void
-EnvironmentRenderer::DrawAgentPlot(std::shared_ptr<IAgentController> agent)
+EnvironmentRenderer::DrawAgentPlot(std::shared_ptr<AgentController> agent, ppo::model::sAgentStateSnaphot const& state)
 {
     if (agent == nullptr)
         return;
 
-    auto const& plots{ agent->GetPlots() };
-
-    if (ImGui::CollapsingHeader(agent->GetName().c_str()))
+    if (agent->m_started && !state.m_common.m_training)
     {
-        std::string plotTitle{agent->GetName()};
+        agent->m_plots[0].push(state.m_common.m_loss);
+        agent->m_plots[1].push(state.m_common.m_actorloss);
+        agent->m_plots[2].push(state.m_common.m_valueloss);
+        agent->m_plots[3].push(state.m_common.m_entropyloss);
+    }
+
+    if (ImGui::CollapsingHeader(state.m_name.c_str()))
+    {
+        std::string plotTitle{state.m_name};
         plotTitle.append("-Loss");
 
         if (ImPlot::BeginPlot(plotTitle.c_str()))
         {
             ImPlot::SetupAxes("t", "y", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-            ImPlot::PlotLine("Loss", plots[0].data(), plots[0].size());
+            ImPlot::PlotLine("Loss", agent->m_plots[0].data(), agent->m_plots[0].size());
             ImPlot::EndPlot();
         }
 
-        plotTitle = agent->GetName();
+        plotTitle =state.m_name;
         plotTitle.append("-ActorLoss");
 
         if (ImPlot::BeginPlot(plotTitle.c_str()))
         {
             ImPlot::SetupAxes("t", "y", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-            ImPlot::PlotLine("Loss", plots[1].data(), plots[1].size());
+            ImPlot::PlotLine("Loss", agent->m_plots[1].data(), agent->m_plots[1].size());
             ImPlot::EndPlot();
         }
 
-        plotTitle = agent->GetName();
+        plotTitle = state.m_name;
         plotTitle.append("-ValueLoss");
 
         if (ImPlot::BeginPlot(plotTitle.c_str()))
         {
             ImPlot::SetupAxes("t", "y", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-            ImPlot::PlotLine("Loss", plots[2].data(), plots[2].size());
+            ImPlot::PlotLine("Loss", agent->m_plots[2].data(), agent->m_plots[2].size());
             ImPlot::EndPlot();
         }     
 
-        plotTitle = agent->GetName();
+        plotTitle = state.m_name;
         plotTitle.append("-EntropyLoss");
 
         if (ImPlot::BeginPlot(plotTitle.c_str()))
         {
             ImPlot::SetupAxes("t", "y", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-            ImPlot::PlotLine("Loss", plots[3].data(), plots[3].size());
+            ImPlot::PlotLine("Loss", agent->m_plots[3].data(), agent->m_plots[3].size());
             ImPlot::EndPlot();
         }
     }
+}
+
+std::shared_ptr<EnvironmentRenderer::AgentController>
+EnvironmentRenderer::GetAgentController(unsigned long long id)
+{
+    if (id == 0)
+        return nullptr;
+
+    auto Iter = p_agents.find(id);
+
+    std::shared_ptr<AgentController> agent{ nullptr };
+    if (Iter == p_agents.end())
+    {
+        agent = std::make_shared<AgentController>();
+        agent->m_id = id;
+        p_agents[id] = agent;
+    }
+    else
+    {
+        agent = Iter->second;
+    }
+
+    return agent;
 }
 
 bool
@@ -644,7 +665,12 @@ EnvironmentRenderer::Run(void)
     sf::Time const dt{ m_deltaClock.restart() };
     ImGui::SFML::Update(*this, dt);
 
-    model::sEnvironmentState state{ p_environment->GetSnapshot() };
+    entt::registry& snapshot{ p_environment->GetSnapshot() };
+
+    auto const& envState{ snapshot.ctx().get<ppo::model::sEnvironmentState>() };
+
+    float sx{ envState.m_maxEast / GetScaleWorld() };
+    m_linewidth = sx / 250.F;
 
     if (p_controlWindow->isOpen())
     {
@@ -666,31 +692,34 @@ EnvironmentRenderer::Run(void)
             DrawSimuControls();
 
             if (ImGui::CollapsingHeader("Environment"))
-                DrawEnvControls(state);
+                DrawEnvControls();
 
-            if (ImGui::CollapsingHeader("Entitys"))
+            if (ImGui::CollapsingHeader("Entities"))
             {
-                for (auto const& [player, _] : p_renderers)
-                {
-                    if (player == nullptr)
-                        continue;
+                auto view = snapshot.view<entt::entity>();
 
-                    DrawEntityInfo(player);
-                }
+                for (auto const& entity : view)
+                    DrawEntityInfo(snapshot, entity);
             }
 
-            for (auto agent : p_agentControllers)
+            auto agentView = snapshot.view<ppo::model::sAgentStateSnaphot>();
+
+            for (auto entity : agentView)
             {
+                auto [trainingAgentState] = agentView.get(entity) ;
+
+                auto agent{ GetAgentController(trainingAgentState.m_id) };
+
                 if (agent == nullptr)
                     continue;
 
-                if (ImGui::CollapsingHeader(agent->GetName().c_str()))
+                if (ImGui::CollapsingHeader(trainingAgentState.m_name.c_str()))
                 {
-                    DrawTrainingControls(agent);
+                    DrawTrainingControls(agent, trainingAgentState);
 
-                    DrawRewardControls(agent);
+                    DrawRewardControls(agent, trainingAgentState);
 
-                    DrawAgentInfo(agent);
+                    DrawAgentInfo(trainingAgentState);
                 }
             }
             
@@ -701,7 +730,7 @@ EnvironmentRenderer::Run(void)
     if (p_plotWindow->isOpen())
     {
         ImGui::SFML::Update(*p_plotWindow, dt);
-
+        
         sf::Vector2u plotSizes{ p_plotWindow->getSize() };
         ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2((float)plotSizes.x, (float)plotSizes.y), ImGuiCond_Always);
@@ -715,12 +744,15 @@ EnvironmentRenderer::Run(void)
         {
             ImGui::SFML::SetCurrentWindow(*p_plotWindow);
 
-            for (auto agent : p_agentControllers)
-            {
-                if (agent == nullptr)
-                    continue;
+            auto agentView = snapshot.view<ppo::model::sAgentStateSnaphot>();
 
-                DrawAgentPlot(agent);
+            for (auto entity : agentView)
+            {
+                auto [trainingAgentState] = agentView.get(entity);
+
+                auto agent{ GetAgentController(trainingAgentState.m_id) };
+
+                DrawAgentPlot(agent, trainingAgentState);
             }
         }
 
@@ -730,7 +762,7 @@ EnvironmentRenderer::Run(void)
     ImGui::SFML::SetCurrentWindow(*this);
     sf::RenderWindow::clear();
 
-    sf::Vector2f maxRanges{ state.m_maxNorth, state.m_maxEast };
+    sf::Vector2f maxRanges{ envState.m_maxNorth, envState.m_maxEast };
     maxRanges = maxRanges / GetScaleWorld();
 
     // set the view
@@ -747,9 +779,50 @@ EnvironmentRenderer::Run(void)
     m_fightingArea.setSize(maxRanges);
     sf::RenderWindow::draw(m_fightingArea);
 
-    for (auto& [player, renderer]: p_renderers)
+    auto view = snapshot.view<entt::entity>();
+
+    for (auto entity : view)
+    {
+        if (entity == entt::null
+        || !snapshot.any_of<ppo::model::sEntityState>(entity))
+            continue;
+
+        auto [entityState] = snapshot.view<ppo::model::sEntityState>().get(entity);
+
+        std::shared_ptr<IRenderer> renderer{ nullptr };
+
+        if (auto Iter = p_renderers.find(entity);
+            Iter == p_renderers.end())
+        {          
+            int  symbolheight = 30;
+            int  symbolwidth = 30;
+            bool symbolfilled = true;
+
+            // creating a renderer for this entity
+            switch (entityState.m_type)
+            {
+            case ppo::model::eEntityType::Objective:
+                renderer = std::make_shared<ObjectiveRenderer>(symbolheight, symbolfilled);
+                p_renderers[entity] = renderer;
+                break;
+            case ppo::model::eEntityType::Missile:
+            case ppo::model::eEntityType::SAM:
+            case ppo::model::eEntityType::Aircraft:
+                renderer = std::make_shared<EntityRenderer>(symbolheight, symbolwidth, symbolfilled);
+                p_renderers[entity] = renderer;
+                break;
+            default:
+                break;
+            }
+        }
+        else
+        {
+            renderer = Iter->second;
+        }
+
         if (renderer != nullptr)
-            renderer->Run();
+            renderer->Run(snapshot, entity);
+    }
 
     // Retour vue default
     sf::RenderWindow::setView(sf::RenderWindow::getDefaultView());

@@ -12,94 +12,170 @@
 
 namespace ppo::model {
 
-using Entities = std::vector<std::shared_ptr<IEntity>>;
+using Entities = std::vector<std::shared_ptr<Entity>>;
 using Agents = std::vector<std::shared_ptr<IAgent>>;
 
-struct Environment::Impl :
-    public sEnvironmentState
+struct sRealTimeCommand {
+    enum class eTypeCommand {
+        None,
+        ChangeState,
+        MaxRange,
+        TimeStep
+    };
+    eTypeCommand           m_type{ eTypeCommand::None };
+    eEnvironmentState       m_state{ eEnvironmentState::INIT };
+    float                   m_timeStep{ 0.F };
+    std::array<float, 2>    m_maxRanges{ 0.F, 0.F };
+};
+
+struct Environment::Impl
 {
     void                    Run           (void);
     void                    Stop          (void);
     void                    Start         (void);
-    IEntity*                GetEntityById (EntityId const id) const noexcept;
-    void                    UpdateDoubbleBuffer(void);
+    void                    CreateSnapshot(void);
 
-    explicit                Impl(Environment& env):
-                                m_env{env}
-                            {
-                                ppo::serialization::Serializer& serializer{ ppo::serialization::Serializer::GetInstance() };
-                                serializer.Register(
-                                    "Environment.toml",
-                                    [this](ppo::serialization::TomlReadArchive& ar)
-                                    {
-                                        serialize< ppo::serialization::TomlReadArchive>(ar);
+    void                    ProcessCommand(sRealTimeCommand const& command);
 
-                                        UpdateDoubbleBuffer();
+                            Impl(void);
 
-                                        m_timestep = m_dt;
-                                        m_maxRangeEast = m_maxEast;
-                                        m_maxRangeNorth = m_maxNorth;
-                                    },
-                                    [this](ppo::serialization::TomlWriteArchive& ar)
-                                    {
-                                        serialize<ppo::serialization::TomlWriteArchive>(ar);
-                                    }
-                                );
-                            };
+                            ~Impl(void);
 
-                            ~Impl         (void);
+    /// <summary>
+    /// This is the main entt::registry (world)
+    /// 
+    /// it is going to be filled and readen only by this environment
+    /// </summary>
+    entt::registry                  m_world{};
 
-    template<typename Ar>
-    void serialize(Ar& ar)
-    {
-        auto section = ar.begin_section("Env");
+    /// <summary>
+    /// Command dispatcher
+    /// </summary>
+    entt::dispatcher                m_dispatcher{};
 
-        section("MaxNorth", m_maxNorth);
-        section("MaxEast", m_maxEast);
-        section("TimeStep", m_dt);
-    };
-
+    /// <summary>
+    /// This is a list of all entities wrappers
+    /// </summary>
     Entities                        m_entities          {};    
+
+    /// <summary>
+    /// this is a list of all agents
+    /// </summary>
     Agents                          m_agents            {};
-    sEnvironmentState               m_buffers           [2];
+
+    /// <summary>
+    /// Snasphot mechanism
+    /// </summary>
+    std::array<entt::registry,2>    m_buffers           {};
     std::atomic<uint32_t>           m_index             { 0 };
+
+    /// <summary>
+    /// this is the running thread of this environment
+    /// </summary>
     std::thread                     m_thread;
+
     std::atomic<bool>               m_running           { false };  
-
-    std::atomic<float>              m_timestep          { 0.02F };
-    std::atomic<float>              m_maxRangeEast      { 150000.F };
-    std::atomic<float>              m_maxRangeNorth     { 112500.F };
-
-    std::atomic<eEnvironmentState>  m_state             { eEnvironmentState::STOPPED };
-
+    eEnvironmentState               m_state             { eEnvironmentState::INIT };
     eEnvironmentState               m_prevState         { m_state };
-
-    Environment&                    m_env;
-
-    static inline sEnvironmentState     EMPTY_ENV_STATE{};
 };
 
+Environment::Impl::Impl(void)
+{
+    // add a buffer for the environment
+    m_world.ctx().emplace<sEnvironmentState>();
+
+    // subscribe to real time command through a thread safe queue
+    m_dispatcher.sink<sRealTimeCommand>().connect<&Environment::Impl::ProcessCommand>(this);
+
+    ppo::serialization::Serializer& serializer{ ppo::serialization::Serializer::GetInstance() };
+    serializer.Register(
+        "Environment.json",
+        [this](ppo::serialization::json& ar)
+        {
+            auto& state = m_world.ctx().get<sEnvironmentState>();
+
+            auto section = ar["Env"];
+
+            state.m_maxNorth = section["MaxNorth"];
+            state.m_maxEast  = section["MaxEast"];
+            state.m_dt       = section["TimeStep"];
+
+            CreateSnapshot();
+        },
+        [this](ppo::serialization::json& ar)
+        {
+            auto const& state = m_world.ctx().get<sEnvironmentState>();
+
+            auto& section = ar["Env"];
+
+            section["MaxNorth"] = state.m_maxNorth ;
+            section["MaxEast"]  = state.m_maxEast  ;
+            section["TimeStep"] = state.m_dt       ;
+        }
+    );
+}
+
+void
+Environment::Impl::ProcessCommand(sRealTimeCommand const& command)
+{
+    auto& environmentState{ m_world.ctx().get<sEnvironmentState>() };
+
+    switch (command.m_type)
+    {
+    case sRealTimeCommand::eTypeCommand::TimeStep:
+        environmentState.m_dt = command.m_timeStep;
+        break;
+    case sRealTimeCommand::eTypeCommand::MaxRange:
+        environmentState.m_maxNorth = command.m_maxRanges[0];
+        environmentState.m_maxEast = command.m_maxRanges[1];
+        break;
+    case sRealTimeCommand::eTypeCommand::ChangeState:
+        m_state = command.m_state;
+        break;
+    default:
+        break;
+    }
+}
+
 void 
-Environment::Impl::UpdateDoubbleBuffer(void)
+Environment::Impl::CreateSnapshot(void)
 {
     const uint32_t next = 1u - m_index.load(std::memory_order_relaxed);
 
-    m_buffers[next].m_maxEast = m_maxEast;
-    m_buffers[next].m_maxNorth = m_maxNorth;
-    m_buffers[next].m_dt = m_dt;
+    // start by cleaning this registry
+    m_buffers[next].clear();
+    m_buffers[next].ctx().clear();
+
+    for (auto entity : m_world.storage<entt::entity>())
+        auto newentity = m_buffers[next].create(entity);
+
+    m_world.view<sEntityState>().each([&](auto entity, const auto& comp)
+    {
+        m_buffers[next].emplace<sEntityState>(entity, comp);
+    });
+
+    m_world.view<sSNAState>().each([&](auto entity, const auto& comp)
+    {
+        m_buffers[next].emplace<sSNAState>(entity, comp);
+    });
+
+    m_world.view<sFlightModelState>().each([&](auto entity, const auto& comp)
+    {
+        m_buffers[next].emplace<sFlightModelState>(entity, comp);
+    });
+
+    m_buffers[next].ctx().emplace<sEnvironmentState>(m_world.ctx().get<sEnvironmentState>());
+
+    for (auto agent : m_agents)
+    {
+        auto const agentSnapshot(agent->GetSnapshot());
+        
+        // add a special entity to broadcast agent state
+        entt::entity entity_agent = m_buffers[next].create();
+        m_buffers[next].emplace<sAgentStateSnaphot>(entity_agent, agentSnapshot);
+    }
 
     m_index.store(next, std::memory_order_release);
-}
-
-IEntity*
-Environment::Impl::GetEntityById(EntityId const id) const noexcept
-{
-    for (auto const& entity : m_entities)
-    {
-        if (entity->GetEntityId() == id)
-            return entity.get();
-    }
-    return nullptr;
 }
 
 Environment::Impl::~Impl(void)
@@ -110,8 +186,11 @@ Environment::Impl::~Impl(void)
 void
 Environment::Impl::Stop(void)
 {
-    m_state.store(eEnvironmentState::STOPPED, std::memory_order_release);
-    m_prevState = eEnvironmentState::STOPPED;
+    sRealTimeCommand cmd{};
+    cmd.m_type = sRealTimeCommand::eTypeCommand::ChangeState;
+    cmd.m_state = eEnvironmentState::STOPPED;
+    m_dispatcher.enqueue<sRealTimeCommand>(cmd);
+
     m_running.store(false, std::memory_order_release);
     if (m_thread.joinable())
         m_thread.join();
@@ -127,26 +206,14 @@ Environment::Impl::Start(void)
 void
 Environment::Impl::Run(void)
 {  
-    eEnvironmentState state{ eEnvironmentState::INIT };
     bool reinitrequest{ false };
 
     while (m_running.load(std::memory_order_acquire))
     {
-        m_maxNorth      = m_maxRangeNorth.load(std::memory_order_acquire);  
-        m_maxEast       = m_maxRangeEast.load(std::memory_order_acquire);   
-        m_dt            = m_timestep.load(std::memory_order_acquire);
-        state           = m_state.load(std::memory_order_acquire);
+        // proceed commands
+        m_dispatcher.update();
 
-        // ensure all agents are in training mode
-        for (auto& agent : m_agents)
-        {
-            if (agent == nullptr)
-                continue;
-
-            reinitrequest |= agent->Update();
-        }
-
-        if (state == eEnvironmentState::RUNNING)
+        if (m_state == eEnvironmentState::RUNNING)
         {            
             // to initialize
             if (m_prevState == eEnvironmentState::STOPPED
@@ -193,10 +260,21 @@ Environment::Impl::Run(void)
             // update the whole environment after all player have been updated
             for (auto& entity: m_entities)
             {
-                if (entity == nullptr)
+                if (entity == nullptr
+                ||  !entity->has<sSNAState>())
                     continue;
 
-                entity->UpdateEnv();
+                auto const& [snaState] = entity->get<sSNAState>();
+
+                if (m_world.any_of<sEntityState>(snaState.m_target))
+                {
+                    float const pkTarget{ snaState.m_pk };
+
+                    auto [targetState] = m_world.view<sEntityState>().get(snaState.m_target);
+
+                    if (0.95F < pkTarget)
+                        targetState.m_destroyed = true;
+                }
             }
 
             // here we know that all players have been processed for this step
@@ -209,35 +287,38 @@ Environment::Impl::Run(void)
             }
         }
 
-        m_prevState = state;
+        m_prevState = m_state;
 
-        UpdateDoubbleBuffer();
+        CreateSnapshot();
 
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
+
+    m_prevState = eEnvironmentState::STOPPED;
 }
 
 Environment::Environment(void):
-    p_impl{std::make_unique<Impl>(*this)}
+    p_impl{std::make_unique<Impl>()}
 {
 
 }
 
 Environment::~Environment(void) = default;
 
+entt::registry* 
+Environment::GetRegistry(void) noexcept
+{
+    if (p_impl == nullptr)
+        return nullptr;
+
+    return &p_impl->m_world;
+}
+
 void              
-Environment::AddEntity(std::shared_ptr<IEntity> entity)
+Environment::AddEntity(std::shared_ptr<Entity> entity)
 {
     if (p_impl == nullptr
     ||  entity == nullptr)
-        return;
-
-    auto Iter = std::find(
-        p_impl->m_entities.begin(),
-        p_impl->m_entities.end(), 
-        entity);    
-
-    if (Iter != p_impl->m_entities.end())
         return;
 
     p_impl->m_entities.push_back(entity);
@@ -258,6 +339,9 @@ Environment::AddAgent(std::shared_ptr<IAgent> pAgent)
     if (Iter != p_impl->m_agents.end())
         return;
 
+    // all agent are going to receive this command
+    p_impl->m_dispatcher.sink<sAgentRealTimeCommand>().connect<&IAgent::ProcessCommand>(pAgent.get());
+
     p_impl->m_agents.push_back(pAgent);
 }
 
@@ -267,7 +351,10 @@ Environment::SetTimeStep(float timestep)
     if (p_impl == nullptr)
         return;
 
-    p_impl->m_timestep.store(timestep, std::memory_order_release);
+    sRealTimeCommand cmd{};
+    cmd.m_type = sRealTimeCommand::eTypeCommand::TimeStep;
+    cmd.m_timeStep = timestep;
+    p_impl->m_dispatcher.enqueue<sRealTimeCommand>(cmd);
 }
 
 void 
@@ -276,16 +363,22 @@ Environment::SetMaxRange(float north, float east)
     if (p_impl == nullptr)
         return;
 
-    p_impl->m_maxRangeNorth.store(north, std::memory_order_release);
-    p_impl->m_maxRangeEast.store(east, std::memory_order_release);
+    sRealTimeCommand cmd{};
+    cmd.m_type = sRealTimeCommand::eTypeCommand::MaxRange;
+    cmd.m_maxRanges[0] = north;
+    cmd.m_maxRanges[1] = east;
+    p_impl->m_dispatcher.enqueue<sRealTimeCommand>(cmd);
 }
 
-sEnvironmentState 
+entt::registry& 
 Environment::GetSnapshot(void) const noexcept
 {
     if (p_impl == nullptr)
-        return Impl::EMPTY_ENV_STATE;
-
+    {
+        static entt::registry empty{};
+        return empty;
+    }
+        
     return p_impl->m_buffers[p_impl->m_index.load(std::memory_order_acquire)];
 }
 
@@ -309,7 +402,10 @@ Environment::Play(void)
     if (!p_impl->m_running.load(std::memory_order_acquire))
         p_impl->Start();
 
-    p_impl->m_state.store(eEnvironmentState::RUNNING, std::memory_order_release);
+    sRealTimeCommand cmd{};
+    cmd.m_type = sRealTimeCommand::eTypeCommand::ChangeState;
+    cmd.m_state = eEnvironmentState::RUNNING;
+    p_impl->m_dispatcher.enqueue<sRealTimeCommand>(cmd);
 }
 
 void
@@ -318,7 +414,10 @@ Environment::Pause(void)
     if (p_impl == nullptr)
         return;
 
-    p_impl->m_state.store(eEnvironmentState::PAUSED, std::memory_order_release);
+    sRealTimeCommand cmd{};
+    cmd.m_type = sRealTimeCommand::eTypeCommand::ChangeState;
+    cmd.m_state = eEnvironmentState::PAUSED;
+    p_impl->m_dispatcher.enqueue<sRealTimeCommand>(cmd);
 }
 
 void
@@ -330,65 +429,13 @@ Environment::Stop(void)
     p_impl->Stop();
 }
 
-IEntity* 
-Environment::GetIEntityById(EntityId playerId) noexcept
+void
+Environment::AddAgentCommand(sAgentRealTimeCommand const& command)
 {
     if (p_impl == nullptr)
-        return nullptr;
+        return;
 
-    return p_impl->GetEntityById(playerId);
-}
-
-float
-Environment::GetTimeStep(void) const noexcept
-{
-    if (p_impl == nullptr)
-        return 0.F;
-
-    return p_impl->m_dt;
-}
-
-float
-Environment::GetMaxNorth(void) const noexcept
-{
-    if (p_impl == nullptr)
-        return 0.F;
-
-    return p_impl->m_maxNorth;
-}
-
-float
-Environment::GetMaxEast(void) const noexcept
-{
-    if (p_impl == nullptr)
-        return 0.F;
-
-    return p_impl->m_maxEast;
-}
-
-EntityId 
-Environment::GetNewEntityId(void)
-{
-    static std::atomic<EntityId> g_id{ 0 };
-    return g_id.fetch_add(1, std::memory_order_relaxed);
-}
-
-unsigned int
-Environment::GetNumberOfEntities(void) const noexcept
-{ 
-    if (p_impl == nullptr)
-        return 0;
-
-    return p_impl->m_entities.size();
-}
-
-IEntity* 
-Environment::GetEntityAtIndex(unsigned int index) noexcept
-{
-    if (index >= GetNumberOfEntities())
-        return nullptr;
-
-    return p_impl->m_entities[index].get();
+    p_impl->m_dispatcher.enqueue<sAgentRealTimeCommand>(command);
 }
 
 }

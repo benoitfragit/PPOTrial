@@ -3,24 +3,10 @@
 
 namespace ppo::renderer {
 
-EntityRenderer::EntityRenderer(model::IEntityState* player, int height, int width, bool filled) :
+EntityRenderer::EntityRenderer(int height, int width, bool filled) :
     m_width{ static_cast<float>(width) },
     m_height { static_cast<float>(height) },
-    m_filled { filled },
-    p_player {player}
-{
-    if (p_player == nullptr)
-        return;
-
-    auto state = p_player->GetSnapshot();
-    switch (state.m_side)
-    {
-        case ppo::model::eEntitySide::Friend:  m_color = sf::Color::Blue;           break;
-        case ppo::model::eEntitySide::Hostile: m_color = sf::Color::Red;            break;
-        case ppo::model::eEntitySide::Unknown: m_color = sf::Color::White;          break;
-        default:                               m_color = sf::Color::Transparent;    break;
-    }
-}
+    m_filled { filled }{}
 
 static void
 DrawQuadBetweenLine(sf::Vector2f const& a, sf::Vector2f const& b, sf::Color const color, float const linewidth, sf::VertexArray& vertices)
@@ -107,12 +93,12 @@ EntityRenderer::DrawDestroySymbol(model::sEntityState const& state)
 }
 
 void
-EntityRenderer::Run(void) noexcept
+EntityRenderer::Run(entt::registry& registry, entt::entity entity) noexcept
 {
-    if (p_player == nullptr)
+    if (!registry.any_of<ppo::model::sEntityState>(entity))
         return;
 
-    model::sEntityState state{ p_player->GetSnapshot() };
+    auto const [state] = registry.view<ppo::model::sEntityState>().get(entity);
 
     auto&       renderer{ EnvironmentRenderer::GetInstance() };
     auto const& view    { renderer.GetView() };
@@ -121,34 +107,47 @@ EntityRenderer::Run(void) noexcept
     float const ratioNorth  { viewSize.x / winSize.y };
     float const ratioEast   { viewSize.y / winSize.x };
 
-    sf::ConvexShape::setPointCount(3);
+    if (registry.any_of<ppo::model::sFlightModelState>(entity)
+        && state.m_type != ppo::model::eEntityType::SAM)
+    {
+        switch (state.m_side)
+        {
+        case ppo::model::eEntitySide::Friend:  m_color = sf::Color::Blue;           break;
+        case ppo::model::eEntitySide::Hostile: m_color = sf::Color::Red;            break;
+        case ppo::model::eEntitySide::Unknown: m_color = sf::Color::White;          break;
+        default:                               m_color = sf::Color::Transparent;    break;
+        }
 
-    sf::Vector2f const p1{ -m_height * ratioNorth / 2.F ,  -m_width *ratioEast / 2.F };
-    sf::Vector2f const p2{ -m_height * ratioNorth / 2.F,   m_width * ratioEast / 2.F };
-    sf::Vector2f const p3{ m_height * ratioNorth / 2.F,                           0 };
-                                        
-    sf::ConvexShape::setPoint(0, p1);
-    sf::ConvexShape::setPoint(1, p2);
-    sf::ConvexShape::setPoint(2, p3);
+        sf::ConvexShape::setPointCount(3);
+
+        sf::Vector2f const p1{ -m_height * ratioNorth / 2.F ,  -m_width * ratioEast / 2.F };
+        sf::Vector2f const p2{ -m_height * ratioNorth / 2.F,   m_width * ratioEast / 2.F };
+        sf::Vector2f const p3{ m_height * ratioNorth / 2.F,                           0 };
+
+        sf::ConvexShape::setPoint(0, p1);
+        sf::ConvexShape::setPoint(1, p2);
+        sf::ConvexShape::setPoint(2, p3);
+        
+        sf::ConvexShape::setOutlineColor(m_color);
+        if (m_filled)
+            sf::ConvexShape::setFillColor(m_color);
+    }
 
     // position
     setPosition(state.m_x / renderer.GetScaleWorld(), state.m_y / renderer.GetScaleWorld());
     setOrigin(0.F, 0.F);
 
-    sf::ConvexShape::setOutlineColor(m_color);
-    if (m_filled)
-        sf::ConvexShape::setFillColor(m_color);
-
     // orientation
     setRotation(static_cast<float>(state.m_rotation * RAD_TO_DEG));
-
-    if (p_player->GetISNA() != nullptr)
+    
+    if (registry.any_of<ppo::model::sSNAState>(entity))
     {
-        auto const isnastate{ p_player->GetISNA()->GetSnapshot() };
+        auto [isnastate] = registry.view<ppo::model::sSNAState>().get(entity);
 
         // shooting ranges
         if (float const escapeZoneValue{ isnastate.m_escapezone };
-            std::numeric_limits<float>::epsilon() < escapeZoneValue)
+            state.m_type != ppo::model::eEntityType::SAM
+        &&  std::numeric_limits<float>::epsilon() < escapeZoneValue)
             DrawShootingRanges(state, escapeZoneValue, sf::Color::Magenta, -isnastate.m_maxShootAngle, isnastate.m_maxShootAngle);
 
         if (float const noEscapeZoneValue{ isnastate.m_noescapezone };

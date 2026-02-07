@@ -1,14 +1,19 @@
 #pragma once
-#include "serialization.hpp"
-
+#include <nlohmann/json.hpp>
+#include <fstream>
+#include <iostream>
 #include <filesystem>
+#include <string>
 #include <functional>
 #include <memory>
 
 namespace ppo::serialization {
 
+using json = nlohmann::json;
+
 class Serializer {
 public:
+
     static Serializer& GetInstance(void);
     
     virtual ~Serializer(void);
@@ -20,13 +25,15 @@ public:
 
     void SetPath(std::filesystem::path path);
 
-    using TomlLoadFunction = std::function<void(TomlReadArchive& ar)>;
-    using TomlSaveFunction = std::function<void(TomlWriteArchive& ar)>;
+    using JsonLoadFunction = std::function<void(json& ar)>;
+    using JsonSaveFunction = std::function<void(json& ar)>;
 
-    void Register(std::filesystem::path path, TomlLoadFunction load, TomlSaveFunction save);
+    void Register(std::filesystem::path path, JsonLoadFunction load, JsonSaveFunction save);
 
     void Load(void);
     void Save(void);
+
+    static json Parse(std::filesystem::path file);
 
 private:
     Serializer(void);

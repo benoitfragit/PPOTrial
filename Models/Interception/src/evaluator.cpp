@@ -3,142 +3,142 @@
 #include "serializer.hpp"
 #include "prodagent.hpp"
 #include "interception.hpp"
+#include "utils.hpp"
+#include "checkpointinitializersystem.hpp"
 
 #include <thread>
 #include <map>
 #include <vector>
 #include <chrono>
 
-namespace ppo::interception {
+#include "entt/entt.hpp"
 
-using Agents = std::map<std::shared_ptr<ppo::model::Aircraft>, std::shared_ptr<SNAProdAgent>>;
+namespace rl {
 
-struct sCheckPointGenerator {
-    sCheckPointGenerator(Agents const& agents,
-                         ppo::model::sEnvironmentState const& env) :
-        m_agents{ agents },
-        m_env{env}{};
+using Entities = std::map<std::string, std::shared_ptr<ppo::model::Aircraft>>;
 
-    template<typename Ar>
-    void serialize(Ar& ar)
+struct sCheckPointGenerator 
+{
+    void serialize(entt::registry& registry, Entities& entities, ppo::serialization::json& ar)
     {
-        auto checkpointsection = ar.begin_section("Data");
+        auto const& evalState = registry.ctx().get<ppo::model::sEvaluatorState>();
 
-        for (auto const& [player, _] : m_agents)
+        auto& checkpointsection = ar["Data"];
+
+        for (auto const& [name, entity] : entities)
         {
-            if (player == nullptr)
-                continue;
+            auto const [checkpoint] = entity->get<ppo::model::sEntityCheckPoint>();
 
-            auto section{ checkpointsection.begin_section(player->GetName().c_str()) };
-
-            if (auto Iter = m_buffers.find(player->GetName());
-                Iter != m_buffers.end())
-            {
-                for (auto i = 0; i < m_nbtests; ++i)
-                    if (i < Iter->second.size())
-                        section(std::to_string(i).c_str(), Iter->second[i]);
-            }
-            else
-            {
-                std::vector<ppo::model::CheckPointBuffer> buffers{};
-                for (auto i = 0; i < m_nbtests; ++i)
-                {
-                    auto buf = player->GetCheckpoint();
-
-                    section(std::to_string(i).c_str(), buf);
-
-                    buffers.push_back(buf);
-                }
-
-                m_buffers[player->GetName()] = buffers;
-            }
+            checkpointsection[name] = checkpoint.m_buffers;
         }
     };
-
-    std::map<std::string, std::vector<ppo::model::CheckPointBuffer>> m_buffers{};
-
-    Agents const& m_agents;
-    ppo::model::sEnvironmentState const& m_env;
-    unsigned int m_nbtests{ 0 };
 };
 
-struct Evaluator::Impl : 
-    public ppo::model::sEvaluatorState
+struct Evaluator::Impl
 {
-         Impl(void);
-         ~Impl(void)
-         {
-             if (m_thread.joinable())
-                 m_thread.join();
-         };
+    entt::registry m_world{};
 
-    template<typename Ar>
-    void serialize          (Ar& ar);
+    Impl(void);
+
+    ~Impl(void)
+    {
+        if (m_thread.joinable())
+            m_thread.join();
+    };
+
+    void LoadFromFile       (ppo::serialization::json& ar);
+    void SaveToFile         (ppo::serialization::json& ar);
     void UpdateDoubleBuffer (void);
     void Start              (std::string const& name, std::filesystem::path const& modelpath);
     void Stop               (void);
     void Run                (void);
-
-    float             GetTimeStep(void) const noexcept { return m_dt; };
     
-    ppo::model::Entity*
-    GetIEntityById(ppo::model::EntityId const id) const noexcept
-    {
-        for (auto const& pair : m_agents)
-        {
-            if (pair.first->GetEntityId() == id)
-                return pair.first.get();
-        }
-        return nullptr;
-    };
-
-    float             GetMaxNorth(void) const noexcept { return m_maxNorth; };
-    float             GetMaxEast(void) const noexcept { return m_maxEast; };
-
-    static ppo::model::EntityId
-    GetNewEntityId(void)
-    {
-        static std::atomic<ppo::model::EntityId> g_id{ 0 };
-        return g_id.fetch_add(1, std::memory_order_relaxed);
-    }
-
-    void AddEntity(std::shared_ptr<ppo::model::IEntity> entity) {};
+    void AddEntity(std::shared_ptr<ppo::model::Entity> entity) {};
     void AddAgent(std::shared_ptr<ppo::model::IAgent> agent) {};
 
-    // this is the thread launch to perform the evaluation
-    std::thread  m_thread;
+    template<typename T, typename... Args>
+    std::shared_ptr<T>
+    CreateEntity(Args&&... args)
+    {
+        if constexpr (!std::is_base_of_v<ppo::model::Entity, T>)
+            return nullptr;
 
-    // a variable to detect stopping
-    std::atomic<bool>  m_running{ false };
+        auto entity{ std::make_shared<T>(&m_world, std::forward<Args>(args)...) };
 
-    std::shared_ptr<ppo::model::Aircraft> p_blue{nullptr};
-    std::shared_ptr<ppo::model::Aircraft> p_red {nullptr};
-    Agents m_agents{};
+        if (entity != nullptr)
+        {
+            entity->SetInitializerSystem(&ppo::model::CheckpointInitializerSystem::Init);
+            AddEntity(entity);
+        }
 
-    std::filesystem::path m_modelpath{};
+        return entity;
+    };
 
-    sEvaluatorState       m_buffers[2];
-    std::atomic<uint32_t> m_index{ 0 };
+    template<typename Ag, typename... Args>
+    std::shared_ptr<Ag>
+        CreateAgent(Args&&... args)
+    {
+        if constexpr (!std::is_base_of_v<ppo::model::IAgent, Ag>)
+            return nullptr;
 
-    // a tool to generate and store a checkpoint buffer
-    sCheckPointGenerator m_checkpoint{ m_agents, *this };
+        auto agent{ std::make_shared<Ag>(std::forward<Args>(args)...) };
+        if (agent != nullptr)
+            AddAgent(agent);
 
-    static inline const sEvaluatorState EMPTY_STATE{};
+        return agent;
+    };
+
+    std::thread                             m_thread;
+    std::atomic<bool>                       m_running{ false };
+    std::shared_ptr<ppo::model::Aircraft>   p_blue{nullptr};
+    std::shared_ptr<ppo::model::Aircraft>   p_red {nullptr};
+    Entities                                m_entities{};
+    std::shared_ptr<SNAProdAgent>           m_agent{ nullptr };
+    std::filesystem::path                   m_modelpath{};
+    ppo::model::sEvaluatorState             m_buffers[2];
+    std::atomic<uint32_t>                   m_index{ 0 };
+    sCheckPointGenerator                    m_checkpoint{};
+
+    static inline const ppo::model::sEvaluatorState EMPTY_STATE{};
 };
 
 Evaluator::Impl::Impl(void)
 {
+    m_world.ctx().emplace<ppo::model::sEnvironmentState>();
+    m_world.ctx().emplace<ppo::model::sEvaluatorState>();
+    auto& evalName = m_world.ctx().emplace<ppo::model::sEvaluatorName>();
+
+    evalName.m_filename = "Evaluation.json";
+
+    if (m_agent == nullptr)
+    {
+        p_blue  = CreateEntity<ppo::model::Aircraft>("blueeval", ppo::model::eEntitySide::Friend);
+        p_red   = CreateEntity<ppo::model::Aircraft>("redeval", ppo::model::eEntitySide::Hostile);
+        m_agent = CreateAgent<SNAProdAgent>(*p_blue.get());
+
+        auto& checkpointblue = p_blue->add<ppo::model::sEntityCheckPoint>();
+        checkpointblue.m_name = "blueeval";
+        ppo::model::CheckpointInitializerSystem::Load(*p_blue.get());
+
+        auto& checkpointred = p_red->add<ppo::model::sEntityCheckPoint>();
+        checkpointred.m_name = "redeval";
+        ppo::model::CheckpointInitializerSystem::Load(*p_red.get());
+
+        m_entities["blueeval"] = p_blue;
+        m_entities["redeval"] = p_red;
+    }
+
     // use same env as training environment
     ppo::serialization::Serializer& serializer{ ppo::serialization::Serializer::GetInstance() };
     serializer.Register(
-        "Evaluation.toml",
-        [this](ppo::serialization::TomlReadArchive& ar)
+        "Evaluation.json",
+        [this](ppo::serialization::json& ar)
         {
-            serialize< ppo::serialization::TomlReadArchive>(ar);
+            this->LoadFromFile(ar);
         },
-        [this](ppo::serialization::TomlWriteArchive& ar)
+        [this](ppo::serialization::json& ar)
         {
-            serialize< ppo::serialization::TomlWriteArchive>(ar);
+            this->SaveToFile(ar);
         }
     );
 }
@@ -146,38 +146,49 @@ Evaluator::Impl::Impl(void)
 void
 Evaluator::Impl::UpdateDoubleBuffer(void)
 {
+    auto const& state{ m_world.ctx().get<ppo::model::sEvaluatorState>() };
+
     const uint32_t next = 1u - m_index.load(std::memory_order_relaxed);
 
-    m_buffers[next].m_maxEast = m_maxEast;
-    m_buffers[next].m_maxNorth = m_maxNorth;
-    m_buffers[next].m_dt = m_dt;
-    m_buffers[next].m_nbstep = m_nbstep;
-    m_buffers[next].m_nbtests = m_nbtests;
-    m_buffers[next].m_notation = m_notation;
-    m_buffers[next].m_inprogress = m_inprogress;
-    m_buffers[next].m_progress = m_progress;
+    memcpy(&m_buffers[next], &state, sizeof(ppo::model::sEvaluatorState));
 
     m_index.store(next, std::memory_order_release);
 }
 
-template<typename Ar>
 void 
-Evaluator::Impl::serialize(Ar& ar)
+Evaluator::Impl::LoadFromFile(ppo::serialization::json& ar)
 {
-    auto section = ar.begin_section("Eval");
+    auto& state   { m_world.ctx().get<ppo::model::sEvaluatorState>() };
+    auto& envState{ m_world.ctx().get<ppo::model::sEnvironmentState>() };
 
-    section("MaxNorth", m_maxNorth);
-    section("MaxEast",  m_maxEast);
-    section("TimeStep", m_dt);
-    section("NbSteps",  m_nbstep);
-    section("NbTests",  m_nbtests);
-    section("Notation", m_notation);
+    auto section = ar["Eval"];
 
-    m_checkpoint.m_nbtests = m_nbtests;
-
-    m_checkpoint.serialize(ar);
+    envState.m_maxNorth =  section["MaxNorth"];
+    envState.m_maxEast  =  section["MaxEast" ];
+    envState.m_dt       =  section["TimeStep"];
+    state.m_nbstep      =  section["NbSteps" ];
+    state.m_nbtests     =  section["NbTests" ];
+    state.m_notation    =  section["Notation"];
 
     UpdateDoubleBuffer();
+}
+
+void
+Evaluator::Impl::SaveToFile(ppo::serialization::json& ar)
+{
+    auto& state   { m_world.ctx().get<ppo::model::sEvaluatorState>() };
+    auto& envState{ m_world.ctx().get<ppo::model::sEnvironmentState>() };
+
+    auto& section = ar["Eval"];
+
+    section["MaxNorth"] = envState.m_maxNorth;
+    section["MaxEast" ] = envState.m_maxEast ;
+    section["TimeStep"] = envState.m_dt      ;
+    section["NbSteps" ] = state.m_nbstep     ;
+    section["NbTests" ] = state.m_nbtests    ;
+    section["Notation"] = state.m_notation   ;
+
+    m_checkpoint.serialize(m_world, m_entities, ar);
 }
 
 void
@@ -197,8 +208,17 @@ Evaluator::Impl::Start(std::string const& name, std::filesystem::path const& mod
     if (!std::filesystem::exists(evalpath))
         return;
 
-    p_red->SetTarget(p_blue->GetEntityId());
-    p_blue->SetTarget(p_red->GetEntityId());
+    if (p_red != nullptr
+     && p_red->has<ppo::model::sSNAState>()
+     && p_blue != nullptr
+     && p_blue->has<ppo::model::sSNAState>())
+    {
+        auto [blue_snaState] = p_blue->get<ppo::model::sSNAState>();
+        auto [red_snaState] = p_red->get< ppo::model::sSNAState>();
+
+        blue_snaState.m_target = p_red->uniqid();
+        red_snaState.m_target = p_blue->uniqid();
+    }
 
     m_running.store(true, std::memory_order_release);
     m_thread = std::thread(&Evaluator::Impl::Run, this);
@@ -207,6 +227,13 @@ Evaluator::Impl::Start(std::string const& name, std::filesystem::path const& mod
 void
 Evaluator::Impl::Run(void)
 {
+    if (m_agent == nullptr
+    || p_blue == nullptr
+    || p_red == nullptr)
+        return;
+
+    auto& state{ m_world.ctx().get<ppo::model::sEvaluatorState>() };
+
     // for all test available
     float playerDestroyed{0.F};
     float targetDestroyed{0.F};
@@ -214,105 +241,98 @@ Evaluator::Impl::Run(void)
     float pkill{ 0.F };
     float notation{ -FLT_MAX };
 
-    m_inprogress = true;
-    m_progress = 0.F;
+    state.m_inprogress = true;
+    state.m_progress = 0.F;
     UpdateDoubleBuffer();
 
-    for (int i = 0; i < m_nbtests; ++i)
+    for (int i = 0; i < state.m_nbtests; ++i)
     {
         // thread must terminate
         if (!m_running.load(std::memory_order_acquire))
             return;
 
         // initialize the player and the plicy
-        for (auto& [player, agent] : m_agents)
+        for (auto& [name, entity] : m_entities)
         {
-            if (player == nullptr)
+            if (entity == nullptr)
                 continue;
 
-            std::string const& name{ player->GetName() };
-            auto const Iter{ m_checkpoint.m_buffers.find(name) };
-            if (Iter != m_checkpoint.m_buffers.end())
-            {
-                std::vector<ppo::model::CheckPointBuffer> const& buffers{ Iter->second };
-
-                // set the ieme testcase 
-                player->SetCheckpoint(buffers[i]);
-            }
-
-            if (agent != nullptr)
-                agent->Init();
+            auto [checkpoint] = entity->get<ppo::model::sEntityCheckPoint>();
+            checkpoint.m_index = i;
+            entity->Init();
         }
+
+        m_agent->Init();
 
         // perform all step until m_nbstep
         float pk{ 0.F };
         int j{ 0 };
-        for (; j < m_nbstep; ++j)
+        for (; j < state.m_nbstep; ++j)
         {
             // thread must terminate
             if (!m_running.load(std::memory_order_acquire))
                 return;
 
             // choose action according to policy
-            for (auto& [_, agent] : m_agents)
-            {
-                if (agent == nullptr)
-                    continue;
+            m_agent->ChooseAction();
 
-                agent->ChooseAction();
-            }
-
-            // update model
             bool targetDestruction{ false };
-            for (auto& [player, agent] : m_agents)
+            float newpk{ 0.F };
+
+            for (auto& [_, entity] : m_entities)
             {
-                if (player == nullptr)
+                if (entity == nullptr)
                     continue;
 
-                // Run the model after the Agent run to apply the action
-                player->Run();
+                entity->Run();
             }
 
-            for (auto& [player, agent] : m_agents)
+            for (auto& [_, entity] : m_entities)
             {
-                if (agent == nullptr)
+                if (entity == nullptr
+                ||  !entity->has<ppo::model::sSNAState>())
                     continue;
 
-                player->UpdateEnv();
+                auto const& [snaState] = entity->get<ppo::model::sSNAState>();
 
-                agent->SetNewState();
+                if (m_world.any_of<ppo::model::sEntityState>(snaState.m_target))
+                {
+                    float const pkTarget{ snaState.m_pk };
+
+                    auto [targetState] = m_world.view<ppo::model::sEntityState>().get(snaState.m_target);
+
+                    if (0.95F < pkTarget)
+                    {
+                        targetState.m_destroyed = true;
+
+                        if (entity == p_blue)
+                            targetDestruction = true;
+                    }
+
+                    if (entity == p_blue)
+                        newpk = pkTarget;
+                }
             }
+
+            m_agent->SetNewState();
 
             bool goToNextTest(false);
-            for (auto& [player, agent] : m_agents)
+
+            if (p_blue->has<ppo::model::sEntityState>())
             {
-                if (player == nullptr
-                 || agent == nullptr)
-                    continue;
-
-                ppo::model::Entity* const target{ player.get() == p_red.get() ? p_blue.get() : p_red.get()};
-                if (target == nullptr)
-                    continue;
-
-                ppo::model::SNA const& sna{ player->GetSNA() };
-
-                float const newpk{ sna.GetKillProbability() };
-                if (0.95F < newpk)
-                    targetDestruction = true;
+                auto [entityState] = p_blue->get<ppo::model::sEntityState>();
                
                 pk = std::max(pk,newpk);
 
-                if (player->GetDestroyed())
+                if (entityState.m_destroyed)
                 {
                     playerDestroyed += 1.F;
                     goToNextTest = true;
-                    break;
                 }
                 else if (targetDestruction)
                 {
                     targetDestroyed += 1.F;
                     goToNextTest = true;
-                    break;
                 }
             }
                  
@@ -321,19 +341,19 @@ Evaluator::Impl::Run(void)
         }
 
         pkill += pk;
-        missionDuration += (m_nbstep+1)/(j+1);
+        missionDuration += static_cast<float>(state.m_nbstep+1)/static_cast<float>(j+1);
 
-        m_inprogress = true;
-        m_progress = static_cast<float>(i) / static_cast<float>(m_nbtests);
+        state.m_inprogress = true;
+        state.m_progress = static_cast<float>(i) / static_cast<float>(state.m_nbtests);
 
         UpdateDoubleBuffer();
 
         std::this_thread::sleep_for(std::chrono::milliseconds(3));
     }
 
-    notation = 100.F * (targetDestroyed + pkill - playerDestroyed + missionDuration) / static_cast<float>(m_nbtests);
+    notation = 100.F * (targetDestroyed + pkill - playerDestroyed + missionDuration) / static_cast<float>(state.m_nbtests);
     
-    if (m_notation < notation)
+    if (state.m_notation < notation)
     {
         // move the model into prod
         std::filesystem::path proddirectory{ m_modelpath / "prod" };
@@ -345,24 +365,18 @@ Evaluator::Impl::Run(void)
         std::filesystem::path prodmodel{ proddirectory / "model.pt" };
         std::filesystem::copy_file(evalmodel, prodmodel, std::filesystem::copy_options::overwrite_existing);
 
-        m_notation = notation;
+        state.m_notation = notation;
     }
 
-    m_inprogress = false;
-    m_progress   = 0.F;
+    state.m_inprogress = false;
+    state.m_progress   = 0.F;
     UpdateDoubleBuffer();
 }
 
 Evaluator::Evaluator(void) :
     p_impl{ std::make_unique<Impl>() }
 {
-    auto [missileblue, prodblue] = GetNewProductionAircraft("blueeval", ppo::model::eEntitySide::Friend, *p_impl.get());
-    auto missilered = GetNewRandomAircraft("redeval", ppo::model::eEntitySide::Hostile, *p_impl.get());
-    p_impl->p_blue = missileblue;
-    p_impl->p_red = missilered;
 
-   p_impl->m_agents[p_impl->p_blue] = prodblue;
-   p_impl->m_agents[p_impl->p_red] = nullptr;
 }
 
 Evaluator::~Evaluator(void) = default;
@@ -394,4 +408,4 @@ Evaluator::Stop(void)
     p_impl->Stop();
 }
 
-} /* ppo::model */
+} /* rl */

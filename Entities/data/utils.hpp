@@ -4,6 +4,7 @@
 #include <functional>
 #include <random>
 #include <vector>
+#include <atomic>
 
 namespace ppo::model {
 

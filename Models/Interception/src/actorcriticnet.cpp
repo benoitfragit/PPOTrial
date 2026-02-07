@@ -1,7 +1,7 @@
 #include "actorcriticnet.hpp"
 #include <math.h>
 
-namespace ppo::interception {
+namespace rl {
 
 constexpr double PI = 3.1415926536;
 
@@ -146,4 +146,4 @@ ActorCriticNetProd::forward(torch::Tensor state)
     return p_policy->forward_mu(state);
 }
 
-} /* ppo::interception */
+} /* rl */
