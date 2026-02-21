@@ -3,8 +3,8 @@ project(Mission LANGUAGES CXX)
 
 add_library(${PROJECT_NAME}
 	STATIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/actorcriticcategorical.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/actorcriticcategorical.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/actorcriticmission.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/actorcriticmission.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/data/targetselector.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/targetselector.cpp
 	)
@@ -12,7 +12,15 @@ add_library(${PROJECT_NAME}
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/data)
 
 target_link_libraries(${PROJECT_NAME} 
-						PUBLIC GenericEnv GenericPPO)
+						PUBLIC	GenericEntities 
+								EntityInitializer
+								GenericSerializer 
+								GenericPPO)
+
+add_dependencies(${PROJECT_NAME} GenericEntities 
+								 EntityInitializer
+								 GenericSerializer 
+								 GenericPPO)
 
 set(RESOURCE_RLMISSIONMODEL_PATH "${CMAKE_SOURCE_DIR}/resources/model/RLMission")
 target_compile_definitions(${PROJECT_NAME} PUBLIC RESOURCE_RLMISSIONMODEL_PATH="${RESOURCE_RLMISSIONMODEL_PATH}")

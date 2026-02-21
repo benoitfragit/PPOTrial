@@ -206,18 +206,20 @@ TrainingAgent<Policy, Model>::SetNewState(void)
             // increase version number
             ++m_internal.m_version;
 
-            // check if we need to evaluate this new model
-            if (p_evaluator != nullptr
-            &&   m_internal.m_version % m_internal.m_checkpoint == 0
-            &&  !m_internal.m_evaluationprogress)
+            if (m_internal.m_version % m_internal.m_checkpoint == 0)
             {
-                p_evaluator->Stop();
-
                 // save the model in eval
                 p_rlagent->Save(m_modelpath);
 
-                // then launch an evaluation
-                p_evaluator->Start(m_name, m_modelpath);
+                // check if we need to evaluate this new model
+                if (p_evaluator != nullptr
+                    && !m_internal.m_evaluationprogress)
+                {
+                    p_evaluator->Stop();
+
+                    // then launch an evaluation
+                    p_evaluator->Start(m_name, m_modelpath);
+                }
             }
 
             ret = true;

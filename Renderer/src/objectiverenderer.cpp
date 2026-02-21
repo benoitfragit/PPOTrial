@@ -61,7 +61,7 @@ ObjectiveRenderer::Run(entt::registry& registry, entt::entity entity) noexcept
     if (m_filled)
         sf::CircleShape::setFillColor(m_color);
 
-    renderer.draw(*this);
+    renderer.GetRenderTexture().draw(*this);
 
     if (state.m_destroyed)
         DrawDestroySymbol(state);
@@ -84,21 +84,21 @@ ObjectiveRenderer::DrawDestroySymbol(model::sEntityState const& state)
     sf::VertexArray vertices(sf::Quads);
 
     sf::Vector2f a{ position.x + m_radius * ratioNorth / 2.F,
-                    position.y - m_radius * ratioEast / 2.F };
+                    position.y - m_radius * ratioNorth / 2.F };
 
     sf::Vector2f b{ position.x - m_radius * ratioNorth / 2.F,
-                    position.y + m_radius * ratioEast / 2.F };
+                    position.y + m_radius * ratioNorth / 2.F };
 
     DrawQuadBetweenLine(a, b, sf::Color::White, lineWidth, vertices);
 
     a = sf::Vector2f(position.x + m_radius * ratioNorth / 2.F,
-        position.y + m_radius * ratioEast / 2.F);
+        position.y + m_radius * ratioNorth / 2.F);
     b = sf::Vector2f(position.x - m_radius * ratioNorth / 2.F,
-        position.y - m_radius * ratioEast / 2.F);
+        position.y - m_radius * ratioNorth / 2.F);
 
     DrawQuadBetweenLine(a, b, sf::Color::White, lineWidth, vertices);
 
-    renderer.draw(vertices);
+    renderer.GetRenderTexture().draw(vertices);
 }
 
 } /* ppo::environment */

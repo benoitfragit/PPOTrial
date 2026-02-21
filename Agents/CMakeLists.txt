@@ -1,2 +1,2 @@
 add_subdirectory(Interception)
-#add_subdirectory(mission)
+add_subdirectory(mission)

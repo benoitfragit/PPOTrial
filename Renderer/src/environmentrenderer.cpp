@@ -108,32 +108,14 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
     if (ImGui::SFML::Init(*this))
         setFramerateLimit(60.F);
 
-
-    if (p_controlWindow == nullptr)
-    {
-        p_controlWindow = std::make_unique<sf::RenderWindow>(sf::VideoMode(320, 980), "Training controls");
-        
-        if (ImGui::SFML::Init(*p_controlWindow))
-            p_controlWindow->setFramerateLimit(60.F);
-    }
+    // Create the rendering texture to draw renderers on it and then display it in the main window
+    m_texture.create(getSize().x, getSize().y);
 
     ImGui::StyleColorsDark();
 
     SetupModernDarkTheme();
-
-    if (p_plotWindow == nullptr)
-    {
-        p_plotWindow = std::make_unique<sf::RenderWindow>(sf::VideoMode(320,980), "Training plots");
-        
-        if (ImGui::SFML::Init(*p_plotWindow))
-            p_plotWindow->setFramerateLimit(60.F);
-    }
 
     ImPlot::CreateContext();
-
-    ImGui::StyleColorsDark();
-
-    SetupModernDarkTheme();
 }
 
 void 
@@ -290,7 +272,7 @@ EnvironmentRenderer::DrawRewardControls(std::shared_ptr<AgentController> agent, 
         ImGui::Text("Reward clamp");
         ImGui::TableSetColumnIndex(1);
         ImGui::SetNextItemWidth(-FLT_MIN);
-        if (ImGui::SliderFloat("##clamp", &agent->m_clamp, 0.5F, 10.F))
+        if (ImGui::SliderFloat("##clamp", &agent->m_clamp, 0.5F, 100.F))
         {
             ppo::model::sAgentRealTimeCommand command{};
             command.m_id = agent->m_id;
@@ -520,61 +502,74 @@ EnvironmentRenderer::DrawAgentInfo(ppo::model::sAgentStateSnaphot const& agentSt
 }
 
 void
+EnvironmentRenderer::DrawOneAgentPlot(AgentController::Plot& plot)
+{
+    if (ImPlot::BeginPlot(plot.m_name.c_str(), ImGui::GetContentRegionAvail()))
+    {
+        ImPlot::SetupAxes("t", "y", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+        ImPlot::PlotLine("Loss", plot.data(), plot.size());
+
+        if (ImGui::BeginPopupContextItem())
+        {
+            if (ImGui::MenuItem("Pin plot"))
+            {
+                if (p_pinnedPlot != &plot)
+                    p_pinnedPlot = &plot;
+                else
+                    p_pinnedPlot = nullptr;
+            }
+
+            ImGui::EndPopup();
+        }
+
+        ImPlot::EndPlot();
+    }
+}
+
+void
 EnvironmentRenderer::DrawAgentPlot(std::shared_ptr<AgentController> agent, ppo::model::sAgentStateSnaphot const& state)
 {
     if (agent == nullptr)
         return;
 
-    if (agent->m_started && !state.m_common.m_training)
-    {
-        agent->m_plots[0].push(state.m_common.m_loss);
-        agent->m_plots[1].push(state.m_common.m_actorloss);
-        agent->m_plots[2].push(state.m_common.m_valueloss);
-        agent->m_plots[3].push(state.m_common.m_entropyloss);
-    }
+    ImVec2 tabSizes{ ImGui::GetContentRegionAvail() };
 
-    if (ImGui::CollapsingHeader(state.m_name.c_str()))
-    {
-        std::string plotTitle{state.m_name};
-        plotTitle.append("-Loss");
+    agent->m_plots[0].m_name = state.m_name;
+    agent->m_plots[0].m_name.append("-Loss");
+    agent->m_plots[1].m_name = state.m_name;
+    agent->m_plots[1].m_name.append("-ActorLoss");
+    agent->m_plots[2].m_name = state.m_name;
+    agent->m_plots[2].m_name.append("-ValueLoss ");
+    agent->m_plots[3].m_name = state.m_name;
+    agent->m_plots[3].m_name.append("-EntropyLoss ");
 
-        if (ImPlot::BeginPlot(plotTitle.c_str()))
-        {
-            ImPlot::SetupAxes("t", "y", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-            ImPlot::PlotLine("Loss", agent->m_plots[0].data(), agent->m_plots[0].size());
-            ImPlot::EndPlot();
-        }
+    ImGui::BeginChild("##Loss", ImVec2(1.F * (float)tabSizes.x / 2.F, (float)tabSizes.y / 2.F), false);
 
-        plotTitle =state.m_name;
-        plotTitle.append("-ActorLoss");
+    DrawOneAgentPlot(agent->m_plots[0]);
 
-        if (ImPlot::BeginPlot(plotTitle.c_str()))
-        {
-            ImPlot::SetupAxes("t", "y", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-            ImPlot::PlotLine("Loss", agent->m_plots[1].data(), agent->m_plots[1].size());
-            ImPlot::EndPlot();
-        }
+    ImGui::EndChild();
 
-        plotTitle = state.m_name;
-        plotTitle.append("-ValueLoss");
+    ImGui::SameLine();
 
-        if (ImPlot::BeginPlot(plotTitle.c_str()))
-        {
-            ImPlot::SetupAxes("t", "y", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-            ImPlot::PlotLine("Loss", agent->m_plots[2].data(), agent->m_plots[2].size());
-            ImPlot::EndPlot();
-        }     
+    ImGui::BeginChild("##ActorLoss", ImVec2(1.F * (float)tabSizes.x / 2.F, (float)tabSizes.y / 2.F), false);
 
-        plotTitle = state.m_name;
-        plotTitle.append("-EntropyLoss");
+    DrawOneAgentPlot(agent->m_plots[1]);
 
-        if (ImPlot::BeginPlot(plotTitle.c_str()))
-        {
-            ImPlot::SetupAxes("t", "y", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-            ImPlot::PlotLine("Loss", agent->m_plots[3].data(), agent->m_plots[3].size());
-            ImPlot::EndPlot();
-        }
-    }
+    ImGui::EndChild();
+
+    ImGui::BeginChild("##ValueLoss", ImVec2(1.F * (float)tabSizes.x / 2.F, (float)tabSizes.y / 2.F), false);
+
+    DrawOneAgentPlot(agent->m_plots[2]);
+
+    ImGui::EndChild();
+
+    ImGui::SameLine();
+                      
+    ImGui::BeginChild("##EntropyLoss", ImVec2(1.F * (float)tabSizes.x / 2.F, (float)tabSizes.y / 2.F), false);
+
+    DrawOneAgentPlot(agent->m_plots[3]);
+
+    ImGui::EndChild();
 }
 
 std::shared_ptr<EnvironmentRenderer::AgentController>
@@ -614,12 +609,6 @@ EnvironmentRenderer::Run(void)
 
         if (event.type == sf::Event::Closed)
         {
-            if (p_controlWindow->isOpen())
-                p_controlWindow->close();
-
-            if (p_plotWindow->isOpen())
-                p_plotWindow->close();
-
             sf::RenderWindow::close();
             ImPlot::DestroyContext();
             ImGui::SFML::Shutdown();
@@ -634,33 +623,6 @@ EnvironmentRenderer::Run(void)
                 m_view.zoom(1.1);
         }
     }
-
-    if (p_controlWindow->isOpen())
-    {
-        while (p_controlWindow->pollEvent(event))
-        {
-            ImGui::SFML::ProcessEvent(*p_controlWindow, event);
-
-            if (event.type == sf::Event::Closed)
-            {
-                p_controlWindow->close();
-                ImGui::SFML::Shutdown(*p_controlWindow);
-            }
-        }
-    }
-
-    if (p_plotWindow->isOpen())
-    {
-        while (p_plotWindow->pollEvent(event))
-        {
-            ImGui::SFML::ProcessEvent(*p_plotWindow, event);
-            if (event.type == sf::Event::Closed)
-            {
-                p_plotWindow->close();
-                ImGui::SFML::Shutdown(*p_plotWindow);
-            }
-        }
-    }
     
     sf::Time const dt{ m_deltaClock.restart() };
     ImGui::SFML::Update(*this, dt);
@@ -672,104 +634,18 @@ EnvironmentRenderer::Run(void)
     float sx{ envState.m_maxEast / GetScaleWorld() };
     m_linewidth = sx / 250.F;
 
-    if (p_controlWindow->isOpen())
-    {
-        ImGui::SFML::Update(*p_controlWindow, dt);
-
-        sf::Vector2u controlSizes{ p_controlWindow->getSize() };
-        ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2((float)controlSizes.x, (float)controlSizes.y), ImGuiCond_Always);
-
-        ImGuiWindowFlags flags{ ImGuiWindowFlags_NoTitleBar
-                            | ImGuiWindowFlags_NoResize
-                            | ImGuiWindowFlags_NoMove
-                            | ImGuiWindowFlags_NoCollapse };
-
-        if (ImGui::Begin("Training Controls", nullptr, flags))
-        {
-            ImGui::SFML::SetCurrentWindow(*p_controlWindow);
-
-            DrawSimuControls();
-
-            if (ImGui::CollapsingHeader("Environment"))
-                DrawEnvControls();
-
-            if (ImGui::CollapsingHeader("Entities"))
-            {
-                auto view = snapshot.view<entt::entity>();
-
-                for (auto const& entity : view)
-                    DrawEntityInfo(snapshot, entity);
-            }
-
-            auto agentView = snapshot.view<ppo::model::sAgentStateSnaphot>();
-
-            for (auto entity : agentView)
-            {
-                auto [trainingAgentState] = agentView.get(entity) ;
-
-                auto agent{ GetAgentController(trainingAgentState.m_id) };
-
-                if (agent == nullptr)
-                    continue;
-
-                if (ImGui::CollapsingHeader(trainingAgentState.m_name.c_str()))
-                {
-                    DrawTrainingControls(agent, trainingAgentState);
-
-                    DrawRewardControls(agent, trainingAgentState);
-
-                    DrawAgentInfo(trainingAgentState);
-                }
-            }
-            
-        }
-        ImGui::End();
-    }
-
-    if (p_plotWindow->isOpen())
-    {
-        ImGui::SFML::Update(*p_plotWindow, dt);
-        
-        sf::Vector2u plotSizes{ p_plotWindow->getSize() };
-        ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2((float)plotSizes.x, (float)plotSizes.y), ImGuiCond_Always);
-
-        ImGuiWindowFlags flags{ ImGuiWindowFlags_NoTitleBar
-                            | ImGuiWindowFlags_NoResize
-                            | ImGuiWindowFlags_NoMove
-                            | ImGuiWindowFlags_NoCollapse };
-
-        if (ImGui::Begin("Plots Displays", nullptr, flags))
-        {
-            ImGui::SFML::SetCurrentWindow(*p_plotWindow);
-
-            auto agentView = snapshot.view<ppo::model::sAgentStateSnaphot>();
-
-            for (auto entity : agentView)
-            {
-                auto [trainingAgentState] = agentView.get(entity);
-
-                auto agent{ GetAgentController(trainingAgentState.m_id) };
-
-                DrawAgentPlot(agent, trainingAgentState);
-            }
-        }
-
-        ImGui::End();
-    }
-
     ImGui::SFML::SetCurrentWindow(*this);
-    sf::RenderWindow::clear();
+
+    // set the view
+    m_texture.setView(m_view);
+    m_texture.clear(sf::Color::Black);
 
     sf::Vector2f maxRanges{ envState.m_maxNorth, envState.m_maxEast };
     maxRanges = maxRanges / GetScaleWorld();
 
-    // set the view
     m_view.setCenter({ 0.F, 0.F });
     m_view.setViewport({ 0.F, 0.F, 1.F, 1.F });
     m_view.setRotation(90.F);
-    sf::RenderWindow::setView(m_view);
 
     m_fightingArea.setOutlineColor(sf::Color::Yellow);
     m_fightingArea.setFillColor(sf::Color::Transparent);
@@ -777,7 +653,7 @@ EnvironmentRenderer::Run(void)
     m_fightingArea.setPosition(-maxRanges/2.F);
     m_fightingArea.setOrigin(0, 0);
     m_fightingArea.setSize(maxRanges);
-    sf::RenderWindow::draw(m_fightingArea);
+    m_texture.draw(m_fightingArea);
 
     auto view = snapshot.view<entt::entity>();
 
@@ -824,26 +700,141 @@ EnvironmentRenderer::Run(void)
             renderer->Run(snapshot, entity);
     }
 
-    // Retour vue default
-    sf::RenderWindow::setView(sf::RenderWindow::getDefaultView());
+    m_texture.display();
 
+    ImGui::SetNextWindowPos({ 0.F, 0.F });
+    ImGui::SetNextWindowSize({ (float)getSize().x, (float)getSize().y });
+    ImGui::Begin("##Main", nullptr, ImGuiWindowFlags_NoTitleBar 
+                                 | ImGuiWindowFlags_NoResize
+                                 | ImGuiWindowFlags_NoMove
+                                 | ImGuiWindowFlags_NoCollapse  
+                                 | ImGuiWindowFlags_NoBringToFrontOnFocus);
+
+    if (ImGui::BeginTabBar("##TabBar"))
+    {
+        if (ImGui::BeginTabItem("Environment"))
+        {
+            ImVec2 tabSizes{ ImGui::GetContentRegionAvail() };
+            
+            if (tabSizes.x != m_texture.getSize().x || tabSizes.y != m_texture.getSize().y)
+            {
+                m_texture.create(tabSizes.x, tabSizes.y);
+
+                m_view.setSize(tabSizes.x, tabSizes.y);
+            }
+
+            ImGui::Image(m_texture);
+
+            ImGui::SetNextWindowSize({ (float)tabSizes.x/3.F, (float)tabSizes.y/4.F }, ImGuiCond_Once);
+            ImGui::SetNextWindowPos({ (float)tabSizes.x / 3.F, 3.F*(float)tabSizes.y/4.F }, ImGuiCond_Once);
+
+            ImGui::Begin("##SimulationControls", nullptr, ImGuiWindowFlags_NoCollapse);
+                DrawSimuControls();
+                DrawEnvControls();
+            ImGui::End();
+
+            ImGui::SetNextWindowSize({ (float)tabSizes.x / 3.F, (float)tabSizes.y / 3.F }, ImGuiCond_Once);
+            ImGui::SetNextWindowPos({2.F* (float)tabSizes.x / 3.F, 2.F * (float)tabSizes.y / 3.F }, ImGuiCond_Once);
+
+            if (p_pinnedPlot != nullptr)
+            {
+                ImGui::Begin("##PinnedPlot", nullptr, ImGuiWindowFlags_NoCollapse);
+                    DrawOneAgentPlot(*p_pinnedPlot);
+                ImGui::End();
+            }
+
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Entities"))
+        {
+            auto view = snapshot.view<entt::entity>();
+            int i{ 0 };
+            for (auto const& entity : view)
+            {
+                if (!snapshot.any_of<ppo::model::sEntityState>(entity))
+                    continue;
+
+                ImGui::PushID(i);
+                if (ImGui::CollapsingHeader(("Entity " + std::to_string(static_cast<entt::id_type>(entity))).c_str()))
+                {
+                    DrawEntityInfo(snapshot, entity);
+                }
+                ImGui::PopID();
+                ++i;
+            }
+            ImGui::EndTabItem();
+        }
+
+        auto agentView = snapshot.view<ppo::model::sAgentStateSnaphot>();
+
+        auto j = 0;
+        static bool first{ true };
+        for (auto entity : agentView)
+        {
+            auto [trainingAgentState] = agentView.get(entity);
+
+            auto agent{ GetAgentController(trainingAgentState.m_id) };
+
+            if (agent == nullptr)
+                continue;
+
+            if (agent->m_started && !trainingAgentState.m_common.m_training && !first)
+            {
+                agent->m_plots[0].push(trainingAgentState.m_common.m_loss);
+                agent->m_plots[1].push(trainingAgentState.m_common.m_actorloss);
+                agent->m_plots[2].push(trainingAgentState.m_common.m_valueloss);
+                agent->m_plots[3].push(trainingAgentState.m_common.m_entropyloss);
+            }
+
+            ImGui::PushID(j);
+
+            if (ImGui::BeginTabItem(trainingAgentState.m_name.c_str()))
+            {
+                ImVec2 tabSizes{ ImGui::GetContentRegionAvail() };
+
+                ImGui::BeginChild("##AgentControls", ImVec2((float)tabSizes.x/3.F, tabSizes.y), false);
+
+                    DrawTrainingControls(agent, trainingAgentState);
+
+                    DrawRewardControls(agent, trainingAgentState);
+
+                    DrawAgentInfo(trainingAgentState);
+                
+                ImGui::EndChild();
+
+                ImGui::SameLine();
+
+                ImGui::BeginChild("##AgentPlots", ImVec2(2.F*(float)tabSizes.x / 3.F, tabSizes.y), false);
+
+                    DrawAgentPlot(agent, trainingAgentState);
+
+                ImGui::EndChild();
+            
+                ImGui::EndTabItem();
+            }
+
+            ImGui::PopID();
+            ++j;
+        }
+        first = false;
+
+        ImGui::EndTabBar();
+    }
+
+    ImGui::End();
+
+    sf::RenderWindow::clear();
     ImGui::SFML::Render(*this);
-    sf::RenderWindow::display();     
+    sf::RenderWindow::display(); 
 
-    if (p_controlWindow->isOpen())
-    {
-        p_controlWindow->clear();
-        ImGui::SFML::Render(*p_controlWindow);
-        p_controlWindow->display();
-    }
-
-    if (p_plotWindow->isOpen())
-    {
-        p_plotWindow->clear();
-        ImGui::SFML::Render(*p_plotWindow);
-        p_plotWindow->display();
-    }
     return true;
+}
+
+sf::RenderTexture&
+EnvironmentRenderer::GetRenderTexture(void) noexcept
+{
+    return m_texture;
 }
 
 }

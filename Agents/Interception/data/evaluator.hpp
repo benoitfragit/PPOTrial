@@ -1,7 +1,6 @@
 #pragma once
 
-#include "interface.hpp"
-
+#include "iagent.hpp"
 #include <string>
 #include <memory>
 #include <filesystem>

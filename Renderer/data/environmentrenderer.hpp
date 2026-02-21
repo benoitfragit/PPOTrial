@@ -27,6 +27,7 @@ public:
     void                        SetEnvironment      (ppo::model::Environment& env) noexcept;
     bool                        Run                 (void);
     sf::View const&             GetView             (void) const noexcept;
+    sf::RenderTexture&          GetRenderTexture    (void) noexcept;
     float                       GetScaleWorld       (void) const noexcept;
     float                       GetLineWidth        (void) const noexcept;
     
@@ -65,7 +66,7 @@ public:
         std::vector<float> m_data{};
         std::size_t m_size{ 0 };
         std::size_t m_index{ 0 };
-
+        std::string m_name{ "" };
     };
 
     struct AgentController {
@@ -91,9 +92,8 @@ private:
     void                        DrawEntityInfo      (entt::registry const& snapshot, entt::entity entity);
     void                        DrawAgentInfo       (ppo::model::sAgentStateSnaphot const& state);
     void                        DrawAgentPlot       (std::shared_ptr<AgentController> agent, ppo::model::sAgentStateSnaphot const& state);
+    void                        DrawOneAgentPlot    (AgentController::Plot& plot);
 
-    std::unique_ptr<sf::RenderWindow>   p_controlWindow {nullptr};
-    std::unique_ptr<sf::RenderWindow>   p_plotWindow    { nullptr };    
     sf::Clock                           m_deltaClock    {};
     sf::View                            m_view          {};
     sf::RectangleShape                  m_fightingArea  {};
@@ -102,6 +102,9 @@ private:
     using Renderers = std::map<entt::entity, std::shared_ptr<IRenderer>>;
     Renderers                           p_renderers     {};
     std::map<unsigned long long, std::shared_ptr<AgentController>> p_agents{};
+    AgentController::Plot*              p_pinnedPlot{ nullptr };
+
+    sf::RenderTexture                   m_texture;
 
     int                                 m_currentScaleLevel{1};
     float                               m_areawidth        {150};

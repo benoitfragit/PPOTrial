@@ -3,8 +3,6 @@
 #include "snasystem.hpp"
 #include "flightmodelsystem.hpp"
 #include "snacontrolsystem.hpp"
-#include "randominitializersystem.hpp"
-#include "checkpointinitializersystem.hpp"
 
 #include "serializer.hpp"
 

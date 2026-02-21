@@ -8,8 +8,13 @@ add_library(${PROJECT_NAME}
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/data)
 
-target_link_libraries(${PROJECT_NAME} PUBLIC GenericEntities GenericPPO GenericSerializer EnTT::EnTT)
+target_link_libraries(${PROJECT_NAME} PUBLIC GenericEntities 
+											 EntityInitializer 
+											 GenericPPO 
+											 GenericSerializer 
+											 EnTT::EnTT)
 
 add_dependencies(${PROJECT_NAME} GenericEntities 
+								 EntityInitializer
 								 GenericPPO
 								 GenericSerializer)

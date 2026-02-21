@@ -41,10 +41,13 @@ Entity::Init(void) noexcept
 
     auto& [state] = get<sEntityState>();
 
+    state.m_destroyed = false;
+    state.m_prevDestroyed = false;
+    state.m_destroyedById = entt::null;
+
     if (p_initializer != nullptr)
         p_initializer(*this);
 
-    state.m_destroyed = false;
     state.m_dx = state.m_speed * cos(state.m_rotation);
     state.m_dy = state.m_speed * sin(state.m_rotation);
 }

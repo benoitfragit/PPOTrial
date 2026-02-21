@@ -1,5 +1,4 @@
 #pragma once
-#include "environment.hpp"
 #include "aircraft.hpp"
 #include "evaluator.hpp"
 #include "actorcriticnet.hpp"

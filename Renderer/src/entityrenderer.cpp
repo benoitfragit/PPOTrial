@@ -32,8 +32,7 @@ EntityRenderer::DrawShootingRanges(model::sEntityState const& state, float radiu
 {
     auto&                renderer   { EnvironmentRenderer::GetInstance() };
     auto const&          view       { renderer.GetView() };
-    auto const           winSize    { renderer.getSize() };
-    auto const           viewSize   { view.getSize() };
+    auto&                texture    { renderer.GetRenderTexture() };
     float const          lineWidth  { renderer.GetLineWidth() };
     sf::Vector2f const&  position   { sf::ConvexShape::getPosition() };
     float const          stepangle  { (endangle - startangle) / nbpoint };
@@ -55,7 +54,7 @@ EntityRenderer::DrawShootingRanges(model::sEntityState const& state, float radiu
     for (unsigned short idx = 1; idx < points.size(); ++idx)
         DrawQuadBetweenLine(points[idx - 1], points[idx], color, lineWidth, vertices);
 
-    renderer.draw(vertices);
+    texture.draw(vertices);
 }
 
 void
@@ -63,11 +62,11 @@ EntityRenderer::DrawDestroySymbol(model::sEntityState const& state)
 {
     auto& renderer              { EnvironmentRenderer::GetInstance() };
     auto const& view            { renderer.GetView() };
-    auto const  winSize         { renderer.getSize() };
+    auto& texture               { renderer.GetRenderTexture()};
     auto const  viewSize        { view.getSize() };
 
-    float const ratioNorth      { viewSize.x / winSize.y };
-    float const ratioEast       { viewSize.y / winSize.x };
+    float const ratioNorth      { viewSize.x / texture.getSize().y};
+    float const ratioEast       { viewSize.y / texture.getSize().x};
 
     sf::Vector2f const& position{ sf::ConvexShape::getPosition() };
     float const lineWidth       { renderer.GetLineWidth()};
@@ -75,21 +74,21 @@ EntityRenderer::DrawDestroySymbol(model::sEntityState const& state)
     sf::VertexArray vertices(sf::Quads);
 
     sf::Vector2f a{ position.x + m_height * ratioNorth / 2.F,
-                    position.y - m_width * ratioEast / 2.F };
+                    position.y - m_width * ratioNorth / 2.F };
 
     sf::Vector2f b{ position.x - m_height * ratioNorth / 2.F,
-                    position.y + m_width * ratioEast / 2.F };
+                    position.y + m_width * ratioNorth / 2.F };
 
     DrawQuadBetweenLine(a, b, sf::Color::White, lineWidth, vertices);
 
     a = sf::Vector2f(position.x + m_height * ratioNorth / 2.F,
-                     position.y + m_width  * ratioEast / 2.F);
+                     position.y + m_width  * ratioNorth / 2.F);
     b = sf::Vector2f(position.x - m_height * ratioNorth / 2.F,
-                     position.y - m_width  * ratioEast / 2.F);
+                     position.y - m_width  * ratioNorth / 2.F);
 
     DrawQuadBetweenLine(a, b, sf::Color::White, lineWidth, vertices);
 
-    renderer.draw(vertices);
+    texture.draw(vertices);
 }
 
 void
@@ -102,10 +101,10 @@ EntityRenderer::Run(entt::registry& registry, entt::entity entity) noexcept
 
     auto&       renderer{ EnvironmentRenderer::GetInstance() };
     auto const& view    { renderer.GetView() };
-    auto const  winSize { renderer.getSize() };
+    auto& texture{ renderer.GetRenderTexture() };
     auto const  viewSize{ view.getSize() };
-    float const ratioNorth  { viewSize.x / winSize.y };
-    float const ratioEast   { viewSize.y / winSize.x };
+    float const ratioNorth  { viewSize.x / texture.getSize().y };
+    float const ratioEast   { viewSize.y / texture.getSize().x };
 
     if (registry.any_of<ppo::model::sFlightModelState>(entity)
         && state.m_type != ppo::model::eEntityType::SAM)
@@ -120,8 +119,8 @@ EntityRenderer::Run(entt::registry& registry, entt::entity entity) noexcept
 
         sf::ConvexShape::setPointCount(3);
 
-        sf::Vector2f const p1{ -m_height * ratioNorth / 2.F ,  -m_width * ratioEast / 2.F };
-        sf::Vector2f const p2{ -m_height * ratioNorth / 2.F,   m_width * ratioEast / 2.F };
+        sf::Vector2f const p1{ -m_height * ratioNorth / 2.F ,  -m_width * ratioNorth / 2.F };
+        sf::Vector2f const p2{ -m_height * ratioNorth / 2.F,   m_width * ratioNorth / 2.F };
         sf::Vector2f const p3{ m_height * ratioNorth / 2.F,                           0 };
 
         sf::ConvexShape::setPoint(0, p1);
@@ -152,10 +151,17 @@ EntityRenderer::Run(entt::registry& registry, entt::entity entity) noexcept
 
         if (float const noEscapeZoneValue{ isnastate.m_noescapezone };
             std::numeric_limits<float>::epsilon() < noEscapeZoneValue)
-            DrawShootingRanges(state, noEscapeZoneValue, sf::Color::Red, -isnastate.m_maxShootAngle, isnastate.m_maxShootAngle);
+        {
+            sf::Color c{ sf::Color::Red };
+            if (state.m_type == ppo::model::eEntityType::SAM)
+                if (state.m_side == ppo::model::eEntitySide::Friend)
+                    c = sf::Color::Blue;
+
+            DrawShootingRanges(state, noEscapeZoneValue, c, -isnastate.m_maxShootAngle, isnastate.m_maxShootAngle);
+        }
     }
 
-    renderer.draw(*this);
+    texture.draw(*this);
 
     if (state.m_destroyed)
         DrawDestroySymbol(state);

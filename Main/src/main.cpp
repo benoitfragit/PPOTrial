@@ -5,6 +5,7 @@
 #include "serializer.hpp"
 #include "objective.hpp"
 #include "Interception.hpp"
+#include "targetselector.hpp"
 #include "sam.hpp"
 
 #include "environmentrenderer.hpp"
@@ -28,7 +29,8 @@ LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment&
         ppo::model::eEntityType  type{ ppo::model::eEntityType::None };
         ppo::model::eEntitySide  side{ ppo::model::eEntitySide::Unknown };
         std::string              target{ "" };
-        std::string              agent{""};
+        std::vector<std::string> agents  {};
+        std::string              platform{ "" };   
 
         // champs simples
         std::string tmp{ entitySection["type"] };
@@ -41,16 +43,28 @@ LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment&
         else if (tmp == "Friend")    side = ppo::model::eEntitySide::Friend;
 
         target = entitySection["target"];
-        agent  = entitySection["agent" ];
+        platform = entitySection["platform"];
+        agents  = entitySection["agents" ].get<std::vector<std::string>>();
 
-        if (type == ppo::model::eEntityType::Aircraft)
+        if (type == ppo::model::eEntityType::None)
+            continue;
+
+        if (type == ppo::model::eEntityType::Aircraft
+        &&  platform != "")
         {
-            auto entity = environment.CreateEntity<ppo::model::Aircraft>(name, side);
+            auto entity = environment.CreateEntity<ppo::model::Aircraft>(platform, side);
 
-            if (agent == "SNAProdAgent")
-                auto agent = environment.CreateAgent<rl::SNAProdAgent>(*entity.get());
-            else if (agent == "SNATrainingAgent")
-                auto agent = environment.CreateAgent<rl::SNATrainingAgent>(*entity.get());
+            for (auto const& agent : agents)
+            {
+                if (agent == "SNAProdAgent")
+                    auto agent = environment.CreateAgent<rl::SNAProdAgent>(*entity.get());
+                else if (agent == "SNATrainingAgent")
+                    auto agent = environment.CreateAgent<rl::SNATrainingAgent>(*entity.get());
+                else if (agent == "TargetSelectorTrainingAgent")
+                    auto agent = environment.CreateAgent<rl::TargetSelectorTrainingAgent>(*entity.get());
+                else if (agent == "TargetSelectorProdAgent")
+                    auto agent = environment.CreateAgent<rl::TargetSelectorProdAgent>(*entity.get());
+            }
 
             if (target.compare("") != 0)
                 targetMapping[entity.get()] = target;
@@ -63,9 +77,10 @@ LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment&
 
             entityMapping[name] = entity.get();
         }
-        else if (type == ppo::model::eEntityType::SAM)
+        else if (type == ppo::model::eEntityType::SAM
+        &&       platform != "")
         {
-            auto entity = environment.CreateEntity<ppo::model::SAM>(name, side);
+            auto entity = environment.CreateEntity<ppo::model::SAM>(platform, side);
             entityMapping[name] = entity.get();
         }
     }

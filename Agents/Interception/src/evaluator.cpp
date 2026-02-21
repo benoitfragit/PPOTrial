@@ -112,8 +112,8 @@ Evaluator::Impl::Impl(void)
 
     if (m_agent == nullptr)
     {
-        p_blue  = CreateEntity<ppo::model::Aircraft>("blueeval", ppo::model::eEntitySide::Friend);
-        p_red   = CreateEntity<ppo::model::Aircraft>("redeval", ppo::model::eEntitySide::Hostile);
+        p_blue  = CreateEntity<ppo::model::Aircraft>("evalaircraft", ppo::model::eEntitySide::Friend);
+        p_red   = CreateEntity<ppo::model::Aircraft>("evalaircraft", ppo::model::eEntitySide::Hostile);
         m_agent = CreateAgent<SNAProdAgent>(*p_blue.get());
 
         auto& checkpointblue = p_blue->add<ppo::model::sEntityCheckPoint>();

@@ -126,4 +126,52 @@ SNASystem::Init(BaseEntity& entity)
    state.m_target_los_rate = 0.F;
 }
 
+float 
+SNASystem::EvaluateDestruction(BaseEntity& entity, BaseEntity& otherEntity)
+{
+    if (!entity.has<sEntityState, sSNAState>()
+    ||  !otherEntity.has<sEntityState>()
+    ||  entity.uniqid() == otherEntity.uniqid())
+        return 0.F;
+
+    auto [entityState, snaState] = entity.get<sEntityState, sSNAState>();
+    auto [otherEntityState] = otherEntity.get<sEntityState>();
+
+    if (otherEntityState.m_side == entityState.m_side
+    ||  (entityState.m_type == eEntityType::SAM && otherEntityState.m_type != eEntityType::Aircraft))
+        return 0.F;
+
+    float pkrange{ 0.F };
+    float pkangle{ 0.F };
+
+    float const dx{ otherEntityState.m_x - entityState.m_x };
+    float const dy{ otherEntityState.m_y - entityState.m_y };
+
+    float const d{ std::sqrt(dx * dx + dy * dy) };
+
+    float const ux{ dx / (d + 1e-6F) };
+    float const uy{ dy / (d + 1e-6F) };
+
+    float az = atan2(uy, ux);
+    az = ppo::model::wrapMinusPi2Pi(az);
+    az = ppo::model::wrapMinusPi2Pi(az - entityState.m_rotation);
+
+    float const deltad{ snaState.m_escapezone - snaState.m_noescapezone + 1e-6F };
+    pkrange = std::clamp((snaState.m_escapezone - d) / deltad, 0.F, 1.F);
+
+    if (entityState.m_type != eEntityType::SAM)
+    {
+        if (d <= snaState.m_noescapezone && std::fabs(az) < HALFPI)
+            return 1.F;
+
+        pkangle = std::clamp(1.F - std::fabs(az)/(snaState.m_maxShootAngle+1e-6F), 0.F, 1.F);
+    }
+    else
+    {
+        pkangle = 1.F;
+    }
+
+    return pkrange * pkangle;
+}
+
 }

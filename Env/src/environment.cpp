@@ -1,6 +1,7 @@
 #include "environment.hpp"
 #include "utils.hpp"
 #include "serializer.hpp"
+#include "snasystem.hpp"
 
 #include <map>
 #include <thread>
@@ -14,6 +15,13 @@ namespace ppo::model {
 
 using Entities = std::vector<std::shared_ptr<Entity>>;
 using Agents = std::vector<std::shared_ptr<IAgent>>;
+
+enum class eEnvironmentState : unsigned char {
+    INIT = 0,
+    RUNNING = 1,
+    PAUSED = 2,
+    STOPPED = 3
+};
 
 struct sRealTimeCommand {
     enum class eTypeCommand {
@@ -253,6 +261,14 @@ Environment::Impl::Run(void)
                 if (entity == nullptr)
                     continue;
 
+                if (entity->has<sEntityState>())
+                {
+                    auto [entityState] = entity->get<sEntityState>();
+
+                    if (entityState.m_destroyed)
+                        continue;
+                }
+
                 // according to the action compute the new state
                 entity->Run();
             }
@@ -261,19 +277,34 @@ Environment::Impl::Run(void)
             for (auto& entity: m_entities)
             {
                 if (entity == nullptr
-                ||  !entity->has<sSNAState>())
+                ||  !entity->has<sEntityState, sSNAState>())
                     continue;
 
-                auto const& [snaState] = entity->get<sSNAState>();
+                auto const [entityState, snaState] = entity->get<sEntityState, sSNAState>();
 
-                if (m_world.any_of<sEntityState>(snaState.m_target))
+                if (entityState.m_destroyed)
+                    continue;
+
+                for (auto& otherEntity : m_entities)
                 {
-                    float const pkTarget{ snaState.m_pk };
+                    if (otherEntity == entity
+                    || !otherEntity->has<sEntityState>())
+                        continue;
 
-                    auto [targetState] = m_world.view<sEntityState>().get(snaState.m_target);
+                    auto [otherEntityState] = otherEntity->get<sEntityState>();
 
-                    if (0.95F < pkTarget)
-                        targetState.m_destroyed = true;
+                    if (otherEntityState.m_destroyed) 
+                    {
+                        otherEntityState.m_prevDestroyed = true;
+                        continue;
+                    }
+
+                    if (float pk{ SNASystem::EvaluateDestruction(*entity.get(), *otherEntity.get()) };
+                        0.95F < pk)
+                    {
+                        otherEntityState.m_destroyed = true;
+                        otherEntityState.m_destroyedById = entity->uniqid();
+                    } 
                 }
             }
 

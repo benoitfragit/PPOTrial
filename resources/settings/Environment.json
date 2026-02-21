@@ -1,7 +1,7 @@
 {
     "Env": {
-        "MaxEast": 200000.0,
-        "MaxNorth": 153125.0,
+        "MaxEast": 70000.0,
+        "MaxNorth": 53593.75,
         "TimeStep": 0.20000000298023224
     }
 }

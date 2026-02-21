@@ -16,6 +16,12 @@ public:
             m_entity = p_registry->create();
     };
 
+    BaseEntity(entt::registry* registry, entt::entity entity):
+        p_registry{ registry },
+        m_entity{ entity }
+    {
+    };
+
     BaseEntity(BaseEntity& other)
     {
         m_entity   = other.uniqid();

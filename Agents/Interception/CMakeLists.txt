@@ -15,11 +15,13 @@ target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/da
 
 target_link_libraries(${PROJECT_NAME} 
 						PUBLIC 	GenericEntities 
+								EntityInitializer
 								GenericPPO)
 
 set(RESOURCE_RLSNAMODEL_PATH "${CMAKE_SOURCE_DIR}/resources/model/RLSNA")
 target_compile_definitions(${PROJECT_NAME} PUBLIC RESOURCE_RLSNAMODEL_PATH="${RESOURCE_RLSNAMODEL_PATH}")
 
 add_dependencies(${PROJECT_NAME} GenericEntities 
+								 EntityInitializer
 								 GenericSerializer 
 								 GenericPPO)

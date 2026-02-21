@@ -124,4 +124,11 @@ public:
     virtual sAgentStateSnaphot  GetSnapshot(void) const noexcept = 0;
 };
 
+class IEvaluator {
+public:
+    virtual ~IEvaluator(void) = default;
+    virtual void Start(std::string const& name, std::filesystem::path const& modelpath) = 0;
+    virtual void Stop(void) = 0;
+    virtual sEvaluatorState GetSnapshot(void) const noexcept = 0;
+};
 } /* ppo::model */

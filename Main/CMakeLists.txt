@@ -14,17 +14,16 @@ target_link_libraries(${PROJECT_NAME}
 		GenericPPO
         GenericEnv
 		GenericRenderer
-		Interception)
+		Interception
+        Mission)
 		
 add_dependencies(${PROJECT_NAME} GenericEntities 
 								 GenericSerializer 
 								 GenericPPO
 								 GenericEnv
 								 GenericRenderer
-								 Interception)
-
-set(RESOURCE_PATH "${CMAKE_SOURCE_DIR}/resources/settings")
-target_compile_definitions(${PROJECT_NAME} PRIVATE RESOURCE_PATH="${RESOURCE_PATH}")
+								 Interception
+                                 Mission)
 
 # For Windows: ensure DLLs are copied
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
