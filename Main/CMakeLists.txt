@@ -14,24 +14,18 @@ target_link_libraries(${PROJECT_NAME}
 		GenericPPO
         GenericEnv
 		GenericRenderer
-		Interception)
+		Interception
+        Mission
+        MetaReflection)
 		
 add_dependencies(${PROJECT_NAME} GenericEntities 
 								 GenericSerializer 
 								 GenericPPO
 								 GenericEnv
 								 GenericRenderer
-								 Interception)
-
-set(RESOURCE_PATH "${CMAKE_SOURCE_DIR}/resources/settings")
-target_compile_definitions(${PROJECT_NAME} PRIVATE RESOURCE_PATH="${RESOURCE_PATH}")
-
-# For Windows: ensure DLLs are copied
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    $<TARGET_FILE_DIR:sfml-graphics>
-    $<TARGET_FILE_DIR:${PROJECT_NAME}>
-)
+								 Interception
+                                 Mission
+                                 MetaReflection)
 
 # Copier les DLL automatiquement
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD

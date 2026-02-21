@@ -1,0 +1,22 @@
+{
+	"aircraft": {
+
+		"FlightModel": {
+			"MaxAcceleration": 100.0,
+			"MaxFuel": 2000000,
+			"MaxRotAcceleration": 0.4000000059604645,
+			"MaxSpeed": 400.0,
+			"MinSpeed": 10.0
+		},
+
+		"SNA": {
+			"MaxMissile": 8,
+			"MaxNoEscapeZoneRange": 4000.0,
+			"MaxShootAngle": 1.0471980571746826
+		},
+
+		"SNAControl": {
+			"Available": true
+		}
+	}
+}

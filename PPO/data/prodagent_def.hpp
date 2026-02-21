@@ -1,3 +1,11 @@
+/**
+* @file PPO/data/prodagent_def.hpp
+* @brief Declarations for prodagent_def.
+* @author PPOTrial
+* @date 2026-03-29
+* @copyright Copyright (c) 2026 PPOTrial
+* @license MIT
+*/
 #pragma once
 
 #include <array>
@@ -10,6 +18,9 @@
 
 namespace ppo::model {
 
+/**
+* @brief Builds the production agent and loads its serialized policy when present.
+*/
 template<typename Policy, typename Model>
 ProdAgent<Policy, Model>::ProdAgent(Model* model, std::string const& name, std::filesystem::path const& modelpath):
     p_model{model},
@@ -30,6 +41,9 @@ ProdAgent<Policy, Model>::ProdAgent(Model* model, std::string const& name, std::
     }
 }
 
+/**
+* @brief Initializes the production state buffer from the model.
+*/
 template<typename Policy,  typename Model>
 void
 ProdAgent<Policy, Model>::Init(void)
@@ -40,6 +54,9 @@ ProdAgent<Policy, Model>::Init(void)
     p_model->SetNewState(m_stateVector);
 }
 
+/**
+* @brief Runs inference and copies the result into the live action buffer.
+*/
 template<typename Policy,  typename Model>
 void
 ProdAgent<Policy, Model>::ChooseAction(void)
@@ -50,13 +67,16 @@ ProdAgent<Policy, Model>::ChooseAction(void)
 
     torch::Tensor actions_t = p_policy->forward(m_states_t);
 
-    // copy current action buffer into output buffer
+    // Copy the torch output tensor back into the fixed-size action buffer.
     float const* srcActionPtr = actions_t.data_ptr<float>();
     std::memcpy(m_actionVector.data(), srcActionPtr, sizeof(float) * actions_t.size(1));
 
     p_model->SetNextAction(m_actionVector);
 }
 
+/**
+* @brief Refreshes the observation buffer after one environment step.
+*/
 template<typename Policy, typename Model>
 bool
 ProdAgent<Policy, Model>::SetNewState(void)
@@ -69,6 +89,9 @@ ProdAgent<Policy, Model>::SetNewState(void)
     return false;
 }
 
+/**
+* @brief Reports that production agents are always inference-ready.
+*/
 template<typename Policy, typename Model>
 bool
 ProdAgent<Policy, Model>::IsTrained(void)                  const noexcept
@@ -77,6 +100,9 @@ ProdAgent<Policy, Model>::IsTrained(void)                  const noexcept
 }
 
 
+/**
+* @brief Returns an empty snapshot because production agents expose no training state.
+*/
 template<typename Policy, typename Model>
 sAgentStateSnaphot
 ProdAgent<Policy, Model>::GetSnapshot(void) const noexcept

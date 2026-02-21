@@ -1,36 +1,60 @@
+/**
+* @file PPO/src/ppo.cpp
+* @brief Implementation of the PPO optimizer wrapper.
+* @author PPOTrial
+* @date 2026-03-29
+* @copyright Copyright (c) 2026 PPOTrial
+* @license MIT
+*/
 #include "ppo.hpp"
 
 #include <torch/torch.h>
 
 #include <iostream>
-#include <vector>
 #include <math.h>
+#include <vector>
 
 namespace ppo::model {
 
+/**
+* @brief Private PPO implementation state.
+*/
 struct PPO::Impl {
-    Impl(std::shared_ptr<ITrainingNet> policy, std::string const& modelpath, int64_t state_dim, int64_t action_dim, PPOParamters const& parameters)
+    /**
+    * @brief Builds the PPO backend and optionally restores previous weights.
+    * @param policy Trainable policy network.
+    * @param modelpath Base directory containing model checkpoints.
+    * @param state_dim Observation size.
+    * @param action_dim Action size.
+    * @param parameters PPO hyper-parameters.
+    * @param loadExistingModel True to restore the previous prod checkpoint.
+    */
+    Impl(std::shared_ptr<ITrainingNet> policy,
+         std::string const& modelpath,
+         int64_t state_dim,
+         int64_t action_dim,
+         PPOParamters const& parameters,
+         bool loadExistingModel)
     {
-        m_gamma         = parameters.m_gamma        ;
-        m_lambda_gae    = parameters.m_lambda_gae   ;
-        m_clip_epsilon  = parameters.m_clip_epsilon ;
-        m_value_coef    = parameters.m_value_coef   ;
-        m_entropy_coef  = parameters.m_entropy_coef ;
+        m_gamma = parameters.m_gamma;
+        m_lambda_gae = parameters.m_lambda_gae;
+        m_clip_epsilon = parameters.m_clip_epsilon;
+        m_value_coef = parameters.m_value_coef;
+        m_entropy_coef = parameters.m_entropy_coef;
         m_learningReate = parameters.m_learningReate;
-        m_K_epochs      = parameters.m_K_epochs     ;
-        m_batch_size    = parameters.m_batch_size   ;
-        m_target_kl     = parameters.m_target_kl;
+        m_K_epochs = parameters.m_K_epochs;
+        m_batch_size = parameters.m_batch_size;
+        m_target_kl = parameters.m_target_kl;
 
-        m_policy     = policy;
+        m_policy = policy;
+        m_optimizer = std::make_shared<torch::optim::Adam>(
+            m_policy->parameters(),
+            torch::optim::AdamOptions(m_learningReate));
 
-        m_optimizer  = std::make_shared<torch::optim::Adam>(
-            m_policy->parameters(), torch::optim::AdamOptions(m_learningReate)
-        );
-
-        // load du checkpoint
+        // Restore the production checkpoint when warm-starting training.
         std::filesystem::path modelfile{ modelpath };
         modelfile = modelfile / "prod" / "model.pt";
-        if (std::filesystem::exists(modelfile))
+        if (loadExistingModel && std::filesystem::exists(modelfile))
         {
             torch::serialize::InputArchive archive{};
             archive.load_from(modelfile.string());
@@ -39,40 +63,51 @@ struct PPO::Impl {
         }
 
         m_policy->train();
-    };
+    }
 
+    /**
+    * @brief Applies one PPO update on one mini-batch.
+    * @param states Batched observations.
+    * @param actions Batched actions.
+    * @param old_logp Log-probabilities recorded during rollout collection.
+    * @param returns Discounted returns.
+    * @param advantages Normalized generalized advantages.
+    * @return Tuple containing total, actor, value, and entropy losses.
+    */
     std::tuple<float, float, float, float>
     update(
-            const torch::Tensor& states,
-            const torch::Tensor& actions,
-            const torch::Tensor& old_logp,
-            const torch::Tensor& returns,
-            const torch::Tensor& advantages)
+        const torch::Tensor& states,
+        const torch::Tensor& actions,
+        const torch::Tensor& old_logp,
+        const torch::Tensor& returns,
+        const torch::Tensor& advantages)
     {
         if (m_policy == nullptr)
             return { 0.F, 0.F, 0.F, 0.F };
-        
+
         auto adv = (advantages - advantages.mean()) /
             (advantages.std(false) + 1e-8);
 
         auto [logp, values, entropy] = m_policy->evaluate(states, actions);
 
-        // Kullback�Leibler divergence early stopping
+        // Stop early when the batch deviates too much from the reference policy.
         float kl_value = (old_logp - logp).mean().item<float>();
-        if (kl_value >= 1.5F* m_target_kl)
-            return {0.F, 0.F, 0.F, 0.F};
+        if (kl_value >= 1.5F * m_target_kl)
+            return { 0.F, 0.F, 0.F, 0.F };
 
         auto ratio = torch::exp(logp - old_logp.detach());
-
         auto surr1 = ratio * adv;
         auto surr2 = torch::clamp(
-            ratio, 1.0 - m_clip_epsilon, 1.0 + m_clip_epsilon) * adv;
+            ratio,
+            1.0 - m_clip_epsilon,
+            1.0 + m_clip_epsilon) * adv;
 
         auto actor_loss = -torch::min(surr1, surr2).mean();
         auto value_loss = torch::mse_loss(values, returns);
         auto entropy_loss = -entropy.mean();
 
-        auto loss = actor_loss +
+        auto loss =
+            actor_loss +
             m_value_coef * value_loss +
             m_entropy_coef * entropy_loss;
 
@@ -87,32 +122,85 @@ struct PPO::Impl {
             value_loss.item<float>(),
             entropy_loss.item<float>()
         };
-    };
+    }
 
-    std::shared_ptr<ITrainingNet>       m_policy;
+    /** @brief Trainable policy network. */
+    std::shared_ptr<ITrainingNet> m_policy;
+    /** @brief Adam optimizer used to update the policy. */
     std::shared_ptr<torch::optim::Adam> m_optimizer;
 
-    float m_gamma        { 0.99F };
-    float m_lambda_gae   { 0.95F };
-    float m_clip_epsilon { 0.2F  };
-    float m_value_coef   { 0.5F  };
-    float m_entropy_coef { 0.02F };
+    /** @brief Discount factor. */
+    float m_gamma{ 0.99F };
+    /** @brief GAE lambda factor. */
+    float m_lambda_gae{ 0.95F };
+    /** @brief PPO clip epsilon. */
+    float m_clip_epsilon{ 0.2F };
+    /** @brief Value-loss coefficient. */
+    float m_value_coef{ 0.5F };
+    /** @brief Entropy regularization coefficient. */
+    float m_entropy_coef{ 0.02F };
+    /** @brief Adam learning rate. */
     float m_learningReate{ 3e-4F };
-    float m_target_kl    { 0.01F };
+    /** @brief KL divergence target used for early stopping. */
+    float m_target_kl{ 0.01F };
 
-    int m_K_epochs        { 4 };
-    int m_batch_size      { 64 };
+    /** @brief Number of PPO epochs per rollout. */
+    int m_K_epochs{ 4 };
+    /** @brief Mini-batch size used during PPO updates. */
+    int m_batch_size{ 64 };
 
+    /** @brief Last aggregated PPO training outputs. */
     PPOOutputs m_outputs{};
 
+    /** @brief Empty fallback output returned when no implementation exists. */
     inline static PPOOutputs const EMPTY_PPO_OUTPUTS{};
 };
 
-PPO::PPO(std::shared_ptr<ITrainingNet> policy, std::string const& modelpath, int64_t state_dim, int64_t action_dim, PPOParamters const& parameters) :
-    p_impl{ std::make_unique<Impl>(policy, modelpath, state_dim, action_dim, parameters) }{}
+/**
+* @brief Builds the PPO wrapper around one trainable policy.
+* @param policy Trainable policy network.
+* @param modelpath Base directory containing model checkpoints.
+* @param state_dim Observation size.
+* @param action_dim Action size.
+* @param parameters PPO hyper-parameters.
+* @param loadExistingModel True to restore the previous prod checkpoint.
+*/
+PPO::PPO(std::shared_ptr<ITrainingNet> policy,
+         std::string const& modelpath,
+         int64_t state_dim,
+         int64_t action_dim,
+         PPOParamters const& parameters,
+         bool loadExistingModel) :
+    p_impl{ std::make_unique<Impl>(
+        policy,
+        modelpath,
+        state_dim,
+        action_dim,
+        parameters,
+        loadExistingModel) }
+{
+}
 
+/**
+* @brief Destroys the PPO wrapper.
+*/
 PPO::~PPO() = default;
 
+/**
+* @brief Updates the policy from one collected rollout buffer.
+*
+* The method first computes generalized advantage estimates and returns, then
+* iterates over shuffled mini-batches for several PPO epochs and averages the
+* reported training losses.
+*
+* @param states Batched observations.
+* @param actions Batched actions.
+* @param old_logp Log-probabilities recorded during rollout collection.
+* @param values Value estimates recorded during rollout collection.
+* @param rewards Per-step rewards.
+* @param dones Per-step done flags.
+* @param last_values Bootstrap value for truncated rollouts.
+*/
 void
 PPO::UpdatePolicy(
     const torch::Tensor& states,
@@ -127,25 +215,26 @@ PPO::UpdatePolicy(
         return;
 
     int64_t N = states.size(0);
-    float L = 0, A = 0, V = 0, E = 0;
+    float L = 0.F;
+    float A = 0.F;
+    float V = 0.F;
+    float E = 0.F;
     int n = 0;
     int64_t maxStep{ rewards.size(0) };
     torch::Tensor advantages = torch::zeros({ maxStep });
     torch::Tensor returns = torch::zeros({ maxStep });
 
-    // use a context to be sure that GAE with no_grad is applied only in this context
-    // otherwise we could use detach on values
+    // Compute GAE and returns without tracking gradients.
     {
         torch::NoGradGuard no_grad;
 
-        // --- Compute GAE and Returns ---
-        float gae = 0.0f;
+        float gae = 0.0F;
         for (int64_t t = maxStep - 1; t >= 0; --t)
         {
             float reward = rewards[t].item<float>();
             float value = values[t].item<float>();
             float done = dones[t].item<float>();
-            float next_value{ last_values.item<float>()};
+            float next_value{ last_values.item<float>() };
             if (t != maxStep - 1)
                 next_value = values[t + 1].item<float>();
 
@@ -172,8 +261,7 @@ PPO::UpdatePolicy(
                 actions.index_select(0, b),
                 old_logp.index_select(0, b),
                 returns.index_select(0, b),
-                advantages.index_select(0, b)
-            );
+                advantages.index_select(0, b));
 
             L += std::get<0>(r);
             A += std::get<1>(r);
@@ -189,6 +277,11 @@ PPO::UpdatePolicy(
     p_impl->m_outputs.m_valueloss = V / n;
 }
 
+/**
+* @brief Samples one stochastic action from the current policy.
+* @param state Input observation tensor.
+* @return Tuple containing action, log-probability, and value.
+*/
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
 PPO::SelectAction(const torch::Tensor& state)
 {
@@ -200,7 +293,11 @@ PPO::SelectAction(const torch::Tensor& state)
     return p_impl->m_policy->selectaction(state);
 }
 
-void  
+/**
+* @brief Saves the current model to the eval directory and optionally prod.
+* @param modelpath Base directory containing model checkpoints.
+*/
+void
 PPO::Save(std::filesystem::path const& modelpath)
 {
     if (p_impl == nullptr)
@@ -237,7 +334,10 @@ PPO::Save(std::filesystem::path const& modelpath)
     }
 }
 
-
+/**
+* @brief Returns the last aggregated PPO training outputs.
+* @return Reference to the output structure.
+*/
 PPOOutputs const&
 PPO::GetOutputs(void) const noexcept
 {
@@ -247,4 +347,4 @@ PPO::GetOutputs(void) const noexcept
     return p_impl->m_outputs;
 }
 
-}   /* ppo::model */
+} /* ppo::model */

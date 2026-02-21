@@ -1,0 +1,36 @@
+{
+    "Renderer": {
+        "AutoAttachCamera": true,
+        "Camera": {
+            "Fovy": 45.0,
+            "Position": [
+                34.057716369628906,
+                19.83399200439453,
+                -17.052047729492188
+            ],
+            "Target": [
+                17.04206085205078,
+                0.34999987483024597,
+                14.131027221679688
+            ],
+            "Up": [
+                0.0,
+                1.0,
+                0.0
+            ]
+        },
+        "CameraDistance": 35.22200012207031,
+        "CameraHeight": 19.833999633789063,
+        "DomainHeight": 1.5369999408721924,
+        "FocusSelectionInMinimap": false,
+        "MinimapZoom": 1.0,
+        "ScaleLevel": 1,
+        "ShowDestroyed": true,
+        "ShowDomains": true,
+        "ShowGrid": false,
+        "ShowMetaCatalog": false,
+        "ShowPseudoLidar": true,
+        "TrailDuration": 3.0999999046325684
+    },
+    "schemaVersion": 1
+}

@@ -1,9 +1,22 @@
+/**
+* @file Entities/src/flightmodelsystem.cpp
+* @brief Implementation for flightmodelsystem.
+* @author PPOTrial
+* @date 2026-03-29
+* @copyright Copyright (c) 2026 PPOTrial
+* @license MIT
+*/
 #include "flightmodelsystem.hpp"
 
 #include "utils.hpp"
 
 namespace ppo::model {
 
+/**
+* @brief Creates the flight-model component from serialized platform data.
+* @param entity Entity that receives the flight-model state.
+* @param ar Serialized platform section.
+*/
 void
 FlightModelSystem::Create(BaseEntity& entity, ppo::serialization::json& ar)
 {
@@ -11,7 +24,7 @@ FlightModelSystem::Create(BaseEntity& entity, ppo::serialization::json& ar)
     {
         auto section = ar["FlightModel"];
 
-        // add a flightmodel to this aircraft
+        // Attach one flight-model component configured from the platform file.
         sFlightModelState& flightmodelstate{ entity.add<sFlightModelState>() };
 
         flightmodelstate.m_maxfuel  = section["MaxFuel"];           
@@ -22,6 +35,10 @@ FlightModelSystem::Create(BaseEntity& entity, ppo::serialization::json& ar)
     }
 }
 
+/**
+* @brief Restores fuel to the platform maximum before an episode starts.
+* @param entity Entity that owns the flight-model state.
+*/
 void 
 FlightModelSystem::Init(BaseEntity& entity)
 {
@@ -33,6 +50,15 @@ FlightModelSystem::Init(BaseEntity& entity)
     state.m_fuel        = state.m_maxfuel;
 }
 
+/**
+* @brief Propagates speed, heading, and fuel consumption for one time step.
+*
+* The algorithm applies control inputs, clamps the resulting speed, estimates
+* fuel burn from cruise and turn-rate terms, and destroys the entity when fuel
+* is exhausted or speed drops below the minimum sustainable value.
+*
+* @param entity Entity that owns the flight-model state.
+*/
 void
 FlightModelSystem::Run(BaseEntity& entity)
 {

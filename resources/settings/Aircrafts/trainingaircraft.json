@@ -1,0 +1,22 @@
+{
+	"trainingaircraft": {
+
+		"FlightModel": {
+			"MaxAcceleration": 600.0,
+			"MaxFuel": 2000000,
+			"MaxRotAcceleration": 0.70000059604645,
+			"MaxSpeed": 700.0,
+			"MinSpeed": 10.0
+		},
+		
+		"SNA": {
+			"MaxMissile": 8,
+			"MaxNoEscapeZoneRange": 5000.0,
+			"MaxShootAngle": 3.1471980571746826
+		},	  
+
+		"SNAControl": {
+			"Available": true
+		}
+	}
+}

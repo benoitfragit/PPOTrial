@@ -1,127 +1,302 @@
+/**
+* @file PPO/data/iagent.hpp
+* @brief Declarations for iagent.
+* @author PPOTrial
+* @date 2026-03-29
+* @copyright Copyright (c) 2026 PPOTrial
+* @license MIT
+*/
 #pragma once
 
-#include "interface.hpp"
+#include "components.hpp"
 
+#include <filesystem>
 #include <string>
 #include <atomic>
 #include <vector>
 
 namespace ppo::model {
 
-/// <summary>
-/// this is a method to get a unique identifier
-/// </summary>
-/// <returns>a unique identifier</returns>
-inline unsigned long long 
-GetNewUniqId(void) 
+/**
+* @brief Returns a unique identifier for agent-like runtime objects.
+* @return Monotonically increasing identifier.
+*/
+inline unsigned long long
+GetNewUniqId(void)
 {
     static std::atomic<unsigned long long> counter{ 0 };
     ++counter;
     return counter.load(std::memory_order_relaxed);
 }
 
+/**
+* @brief PPO hyper-parameters shared by training agents.
+*/
 struct PPOParamters
 {
-    float           m_gamma{ 0.99F };
-    float           m_lambda_gae{ 0.95F };
-    float           m_clip_epsilon{ 0.2F };
-    float           m_value_coef{ 0.5F };
-    float           m_entropy_coef{ 0.02F };
-    float           m_learningReate{ 3e-4F };
-    int             m_K_epochs{ 4 };
-    int             m_batch_size{ 64 };
-    float           m_target_kl{ 0.01F };
+    /**
+    * @brief Discount factor.
+    */
+    float m_gamma{ 0.99F };
+    /**
+    * @brief Generalized advantage estimation lambda.
+    */
+    float m_lambda_gae{ 0.95F };
+    /**
+    * @brief PPO clipping factor.
+    */
+    float m_clip_epsilon{ 0.2F };
+    /**
+    * @brief Critic loss weight.
+    */
+    float m_value_coef{ 0.5F };
+    /**
+    * @brief Entropy bonus weight.
+    */
+    float m_entropy_coef{ 0.02F };
+    /**
+    * @brief Optimizer learning rate.
+    */
+    float m_learningReate{ 3e-4F };
+    /**
+    * @brief Number of PPO epochs per update.
+    */
+    int m_K_epochs{ 4 };
+    /**
+    * @brief Mini-batch size.
+    */
+    int m_batch_size{ 64 };
+    /**
+    * @brief Target KL divergence threshold.
+    */
+    float m_target_kl{ 0.01F };
 };
 
-struct sCommonAgentState  :
+/**
+* @brief Runtime training state exposed by one agent.
+*/
+struct sCommonAgentState :
     public PPOParamters
 {
+    /**
+    * @brief Current step inside the rollout.
+    */
     long long m_step{ 0 };
+    /**
+    * @brief Maximum number of steps in one rollout.
+    */
     long long m_maxStep{ 0 };
-    float     m_reward{ 0.F };
-    float     m_rewardClamp{ 3.F };
-    float     m_loss{ 0.F };
-    float     m_actorloss{ 0.F };
-    float     m_entropyloss{ 0.F };
-    float     m_valueloss{ 0.F };
+    /**
+    * @brief Current clamped reward value.
+    */
+    float m_reward{ 0.F };
+    /**
+    * @brief Reward clamping threshold.
+    */
+    float m_rewardClamp{ 3.F };
+    /**
+    * @brief Total PPO loss.
+    */
+    float m_loss{ 0.F };
+    /**
+    * @brief Actor loss term.
+    */
+    float m_actorloss{ 0.F };
+    /**
+    * @brief Entropy loss term.
+    */
+    float m_entropyloss{ 0.F };
+    /**
+    * @brief Value loss term.
+    */
+    float m_valueloss{ 0.F };
+    /**
+    * @brief Evaluation checkpoint period in rollouts.
+    */
     unsigned int m_checkpoint{ 0 };
+    /**
+    * @brief Current model version.
+    */
     unsigned int m_version{ 0 };
-    float     m_notation{ 0.F };
-    float     m_evaluationprogress{ 0.F };
-    bool      m_evaluationinprogress{ false };
-    bool      m_done{ false };
-    bool      m_training{ false };
+    /**
+    * @brief Latest evaluator score.
+    */
+    float m_notation{ 0.F };
+    /**
+    * @brief Latest evaluator progress ratio.
+    */
+    float m_evaluationprogress{ 0.F };
+    /**
+    * @brief True while an evaluator run is active.
+    */
+    bool m_evaluationinprogress{ false };
+    /**
+    * @brief Episode termination flag.
+    */
+    bool m_done{ false };
+    /**
+    * @brief True while PPO optimization is active.
+    */
+    bool m_training{ false };
 };
 
+/**
+* @brief Serializable view of one agent state for the UI.
+*/
 struct sAgentStateSnaphot
 {
-    sCommonAgentState   m_common{};
-    std::vector<float>  m_scalings{};
-    std::vector<float>  m_rewards{};
+    /**
+    * @brief Common scalar agent state.
+    */
+    sCommonAgentState m_common{};
+    /**
+    * @brief Reward scaling factors.
+    */
+    std::vector<float> m_scalings{};
+    /**
+    * @brief Accumulated rewards per channel.
+    */
+    std::vector<float> m_rewards{};
+    /**
+    * @brief Reward channel names.
+    */
     std::vector<std::string> m_rewardnames{};
-    std::string         m_name{""};
-    unsigned long long  m_id{ 0 };
+    /**
+    * @brief Logical agent name.
+    */
+    std::string m_name{ "" };
+    /**
+    * @brief Unique runtime identifier.
+    */
+    unsigned long long m_id{ 0 };
 };
 
-struct PPOOutputs {
+/**
+* @brief PPO loss outputs reported after one optimization step.
+*/
+struct PPOOutputs
+{
+    /**
+    * @brief Total PPO loss.
+    */
     float m_loss{ 0.F };
+    /**
+    * @brief Actor loss term.
+    */
     float m_actorloss{ 0.F };
+    /**
+    * @brief Critic loss term.
+    */
     float m_valueloss{ 0.F };
+    /**
+    * @brief Entropy regularization term.
+    */
     float m_entropyloss{ 0.F };
 };
 
-/// <summary>
-/// a comamnd to control an agent
-/// 
-/// targeted agent is the one with the m_id
-/// </summary>
-struct sAgentRealTimeCommand {
-    /// <summary>
-    /// type of the real time command
-    /// </summary>
-    enum class eTypeCommand {
+/**
+* @brief Real-time command targeting one specific agent instance.
+*/
+struct sAgentRealTimeCommand
+{
+    /**
+    * @brief Supported real-time command types.
+    */
+    enum class eTypeCommand
+    {
         None,
         RolloutBuffer,
         RewardClamp,
         RewardScaling
     };
-    /// <summary>
-    /// current command type
-    /// </summary>
+
+    /**
+    * @brief Command type.
+    */
     eTypeCommand m_type{ eTypeCommand::None };
-    /// <summary>
-    /// id of the agent
-    /// 
-    /// if the ID mismatch then an agent must ignore this command
-    /// </summary>
+    /**
+    * @brief Target agent identifier.
+    */
     unsigned long long m_id{ 0 };
-    /// <summary>
-    /// new rollout buffer size
-    /// </summary>
-    long long    m_rolloutBuffer{ 0 };
-    /// <summary>
-    /// a value to clamp the max reward
-    /// </summary>
-    float        m_rewardClamp{ 0.F };
-    /// <summary>
-    /// a value of one reward scaling
-    /// </summary>
-    float        m_rewardScaling{ 0.F };
-    /// <summary>
-    /// anonymous reward type affected by the scaling
-    /// </summary>
+    /**
+    * @brief New rollout buffer size.
+    */
+    long long m_rolloutBuffer{ 0 };
+    /**
+    * @brief New reward clamp value.
+    */
+    float m_rewardClamp{ 0.F };
+    /**
+    * @brief New reward scaling factor.
+    */
+    float m_rewardScaling{ 0.F };
+    /**
+    * @brief Index of the reward channel to scale.
+    */
     unsigned char m_rewardScalingType{ 0 };
 };
 
-class IAgent {
+/**
+* @brief Common interface implemented by all runtime agents.
+*/
+class IAgent
+{
 public:
-    virtual                     ~IAgent(void) = default;
+    /**
+    * @brief Virtual destructor for interface-safe cleanup.
+    */
+    virtual ~IAgent(void) = default;
 
-    virtual void                Init(void) = 0;
-    virtual void                ChooseAction(void) = 0;
-    virtual bool                SetNewState(void) = 0;
-    virtual void                ProcessCommand(sAgentRealTimeCommand const& command)  noexcept = 0;
-    virtual sAgentStateSnaphot  GetSnapshot(void) const noexcept = 0;
+    /**
+    * @brief Initializes the agent before a new episode.
+    */
+    virtual void Init(void) = 0;
+    /**
+    * @brief Chooses and applies one action.
+    */
+    virtual void ChooseAction(void) = 0;
+    /**
+    * @brief Pushes one new state transition into the agent.
+    * @return True when a rollout or episode milestone is reached.
+    */
+    virtual bool SetNewState(void) = 0;
+    /**
+    * @brief Processes one real-time command.
+    * @param command Command payload.
+    */
+    virtual void ProcessCommand(sAgentRealTimeCommand const& command) noexcept = 0;
+    /**
+    * @brief Builds a UI-friendly state snapshot.
+    * @return Immutable snapshot copy.
+    */
+    virtual sAgentStateSnaphot GetSnapshot(void) const noexcept = 0;
+};
+
+/**
+* @brief Interface for asynchronous evaluator backends.
+*/
+class IEvaluator
+{
+public:
+    /**
+    * @brief Virtual destructor for interface-safe cleanup.
+    */
+    virtual ~IEvaluator(void) = default;
+    /**
+    * @brief Starts one asynchronous evaluation campaign.
+    * @param name Agent family name.
+    * @param modelpath Root model folder.
+    */
+    virtual void Start(std::string const& name, std::filesystem::path const& modelpath) = 0;
+    /**
+    * @brief Stops the current evaluation campaign.
+    */
+    virtual void Stop(void) = 0;
+    /**
+    * @brief Returns the latest evaluator snapshot.
+    * @return Immutable evaluator state.
+    */
+    virtual sEvaluatorState GetSnapshot(void) const noexcept = 0;
 };
 
 } /* ppo::model */

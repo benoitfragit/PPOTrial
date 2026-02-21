@@ -1,6 +1,15 @@
+/**
+* @file Env/src/environment.cpp
+* @brief Implementation for environment.
+* @author PPOTrial
+* @date 2026-03-29
+* @copyright Copyright (c) 2026 PPOTrial
+* @license MIT
+*/
 #include "environment.hpp"
 #include "utils.hpp"
 #include "serializer.hpp"
+#include "snasystem.hpp"
 
 #include <map>
 #include <thread>
@@ -9,12 +18,91 @@
 #include <array>
 #include <algorithm>
 #include <vector>
+#include <mutex>
 
 namespace ppo::model {
 
+/**
+* @brief Convenience alias for managed entity instances.
+*/
 using Entities = std::vector<std::shared_ptr<Entity>>;
+/**
+* @brief Convenience alias for managed agent instances.
+*/
 using Agents = std::vector<std::shared_ptr<IAgent>>;
 
+/**
+* @brief Lifetime of one explosion event in steady-clock seconds.
+*/
+constexpr double kExplosionDurationSeconds = 2.0;
+
+/**
+* @brief Returns the current steady-clock time in seconds.
+* @return Current steady-clock time in seconds.
+*/
+double
+GetSteadyTimeSeconds(void)
+{
+    using Clock = std::chrono::steady_clock;
+    using Seconds = std::chrono::duration<double>;
+    return std::chrono::duration_cast<Seconds>(Clock::now().time_since_epoch()).count();
+}
+
+/**
+* @brief Computes the base explosion radius associated with one entity type.
+* @param type Destroyed entity type.
+* @return Base explosion radius.
+*/
+float
+ExplosionRadiusForType(eEntityType type) noexcept
+{
+    switch (type)
+    {
+    case eEntityType::Objective:
+        return 2.40F;
+    case eEntityType::SAM:
+        return 1.35F;
+    case eEntityType::Aircraft:
+        return 1.10F;
+    default:
+        return 1.00F;
+    }
+}
+
+/**
+* @brief Computes the explosion plume height scaling for one entity type.
+* @param type Destroyed entity type.
+* @return Height scaling factor.
+*/
+float
+ExplosionHeightScaleForType(eEntityType type) noexcept
+{
+    switch (type)
+    {
+    case eEntityType::Objective:
+        return 2.35F;
+    case eEntityType::SAM:
+        return 1.45F;
+    case eEntityType::Aircraft:
+        return 1.20F;
+    default:
+        return 1.00F;
+    }
+}
+
+/**
+* @brief Internal execution states of the environment thread.
+*/
+enum class eEnvironmentState : unsigned char {
+    INIT = 0,
+    RUNNING = 1,
+    PAUSED = 2,
+    STOPPED = 3
+};
+
+/**
+* @brief Internal command exchanged with the environment thread.
+*/
 struct sRealTimeCommand {
     enum class eTypeCommand {
         None,
@@ -28,12 +116,18 @@ struct sRealTimeCommand {
     std::array<float, 2>    m_maxRanges{ 0.F, 0.F };
 };
 
+/**
+* @brief Hidden implementation owning runtime state and the worker thread.
+*/
 struct Environment::Impl
 {
     void                    Run           (void);
     void                    Stop          (void);
     void                    Start         (void);
     void                    CreateSnapshot(void);
+    void                    SyncDestroyedStateHistory(void);
+    void                    RecordExplosionEvents(void);
+    void                    PruneExplosionEvents(void);
 
     void                    ProcessCommand(sRealTimeCommand const& command);
 
@@ -41,38 +135,16 @@ struct Environment::Impl
 
                             ~Impl(void);
 
-    /// <summary>
-    /// This is the main entt::registry (world)
-    /// 
-    /// it is going to be filled and readen only by this environment
-    /// </summary>
-    entt::registry                  m_world{};
-
-    /// <summary>
-    /// Command dispatcher
-    /// </summary>
-    entt::dispatcher                m_dispatcher{};
-
-    /// <summary>
-    /// This is a list of all entities wrappers
-    /// </summary>
-    Entities                        m_entities          {};    
-
-    /// <summary>
-    /// this is a list of all agents
-    /// </summary>
-    Agents                          m_agents            {};
-
-    /// <summary>
-    /// Snasphot mechanism
-    /// </summary>
-    std::array<entt::registry,2>    m_buffers           {};
-    std::atomic<uint32_t>           m_index             { 0 };
-
-    /// <summary>
-    /// this is the running thread of this environment
-    /// </summary>
+    entt::registry                   m_world{};
+    entt::dispatcher                 m_dispatcher{};
+    Entities                         m_entities{};
+    Agents                           m_agents{};
+    std::array<entt::registry, 2>    m_buffers{};
+    std::atomic<uint32_t>            m_index{ 0 };
+    mutable std::mutex               m_snapshotMutex{};
     std::thread                     m_thread;
+    std::vector<sExplosionEvent>    m_explosionEvents{};
+    unsigned long long              m_nextExplosionEventId{ 1 };
 
     std::atomic<bool>               m_running           { false };  
     eEnvironmentState               m_state             { eEnvironmentState::INIT };
@@ -81,10 +153,10 @@ struct Environment::Impl
 
 Environment::Impl::Impl(void)
 {
-    // add a buffer for the environment
+    // Create the shared environment-state context before any entity is added.
     m_world.ctx().emplace<sEnvironmentState>();
 
-    // subscribe to real time command through a thread safe queue
+    // Route internal control commands through the dispatcher queue.
     m_dispatcher.sink<sRealTimeCommand>().connect<&Environment::Impl::ProcessCommand>(this);
 
     ppo::serialization::Serializer& serializer{ ppo::serialization::Serializer::GetInstance() };
@@ -115,6 +187,9 @@ Environment::Impl::Impl(void)
     );
 }
 
+/**
+* @brief Applies one queued real-time command to the environment state.
+*/
 void
 Environment::Impl::ProcessCommand(sRealTimeCommand const& command)
 {
@@ -137,12 +212,16 @@ Environment::Impl::ProcessCommand(sRealTimeCommand const& command)
     }
 }
 
+/**
+* @brief Publishes a double-buffered registry snapshot for renderers and tools.
+*/
 void 
 Environment::Impl::CreateSnapshot(void)
 {
+    std::lock_guard<std::mutex> lock{ m_snapshotMutex };
     const uint32_t next = 1u - m_index.load(std::memory_order_relaxed);
 
-    // start by cleaning this registry
+    // Rebuild the target snapshot from scratch to keep it fully self-consistent.
     m_buffers[next].clear();
     m_buffers[next].ctx().clear();
 
@@ -164,13 +243,24 @@ Environment::Impl::CreateSnapshot(void)
         m_buffers[next].emplace<sFlightModelState>(entity, comp);
     });
 
+    m_world.view<sPseudoLidarState>().each([&](auto entity, const auto& comp)
+    {
+        m_buffers[next].emplace<sPseudoLidarState>(entity, comp);
+    });
+
+    m_world.view<sEntityMetadata>().each([&](auto entity, const auto& comp)
+    {
+        m_buffers[next].emplace<sEntityMetadata>(entity, comp);
+    });
+
     m_buffers[next].ctx().emplace<sEnvironmentState>(m_world.ctx().get<sEnvironmentState>());
+    m_buffers[next].ctx().emplace<sExplosionEventBuffer>(sExplosionEventBuffer{ m_explosionEvents });
 
     for (auto agent : m_agents)
     {
         auto const agentSnapshot(agent->GetSnapshot());
         
-        // add a special entity to broadcast agent state
+        // Broadcast each agent snapshot through a synthetic snapshot entity.
         entt::entity entity_agent = m_buffers[next].create();
         m_buffers[next].emplace<sAgentStateSnaphot>(entity_agent, agentSnapshot);
     }
@@ -178,11 +268,17 @@ Environment::Impl::CreateSnapshot(void)
     m_index.store(next, std::memory_order_release);
 }
 
+/**
+* @brief Stops the worker thread when the implementation is destroyed.
+*/
 Environment::Impl::~Impl(void)
 {
     Stop();
 }
 
+/**
+* @brief Requests a stop and joins the worker thread.
+*/
 void
 Environment::Impl::Stop(void)
 {
@@ -196,6 +292,9 @@ Environment::Impl::Stop(void)
         m_thread.join();
 }
 
+/**
+* @brief Starts the worker thread.
+*/
 void
 Environment::Impl::Start(void)
 {
@@ -203,6 +302,86 @@ Environment::Impl::Start(void)
     m_thread = std::thread(&Environment::Impl::Run, this);
 }
 
+/**
+* @brief Copies the current destroyed state into the previous-step history.
+*
+* This is executed once at the start of every simulation step so that any
+* destruction detected later during the step keeps a clean transition from
+* "alive" to "destroyed".
+*/
+void
+Environment::Impl::SyncDestroyedStateHistory(void)
+{
+    for (auto& entity : m_entities)
+    {
+        if (entity == nullptr
+            || !entity->has<sEntityState>())
+        {
+            continue;
+        }
+
+        auto [entityState] = entity->get<sEntityState>();
+        entityState.m_prevDestroyed = entityState.m_destroyed;
+    }
+}
+
+/**
+* @brief Records one explosion event for every fresh destruction.
+*
+* The resulting event buffer is independent from entity lifetime so that the
+* renderer can keep displaying the explosion even when the environment is
+* reinitialized immediately afterwards.
+*/
+void
+Environment::Impl::RecordExplosionEvents(void)
+{
+    double const now = GetSteadyTimeSeconds();
+
+    for (auto& entity : m_entities)
+    {
+        if (entity == nullptr
+            || !entity->has<sEntityState>())
+        {
+            continue;
+        }
+
+        auto [entityState] = entity->get<sEntityState>();
+        if (!entityState.m_destroyed || entityState.m_prevDestroyed)
+            continue;
+
+        m_explosionEvents.push_back(sExplosionEvent{
+            m_nextExplosionEventId++,
+            entityState.m_x,
+            entityState.m_y,
+            0.F,
+            entityState.m_type,
+            now,
+            ExplosionRadiusForType(entityState.m_type),
+            ExplosionHeightScaleForType(entityState.m_type)
+        });
+    }
+}
+
+/**
+* @brief Removes expired explosion events from the persistent event buffer.
+*/
+void
+Environment::Impl::PruneExplosionEvents(void)
+{
+    double const now = GetSteadyTimeSeconds();
+    auto const keepFrom = std::remove_if(
+        m_explosionEvents.begin(),
+        m_explosionEvents.end(),
+        [now](sExplosionEvent const& event)
+        {
+            return (now - event.m_startTime) > kExplosionDurationSeconds;
+        });
+    m_explosionEvents.erase(keepFrom, m_explosionEvents.end());
+}
+
+/**
+* @brief Runs the main simulation loop.
+*/
 void
 Environment::Impl::Run(void)
 {  
@@ -210,12 +389,14 @@ Environment::Impl::Run(void)
 
     while (m_running.load(std::memory_order_acquire))
     {
-        // proceed commands
+        // Apply every queued command before stepping the simulation.
         m_dispatcher.update();
 
         if (m_state == eEnvironmentState::RUNNING)
-        {            
-            // to initialize
+        {
+            SyncDestroyedStateHistory();
+
+            // Reinitialize entities and agents after a stop or a completed rollout.
             if (m_prevState == eEnvironmentState::STOPPED
             ||  reinitrequest)
             {
@@ -227,7 +408,7 @@ Environment::Impl::Run(void)
                     entity->Init();
                 }
 
-                // all players must be initialized before initliazing agents
+                // Initialize agents only after every entity has rebuilt its state.
                 for (auto& agent : m_agents)
                 {
                     if (agent == nullptr)
@@ -241,7 +422,7 @@ Environment::Impl::Run(void)
 
             for (auto& agent : m_agents)
             {
-                // according to the current state select an action
+                // Each agent observes the latest state and emits one action.
                 if (agent == nullptr)
                     continue;
                     
@@ -253,31 +434,53 @@ Environment::Impl::Run(void)
                 if (entity == nullptr)
                     continue;
 
-                // according to the action compute the new state
+                if (entity->has<sEntityState>())
+                {
+                    auto [entityState] = entity->get<sEntityState>();
+
+                    if (entityState.m_destroyed)
+                        continue;
+                }
+
+                // Apply the previously selected action to update entity state.
                 entity->Run();
             }
 
-            // update the whole environment after all player have been updated
+            // Resolve destruction outcomes only after every entity has advanced.
             for (auto& entity: m_entities)
             {
                 if (entity == nullptr
-                ||  !entity->has<sSNAState>())
+                ||  !entity->has<sEntityState, sSNAState>())
                     continue;
 
-                auto const& [snaState] = entity->get<sSNAState>();
+                auto const [entityState, snaState] = entity->get<sEntityState, sSNAState>();
 
-                if (m_world.any_of<sEntityState>(snaState.m_target))
+                if (entityState.m_destroyed)
+                    continue;
+
+                for (auto& otherEntity : m_entities)
                 {
-                    float const pkTarget{ snaState.m_pk };
+                    if (otherEntity == entity
+                    || !otherEntity->has<sEntityState>())
+                        continue;
 
-                    auto [targetState] = m_world.view<sEntityState>().get(snaState.m_target);
+                    auto [otherEntityState] = otherEntity->get<sEntityState>();
 
-                    if (0.95F < pkTarget)
-                        targetState.m_destroyed = true;
+                    if (otherEntityState.m_destroyed) 
+                        continue;
+
+                    if (float pk{ SNASystem::EvaluateDestruction(*entity.get(), *otherEntity.get()) };
+                        0.95F < pk)
+                    {
+                        otherEntityState.m_destroyed = true;
+                        otherEntityState.m_destroyedById = entity->uniqid();
+                    } 
                 }
             }
 
-            // here we know that all players have been processed for this step
+            RecordExplosionEvents();
+
+            // Push the resulting transitions back into every agent.
             for (auto& agent : m_agents)
             {
                 if (agent == nullptr)
@@ -288,6 +491,7 @@ Environment::Impl::Run(void)
         }
 
         m_prevState = m_state;
+        PruneExplosionEvents();
 
         CreateSnapshot();
 
@@ -297,14 +501,23 @@ Environment::Impl::Run(void)
     m_prevState = eEnvironmentState::STOPPED;
 }
 
+/**
+* @brief Creates the public environment wrapper.
+*/
 Environment::Environment(void):
     p_impl{std::make_unique<Impl>()}
 {
 
 }
 
+/**
+* @brief Destroys the public environment wrapper.
+*/
 Environment::~Environment(void) = default;
 
+/**
+* @brief Returns the live registry pointer used for creation.
+*/
 entt::registry* 
 Environment::GetRegistry(void) noexcept
 {
@@ -314,6 +527,9 @@ Environment::GetRegistry(void) noexcept
     return &p_impl->m_world;
 }
 
+/**
+* @brief Stores one entity in the managed entity list.
+*/
 void              
 Environment::AddEntity(std::shared_ptr<Entity> entity)
 {
@@ -324,6 +540,9 @@ Environment::AddEntity(std::shared_ptr<Entity> entity)
     p_impl->m_entities.push_back(entity);
 }
 
+/**
+* @brief Stores one agent and connects it to the command dispatcher.
+*/
 void 
 Environment::AddAgent(std::shared_ptr<IAgent> pAgent)
 {
@@ -339,12 +558,15 @@ Environment::AddAgent(std::shared_ptr<IAgent> pAgent)
     if (Iter != p_impl->m_agents.end())
         return;
 
-    // all agent are going to receive this command
+    // Every registered agent listens to the shared real-time command bus.
     p_impl->m_dispatcher.sink<sAgentRealTimeCommand>().connect<&IAgent::ProcessCommand>(pAgent.get());
 
     p_impl->m_agents.push_back(pAgent);
 }
 
+/**
+* @brief Queues a new simulation time step value.
+*/
 void
 Environment::SetTimeStep(float timestep)
 {
@@ -357,6 +579,9 @@ Environment::SetTimeStep(float timestep)
     p_impl->m_dispatcher.enqueue<sRealTimeCommand>(cmd);
 }
 
+/**
+* @brief Queues new spatial limits for the environment.
+*/
 void 
 Environment::SetMaxRange(float north, float east)
 {
@@ -370,18 +595,29 @@ Environment::SetMaxRange(float north, float east)
     p_impl->m_dispatcher.enqueue<sRealTimeCommand>(cmd);
 }
 
-entt::registry& 
-Environment::GetSnapshot(void) const noexcept
+/**
+* @brief Reads the latest published snapshot under the snapshot mutex.
+*/
+void
+Environment::ReadSnapshot(std::function<void(entt::registry const&)> const& reader) const
 {
+    static entt::registry empty{};
+    if (reader == nullptr)
+        return;
+
     if (p_impl == nullptr)
     {
-        static entt::registry empty{};
-        return empty;
+        reader(empty);
+        return;
     }
-        
-    return p_impl->m_buffers[p_impl->m_index.load(std::memory_order_acquire)];
+
+    std::lock_guard<std::mutex> lock{ p_impl->m_snapshotMutex };
+    reader(p_impl->m_buffers[p_impl->m_index.load(std::memory_order_acquire)]);
 }
 
+/**
+* @brief Starts the worker thread if it is not already running.
+*/
 void
 Environment::Start(void)
 {
@@ -392,13 +628,16 @@ Environment::Start(void)
     p_impl->Start();
 }
 
+/**
+* @brief Ensures the worker exists and requests the running state.
+*/
 void
 Environment::Play(void)
 {
     if (p_impl == nullptr)
         return;
     
-    // start again if not launched
+    // Lazily recreate the worker thread when the user resumes from a stopped state.
     if (!p_impl->m_running.load(std::memory_order_acquire))
         p_impl->Start();
 
@@ -408,6 +647,9 @@ Environment::Play(void)
     p_impl->m_dispatcher.enqueue<sRealTimeCommand>(cmd);
 }
 
+/**
+* @brief Requests the paused state.
+*/
 void
 Environment::Pause(void)
 {
@@ -420,6 +662,9 @@ Environment::Pause(void)
     p_impl->m_dispatcher.enqueue<sRealTimeCommand>(cmd);
 }
 
+/**
+* @brief Stops the environment worker thread.
+*/
 void
 Environment::Stop(void)
 {
@@ -429,6 +674,9 @@ Environment::Stop(void)
     p_impl->Stop();
 }
 
+/**
+* @brief Queues one agent command on the shared dispatcher.
+*/
 void
 Environment::AddAgentCommand(sAgentRealTimeCommand const& command)
 {

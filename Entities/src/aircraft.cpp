@@ -1,15 +1,27 @@
+/**
+* @file Entities/src/aircraft.cpp
+* @brief Implementation for aircraft.
+* @author PPOTrial
+* @date 2026-03-29
+* @copyright Copyright (c) 2026 PPOTrial
+* @license MIT
+*/
 #include "aircraft.hpp"
 
 #include "snasystem.hpp"
 #include "flightmodelsystem.hpp"
 #include "snacontrolsystem.hpp"
-#include "randominitializersystem.hpp"
-#include "checkpointinitializersystem.hpp"
 
 #include "serializer.hpp"
 
 namespace ppo::model {
 
+/**
+* @brief Builds one aircraft entity from its platform description file.
+* @param registry Registry that owns the entity.
+* @param name Platform file name without extension.
+* @param side Tactical side assigned to the aircraft.
+*/
 Aircraft::Aircraft(entt::registry* registry, std::string const& name, eEntitySide side):
     Entity(registry, side, eEntityType::Aircraft)
 {
@@ -31,6 +43,9 @@ Aircraft::Aircraft(entt::registry* registry, std::string const& name, eEntitySid
     }
 }
 
+/**
+* @brief Initializes control, flight, and weapon subsystems in dependency order.
+*/
 void
 Aircraft::OnInit(void) noexcept
 {
@@ -44,6 +59,9 @@ Aircraft::OnInit(void) noexcept
         SNASystem::Init(*this);
 }
 
+/**
+* @brief Runs control, flight, kinematics, and weapon systems for one step.
+*/
 void
 Aircraft::Run(void) noexcept
 {
