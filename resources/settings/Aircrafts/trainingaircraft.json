@@ -4,8 +4,8 @@
 		"FlightModel": {
 			"MaxAcceleration": 200.0,
 			"MaxFuel": 2000000,
-			"MaxRotAcceleration": 0.50000059604645,
-			"MaxSpeed": 1100.0,
+			"MaxRotAcceleration": 0.80000059604645,
+			"MaxSpeed": 700.0,
 			"MinSpeed": 10.0
 		},
 		
