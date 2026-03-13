@@ -485,7 +485,7 @@ TargetSelectorTrainingAgent::RewardFunction(void) noexcept
             {
                 auto [otherSNState] = otherEntity.get<ppo::model::sSNAState>();
 
-                double const Rsec{ 1.2F * otherSNState.m_noescapezone };
+                double const Rsec{ 1.1F * otherSNState.m_noescapezone };
                 float dx{ otherEntityState.m_x - x };
                 float dy{ otherEntityState.m_y - y };
                 float dsam{ sqrt(dx * dx + dy * dy) };
@@ -516,7 +516,7 @@ TargetSelectorTrainingAgent::RewardFunction(void) noexcept
                 m_firstDanger = true;
             }
 
-            R_NearDanger = std::min(0.F, 0.01F * (minRangeFromDanger - m_prevDangerRange));
+            R_NearDanger = std::clamp(0.01F*(minRangeFromDanger - m_prevDangerRange), -1.F, 1.F);
 
             m_prevDangerRange = minRangeFromDanger;
 

@@ -2,7 +2,7 @@
 	"sam": {
 		"SNA": {
 			"MaxMissile": 8,
-			"MaxNoEscapeZoneRange": 11000.0,
+			"MaxNoEscapeZoneRange": 7000.0,
 			"MaxShootAngle": 3.14159178
 		}
 	}
