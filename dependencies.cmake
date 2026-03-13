@@ -6,7 +6,7 @@ include(FetchContent)
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG v1.91.0
+    GIT_TAG v1.92.1-docking
 )
 FetchContent_MakeAvailable(imgui)
 
@@ -21,7 +21,7 @@ target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR})
 FetchContent_Declare(
     implot
     GIT_REPOSITORY https://github.com/epezent/implot.git
-    GIT_TAG v0.16
+    GIT_TAG v0.17
 )
 FetchContent_MakeAvailable(implot)
 
@@ -54,41 +54,42 @@ set(CMAKE_PREFIX_PATH "${CMAKE_BINARY_DIR}/libtorch")
 
 find_package(Torch REQUIRED)
 
-# --- SFML ---
+# --- RAYLIB ---
 FetchContent_Declare(
-    sfml
-    GIT_REPOSITORY https://github.com/SFML/SFML.git
-    GIT_TAG 2.6.1
+    raylib
+    GIT_REPOSITORY https://github.com/raysan5/raylib.git
+    GIT_TAG 5.5
 )
-FetchContent_MakeAvailable(sfml)
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(raylib)
 
 # ---------------------------------------------------------
-#                Fetch ImGui-SFML (wrapper)
+#                Fetch rlImGui (raylib + ImGui)
 # ---------------------------------------------------------
-set(IMGUI_SFML_FIND_SFML OFF CACHE BOOL "" FORCE)
-set(IMGUI_DIR ${imgui_SOURCE_DIR} CACHE PATH "" FORCE)
 FetchContent_Declare(
-    imgui_sfml
-    GIT_REPOSITORY https://github.com/eliasdaler/imgui-sfml.git
-    GIT_TAG v2.6
+    rlimgui
+    GIT_REPOSITORY https://github.com/raylib-extras/rlImGui.git
+    GIT_TAG main
 )
-FetchContent_MakeAvailable(imgui_sfml)
+FetchContent_MakeAvailable(rlimgui)
 
-# Construire ImGui-SFML
-add_library(imgui-sfml STATIC
-    ${imgui_sfml_SOURCE_DIR}/imgui-SFML.cpp
+add_library(rlImGui STATIC
+    ${rlimgui_SOURCE_DIR}/rlImGui.cpp
 )
 
-target_include_directories(imgui-sfml PUBLIC
-    ${imgui_sfml_SOURCE_DIR}
+target_include_directories(rlImGui PUBLIC
+    ${rlimgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}
 )
 
-target_link_libraries(imgui-sfml PUBLIC
+target_compile_definitions(rlImGui PUBLIC NO_FONT_AWESOME)
+
+target_link_libraries(rlImGui PUBLIC
     imgui
-    sfml-system 
-    sfml-window 
-    sfml-graphics
+    raylib
+    opengl32
 )
 
 # ---------------------------------------------------------
