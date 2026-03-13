@@ -51,6 +51,12 @@ struct sEntityState
     EntityId        m_destroyedById{ entt::null };
 };
 
+struct sEntityMetadata
+{
+    std::string     m_name{};
+    std::string     m_archetype{};
+};
+
 struct sSNAState {
     EntityId        m_target{ entt::null };
     float           m_pk{ 0.F };

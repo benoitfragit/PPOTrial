@@ -19,5 +19,6 @@ add_subdirectory(PPO)
 add_subdirectory(Env)
 add_subdirectory(Renderer)
 add_subdirectory(Agents)
+add_subdirectory(Meta)
 add_subdirectory(Main)
 

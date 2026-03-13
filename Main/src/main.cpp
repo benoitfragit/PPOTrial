@@ -1,5 +1,3 @@
-#include <SFML/Graphics.hpp>
-
 #include "utils.hpp"
 #include "environment.hpp"
 #include "serializer.hpp"
@@ -9,6 +7,30 @@
 #include "sam.hpp"
 
 #include "environmentrenderer.hpp"
+#include "metaregistry.hpp"
+
+namespace {
+
+ppo::model::eEntitySide
+ParseEntitySide(std::string const& name) noexcept
+{
+    if (name == "Hostile")
+        return ppo::model::eEntitySide::Hostile;
+
+    if (name == "Friend")
+        return ppo::model::eEntitySide::Friend;
+
+    return ppo::model::eEntitySide::Unknown;
+}
+
+bool
+RequiresPlatform(std::string const& entityType) noexcept
+{
+    // Preserve the historical behavior:
+    // - Aircraft and SAM require a platform file
+    // - Objective does not
+    return entityType == "Aircraft" || entityType == "SAM";
+}
 
 void
 LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment& environment)
@@ -22,67 +44,46 @@ LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment&
     auto ar = ppo::serialization::Serializer::Parse(scenarioPath);
 
     auto scenarioSection = ar["Scenario"];
-
     auto entitiesList = scenarioSection["entities"];
-    for (auto [name, entitySection] : entitiesList.items()) 
+
+    for (auto [name, entitySection] : entitiesList.items())
     {
-        ppo::model::eEntityType  type{ ppo::model::eEntityType::None };
-        ppo::model::eEntitySide  side{ ppo::model::eEntitySide::Unknown };
-        std::string              target{ "" };
-        std::vector<std::string> agents  {};
-        std::string              platform{ "" };   
+        std::string const entityType{ entitySection.value("type", "") };
+        std::string const sideName{ entitySection.value("side", "") };
+        std::string const targetName{ entitySection.value("target", "") };
+        std::string const platform{ entitySection.value("platform", "") };
+        std::vector<std::string> const agents{ entitySection.value("agents", std::vector<std::string>{}) };
 
-        // champs simples
-        std::string tmp{ entitySection["type"] };
-        if      (tmp == "Aircraft")  type = ppo::model::eEntityType::Aircraft;
-        else if (tmp == "Objective") type = ppo::model::eEntityType::Objective;
-        else if (tmp == "SAM")       type = ppo::model::eEntityType::SAM;
-
-        tmp = entitySection["side"];
-        if      (tmp == "Hostile")   side = ppo::model::eEntitySide::Hostile;
-        else if (tmp == "Friend")    side = ppo::model::eEntitySide::Friend;
-
-        target = entitySection["target"];
-        platform = entitySection["platform"];
-        agents  = entitySection["agents" ].get<std::vector<std::string>>();
-
-        if (type == ppo::model::eEntityType::None)
+        if (entityType.empty())
             continue;
 
-        if (type == ppo::model::eEntityType::Aircraft
-        &&  platform != "")
-        {
-            auto entity = environment.CreateEntity<ppo::model::Aircraft>(platform, side);
+        if (RequiresPlatform(entityType) && platform.empty())
+            continue;
 
-            for (auto const& agent : agents)
-            {
-                if (agent == "SNAProdAgent")
-                    auto agent = environment.CreateAgent<rl::SNAProdAgent>(*entity.get());
-                else if (agent == "SNATrainingAgent")
-                    auto agent = environment.CreateAgent<rl::SNATrainingAgent>(*entity.get());
-                else if (agent == "TargetSelectorTrainingAgent")
-                    auto agent = environment.CreateAgent<rl::TargetSelectorTrainingAgent>(*entity.get());
-                else if (agent == "TargetSelectorProdAgent")
-                    auto agent = environment.CreateAgent<rl::TargetSelectorProdAgent>(*entity.get());
-            }
+        auto entity = ppo::reflection::CreateEntity(
+            entityType,
+            environment,
+            platform,
+            ParseEntitySide(sideName));
 
-            if (target.compare("") != 0)
-                targetMapping[entity.get()] = target;
+        if (entity == nullptr)
+            continue;
 
-            entityMapping[name] = entity.get();
-        }
-        else if (type == ppo::model::eEntityType::Objective)
-        {
-            auto entity = environment.CreateEntity<ppo::model::Objective>(side);
+        entity->add<ppo::model::sEntityMetadata>(ppo::model::sEntityMetadata{
+            std::string(name),
+            entityType
+        });
 
-            entityMapping[name] = entity.get();
-        }
-        else if (type == ppo::model::eEntityType::SAM
-        &&       platform != "")
-        {
-            auto entity = environment.CreateEntity<ppo::model::SAM>(platform, side);
-            entityMapping[name] = entity.get();
-        }
+        // Agents are now instantiated via the reflection registry.
+        // This removes hard-coded string-to-class dispatch while keeping
+        // the current JSON schema and behavior unchanged.
+        for (auto const& agentName : agents)
+            auto agent = ppo::reflection::CreateAgent(agentName, environment, *entity.get());
+
+        if (!targetName.empty())
+            targetMapping[entity.get()] = targetName;
+
+        entityMapping[std::string(name)] = entity.get();
     }
 
     for (auto const& [entity, target] : targetMapping)
@@ -101,9 +102,13 @@ LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment&
     }
 }
 
+} // namespace
+
 int 
 main(int argc, char** argv)
 {
+    ppo::reflection::RegisterAllMeta();
+
     ppo::serialization::Serializer& serializer{ ppo::serialization::Serializer::GetInstance() };
     std::filesystem::path serializationPath{ RESOURCE_PATH };
     serializer.SetPath(serializationPath);

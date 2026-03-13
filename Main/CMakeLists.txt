@@ -15,7 +15,8 @@ target_link_libraries(${PROJECT_NAME}
         GenericEnv
 		GenericRenderer
 		Interception
-        Mission)
+        Mission
+        MetaReflection)
 		
 add_dependencies(${PROJECT_NAME} GenericEntities 
 								 GenericSerializer 
@@ -23,14 +24,8 @@ add_dependencies(${PROJECT_NAME} GenericEntities
 								 GenericEnv
 								 GenericRenderer
 								 Interception
-                                 Mission)
-
-# For Windows: ensure DLLs are copied
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    $<TARGET_FILE_DIR:sfml-graphics>
-    $<TARGET_FILE_DIR:${PROJECT_NAME}>
-)
+                                 Mission
+                                 MetaReflection)
 
 # Copier les DLL automatiquement
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
