@@ -57,7 +57,7 @@ public:
         return agent;
     };
 
-    entt::registry&   GetSnapshot           (void) const noexcept;
+    void              ReadSnapshot          (std::function<void(entt::registry const&)> const& reader) const;
 
     void              Start                 (void);
     void              Play                  (void);

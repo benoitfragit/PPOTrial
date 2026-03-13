@@ -4,6 +4,7 @@
 #include <raylib.h>
 
 #include <array>
+#include <deque>
 #include <map>
 #include <memory>
 #include <string>
@@ -53,6 +54,7 @@ public:
 
         float const* data() const noexcept { return m_data.data(); }
         std::size_t size() const noexcept { return m_size; }
+        void clear() noexcept { m_size = 0; }
 
         std::vector<float> m_data{};
         std::size_t m_size{ 0 };
@@ -62,13 +64,16 @@ public:
     struct AgentController
     {
         using Plot = CircularBuffer<5000>;
-        using Plots = std::array<Plot, 4>;
+        using Plots = std::array<Plot, 5>;
 
         Plots m_plots{};
         bool m_started{ false };
         std::vector<float> m_scalings{};
         int m_rollout{ 0 };
         float m_clamp{ 0.F };
+        float m_rewardMean{ 0.F };
+        unsigned int m_rewardSampleCount{ 0 };
+        long long m_lastRewardStep{ -1 };
         unsigned long long m_id{ 0 };
     };
 
@@ -81,6 +86,12 @@ public:
         bool m_lastEpisodeSuccess{ false };
     };
 
+    struct TrailPoint
+    {
+        Vector3 m_position{};
+        double m_timestamp{ 0.0 };
+    };
+
 private:
     explicit EnvironmentRenderer(std::string const& title);
 
@@ -91,8 +102,10 @@ private:
     void ApplyTheme(void);
     void BuildDefaultLayout(ImGuiID dockspaceId);
     void UpdateMissionTelemetry(entt::registry const& snapshot);
+    void UpdateTrails(entt::registry const& snapshot);
     void UpdateTrackedEntity(entt::registry const& snapshot);
     void UpdateAttachedCamera(entt::registry const& snapshot);
+    void UpdateFreeCamera(entt::registry const& snapshot, bool hovered, Vector2 viewportOrigin, Vector2 viewportSize);
 
     void DrawSimulationControls(void);
     void DrawStatusBar(entt::registry const& snapshot);
@@ -127,8 +140,10 @@ private:
     float m_northRange{ 112500.F };
     float m_eastRange{ 150000.F };
     float m_timestepMs{ 20.F };
-    float m_cameraDistance{ 18.F };
-    float m_cameraHeight{ 8.F };
+    float m_cameraDistance{ 12.F };
+    float m_cameraHeight{ 4.5F };
+    float m_cameraMoveSpeed{ 12.F };
+    float m_trailDuration{ 12.F };
     float m_domainHeight{ 1.6F };
     float m_mapZoom{ 1.F };
     int m_currentScaleLevel{ 1 };
@@ -137,10 +152,12 @@ private:
     bool m_showGrid{ true };
     bool m_showDomains{ true };
     bool m_showDestroyed{ true };
-    bool m_showMetaCatalog{ true };
+    bool m_showMetaCatalog{ false };
+    bool m_showPseudoLidar{ false };
     bool m_focusSelectionInMinimap{ false };
     char m_entityFilter[96]{};
     MissionTelemetry m_missionTelemetry{};
+    std::map<unsigned long long, std::deque<TrailPoint>> m_entityTrails{};
 
     entt::entity m_selectedEntity{ entt::null };
     entt::entity m_trackedEntity{ entt::null };

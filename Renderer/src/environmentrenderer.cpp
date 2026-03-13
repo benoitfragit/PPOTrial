@@ -25,6 +25,82 @@ namespace {
 
 constexpr float PI_F = 3.14159265359F;
 constexpr float DEG_PER_RAD = 57.2957795131F;
+constexpr float CAMERA_MOUSE_ORBIT_SPEED = 0.0075F;
+constexpr float CAMERA_MOUSE_PAN_SPEED = 0.0100F;
+constexpr float CAMERA_WHEEL_ZOOM_SPEED = 1.25F;
+constexpr float CAMERA_ATTACH_SMOOTHING = 0.12F;
+
+Vector3
+VectorLerpLocal(Vector3 const& a, Vector3 const& b, float amount)
+{
+    return Vector3{
+        a.x + (b.x - a.x) * amount,
+        a.y + (b.y - a.y) * amount,
+        a.z + (b.z - a.z) * amount
+    };
+}
+
+Vector3
+VectorAdd(Vector3 const& a, Vector3 const& b)
+{
+    return Vector3{ a.x + b.x, a.y + b.y, a.z + b.z };
+}
+
+Vector3
+VectorSub(Vector3 const& a, Vector3 const& b)
+{
+    return Vector3{ a.x - b.x, a.y - b.y, a.z - b.z };
+}
+
+Vector3
+VectorScale(Vector3 const& v, float scalar)
+{
+    return Vector3{ v.x * scalar, v.y * scalar, v.z * scalar };
+}
+
+float
+VectorLength(Vector3 const& v)
+{
+    return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+}
+
+Vector3
+VectorNormalizeSafe(Vector3 const& v)
+{
+    float const length = VectorLength(v);
+    if (length <= 1.0e-5F)
+        return Vector3{ 0.F, 0.F, 0.F };
+
+    return VectorScale(v, 1.F / length);
+}
+
+Vector3
+VectorCross(Vector3 const& a, Vector3 const& b)
+{
+    return Vector3{
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x
+    };
+}
+
+bool
+TryIntersectGroundPlane(Ray const& ray, Vector3& hitPoint)
+{
+    if (std::fabs(ray.direction.y) <= 1.0e-5F)
+        return false;
+
+    float const distance = -ray.position.y / ray.direction.y;
+    if (distance <= 0.F)
+        return false;
+
+    hitPoint = Vector3{
+        ray.position.x + ray.direction.x * distance,
+        0.F,
+        ray.position.z + ray.direction.z * distance
+    };
+    return true;
+}
 
 char const*
 EntityTypeLabel(ppo::model::eEntityType type)
@@ -154,6 +230,60 @@ DrawObjectiveGlyph3D(ppo::model::sEntityState const& state, float scale, Color c
 }
 
 void
+DrawPrimaryTargetAura3D(ppo::model::sEntityState const& state, float scale)
+{
+    Vector3 const center = ToWorld3D(state.m_x, state.m_y, 0.F, scale);
+    float const pulse = 0.5F + 0.5F * std::sin(static_cast<float>(GetTime()) * 2.8F);
+    float const innerRadius = 0.50F + 0.10F * pulse;
+    float const outerRadius = 0.86F + 0.16F * pulse;
+    Color const glowColor{ 255, 205, 72, static_cast<unsigned char>(150 + 60 * pulse) };
+    Color const coreColor{ 255, 241, 170, static_cast<unsigned char>(210 + 30 * pulse) };
+
+    DrawCylinder(Vector3{ center.x, 0.12F, center.z },
+                 outerRadius * 1.05F,
+                 outerRadius * 1.30F,
+                 0.26F + 0.08F * pulse,
+                 36,
+                 Fade(glowColor, 0.22F));
+    DrawCylinder(Vector3{ center.x, 0.14F, center.z },
+                 innerRadius * 1.15F,
+                 outerRadius,
+                 0.18F + 0.05F * pulse,
+                 36,
+                 Fade(coreColor, 0.28F));
+    DrawCylinderWires(Vector3{ center.x, 0.14F, center.z }, outerRadius, outerRadius, 0.22F, 36, coreColor);
+    DrawCylinderWires(Vector3{ center.x, 0.14F, center.z }, innerRadius, innerRadius, 0.16F, 36, Fade(coreColor, 0.75F));
+    DrawSphereWires(Vector3{ center.x, center.y + 0.34F, center.z }, innerRadius, 14, 14, Fade(coreColor, 0.95F));
+    DrawLine3D(Vector3{ center.x, center.y + 0.45F, center.z },
+               Vector3{ center.x, center.y + 1.55F + 0.20F * pulse, center.z },
+               Fade(coreColor, 0.90F));
+}
+
+void
+DrawTrail3D(std::deque<ppo::renderer::EnvironmentRenderer::TrailPoint> const& trail,
+            float duration,
+            Color color)
+{
+    if (trail.size() < 2 || duration <= 0.F)
+        return;
+
+    double const now = GetTime();
+    for (std::size_t index = 1; index < trail.size(); ++index)
+    {
+        auto const& previous = trail[index - 1];
+        auto const& current = trail[index];
+        float const age = static_cast<float>(now - current.m_timestamp);
+        float const fade = std::clamp(1.F - age / duration, 0.F, 1.F);
+        if (fade <= 0.01F)
+            continue;
+
+        Color const segmentColor{ color.r, color.g, color.b, static_cast<unsigned char>(180.F * fade) };
+        DrawLine3D(previous.m_position, current.m_position, segmentColor);
+        DrawSphere(current.m_position, 0.04F + 0.015F * fade, Fade(segmentColor, 0.35F));
+    }
+}
+
+void
 DrawHemisphere(Vector3 const& center, float radius, Color color, int slices = 28, int rings = 12)
 {
     for (int ring = 0; ring < rings; ++ring)
@@ -251,6 +381,133 @@ EntityDisplayName(ppo::model::sEntityState const& state, entt::entity entity)
     return label;
 }
 
+void
+DrawPseudoLidarCone(Vector3 const& center,
+                    float startAngle,
+                    float endAngle,
+                    float radius0,
+                    float radius1,
+                    Color color)
+{
+    float const coneHeight = 0.85F;
+    Vector3 const apex{ center.x, center.y + coneHeight, center.z };
+    Vector3 const a{ center.x + radius0 * std::sin(startAngle), center.y + 0.03F, center.z - radius0 * std::cos(startAngle) };
+    Vector3 const b{ center.x + radius1 * std::sin(endAngle), center.y + 0.03F, center.z - radius1 * std::cos(endAngle) };
+    Vector3 const aFoot{ a.x, center.y + 0.01F, a.z };
+    Vector3 const bFoot{ b.x, center.y + 0.01F, b.z };
+
+    DrawTriangle3D(apex, a, b, color);
+    DrawTriangle3D(center, aFoot, bFoot, Fade(color, 0.22F));
+    DrawLine3D(apex, a, Fade(WHITE, 0.18F));
+    DrawLine3D(apex, b, Fade(WHITE, 0.18F));
+}
+
+void
+DrawPseudoLidar3D(entt::registry const& snapshot,
+                  entt::entity entity,
+                  ppo::model::sEntityState const& state,
+                  ppo::model::sSNAState const& snaState,
+                  float worldScale)
+{
+    constexpr std::size_t beamCount = 31;
+    std::array<float, beamCount> nearestCollisionRanges{};
+    nearestCollisionRanges.fill(1.F);
+    constexpr float noInterceptThreshold = 0.999F;
+    constexpr float minDenominator = 1.0e-4F;
+
+    float const maxAngleArea = PI_F;
+    float const halfAngleArea = maxAngleArea * 0.5F;
+    float const stepAngle = maxAngleArea / static_cast<float>(beamCount - 1);
+
+    auto sams = snapshot.view<ppo::model::sEntityState, ppo::model::sSNAState>();
+    for (auto other : sams)
+    {
+        if (other == entity)
+            continue;
+
+        auto const& [otherState, otherSna] = sams.get(other);
+        if (otherState.m_type != ppo::model::eEntityType::SAM
+        ||  otherState.m_side == state.m_side
+        ||  otherState.m_destroyed)
+            continue;
+
+        float angle = -halfAngleArea;
+        for (std::size_t index = 0; index < beamCount; ++index)
+        {
+            float const angleRad = state.m_rotation + angle;
+            float const mx = state.m_x - otherState.m_x;
+            float const my = state.m_y - otherState.m_y;
+            float const safetyRadius = otherSna.m_noescapezone;
+            float const distanceToCenter = std::sqrt(mx * mx + my * my);
+            float const b = mx * std::cos(angleRad) + my * std::sin(angleRad);
+            float const c = mx * mx + my * my - safetyRadius * safetyRadius;
+            float const delta = b * b - c;
+
+            if (distanceToCenter <= safetyRadius)
+            {
+                nearestCollisionRanges[index] = 0.F;
+                angle += stepAngle;
+                continue;
+            }
+
+            if (delta >= 0.F)
+            {
+                float const sqrtDelta = std::sqrt(delta);
+                float const d1 = -b - sqrtDelta;
+                float const d2 = -b + sqrtDelta;
+
+                if (d1 >= 0.F)
+                    nearestCollisionRanges[index] = std::min(nearestCollisionRanges[index], d1 / (d1 + std::max(snaState.m_noescapezone, 1.F)));
+            }
+
+            angle += stepAngle;
+        }
+    }
+
+    Vector3 const center = ToWorld3D(state.m_x, state.m_y, 0.F, worldScale);
+    for (std::size_t index = 0; index + 1 < beamCount; ++index)
+    {
+        float const r0 = nearestCollisionRanges[index];
+        float const r1 = nearestCollisionRanges[index + 1];
+        bool const hasIntercept0 = r0 < noInterceptThreshold;
+        bool const hasIntercept1 = r1 < noInterceptThreshold;
+        if (!hasIntercept0 && !hasIntercept1)
+            continue;
+
+        float const localStart = -halfAngleArea + static_cast<float>(index) * stepAngle;
+        float const localEnd = localStart + stepAngle;
+        float const worldStart = state.m_rotation + localStart;
+        float const worldEnd = state.m_rotation + localEnd;
+
+        auto const decodeInterceptDistance = [&](float ratio) -> float
+        {
+            if (ratio >= noInterceptThreshold)
+                return 0.F;
+
+            float const safeNoEscapeZone = std::max(snaState.m_noescapezone, 1.F);
+            float const denominator = std::max(minDenominator, 1.F - ratio);
+            return (ratio * safeNoEscapeZone) / denominator;
+        };
+
+        float const distance0 = decodeInterceptDistance(r0);
+        float const distance1 = decodeInterceptDistance(r1);
+        float const radius0 = hasIntercept0 ? std::max(0.35F, distance0 / worldScale) : 0.F;
+        float const radius1 = hasIntercept1 ? std::max(0.35F, distance1 / worldScale) : 0.F;
+
+        float const minRatio = std::min(hasIntercept0 ? r0 : 1.F, hasIntercept1 ? r1 : 1.F);
+        float const normalizedThreat = 1.F - std::clamp(minRatio, 0.F, 1.F);
+        float const intensity = 0.35F + 0.65F * normalizedThreat;
+        Color const beamColor{
+            static_cast<unsigned char>(50 + 35 * intensity),
+            static_cast<unsigned char>(180 + 50 * intensity),
+            static_cast<unsigned char>(90 + 40 * intensity),
+            static_cast<unsigned char>(50 + 70 * intensity)
+        };
+
+        DrawPseudoLidarCone(center, worldStart, worldEnd, radius0, radius1, beamColor);
+    }
+}
+
 std::string
 EntityDisplayName(entt::registry const& snapshot, entt::entity entity, ppo::model::sEntityState const& state)
 {
@@ -328,8 +585,23 @@ TryGetArithmeticString(entt::meta_any const& any, std::string& out)
     return false;
 }
 
+std::string
+TryResolveEntityName(entt::registry const* snapshot, entt::entity entity)
+{
+    if (snapshot == nullptr || entity == entt::null || !snapshot->valid(entity))
+        return {};
+
+    if (snapshot->any_of<ppo::model::sEntityState>(entity))
+    {
+        auto const& state = snapshot->get<ppo::model::sEntityState>(entity);
+        return EntityDisplayName(*snapshot, entity, state);
+    }
+
+    return "Entity #" + std::to_string(static_cast<entt::id_type>(entity));
+}
+
 void
-DrawMetaAnyRecursive(char const* label, entt::meta_any value)
+DrawMetaAnyRecursive(char const* label, entt::meta_any value, entt::registry const* snapshot = nullptr)
 {
     if (!value)
     {
@@ -352,6 +624,16 @@ DrawMetaAnyRecursive(char const* label, entt::meta_any value)
         return;
     }
 
+    if (auto const* entityId = value.try_cast<ppo::model::EntityId>())
+    {
+        std::string const resolved = TryResolveEntityName(snapshot, *entityId);
+        if (!resolved.empty())
+            ImGui::Text("%s: %s", label, resolved.c_str());
+        else
+            ImGui::Text("%s: <entity:%u>", label, static_cast<unsigned int>(*entityId));
+        return;
+    }
+
     auto seq = value.as_sequence_container();
     if (seq)
     {
@@ -362,7 +644,7 @@ DrawMetaAnyRecursive(char const* label, entt::meta_any value)
             {
                 auto item = *it;
                 std::string const itemLabel = "item[" + std::to_string(index) + "]";
-                DrawMetaAnyRecursive(itemLabel.c_str(), item);
+                DrawMetaAnyRecursive(itemLabel.c_str(), item, snapshot);
             }
             ImGui::TreePop();
         }
@@ -380,8 +662,8 @@ DrawMetaAnyRecursive(char const* label, entt::meta_any value)
                 auto pair = *it;
                 std::string const keyLabel = "key[" + std::to_string(index) + "]";
                 std::string const valueLabel = "value[" + std::to_string(index) + "]";
-                DrawMetaAnyRecursive(keyLabel.c_str(), pair.first);
-                DrawMetaAnyRecursive(valueLabel.c_str(), pair.second);
+                DrawMetaAnyRecursive(keyLabel.c_str(), pair.first, snapshot);
+                DrawMetaAnyRecursive(valueLabel.c_str(), pair.second, snapshot);
             }
             ImGui::TreePop();
         }
@@ -396,7 +678,7 @@ DrawMetaAnyRecursive(char const* label, entt::meta_any value)
             hasData = true;
             auto field = data.get(value);
             std::string const fieldName = FieldDisplayName(data.name());
-            DrawMetaAnyRecursive(fieldName.c_str(), field);
+            DrawMetaAnyRecursive(fieldName.c_str(), field, snapshot);
         }
 
         if (!hasData)
@@ -415,7 +697,7 @@ DrawComponentIfPresent(entt::registry const& snapshot, entt::entity entity)
 
     auto const& component = snapshot.get<Component>(entity);
     auto type = entt::resolve<Component>();
-    DrawMetaAnyRecursive(MetaDisplayName(type), entt::forward_as_meta(component));
+    DrawMetaAnyRecursive(MetaDisplayName(type), entt::forward_as_meta(component), &snapshot);
 }
 
 } // namespace
@@ -511,15 +793,17 @@ EnvironmentRenderer::SetEnvironment(ppo::model::Environment& env) noexcept
 {
     p_environment = &env;
 
-    entt::registry const& snapshot = p_environment->GetSnapshot();
-    if (snapshot.ctx().contains<ppo::model::sEnvironmentState>())
+    p_environment->ReadSnapshot([&](entt::registry const& snapshot)
     {
-        auto const& envState = snapshot.ctx().get<ppo::model::sEnvironmentState>();
-        m_eastRange = envState.m_maxEast;
-        m_northRange = envState.m_maxNorth;
-        m_areawidth = envState.m_maxEast / m_worldScale;
-        m_timestepMs = envState.m_dt * 1000.F;
-    }
+        if (snapshot.ctx().contains<ppo::model::sEnvironmentState>())
+        {
+            auto const& envState = snapshot.ctx().get<ppo::model::sEnvironmentState>();
+            m_eastRange = envState.m_maxEast;
+            m_northRange = envState.m_maxNorth;
+            m_areawidth = envState.m_maxEast / m_worldScale;
+            m_timestepMs = envState.m_dt * 1000.F;
+        }
+    });
 }
 
 std::shared_ptr<EnvironmentRenderer::AgentController>
@@ -682,6 +966,53 @@ EnvironmentRenderer::UpdateMissionTelemetry(entt::registry const& snapshot)
 }
 
 void
+EnvironmentRenderer::UpdateTrails(entt::registry const& snapshot)
+{
+    double const now = GetTime();
+    double const duration = std::max(1.0, static_cast<double>(m_trailDuration));
+
+    auto entityView = snapshot.view<ppo::model::sEntityState>();
+    for (auto entity : entityView)
+    {
+        auto const& [state] = entityView.get(entity);
+        if (state.m_entityId == entt::null || state.m_destroyed)
+            continue;
+
+        auto& trail = m_entityTrails[static_cast<unsigned long long>(state.m_entityId)];
+        Vector3 const worldPosition = ToWorld3D(state.m_x, state.m_y, 0.F, m_worldScale);
+        Vector3 const liftedPosition{ worldPosition.x, worldPosition.y + 0.05F, worldPosition.z };
+
+        bool shouldAppend = trail.empty();
+        if (!shouldAppend)
+        {
+            auto const& last = trail.back();
+            float const dx = liftedPosition.x - last.m_position.x;
+            float const dy = liftedPosition.y - last.m_position.y;
+            float const dz = liftedPosition.z - last.m_position.z;
+            float const distanceSq = dx * dx + dy * dy + dz * dz;
+            shouldAppend = distanceSq > 0.015F || (now - last.m_timestamp) > 0.18;
+        }
+
+        if (shouldAppend)
+            trail.push_back(TrailPoint{ liftedPosition, now });
+
+        while (!trail.empty() && (now - trail.front().m_timestamp) > duration)
+            trail.pop_front();
+    }
+
+    for (auto it = m_entityTrails.begin(); it != m_entityTrails.end();)
+    {
+        while (!it->second.empty() && (now - it->second.front().m_timestamp) > duration)
+            it->second.pop_front();
+
+        if (it->second.empty())
+            it = m_entityTrails.erase(it);
+        else
+            ++it;
+    }
+}
+
+void
 EnvironmentRenderer::UpdateTrackedEntity(entt::registry const& snapshot)
 {
     if (m_trackedEntity != entt::null && snapshot.valid(m_trackedEntity) && snapshot.any_of<ppo::model::sEntityState>(m_trackedEntity))
@@ -734,17 +1065,165 @@ EnvironmentRenderer::UpdateAttachedCamera(entt::registry const& snapshot)
     Vector3 const focus = ToWorld3D(state.m_x, state.m_y, 0.F, m_worldScale);
     Vector3 const forward = HeadingForward(state.m_rotation);
 
-    m_camera.target = Vector3{
-        focus.x + forward.x * 2.0F,
-        focus.y + 0.3F,
-        focus.z + forward.z * 2.0F
+    Vector3 const desiredTarget = Vector3{
+        focus.x + forward.x * 1.4F,
+        focus.y + 0.35F,
+        focus.z + forward.z * 1.4F
     };
 
-    m_camera.position = Vector3{
+    Vector3 const desiredPosition = Vector3{
         focus.x - forward.x * m_cameraDistance,
         focus.y + m_cameraHeight,
         focus.z - forward.z * m_cameraDistance
     };
+
+    m_camera.target = VectorLerpLocal(m_camera.target, desiredTarget, CAMERA_ATTACH_SMOOTHING);
+    m_camera.position = VectorLerpLocal(m_camera.position, desiredPosition, CAMERA_ATTACH_SMOOTHING);
+}
+
+void
+EnvironmentRenderer::UpdateFreeCamera(entt::registry const& snapshot, bool hovered, Vector2 viewportOrigin, Vector2 viewportSize)
+{
+    if (m_autoAttachCamera || !hovered)
+        return;
+
+    ImGuiIO const& io = ImGui::GetIO();
+    Vector2 const mouseDelta = GetMouseDelta();
+    Vector3 const worldUp{ 0.F, 1.F, 0.F };
+    Vector3 offset = VectorSub(m_camera.position, m_camera.target);
+    float const radius = std::max(0.5F, VectorLength(offset));
+
+    if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT))
+    {
+        float const yaw = -mouseDelta.x * CAMERA_MOUSE_ORBIT_SPEED;
+        float const pitch = -mouseDelta.y * CAMERA_MOUSE_ORBIT_SPEED;
+
+        float angle = std::atan2(offset.x, offset.z);
+        float elevation = std::asin(std::clamp(offset.y / radius, -0.98F, 0.98F));
+
+        angle += yaw;
+        elevation = std::clamp(elevation + pitch, -1.35F, 1.35F);
+
+        float const horizontalRadius = std::cos(elevation) * radius;
+        offset = Vector3{
+            std::sin(angle) * horizontalRadius,
+            std::sin(elevation) * radius,
+            std::cos(angle) * horizontalRadius
+        };
+
+        m_camera.position = VectorAdd(m_camera.target, offset);
+    }
+
+    Vector3 forward = VectorNormalizeSafe(VectorSub(m_camera.target, m_camera.position));
+    if (VectorLength(forward) <= 1.0e-5F)
+        forward = Vector3{ 0.F, 0.F, -1.F };
+
+    Vector3 right = VectorNormalizeSafe(VectorCross(forward, worldUp));
+    if (VectorLength(right) <= 1.0e-5F)
+        right = Vector3{ 1.F, 0.F, 0.F };
+
+    if (IsMouseButtonDown(MOUSE_BUTTON_MIDDLE))
+    {
+        Vector3 const pan =
+            VectorAdd(VectorScale(right, -mouseDelta.x * CAMERA_MOUSE_PAN_SPEED * radius),
+                      VectorScale(worldUp, mouseDelta.y * CAMERA_MOUSE_PAN_SPEED * radius));
+        m_camera.position = VectorAdd(m_camera.position, pan);
+        m_camera.target = VectorAdd(m_camera.target, pan);
+    }
+
+    float const wheel = GetMouseWheelMove();
+    if (std::fabs(wheel) > 0.F)
+    {
+        Vector2 const mouse = GetMousePosition();
+        Vector2 const localMouse{ mouse.x - viewportOrigin.x, mouse.y - viewportOrigin.y };
+        Vector3 groundHit{};
+        bool const hasGroundHit =
+            viewportSize.x > 1.F
+         && viewportSize.y > 1.F
+         && TryIntersectGroundPlane(GetScreenToWorldRayEx(localMouse,
+                                                         m_camera,
+                                                         static_cast<int>(viewportSize.x),
+                                                         static_cast<int>(viewportSize.y)),
+                                    groundHit);
+
+        if (hasGroundHit)
+            m_camera.target = VectorLerpLocal(m_camera.target, groundHit, 0.28F);
+
+        Vector3 const zoomDirection =
+            hasGroundHit ? VectorNormalizeSafe(VectorSub(groundHit, m_camera.position)) : forward;
+        Vector3 const zoomStep =
+            VectorScale(zoomDirection, wheel * std::max(1.F, radius * 0.15F) * CAMERA_WHEEL_ZOOM_SPEED);
+        Vector3 const candidate = VectorAdd(m_camera.position, zoomStep);
+        if (VectorLength(VectorSub(m_camera.target, candidate)) >= 0.75F)
+            m_camera.position = candidate;
+    }
+
+    if (!io.WantTextInput)
+    {
+        float const frameMoveSpeed = m_cameraMoveSpeed * GetFrameTime() * (IsKeyDown(KEY_LEFT_SHIFT) ? 2.5F : 1.F);
+        Vector3 planarForward = VectorNormalizeSafe(Vector3{ forward.x, 0.F, forward.z });
+        if (VectorLength(planarForward) <= 1.0e-5F)
+            planarForward = Vector3{ 0.F, 0.F, -1.F };
+
+        Vector3 const planarRight = VectorNormalizeSafe(VectorCross(planarForward, worldUp));
+        Vector3 translation{ 0.F, 0.F, 0.F };
+
+        if (IsKeyDown(KEY_W))
+            translation = VectorAdd(translation, VectorScale(planarForward, frameMoveSpeed));
+        if (IsKeyDown(KEY_S))
+            translation = VectorAdd(translation, VectorScale(planarForward, -frameMoveSpeed));
+        if (IsKeyDown(KEY_A))
+            translation = VectorAdd(translation, VectorScale(planarRight, -frameMoveSpeed));
+        if (IsKeyDown(KEY_D))
+            translation = VectorAdd(translation, VectorScale(planarRight, frameMoveSpeed));
+        if (IsKeyDown(KEY_E))
+            translation = VectorAdd(translation, VectorScale(worldUp, frameMoveSpeed));
+        if (IsKeyDown(KEY_Q))
+            translation = VectorAdd(translation, VectorScale(worldUp, -frameMoveSpeed));
+
+        if (VectorLength(translation) > 0.F)
+        {
+            m_camera.position = VectorAdd(m_camera.position, translation);
+            m_camera.target = VectorAdd(m_camera.target, translation);
+        }
+
+        if (IsKeyPressed(KEY_F)
+        &&  m_trackedEntity != entt::null
+        &&  snapshot.valid(m_trackedEntity)
+        &&  snapshot.any_of<ppo::model::sEntityState>(m_trackedEntity))
+        {
+            auto const& trackedState = snapshot.get<ppo::model::sEntityState>(m_trackedEntity);
+            Vector3 const focus = ToWorld3D(trackedState.m_x, trackedState.m_y, 0.F, m_worldScale);
+            Vector3 const delta = VectorSub(focus, m_camera.target);
+            m_camera.target = VectorAdd(m_camera.target, delta);
+            m_camera.position = VectorAdd(m_camera.position, delta);
+        }
+
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        {
+            Vector2 const mouse = GetMousePosition();
+            Vector2 const localMouse{ mouse.x - viewportOrigin.x, mouse.y - viewportOrigin.y };
+            Vector3 groundHit{};
+            if (viewportSize.x > 1.F
+            &&  viewportSize.y > 1.F
+            &&  TryIntersectGroundPlane(GetScreenToWorldRayEx(localMouse,
+                                                              m_camera,
+                                                              static_cast<int>(viewportSize.x),
+                                                              static_cast<int>(viewportSize.y)),
+                                        groundHit))
+            {
+                m_camera.target = VectorLerpLocal(m_camera.target, groundHit, 0.65F);
+            }
+        }
+
+        if (IsKeyPressed(KEY_R))
+        {
+            m_camera.position = Vector3{ 0.F, 12.F, 12.F };
+            m_camera.target = Vector3{ 0.F, 0.F, 0.F };
+            m_cameraDistance = 12.F;
+            m_cameraHeight = 4.5F;
+        }
+    }
 }
 
 void
@@ -802,12 +1281,14 @@ EnvironmentRenderer::DrawSimulationControls(void)
     ImGui::Checkbox("Auto-attach camera", &m_autoAttachCamera);
     ImGui::Checkbox("Show grid", &m_showGrid);
     ImGui::Checkbox("Show domains", &m_showDomains);
+    ImGui::Checkbox("Show pseudo lidar", &m_showPseudoLidar);
     ImGui::Checkbox("Show destroyed markers", &m_showDestroyed);
     ImGui::Checkbox("Show meta catalog", &m_showMetaCatalog);
     ImGui::Checkbox("Center minimap on selection", &m_focusSelectionInMinimap);
 
     ImGui::SliderFloat("Camera distance", &m_cameraDistance, 5.F, 60.F);
     ImGui::SliderFloat("Camera height", &m_cameraHeight, 2.F, 25.F);
+    ImGui::SliderFloat("Trail duration", &m_trailDuration, 2.F, 30.F, "%.1f s");
     ImGui::SliderFloat("Aircraft domain height", &m_domainHeight, 0.3F, 5.F);
     ImGui::SliderFloat("Minimap zoom", &m_mapZoom, 0.3F, 4.F);
 
@@ -914,7 +1395,18 @@ EnvironmentRenderer::DrawRewardControls(std::shared_ptr<AgentController> const& 
     for (std::size_t i = 0; i < state.m_scalings.size(); ++i)
     {
         ImGui::PushID(static_cast<int>(i));
-        if (ImGui::SliderFloat(state.m_rewardnames[i].c_str(), &agent->m_scalings[i], 0.F, 1.F))
+        std::string const rewardLabel =
+            (i < state.m_rewardnames.size() && !state.m_rewardnames[i].empty())
+                ? state.m_rewardnames[i]
+                : ("Reward " + std::to_string(i));
+
+        if (i >= agent->m_scalings.size())
+        {
+            ImGui::PopID();
+            break;
+        }
+
+        if (ImGui::SliderFloat(rewardLabel.c_str(), &agent->m_scalings[i], 0.F, 1.F))
         {
             ppo::model::sAgentRealTimeCommand command{};
             command.m_id = agent->m_id;
@@ -958,24 +1450,25 @@ EnvironmentRenderer::DrawAgentPlot(std::shared_ptr<AgentController> const& agent
     agent->m_plots[1].m_name = state.m_name + "-ActorLoss";
     agent->m_plots[2].m_name = state.m_name + "-ValueLoss";
     agent->m_plots[3].m_name = state.m_name + "-EntropyLoss";
+    agent->m_plots[4].m_name = state.m_name + "-MeanReward";
 
-    ImVec2 const available = ImGui::GetContentRegionAvail();
-    ImVec2 const half{ available.x * 0.5F, available.y * 0.5F };
+    if (ImGui::BeginTable("##agentplots", 2, ImGuiTableFlags_SizingStretchSame))
+    {
+        for (int index = 0; index < 5; ++index)
+        {
+            if (index % 2 == 0)
+                ImGui::TableNextRow();
 
-    ImGui::BeginChild("##loss", half, false);
-    DrawOneAgentPlot(agent->m_plots[0]);
-    ImGui::EndChild();
-    ImGui::SameLine();
-    ImGui::BeginChild("##actorloss", half, false);
-    DrawOneAgentPlot(agent->m_plots[1]);
-    ImGui::EndChild();
-    ImGui::BeginChild("##valueloss", half, false);
-    DrawOneAgentPlot(agent->m_plots[2]);
-    ImGui::EndChild();
-    ImGui::SameLine();
-    ImGui::BeginChild("##entropyloss", half, false);
-    DrawOneAgentPlot(agent->m_plots[3]);
-    ImGui::EndChild();
+            ImGui::TableNextColumn();
+            ImGui::PushID(index);
+            ImGui::BeginChild("##plotcell", ImVec2(0.F, 220.F), false);
+            DrawOneAgentPlot(agent->m_plots[index]);
+            ImGui::EndChild();
+            ImGui::PopID();
+        }
+
+        ImGui::EndTable();
+    }
 }
 
 void
@@ -993,10 +1486,28 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
 
     DrawPlane(Vector3{ 0.F, -0.02F, 0.F }, Vector2{ 320.F, 320.F }, Color{ 18, 28, 38, 255 });
 
+    entt::entity primaryTarget = entt::null;
+    if (m_trackedEntity != entt::null
+    &&  snapshot.valid(m_trackedEntity)
+    &&  snapshot.any_of<ppo::model::sSNAState>(m_trackedEntity))
+    {
+        auto const& trackedSna = snapshot.get<ppo::model::sSNAState>(m_trackedEntity);
+        if (trackedSna.m_target != entt::null
+        &&  snapshot.valid(trackedSna.m_target)
+        &&  snapshot.any_of<ppo::model::sEntityState>(trackedSna.m_target))
+        {
+            primaryTarget = trackedSna.m_target;
+        }
+    }
+
     auto entityView = snapshot.view<ppo::model::sEntityState>();
     for (auto entity : entityView)
     {
         auto const& [state] = entityView.get(entity);
+        auto trailIt = m_entityTrails.find(static_cast<unsigned long long>(state.m_entityId));
+        if (trailIt != m_entityTrails.end())
+            DrawTrail3D(trailIt->second, m_trailDuration, ColorForSide(state.m_side, 180));
+
         Color const baseColor = ColorForSide(state.m_side);
         Vector3 const center = ToWorld3D(state.m_x, state.m_y, 0.F, m_worldScale);
         bool const isSelected = (entity == m_selectedEntity);
@@ -1027,6 +1538,13 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
                                    m_domainHeight,
                                    Fade(baseColor, 0.22F));
             }
+
+            if (m_showPseudoLidar
+            &&  state.m_type == ppo::model::eEntityType::Aircraft
+            &&  (entity == m_trackedEntity || entity == m_selectedEntity))
+            {
+                DrawPseudoLidar3D(snapshot, entity, state, snaState, m_worldScale);
+            }
         }
 
         if (isTracked)
@@ -1040,13 +1558,22 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
                        Fade(WHITE, 0.55F));
         }
 
-        if (state.m_destroyed && m_showDestroyed)
-            DrawDestroyMarker3D(center);
-    }
+          if (state.m_destroyed && m_showDestroyed)
+              DrawDestroyMarker3D(center);
+      }
 
-    EndMode3D();
-    EndTextureMode();
-}
+      if (primaryTarget != entt::null
+      &&  snapshot.valid(primaryTarget)
+      &&  snapshot.any_of<ppo::model::sEntityState>(primaryTarget))
+      {
+          auto const& targetState = snapshot.get<ppo::model::sEntityState>(primaryTarget);
+          if (!targetState.m_destroyed)
+              DrawPrimaryTargetAura3D(targetState, m_worldScale);
+      }
+
+      EndMode3D();
+      EndTextureMode();
+  }
 
 void
 EnvironmentRenderer::DrawTacticalWindow(entt::registry const& snapshot)
@@ -1073,8 +1600,8 @@ EnvironmentRenderer::DrawTacticalWindow(entt::registry const& snapshot)
     ImGui::SameLine();
     if (ImGui::Button("Reset camera"))
     {
-        m_cameraDistance = 18.F;
-        m_cameraHeight = 8.F;
+        m_cameraDistance = 12.F;
+        m_cameraHeight = 4.5F;
     }
 
     ImGui::SameLine();
@@ -1099,7 +1626,19 @@ EnvironmentRenderer::DrawTacticalWindow(entt::registry const& snapshot)
     RenderTacticalScene(snapshot, static_cast<int>(size.x), static_cast<int>(size.y));
 
     if (m_hasTacticalTexture)
+    {
         rlImGuiImageRenderTextureFit(&m_tacticalTexture, true);
+        bool const hovered = ImGui::IsItemHovered();
+        ImVec2 const itemMin = ImGui::GetItemRectMin();
+        ImVec2 const itemSize = ImGui::GetItemRectSize();
+        UpdateFreeCamera(snapshot,
+                         hovered,
+                         Vector2{ itemMin.x, itemMin.y },
+                         Vector2{ itemSize.x, itemSize.y });
+
+        if (!m_autoAttachCamera)
+            ImGui::TextDisabled("Free cam: RMB orbit | MMB pan | Wheel zoom on cursor | LMB focus point | WASD move | Q/E vertical | F focus | R reset");
+    }
 
     ImGui::End();
 }
@@ -1161,6 +1700,19 @@ EnvironmentRenderer::DrawMinimapWindow(entt::registry const& snapshot)
 
     entt::entity hoveredEntity = entt::null;
     float hoveredDistanceSq = std::numeric_limits<float>::max();
+    entt::entity primaryTarget = entt::null;
+    if (m_trackedEntity != entt::null
+    &&  snapshot.valid(m_trackedEntity)
+    &&  snapshot.any_of<ppo::model::sSNAState>(m_trackedEntity))
+    {
+        auto const& trackedSna = snapshot.get<ppo::model::sSNAState>(m_trackedEntity);
+        if (trackedSna.m_target != entt::null
+        &&  snapshot.valid(trackedSna.m_target)
+        &&  snapshot.any_of<ppo::model::sEntityState>(trackedSna.m_target))
+        {
+            primaryTarget = trackedSna.m_target;
+        }
+    }
 
     auto entityView = snapshot.view<ppo::model::sEntityState>();
     for (auto entity : entityView)
@@ -1228,6 +1780,41 @@ EnvironmentRenderer::DrawMinimapWindow(entt::registry const& snapshot)
 
         if (isSelected)
             draw->AddCircle(center, 12.F, IM_COL32(255, 255, 255, 220), 32, 1.8F);
+
+        if (entity == primaryTarget && !state.m_destroyed)
+        {
+            float const pulse = 0.5F + 0.5F * std::sin(static_cast<float>(GetTime()) * 2.8F);
+            float const haloRadius = 14.F + 3.F * pulse;
+            draw->AddCircle(center, haloRadius, IM_COL32(255, 214, 92, 235), 40, 2.4F);
+            draw->AddCircle(center, haloRadius + 5.F, IM_COL32(255, 244, 190, 120), 40, 1.2F);
+            draw->AddLine(ImVec2{ center.x - 8.F, center.y }, ImVec2{ center.x + 8.F, center.y }, IM_COL32(255, 230, 140, 180), 1.4F);
+            draw->AddLine(ImVec2{ center.x, center.y - 8.F }, ImVec2{ center.x, center.y + 8.F }, IM_COL32(255, 230, 140, 180), 1.4F);
+        }
+
+        auto trailIt = m_entityTrails.find(static_cast<unsigned long long>(state.m_entityId));
+        if (trailIt != m_entityTrails.end() && trailIt->second.size() > 1)
+        {
+            double const now = GetTime();
+            for (std::size_t index = 1; index < trailIt->second.size(); ++index)
+            {
+                auto const& previous = trailIt->second[index - 1];
+                auto const& current = trailIt->second[index];
+                float const fade = std::clamp(1.F - static_cast<float>(now - current.m_timestamp) / m_trailDuration, 0.F, 1.F);
+                if (fade <= 0.01F)
+                    continue;
+
+                float const previousNorth = -previous.m_position.z * m_worldScale;
+                float const previousEast = previous.m_position.x * m_worldScale;
+                float const currentNorth = -current.m_position.z * m_worldScale;
+                float const currentEast = current.m_position.x * m_worldScale;
+                ImVec2 const p0 = toMinimap(previousNorth, previousEast);
+                ImVec2 const p1 = toMinimap(currentNorth, currentEast);
+                draw->AddLine(p0,
+                              p1,
+                              IM_COL32(colorSide.r, colorSide.g, colorSide.b, static_cast<int>(140.F * fade)),
+                              1.6F);
+            }
+        }
 
         if (state.m_destroyed && m_showDestroyed)
         {
@@ -1376,33 +1963,62 @@ EnvironmentRenderer::DrawInspectorWindow(entt::registry const& snapshot)
     }
     ImGui::EndChild();
 
-    if (ImGui::BeginTabBar("##inspecttabs"))
+    if (ImGui::BeginTable("##componenttable", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV))
     {
-        if (ImGui::BeginTabItem("Components"))
+        ImGui::TableSetupColumn("Component", ImGuiTableColumnFlags_WidthFixed, 180.F);
+        ImGui::TableSetupColumn("Reflected Data");
+        ImGui::TableHeadersRow();
+
+        auto drawRow = [&](char const* componentName, auto drawFn)
         {
-            // Components remain rendered generically through EnTT meta.
-            DrawComponentIfPresent<ppo::model::sEntityMetadata>(snapshot, m_selectedEntity);
-            DrawComponentIfPresent<ppo::model::sEntityState>(snapshot, m_selectedEntity);
-            DrawComponentIfPresent<ppo::model::sSNAState>(snapshot, m_selectedEntity);
-            DrawComponentIfPresent<ppo::model::sFlightModelState>(snapshot, m_selectedEntity);
-            DrawComponentIfPresent<ppo::model::sSNAControlState>(snapshot, m_selectedEntity);
-            ImGui::EndTabItem();
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(componentName);
+            ImGui::TableNextColumn();
+            drawFn();
+        };
+
+        if (snapshot.any_of<ppo::model::sEntityMetadata>(m_selectedEntity))
+        {
+            drawRow("EntityMetadata", [&]()
+            {
+                DrawComponentIfPresent<ppo::model::sEntityMetadata>(snapshot, m_selectedEntity);
+            });
         }
 
-        if (ImGui::BeginTabItem("Meta"))
+        if (snapshot.any_of<ppo::model::sEntityState>(m_selectedEntity))
         {
-            auto const type = entt::resolve<ppo::model::sEntityState>();
-            auto descriptor = type.custom();
-            if (auto const* info = static_cast<ppo::reflection::sMetaDescriptor*>(descriptor); info != nullptr)
-                ImGui::Text("Reflected category: %s", info->scenario_name);
-
-            ImGui::TextUnformatted("The panels in this inspector are populated from reflected fields.");
-            ImGui::Separator();
-            DrawMetaAnyRecursive("SelectedEntityState", entt::forward_as_meta(entityState));
-            ImGui::EndTabItem();
+            drawRow("EntityState", [&]()
+            {
+                DrawComponentIfPresent<ppo::model::sEntityState>(snapshot, m_selectedEntity);
+            });
         }
 
-        ImGui::EndTabBar();
+        if (snapshot.any_of<ppo::model::sSNAState>(m_selectedEntity))
+        {
+            drawRow("SNAState", [&]()
+            {
+                DrawComponentIfPresent<ppo::model::sSNAState>(snapshot, m_selectedEntity);
+            });
+        }
+
+        if (snapshot.any_of<ppo::model::sFlightModelState>(m_selectedEntity))
+        {
+            drawRow("FlightModelState", [&]()
+            {
+                DrawComponentIfPresent<ppo::model::sFlightModelState>(snapshot, m_selectedEntity);
+            });
+        }
+
+        if (snapshot.any_of<ppo::model::sSNAControlState>(m_selectedEntity))
+        {
+            drawRow("SNAControlState", [&]()
+            {
+                DrawComponentIfPresent<ppo::model::sSNAControlState>(snapshot, m_selectedEntity);
+            });
+        }
+
+        ImGui::EndTable();
     }
 
     ImGui::End();
@@ -1429,6 +2045,19 @@ EnvironmentRenderer::DrawAgentsWindow(entt::registry const& snapshot)
             agent->m_plots[1].push(state.m_common.m_actorloss);
             agent->m_plots[2].push(state.m_common.m_valueloss);
             agent->m_plots[3].push(state.m_common.m_entropyloss);
+
+            if (state.m_common.m_step < agent->m_lastRewardStep)
+            {
+                agent->m_rewardMean = 0.F;
+                agent->m_rewardSampleCount = 0;
+                agent->m_plots[4].clear();
+            }
+
+            agent->m_lastRewardStep = state.m_common.m_step;
+            ++agent->m_rewardSampleCount;
+            float const sampleCount = static_cast<float>(agent->m_rewardSampleCount);
+            agent->m_rewardMean += (state.m_common.m_reward - agent->m_rewardMean) / sampleCount;
+            agent->m_plots[4].push(agent->m_rewardMean);
         }
 
         if (ImGui::CollapsingHeader(state.m_name.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
@@ -1534,22 +2163,25 @@ EnvironmentRenderer::Run(void)
     rlImGuiBegin();
     BuildDockspace();
 
-    entt::registry const& snapshot = p_environment->GetSnapshot();
-    UpdateMissionTelemetry(snapshot);
+    p_environment->ReadSnapshot([&](entt::registry const& snapshot)
+    {
+        UpdateMissionTelemetry(snapshot);
+        UpdateTrails(snapshot);
 
-    ImGui::Begin("Simulation");
-    DrawStatusBar(snapshot);
-    DrawSimulationControls();
-    if (p_pinnedPlot != nullptr)
-        DrawOneAgentPlot(*p_pinnedPlot);
-    ImGui::End();
+        ImGui::Begin("Simulation");
+        DrawStatusBar(snapshot);
+        DrawSimulationControls();
+        if (p_pinnedPlot != nullptr)
+            DrawOneAgentPlot(*p_pinnedPlot);
+        ImGui::End();
 
-    DrawTacticalWindow(snapshot);
-    DrawMinimapWindow(snapshot);
-    DrawEntitiesWindow(snapshot);
-    DrawInspectorWindow(snapshot);
-    DrawAgentsWindow(snapshot);
-    DrawMetaCatalogWindow();
+        DrawTacticalWindow(snapshot);
+        DrawMinimapWindow(snapshot);
+        DrawEntitiesWindow(snapshot);
+        DrawInspectorWindow(snapshot);
+        DrawAgentsWindow(snapshot);
+        DrawMetaCatalogWindow();
+    });
 
     rlImGuiEnd();
     EndDrawing();

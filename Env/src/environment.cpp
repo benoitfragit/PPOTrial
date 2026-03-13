@@ -10,6 +10,7 @@
 #include <array>
 #include <algorithm>
 #include <vector>
+#include <mutex>
 
 namespace ppo::model {
 
@@ -76,6 +77,7 @@ struct Environment::Impl
     /// </summary>
     std::array<entt::registry,2>    m_buffers           {};
     std::atomic<uint32_t>           m_index             { 0 };
+    mutable std::mutex              m_snapshotMutex{};
 
     /// <summary>
     /// this is the running thread of this environment
@@ -148,6 +150,7 @@ Environment::Impl::ProcessCommand(sRealTimeCommand const& command)
 void 
 Environment::Impl::CreateSnapshot(void)
 {
+    std::lock_guard<std::mutex> lock{ m_snapshotMutex };
     const uint32_t next = 1u - m_index.load(std::memory_order_relaxed);
 
     // start by cleaning this registry
@@ -401,16 +404,21 @@ Environment::SetMaxRange(float north, float east)
     p_impl->m_dispatcher.enqueue<sRealTimeCommand>(cmd);
 }
 
-entt::registry& 
-Environment::GetSnapshot(void) const noexcept
+void
+Environment::ReadSnapshot(std::function<void(entt::registry const&)> const& reader) const
 {
+    static entt::registry empty{};
+    if (reader == nullptr)
+        return;
+
     if (p_impl == nullptr)
     {
-        static entt::registry empty{};
-        return empty;
+        reader(empty);
+        return;
     }
-        
-    return p_impl->m_buffers[p_impl->m_index.load(std::memory_order_acquire)];
+
+    std::lock_guard<std::mutex> lock{ p_impl->m_snapshotMutex };
+    reader(p_impl->m_buffers[p_impl->m_index.load(std::memory_order_acquire)]);
 }
 
 void
