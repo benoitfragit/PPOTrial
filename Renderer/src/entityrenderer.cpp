@@ -140,19 +140,14 @@ EntityRenderer::Run(entt::registry& registry, entt::entity entity) noexcept
     // orientation
     setRotation(static_cast<float>(state.m_rotation * RAD_TO_DEG));
     
-    if (registry.any_of<ppo::model::sSNAState>(entity))
+    if (registry.any_of<ppo::model::sMissionLidarState>(entity))
     {
-        auto [isnastate] = registry.view<ppo::model::sSNAState>().get(entity);
+        auto [lidarState] = registry.view<ppo::model::sMissionLidarState>().get(entity);
 
-        // shooting ranges
-        if (float const escapeZoneValue{ isnastate.m_escapezone };
-            state.m_type != ppo::model::eEntityType::SAM
-        &&  std::numeric_limits<float>::epsilon() < escapeZoneValue)
-            DrawShootingRanges(state, escapeZoneValue, sf::Color::Magenta, -isnastate.m_maxShootAngle, isnastate.m_maxShootAngle);
-
-        if (float const noEscapeZoneValue{ isnastate.m_noescapezone };
-            std::numeric_limits<float>::epsilon() < noEscapeZoneValue)
-            DrawShootingRanges(state, noEscapeZoneValue, sf::Color::Red, -isnastate.m_maxShootAngle, isnastate.m_maxShootAngle);
+        // draw only the pseudo-lidar state produced by the agent
+        if (float const lidarRadius{ lidarState.m_radius };
+            std::numeric_limits<float>::epsilon() < lidarRadius)
+            DrawShootingRanges(state, lidarRadius, sf::Color::Magenta, -lidarState.m_halfAperture, lidarState.m_halfAperture);
     }
 
     renderer.draw(*this);
