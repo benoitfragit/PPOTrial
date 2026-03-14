@@ -79,6 +79,12 @@ struct sSNAControlState {
     float m_rotSpeedCmd{ 0.F };
 };
 
+struct sMissionLidarState {
+    float m_radius{ 0.F };
+    float m_halfAperture{ 0.F };
+    unsigned short m_trackCount{ 0 };
+};
+
 struct sFlightModelState
 {
     float m_acc{ 0.F };

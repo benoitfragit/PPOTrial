@@ -1,6 +1,8 @@
 #include "targetselector.hpp"
 #include "utils.hpp"
 
+#include <limits>
+
 namespace ppo::mission {
 
 void
@@ -27,6 +29,30 @@ RLTargetSelector::SetNewState(STATES& state) noexcept
 {
     memset(state.data(), 0, sizeof(float) * state.size());
 
+    float lidarRadius{ 0.F };
+    float lidarHalfAperture{ 0.F };
+    if (p_aircraft != nullptr
+    && p_aircraft->has<ppo::model::sSNAState>())
+    {
+        auto const [snaState] = p_aircraft->get<ppo::model::sSNAState>();
+
+        // pseudo-lidar radius must be the agent effective radius only
+        lidarRadius = snaState.m_noescapezone;
+
+        lidarHalfAperture = snaState.m_maxShootAngle;
+    }
+
+    if (p_aircraft != nullptr)
+    {
+        if (!p_aircraft->has<ppo::model::sMissionLidarState>())
+            p_aircraft->add<ppo::model::sMissionLidarState>();
+
+        auto [lidarState] = p_aircraft->get<ppo::model::sMissionLidarState>();
+        lidarState.m_radius = lidarRadius;
+        lidarState.m_halfAperture = lidarHalfAperture;
+        lidarState.m_trackCount = 0;
+    }
+
     unsigned int j{ 0 };
     for (auto i = 0; i < p_environment->GetNumberOfEntities(); ++i)
     {
@@ -45,6 +71,10 @@ RLTargetSelector::SetNewState(STATES& state) noexcept
         float const dx{ entityState.m_x - aircraftState.m_x };
         float const dy{ entityState.m_y - aircraftState.m_y };
         float const d{ sqrt(dx * dx + dy * dy) };
+
+        if (std::numeric_limits<float>::epsilon() < lidarRadius
+        && lidarRadius < d)
+            continue;
 
         float const ux{ dx / (d + 1e-6F) };
         float const uy{ dy / (d + 1e-6F) };
@@ -84,7 +114,14 @@ RLTargetSelector::SetNewState(STATES& state) noexcept
         state[j * static_cast<unsigned int>(eFeatures::_Size) + static_cast<unsigned int>(eFeatures::Available)]     = static_cast<float>(entity != nullptr);
 
         ++j;
+
+        if (p_aircraft != nullptr
+        && p_aircraft->has<ppo::model::sMissionLidarState>())
+        {
+            auto [lidarState] = p_aircraft->get<ppo::model::sMissionLidarState>();
+            lidarState.m_trackCount = static_cast<unsigned short>(j);
+        }
     }
 }
 
-}
+} /* ppo::mission */
