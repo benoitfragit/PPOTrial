@@ -30,7 +30,6 @@ RLTargetSelector::SetNewState(STATES& state) noexcept
     memset(state.data(), 0, sizeof(float) * state.size());
 
     float lidarRadius{ 0.F };
-    float lidarHalfAperture{ 0.F };
     if (p_aircraft != nullptr
     && p_aircraft->has<ppo::model::sSNAState>())
     {
@@ -38,8 +37,6 @@ RLTargetSelector::SetNewState(STATES& state) noexcept
 
         // pseudo-lidar radius must be the agent effective radius only
         lidarRadius = snaState.m_noescapezone;
-
-        lidarHalfAperture = snaState.m_maxShootAngle;
     }
 
     if (p_aircraft != nullptr)
@@ -49,7 +46,6 @@ RLTargetSelector::SetNewState(STATES& state) noexcept
 
         auto [lidarState] = p_aircraft->get<ppo::model::sMissionLidarState>();
         lidarState.m_radius = lidarRadius;
-        lidarState.m_halfAperture = lidarHalfAperture;
         lidarState.m_trackCount = 0;
     }
 
