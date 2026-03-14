@@ -46,6 +46,8 @@ RLTargetSelector::SetNewState(STATES& state) noexcept
 
         auto [lidarState] = p_aircraft->get<ppo::model::sMissionLidarState>();
         lidarState.m_radius = lidarRadius;
+        // keep initial pseudo-lidar nature: N rays over 180°
+        lidarState.m_halfAperture = 1.57079632F;
         lidarState.m_trackCount = 0;
     }
 

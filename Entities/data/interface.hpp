@@ -81,7 +81,7 @@ struct sSNAControlState {
 
 struct sMissionLidarState {
     float m_radius{ 0.F };
-    float m_halfAperture{ 3.14159265F };
+    float m_halfAperture{ 1.57079632F };
     unsigned short m_trackCount{ 0 };
 };
 
