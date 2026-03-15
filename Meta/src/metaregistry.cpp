@@ -232,6 +232,11 @@ RegisterComponents(void)
         .data<&ppo::model::sSNAControlState::m_accCmd>("m_accCmd"_hs)
         .data<&ppo::model::sSNAControlState::m_rotSpeedCmd>("m_rotSpeedCmd"_hs);
 
+    entt::meta_factory<ppo::model::sPseudoLidarState>{}
+        .type("PseudoLidarState"_hs)
+        .custom<sMetaDescriptor>(eMetaCategory::Component, "PseudoLidarState")
+        .data<&ppo::model::sPseudoLidarState::m_nearestCollisionRanges>("m_nearestCollisionRanges"_hs);
+
     entt::meta_factory<ppo::model::sFlightModelState>{}
         .type("FlightModelState"_hs)
         .custom<sMetaDescriptor>(eMetaCategory::Component, "FlightModelState")

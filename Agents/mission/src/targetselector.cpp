@@ -209,6 +209,8 @@ StatesAndActionsForMission::SetNewState(STATES& state) noexcept
     for (auto& r : nearestCollisionRanges)
         r = 1.F;
 
+    constexpr float noEscapeEpsilon = 1.0e-4F;
+
     for (auto const& threat : m_threats)
     {
         float angle{ -halfAngleArea };
@@ -222,7 +224,15 @@ StatesAndActionsForMission::SetNewState(STATES& state) noexcept
             float my{ aircraftState.m_y - threat.m_y };
 
             float b = mx * cos(angleRad) + my * sin(angleRad);
-            float c = mx * mx + my * my - (1.2F*1.2F*threat.m_noescapeZone * threat.m_noescapeZone);
+            float c = mx * mx + my * my - (threat.m_noescapeZone * threat.m_noescapeZone);
+            float const distanceToCenter = std::sqrt(mx * mx + my * my);
+
+            if (distanceToCenter <= threat.m_noescapeZone + noEscapeEpsilon)
+            {
+                nearestCollisionRanges[iang] = 0.F;
+                angle += stepAngle;
+                continue;
+            }
 
             float const delta = b * b - c;
 
@@ -302,6 +312,9 @@ StatesAndActionsForMission::SetNewState(STATES& state) noexcept
 
     for (auto iang = 0; iang < nearestCollisionRanges.size();++iang)
         state[MAX_TRACKS * static_cast<unsigned int>(eFeatures::_Size) + iang + 1] = nearestCollisionRanges[iang];
+
+    auto& pseudoLidarState = registry->get_or_emplace<ppo::model::sPseudoLidarState>(m_entity.uniqid());
+    pseudoLidarState.m_nearestCollisionRanges = nearestCollisionRanges;
 }
 
 void
