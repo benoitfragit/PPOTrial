@@ -4,7 +4,7 @@
 #include "entt/meta/resolve.hpp"
 
 #include "environment.hpp"
-#include "entity.hpp"
+#include "entitytypes.hpp"
 #include "iagent.hpp"
 
 #include <memory>
