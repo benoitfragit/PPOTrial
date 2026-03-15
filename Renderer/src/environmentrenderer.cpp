@@ -218,15 +218,53 @@ DrawAircraftGlyph3D(ppo::model::sEntityState const& state, float scale, Color co
     DrawLine3D(rightPt, topRight, Fade(BLACK, 0.45F));
     DrawSphere(Vector3{ center.x, center.y + 0.04F, center.z }, 0.12F, Fade(WHITE, 0.28F));
     DrawCylinder(Vector3{ center.x, -0.02F, center.z }, 0.18F, 0.28F, 0.02F, 16, Fade(BLACK, 0.22F));
+
+    float const pulse = 0.5F + 0.5F * std::sin(static_cast<float>(GetTime()) * 3.4F);
+    Color const haloOuter{ color.r, color.g, color.b, static_cast<unsigned char>(85 + 45.F * pulse) };
+    Color const haloInner{ 255, 255, 255, static_cast<unsigned char>(65 + 50.F * pulse) };
+    DrawCylinderWires(Vector3{ center.x, 0.08F, center.z },
+                      0.66F + 0.06F * pulse,
+                      0.66F + 0.06F * pulse,
+                      0.09F,
+                      28,
+                      haloOuter);
+    DrawCylinderWires(Vector3{ center.x, 0.10F, center.z },
+                      0.40F,
+                      0.40F,
+                      0.05F,
+                      24,
+                      haloInner);
+
+    Vector3 const mastTop{ center.x, center.y + 0.95F, center.z };
+    Vector3 const flagA{ mastTop.x + right.x * 0.22F + forward.x * 0.08F, mastTop.y - 0.06F, mastTop.z + right.z * 0.22F + forward.z * 0.08F };
+    Vector3 const flagB{ mastTop.x + right.x * 0.10F - forward.x * 0.20F, mastTop.y - 0.18F, mastTop.z + right.z * 0.10F - forward.z * 0.20F };
+    DrawLine3D(Vector3{ center.x, center.y + 0.30F, center.z }, mastTop, Fade(WHITE, 0.65F));
+    DrawTriangle3D(mastTop, flagA, flagB, Fade(color, 0.85F));
 }
 
 void
 DrawObjectiveGlyph3D(ppo::model::sEntityState const& state, float scale, Color color)
 {
     Vector3 const center = ToWorld3D(state.m_x, state.m_y, 0.F, scale);
+    float const pulse = 0.5F + 0.5F * std::sin(static_cast<float>(GetTime()) * 2.2F);
+
     DrawSphere(center, 0.28F, color);
     DrawSphereWires(center, 0.34F, 10, 10, Fade(WHITE, 0.45F));
-    DrawCylinder(Vector3{ center.x, 0.34F, center.z }, 0.03F, 0.03F, 0.70F, 8, Fade(WHITE, 0.55F));
+    DrawCylinder(Vector3{ center.x, 0.34F, center.z }, 0.03F, 0.03F, 0.70F + 0.08F * pulse, 8, Fade(WHITE, 0.62F));
+
+    Color const markerColor{ 255, 228, 130, static_cast<unsigned char>(190 + 50.F * pulse) };
+    DrawCylinderWires(Vector3{ center.x, 0.06F, center.z },
+                      0.58F + 0.06F * pulse,
+                      0.58F + 0.06F * pulse,
+                      0.08F,
+                      30,
+                      markerColor);
+    DrawCylinderWires(Vector3{ center.x, 0.14F, center.z },
+                      0.40F,
+                      0.40F,
+                      0.04F,
+                      24,
+                      Fade(markerColor, 0.85F));
 }
 
 void
@@ -341,6 +379,29 @@ DrawCylinderSector(Vector3 const& center,
 
         DrawTriangle3D(p00, p01, p11, color);
         DrawTriangle3D(p00, p11, p10, color);
+    }
+}
+
+void
+DrawSectorArc3D(Vector3 const& center,
+                float radius,
+                float startAngle,
+                float endAngle,
+                float height,
+                Color color,
+                int slices = 40,
+                float thickness = 1.8F)
+{
+    float const step = (endAngle - startAngle) / static_cast<float>(std::max(slices, 1));
+    float const y = center.y + height * 0.5F;
+
+    for (int i = 1; i <= slices; ++i)
+    {
+        float const a0 = startAngle + step * static_cast<float>(i - 1);
+        float const a1 = startAngle + step * static_cast<float>(i);
+        Vector3 const p0{ center.x + radius * std::sin(a0), y, center.z - radius * std::cos(a0) };
+        Vector3 const p1{ center.x + radius * std::sin(a1), y, center.z - radius * std::cos(a1) };
+        DrawLineEx3D(p0, p1, thickness, color);
     }
 }
 
@@ -1442,7 +1503,8 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
     if (m_showGrid)
         DrawGrid(30, 2.F);
 
-    DrawPlane(Vector3{ 0.F, -0.02F, 0.F }, Vector2{ 320.F, 320.F }, Color{ 18, 28, 38, 255 });
+    DrawPlane(Vector3{ 0.F, -0.02F, 0.F }, Vector2{ 320.F, 320.F }, Color{ 14, 21, 30, 255 });
+    DrawGrid(80, 2.F);
 
     entt::entity primaryTarget = entt::null;
     if (m_trackedEntity != entt::null
@@ -1484,17 +1546,29 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
             if (state.m_type == ppo::model::eEntityType::SAM)
             {
                 float const radius = snaState.m_noescapezone / m_worldScale;
-                DrawHemisphere(center, radius, Fade(baseColor, 0.16F));
+                Color const dangerFill{ 248, 86, 76, 42 };
+                DrawHemisphere(center, radius, dangerFill);
+                DrawSphereWires(center, radius, 18, 10, Color{ 255, 156, 120, 165 });
             }
             else
             {
                 float const radius = snaState.m_noescapezone / m_worldScale;
+                Color const dangerFill{ 244, 98, 88, 58 };
+                Color const dangerEdge{ 255, 175, 132, 185 };
                 DrawCylinderSector(center,
                                    radius,
                                    state.m_rotation - snaState.m_maxShootAngle,
                                    state.m_rotation + snaState.m_maxShootAngle,
                                    m_domainHeight,
-                                   Fade(baseColor, 0.22F));
+                                   dangerFill);
+                DrawSectorArc3D(center,
+                                radius,
+                                state.m_rotation - snaState.m_maxShootAngle,
+                                state.m_rotation + snaState.m_maxShootAngle,
+                                m_domainHeight + 0.02F,
+                                dangerEdge,
+                                48,
+                                2.2F);
             }
 
             if (m_showPseudoLidar
