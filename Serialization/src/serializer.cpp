@@ -1,13 +1,84 @@
 #include "serializer.hpp"
 #include <unordered_map>
 #include <vector>
+#include <sstream>
 
 namespace ppo::serialization {
+
+namespace {
+
+/**
+ * @brief Emit a structured configuration diagnostic log line.
+ * @param code Machine-friendly event code.
+ * @param file File concerned by the event.
+ * @param message Human-readable details.
+ */
+void
+LogConfigEvent(std::string const& code, std::filesystem::path const& file, std::string const& message)
+{
+    std::cerr << "[" << code << "] file='" << file.string() << "' message='" << message << "'" << std::endl;
+}
+
+} // namespace
 
 json 
 Serializer::Parse(std::filesystem::path file)
 {
-    return json::parse(std::ifstream(file));
+    std::ifstream stream(file);
+
+    if (!stream.is_open())
+    {
+        LogConfigEvent("CFG_PARSE_FAILURE", file, "unable to open file");
+        return json::object();
+    }
+
+    try
+    {
+        return json::parse(stream);
+    }
+    catch (std::exception const& exception)
+    {
+        LogConfigEvent("CFG_PARSE_FAILURE", file, exception.what());
+        return json::object();
+    }
+}
+
+bool
+Serializer::ValidateSchemaVersion(std::filesystem::path const& file, json& content)
+{
+    if (!content.is_object())
+    {
+        LogConfigEvent("CFG_SCHEMA_INVALID_TYPE", file, "root document is not an object");
+        return false;
+    }
+
+    if (!content.contains("schemaVersion"))
+    {
+        std::ostringstream details;
+        details << "missing schemaVersion, fallback=" << kConfigSchemaVersion;
+        LogConfigEvent("CFG_SCHEMA_MISSING", file, details.str());
+        content["schemaVersion"] = kConfigSchemaVersion;
+        return true;
+    }
+
+    auto const& schemaVersion = content["schemaVersion"];
+
+    if (!schemaVersion.is_number_integer())
+    {
+        LogConfigEvent("CFG_SCHEMA_INVALID_TYPE", file, "schemaVersion must be an integer");
+        return false;
+    }
+
+    int const schemaVersionValue = schemaVersion.get<int>();
+    if (schemaVersionValue != kConfigSchemaVersion)
+    {
+        std::ostringstream details;
+        details << "expected=" << kConfigSchemaVersion << ", found=" << schemaVersionValue;
+        LogConfigEvent("CFG_SCHEMA_MISMATCH", file, details.str());
+        return false;
+    }
+
+    return true;
 }
 
 struct Serializer::Impl 
@@ -87,12 +158,27 @@ Serializer::Load(void)
     for (auto& [filepath, loads] : p_impl->m_loadfunctions)
     {
         if (!std::filesystem::exists(filepath))
+        {
+            LogConfigEvent("CFG_MISSING_FILE", filepath, "file not found");
             continue;
+        }
 
         auto content = Parse(filepath.string());
 
+        if (!ValidateSchemaVersion(filepath, content))
+            continue;
+
         for (auto& load : loads)
-            load(content);
+        {
+            try
+            {
+                load(content);
+            }
+            catch (std::exception const& exception)
+            {
+                LogConfigEvent("CFG_LOAD_EXCEPTION", filepath, exception.what());
+            }
+        }
     }
 }
 
@@ -113,6 +199,9 @@ Serializer::Save(void)
 
         for (auto& save : saves)
             save(doc);
+
+        if (!doc.contains("schemaVersion"))
+            doc["schemaVersion"] = kConfigSchemaVersion;
 
         std::ofstream(filepath) << doc.dump(4);
     }
