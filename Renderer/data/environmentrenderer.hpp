@@ -155,6 +155,7 @@ private:
     bool m_showMetaCatalog{ false };
     bool m_showPseudoLidar{ false };
     bool m_focusSelectionInMinimap{ false };
+    bool m_stopRequested{ false };
     char m_entityFilter[96]{};
     MissionTelemetry m_missionTelemetry{};
     std::map<unsigned long long, std::deque<TrailPoint>> m_entityTrails{};

@@ -1273,11 +1273,11 @@ EnvironmentRenderer::DrawSimulationControls(void)
     ImGui::SameLine();
     if (ImGui::Button("Stop"))
     {
+        m_stopRequested = true;
+
         for (auto const& [_, agent] : p_agents)
             if (agent != nullptr)
                 agent->m_started = false;
-
-        p_environment->Stop();
     }
 
     ImGui::SeparatorText("World");
@@ -2194,6 +2194,12 @@ EnvironmentRenderer::Run(void)
 
     rlImGuiBegin();
     BuildDockspace();
+
+    if (m_stopRequested)
+    {
+        p_environment->Stop();
+        m_stopRequested = false;
+    }
 
     p_environment->ReadSnapshot([&](entt::registry const& snapshot)
     {
