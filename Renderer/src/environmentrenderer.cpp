@@ -409,63 +409,21 @@ DrawPseudoLidar3D(entt::registry const& snapshot,
                   ppo::model::sSNAState const& snaState,
                   float worldScale)
 {
-    constexpr std::size_t beamCount = 31;
-    std::array<float, beamCount> nearestCollisionRanges{};
-    nearestCollisionRanges.fill(1.F);
+    if (!snapshot.any_of<ppo::model::sPseudoLidarState>(entity))
+        return;
+
+    auto const& pseudoLidarState = snapshot.get<ppo::model::sPseudoLidarState>(entity);
+    auto const& nearestCollisionRanges = pseudoLidarState.m_nearestCollisionRanges;
+
     constexpr float noInterceptThreshold = 0.999F;
     constexpr float minDenominator = 1.0e-4F;
 
     float const maxAngleArea = PI_F;
     float const halfAngleArea = maxAngleArea * 0.5F;
-    float const stepAngle = maxAngleArea / static_cast<float>(beamCount - 1);
-
-    auto sams = snapshot.view<ppo::model::sEntityState, ppo::model::sSNAState>();
-    for (auto other : sams)
-    {
-        if (other == entity)
-            continue;
-
-        auto const& [otherState, otherSna] = sams.get(other);
-        if (otherState.m_type != ppo::model::eEntityType::SAM
-        ||  otherState.m_side == state.m_side
-        ||  otherState.m_destroyed)
-            continue;
-
-        float angle = -halfAngleArea;
-        for (std::size_t index = 0; index < beamCount; ++index)
-        {
-            float const angleRad = state.m_rotation + angle;
-            float const mx = state.m_x - otherState.m_x;
-            float const my = state.m_y - otherState.m_y;
-            float const safetyRadius = otherSna.m_noescapezone;
-            float const distanceToCenter = std::sqrt(mx * mx + my * my);
-            float const b = mx * std::cos(angleRad) + my * std::sin(angleRad);
-            float const c = mx * mx + my * my - safetyRadius * safetyRadius;
-            float const delta = b * b - c;
-
-            if (distanceToCenter <= safetyRadius)
-            {
-                nearestCollisionRanges[index] = 0.F;
-                angle += stepAngle;
-                continue;
-            }
-
-            if (delta >= 0.F)
-            {
-                float const sqrtDelta = std::sqrt(delta);
-                float const d1 = -b - sqrtDelta;
-                float const d2 = -b + sqrtDelta;
-
-                if (d1 >= 0.F)
-                    nearestCollisionRanges[index] = std::min(nearestCollisionRanges[index], d1 / (d1 + std::max(snaState.m_noescapezone, 1.F)));
-            }
-
-            angle += stepAngle;
-        }
-    }
+    float const stepAngle = maxAngleArea / static_cast<float>(nearestCollisionRanges.size() - 1);
 
     Vector3 const center = ToWorld3D(state.m_x, state.m_y, 0.F, worldScale);
-    for (std::size_t index = 0; index + 1 < beamCount; ++index)
+    for (std::size_t index = 0; index + 1 < nearestCollisionRanges.size(); ++index)
     {
         float const r0 = nearestCollisionRanges[index];
         float const r1 = nearestCollisionRanges[index + 1];

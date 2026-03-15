@@ -80,6 +80,11 @@ struct sSNAControlState {
     float m_rotSpeedCmd{ 0.F };
 };
 
+struct sPseudoLidarState
+{
+    std::array<float, 61> m_nearestCollisionRanges{};
+};
+
 struct sFlightModelState
 {
     float m_acc{ 0.F };
