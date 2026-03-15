@@ -3,7 +3,7 @@
 #include <array>
 
 #include "serializer.hpp"
-#include "entity.hpp"
+#include "baseentity.hpp"
 
 namespace ppo::model {
 

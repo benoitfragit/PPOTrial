@@ -1,9 +1,9 @@
 #pragma once 
 
 #include "serializer.hpp"
-#include "interface.hpp"
+#include "components.hpp"
 
-#include "entity.hpp"
+#include "baseentity.hpp"
 
 namespace ppo::model {
 

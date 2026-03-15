@@ -1,6 +1,6 @@
 #pragma once
 
-#include "interface.hpp"
+#include "components.hpp"
 
 #include <string>
 #include <atomic>

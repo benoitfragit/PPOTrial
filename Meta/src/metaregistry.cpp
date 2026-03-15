@@ -3,7 +3,8 @@
 #include "aircraft.hpp"
 #include "sam.hpp"
 #include "objective.hpp"
-#include "interface.hpp"
+#include "components.hpp"
+#include "entitytypes.hpp"
 
 #include "interception.hpp"
 #include "targetselector.hpp"

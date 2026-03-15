@@ -1,7 +1,7 @@
 #pragma once
 
 #include "serializer.hpp"
-#include "interface.hpp"
+#include "components.hpp"
 
 #include "baseentity.hpp"
 

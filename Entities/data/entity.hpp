@@ -2,7 +2,7 @@
 
 #include "baseentity.hpp"
 
-#include "interface.hpp"
+#include "entitytypes.hpp"
 
 namespace ppo::model {
 
