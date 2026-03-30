@@ -23,7 +23,7 @@ namespace {
 /**
 * @brief Number of bins used by the mission pseudo-lidar.
 */
-constexpr std::size_t kPseudoLidarBinCount = 61U;
+constexpr std::size_t kPseudoLidarBinCount = MissionObservationLayout::kPseudoLidarBinCount;
 constexpr float kPseudoLidarAngleSpan = static_cast<float>(ppo::model::TWOPI);
 constexpr float kPseudoLidarHalfAngleSpan = 0.5F * kPseudoLidarAngleSpan;
 constexpr float kPseudoLidarStepAngle =

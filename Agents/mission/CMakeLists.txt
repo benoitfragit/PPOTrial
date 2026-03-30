@@ -3,6 +3,7 @@ project(Mission LANGUAGES CXX)
 
 add_library(${PROJECT_NAME}
 	STATIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/missionlayout.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/actorcriticmission.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/actorcriticmission.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/data/targetselector.hpp

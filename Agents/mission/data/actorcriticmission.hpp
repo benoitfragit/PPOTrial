@@ -8,6 +8,7 @@
 */
 #pragma once
 
+#include "missionlayout.hpp"
 #include "trainingnet.hpp"
 
 #include <memory>
@@ -108,18 +109,6 @@ private:
         const torch::Tensor& mask);
 
 private:
-    /**
-    * @brief Number of features per track.
-    */
-    int64_t M{ 9 };
-    /**
-    * @brief Maximum number of tracks.
-    */
-    int64_t N{ 10 };
-    /**
-    * @brief Number of global scalar features.
-    */
-    int64_t P{ 62 };
     /**
     * @brief Shared hidden width used by the attention encoder.
     */

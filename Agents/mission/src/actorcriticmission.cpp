@@ -101,15 +101,54 @@ static torch::Tensor gaussian_entropy(
 
 namespace rl {
 
+namespace {
+
+/**
+* @brief Number of per-track mission features consumed by the network.
+*/
+constexpr int64_t kTrackFeatureCount =
+    static_cast<int64_t>(MissionObservationLayout::kTrackFeatureCount);
+/**
+* @brief Maximum number of ranked mission tracks consumed by the network.
+*/
+constexpr int64_t kMaxTracks =
+    static_cast<int64_t>(MissionObservationLayout::kMaxTracks);
+/**
+* @brief Number of global mission features appended after the track block.
+*/
+constexpr int64_t kGlobalFeatureCount =
+    static_cast<int64_t>(MissionObservationLayout::kGlobalFeatureCount);
+/**
+* @brief Number of ammunition-related mission features.
+*/
+constexpr int64_t kAmmoFeatureCount =
+    static_cast<int64_t>(MissionObservationLayout::kAmmoFeatureCount);
+/**
+* @brief Flattened mission observation size expected by the network.
+*/
+constexpr int64_t kStateDimension =
+    static_cast<int64_t>(MissionObservationLayout::kStateDimension);
+/**
+* @brief Number of action values emitted by the mission policy.
+*/
+constexpr int64_t kActionCount =
+    static_cast<int64_t>(MissionObservationLayout::kActionCount);
+/**
+* @brief Flattened size of the ranked-track block inside the mission observation.
+*/
+constexpr int64_t kTrackSectionSize = kMaxTracks * kTrackFeatureCount;
+
+} // namespace
+
 /**
 * @brief Builds the mission actor-critic architecture and initializes weights.
 */
 ActorCriticTrackAttention::ActorCriticTrackAttention(int64_t state_dim, int64_t action_dim)
 {
-    TORCH_CHECK((M*N+P) == state_dim && action_dim == 3);
+    TORCH_CHECK(state_dim == kStateDimension && action_dim == kActionCount);
 
     // Encoder partagé par track
-    enc1 = register_module("enc1", torch::nn::Linear(M, 128));
+    enc1 = register_module("enc1", torch::nn::Linear(kTrackFeatureCount, 128));
     enc2 = register_module("enc2", torch::nn::Linear(128, d_model));
 
     // Attention
@@ -118,7 +157,7 @@ ActorCriticTrackAttention::ActorCriticTrackAttention(int64_t state_dim, int64_t 
 
     // Actor heads
     // Entrée = pooled(2*d) + ctx(d) + ammo(1) + impacts(P-1)
-    const int64_t actor_in = d_model * 3 + P;
+    const int64_t actor_in = d_model * 3 + kGlobalFeatureCount;
 
     mu_head     = register_module("mu_head",     torch::nn::Linear(actor_in, 2));
     logstd_head = register_module("logstd_head", torch::nn::Linear(actor_in, 2));
@@ -150,20 +189,23 @@ ActorCriticTrackAttention::parse_input(
     const torch::Tensor& input) const
 {
     TORCH_CHECK(input.dim() == 2);
-    TORCH_CHECK(input.size(1) == N * M + P);
+    TORCH_CHECK(input.size(1) == kStateDimension);
 
     ParsedInput out;
     const auto B = input.size(0);
 
     // ammo = dernière colonne
-    out.ammo = input.slice(1, N * M, N * M + 1).contiguous(); // [B,1]
+    out.ammo = input.slice(1, kTrackSectionSize, kTrackSectionSize + kAmmoFeatureCount).contiguous(); // [B,1]
 
     // impacts = dernières colonnes
-    out.impacts = input.slice(1, N * M + 1, N * M + P).contiguous(); // [B,P-1]
+    out.impacts = input.slice(
+        1,
+        kTrackSectionSize + kAmmoFeatureCount,
+        kTrackSectionSize + kGlobalFeatureCount).contiguous(); // [B,P-1]
 
     // tracks flatten -> reshape
-    auto flat = input.slice(1, 0, N * M).contiguous();
-    out.tracks = flat.view({B, N, M}); // [B,N,M]
+    auto flat = input.slice(1, 0, kTrackSectionSize).contiguous();
+    out.tracks = flat.view({ B, kMaxTracks, kTrackFeatureCount }); // [B,N,M]
 
     return out;
 }
@@ -201,14 +243,14 @@ ActorCriticTrackAttention::forward(torch::Tensor flat_input)
     auto mask = parsed.tracks.index({
         torch::indexing::Slice(),
         torch::indexing::Slice(),
-        M - 1
+        kTrackFeatureCount - 1
     }).clamp(0.0f, 1.0f);
 
     // Encodeur par track
-    auto flat = parsed.tracks.contiguous().view({B * N, M});
+    auto flat = parsed.tracks.contiguous().view({ B * kMaxTracks, kTrackFeatureCount });
     auto feat = torch::relu(enc2->forward(
                 torch::relu(enc1->forward(flat))))
-                .view({B, N, d_model});
+                .view({ B, kMaxTracks, d_model });
 
     // Pooling mean + max
     auto m = mask.unsqueeze(-1);

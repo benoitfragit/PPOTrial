@@ -10,6 +10,7 @@
 #include "aircraft.hpp"
 #include "trainingagent.hpp"
 #include "prodagent.hpp"
+#include "missionlayout.hpp"
 #include "actorcriticmission.hpp"
 #include "evaluator.hpp"
 
@@ -79,7 +80,7 @@ struct StatesAndActionsForMission
     /**
     * @brief Maximum number of tracks exposed to the network.
     */
-    static constexpr unsigned char MAX_TRACKS{ 10 };
+    static constexpr std::size_t MAX_TRACKS{ MissionObservationLayout::kMaxTracks };
 
     /**
     * @brief Per-track features packed into the mission state vector.
@@ -102,13 +103,20 @@ struct StatesAndActionsForMission
     };
 
     /**
+    * @brief Keeps the semantic track feature list aligned with the shared layout.
+    */
+    static_assert(
+        static_cast<std::size_t>(eFeatures::_Size) == MissionObservationLayout::kTrackFeatureCount,
+        "Mission track feature count must stay aligned with MissionObservationLayout");
+
+    /**
     * @brief Flattened mission state vector type.
     */
-    using STATES = std::array<float, MAX_TRACKS * static_cast<unsigned int>(eFeatures::_Size) + 62>;
+    using STATES = std::array<float, MissionObservationLayout::kStateDimension>;
     /**
     * @brief Mission action vector type.
     */
-    using ACTIONS = std::array<float, 3>;
+    using ACTIONS = std::array<float, MissionObservationLayout::kActionCount>;
 
     /**
     * @brief Applies the chosen action to the controlled entity.

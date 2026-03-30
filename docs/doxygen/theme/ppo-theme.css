@@ -1,0 +1,285 @@
+:root {
+  --ppo-bg-top: #eef6ff;
+  --ppo-bg-bottom: #f7fbf9;
+  --ppo-surface: rgba(255, 255, 255, 0.92);
+  --ppo-surface-strong: #ffffff;
+  --ppo-border: #d7e3f0;
+  --ppo-border-strong: #bfd0e2;
+  --ppo-text: #18202a;
+  --ppo-muted: #556476;
+  --ppo-accent: #0f766e;
+  --ppo-accent-strong: #1d4f91;
+  --ppo-accent-soft: #e5f4f8;
+  --ppo-nav: #10263d;
+  --ppo-code: #0f1722;
+  --ppo-code-text: #dce9ff;
+  --ppo-shadow: 0 20px 48px rgba(16, 38, 61, 0.12);
+  --ppo-radius: 18px;
+}
+
+html,
+body {
+  background:
+    radial-gradient(circle at top left, rgba(29, 79, 145, 0.10), transparent 30rem),
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.11), transparent 28rem),
+    linear-gradient(180deg, var(--ppo-bg-top), var(--ppo-bg-bottom));
+  color: var(--ppo-text);
+  font-family: "Segoe UI Variable Text", "Aptos", "Segoe UI", system-ui, sans-serif;
+  line-height: 1.65;
+}
+
+body {
+  margin: 0;
+}
+
+#top {
+  background: transparent;
+}
+
+#titlearea {
+  border: 0;
+  background:
+    linear-gradient(135deg, rgba(16, 38, 61, 0.96), rgba(29, 79, 145, 0.92));
+  box-shadow: 0 14px 30px rgba(16, 38, 61, 0.18);
+}
+
+#projectname {
+  color: #ffffff;
+  font-family: "Bahnschrift", "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  font-size: 2rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+#projectbrief {
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 0.98rem;
+}
+
+#main-nav,
+.tabs,
+.tabs2,
+.tabs3 {
+  border: 0;
+  background: transparent;
+}
+
+.sm-dox,
+.sm-dox a,
+.tabs a,
+.tabs2 a,
+.tabs3 a {
+  background: transparent !important;
+  color: #d8e8ff !important;
+  font-weight: 600;
+}
+
+.sm-dox a:hover,
+.tabs a:hover,
+.tabs2 a:hover,
+.tabs3 a:hover {
+  color: #ffffff !important;
+}
+
+#nav-path ul {
+  background: transparent;
+  border: 0;
+}
+
+#nav-path li.navelem a {
+  color: var(--ppo-accent-strong);
+}
+
+#side-nav,
+#nav-tree {
+  background: rgba(248, 251, 255, 0.86);
+  border-right: 1px solid var(--ppo-border);
+  backdrop-filter: blur(10px);
+}
+
+#nav-tree .label a {
+  color: var(--ppo-text);
+}
+
+#nav-tree .selected,
+#nav-tree .selected a {
+  background: linear-gradient(135deg, var(--ppo-accent), var(--ppo-accent-strong)) !important;
+  color: #ffffff !important;
+  border-radius: 10px;
+}
+
+div.header,
+div.contents {
+  background: var(--ppo-surface);
+  border: 1px solid var(--ppo-border);
+  border-radius: var(--ppo-radius);
+  box-shadow: var(--ppo-shadow);
+  margin: 1.4rem;
+  padding: 1.5rem 2rem;
+  backdrop-filter: blur(10px);
+}
+
+div.header {
+  margin-bottom: 0;
+}
+
+div.headertitle {
+  padding: 0;
+}
+
+.title {
+  color: var(--ppo-text);
+  font-family: "Bahnschrift", "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  letter-spacing: 0.02em;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--ppo-text);
+  font-family: "Bahnschrift", "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  letter-spacing: 0.01em;
+}
+
+a {
+  color: var(--ppo-accent-strong);
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.18em;
+}
+
+a:hover {
+  color: var(--ppo-accent);
+}
+
+table.doxtable,
+table.fieldtable,
+table.memberdecls,
+.markdownTable {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  border: 1px solid var(--ppo-border);
+  border-radius: 14px;
+  background: var(--ppo-surface-strong);
+}
+
+table.doxtable th,
+table.fieldtable th,
+table.memberdecls th,
+.markdownTable th {
+  background: linear-gradient(135deg, var(--ppo-accent-strong), #356fb7);
+  color: #ffffff;
+  border: 0;
+}
+
+table.doxtable td,
+table.fieldtable td,
+table.memberdecls td,
+.markdownTable td {
+  border-color: var(--ppo-border);
+}
+
+div.fragment,
+pre.fragment,
+.fragment {
+  background: linear-gradient(180deg, #111d2a, var(--ppo-code));
+  color: var(--ppo-code-text);
+  border: 1px solid rgba(161, 202, 255, 0.18);
+  border-radius: 16px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.memtitle {
+  background: linear-gradient(135deg, rgba(15, 118, 110, 0.12), rgba(29, 79, 145, 0.14));
+  border: 1px solid var(--ppo-border);
+  border-bottom: 0;
+  border-radius: 16px 16px 0 0;
+  color: var(--ppo-text);
+  font-weight: 700;
+}
+
+.memitem {
+  background: var(--ppo-surface-strong);
+  border: 1px solid var(--ppo-border);
+  border-radius: 0 0 16px 16px;
+  box-shadow: 0 14px 28px rgba(16, 38, 61, 0.06);
+  margin-bottom: 1.4rem;
+  overflow: hidden;
+}
+
+.memproto,
+.memdoc,
+.fieldtable td,
+.fieldtable th {
+  border-color: var(--ppo-border);
+}
+
+.summary {
+  background: linear-gradient(135deg, rgba(15, 118, 110, 0.07), rgba(29, 79, 145, 0.08));
+  border: 1px solid var(--ppo-border);
+  border-radius: 14px;
+  padding: 0.8rem 1rem;
+}
+
+.paramname {
+  color: var(--ppo-accent-strong);
+  font-weight: 700;
+}
+
+code,
+tt {
+  color: #8b2f49;
+  background: rgba(29, 79, 145, 0.08);
+  border-radius: 8px;
+  padding: 0.12rem 0.36rem;
+}
+
+.textblock blockquote {
+  border-left: 4px solid rgba(15, 118, 110, 0.35);
+  color: var(--ppo-muted);
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+}
+
+.textblock ul li,
+.textblock ol li {
+  margin: 0.28rem 0;
+}
+
+.dotgraph {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--ppo-border);
+  border-radius: 14px;
+  padding: 0.75rem;
+}
+
+#MSearchBox {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.10);
+}
+
+#MSearchField {
+  color: #ffffff;
+}
+
+#MSearchField::placeholder {
+  color: rgba(255, 255, 255, 0.66);
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--ppo-border);
+}
+
+@media (max-width: 1024px) {
+  div.header,
+  div.contents {
+    margin: 1rem;
+    padding: 1.1rem 1.2rem;
+  }
+}
