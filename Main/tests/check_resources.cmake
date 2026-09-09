@@ -1,4 +1,4 @@
-foreach(name IN ITEMS default.nav score.metrics)
+foreach(name IN ITEMS default.nav multiple.nav score.metrics)
     if(NOT EXISTS "${RESOURCE_DIR}/${name}")
         message(FATAL_ERROR "Missing packaged scenario resource: ${name}")
     endif()

@@ -1,6 +1,7 @@
 #include "navigation.hpp"
 #include "ppo/rl/runtime.hpp"
 #include <chrono>
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -8,6 +9,11 @@
 #include <stdexcept>
 
 namespace {
+void set_goal_velocity(navigation::Scenario& scenario, navigation::Point velocity)
+{
+    scenario.mobiles[1].initial.heading = std::atan2(velocity.y, velocity.x);
+    scenario.mobiles[1].initial.speed = std::hypot(velocity.x, velocity.y);
+}
 void check(bool condition,const char* message) {if(!condition) throw std::runtime_error(message);}
 class RecordingLearner final : public ppo::rl::ILearner
 {
@@ -31,23 +37,23 @@ public:
 void test_navigation()
 {
     navigation::Scenario scenario;
-    scenario.goal={2,0}; scenario.arrival_radius=0.25; scenario.speed=5; scenario.dt=1;
+    scenario.mobiles[1].initial.position={2,0}; scenario.mobiles[0].arrival_radius = scenario.mobiles[1].arrival_radius = 0.25; scenario.mobiles[0].initial.speed=5; scenario.dt=1;
     navigation::Environment environment(scenario);
     environment.reset();
     auto arrival=environment.step(std::vector<float>{0,0});
     check(arrival.terminated && std::get<bool>(arrival.info.at("success")),"swept arrival");
     check(std::abs(environment.position().x-1.75)<1e-9,"stop at first arrival");
-    scenario.goal={10,0}; scenario.obstacles={{{2,0},0.25}};
+    scenario.mobiles[1].initial.position={10,0}; scenario.zones={{100,"Zone",{2,0},0.25}};
     navigation::Environment blocked(scenario);
     blocked.reset();
     const auto collision=blocked.step(std::vector<float>{0,0});
     check(collision.terminated && std::get<bool>(collision.info.at("collision")),"no obstacle tunnelling");
     check(std::abs(blocked.position().x-1.75)<1e-9,"stop at first collision");
-    scenario.goal={1,0}; scenario.obstacles={{{3,0},0.25}};
+    scenario.mobiles[1].initial.position={1,0}; scenario.zones={{100,"Zone",{3,0},0.25}};
     navigation::Environment early_goal(scenario);
     early_goal.reset();
     check(std::get<bool>(early_goal.step(std::vector<float>{0,0}).info.at("success")),"arrival precedes later obstacle");
-    scenario.goal={-1,0}; scenario.half_extent=4;scenario.obstacles.clear();
+    scenario.mobiles[1].initial.position={-1,0}; scenario.half_extent=4;scenario.zones.clear();
     navigation::Environment boundary(scenario);boundary.reset();
     check(std::get<bool>(boundary.step(std::vector<float>{0,0}).info.at("collision")),"boundary crossing");
     check(std::abs(boundary.position().x-4)<1e-9,"boundary position");
@@ -55,13 +61,13 @@ void test_navigation()
 void test_moving_goal()
 {
     navigation::Scenario scenario;
-    scenario.goal = {2,0};
-    scenario.goal_velocity = {0.5,0};
-    scenario.arrival_radius = 0.25;
-    scenario.speed = 1;
+    scenario.mobiles[1].initial.position = {2,0};
+    set_goal_velocity(scenario, {0.5,0});
+    scenario.mobiles[0].arrival_radius = scenario.mobiles[1].arrival_radius = 0.25;
+    scenario.mobiles[0].initial.speed = 1;
     scenario.dt = 1;
     scenario.max_steps = 20;
-    scenario.obstacles = {{{2,2},0.3}};
+    scenario.zones = {{100,"Zone",{2,2},0.3}};
     navigation::Environment environment(scenario);
     const auto initial = environment.reset({42,{}});
     const auto& observed = std::get<std::vector<float>>(initial.observation);
@@ -78,14 +84,14 @@ void test_moving_goal()
 
     // Replay a simple detour: north, east, east, south, east. No learned policy.
     navigation::Scenario detour_scenario;
-    detour_scenario.goal = {2,0};
-    detour_scenario.goal_velocity = {0.1,0};
-    detour_scenario.arrival_radius = 0.25;
-    detour_scenario.speed = 1;
+    detour_scenario.mobiles[1].initial.position = {2,0};
+    set_goal_velocity(detour_scenario, {0.1,0});
+    detour_scenario.mobiles[0].arrival_radius = detour_scenario.mobiles[1].arrival_radius = 0.25;
+    detour_scenario.mobiles[0].initial.speed = 1;
     detour_scenario.dt = 1;
     detour_scenario.max_steps = 20;
     detour_scenario.max_turn_rate = 1.5707963267948966;
-    detour_scenario.obstacles = {{{1,0},0.2}};
+    detour_scenario.zones = {{100,"Zone",{1,0},0.2}};
     navigation::Environment detour(detour_scenario);
     detour.reset();
     const float turns[] = {1,-1,0,-1,1};
@@ -98,11 +104,11 @@ void test_moving_goal()
     }
     check(result.terminated && std::get<bool>(result.info.at("success")), "detour reaches another moving mobile around a blocking zone");
 
-    scenario.goal = {4,0};
-    scenario.goal_velocity = {-5,0};
-    scenario.speed = 5;
+    scenario.mobiles[1].initial.position = {4,0};
+    set_goal_velocity(scenario, {-5,0});
+    scenario.mobiles[0].initial.speed = 5;
     scenario.max_steps = 1;
-    scenario.obstacles.clear();
+    scenario.zones.clear();
     navigation::Environment crossing(scenario);
     crossing.reset();
     const auto meeting = crossing.step(std::vector<float>{0,0});
@@ -110,21 +116,21 @@ void test_moving_goal()
         && std::abs(crossing.position().x - 1.875) < 1e-9
         && std::abs(crossing.goal_state().position.x - 2.125) < 1e-9, "relative sweep detects meeting between endpoints");
 
-    scenario.goal_velocity = {-1,0};
-    scenario.obstacles = {{{1,0},0.1}};
+    set_goal_velocity(scenario, {-1,0});
+    scenario.zones = {{100,"Zone",{1,0},0.1}};
     navigation::Environment blocked(scenario);
     blocked.reset();
     const auto collision = blocked.step(std::vector<float>{0,0});
     check(std::get<bool>(collision.info.at("collision")) && !std::get<bool>(collision.info.at("success")), "forbidden zone reached before moving goal");
     check(std::abs(blocked.goal_state().position.x - 3.82) < 1e-9, "goal uses collision event time too");
 
-    scenario.obstacles.clear();
-    scenario.goal_velocity = {1000,0};
+    scenario.zones.clear();
+    set_goal_velocity(scenario, {1000,0});
     bool rejected = false;
     try { navigation::Environment invalid(scenario); }
     catch (const std::invalid_argument&) { rejected = true; }
-    check(rejected, "goal trajectory outside world rejected");
-    scenario.goal_velocity.x = std::numeric_limits<double>::quiet_NaN();
+    check(rejected, "goal speed above configured limits rejected");
+    scenario.mobiles[1].initial.speed = std::numeric_limits<double>::quiet_NaN();
     rejected = false;
     try { navigation::Environment invalid(scenario); }
     catch (const std::invalid_argument&) { rejected = true; }
@@ -132,7 +138,7 @@ void test_moving_goal()
 }
 void test_shared_loop()
 {
-    navigation::Scenario scenario; scenario.max_steps=2; scenario.goal_velocity={0.5,0.2};
+    navigation::Scenario scenario; scenario.max_steps=2; set_goal_velocity(scenario, {0.5,0.2});
     navigation::Environment first(scenario),second(scenario);
     RecordingLearner training,evaluation;
     const auto train=ppo::rl::train_episode(first,training,{42,{}},10);
@@ -148,7 +154,7 @@ void test_shared_loop()
     bool invalid=false;
     try {first.step(std::vector<float>{std::numeric_limits<float>::quiet_NaN(),0});}
     catch(const std::invalid_argument&) {invalid=true;}
-    check(invalid && first.position().x==scenario.start.x,"invalid action does not mutate environment");
+    check(invalid && first.position().x==scenario.mobiles[0].initial.position.x,"invalid action does not mutate environment");
 }
 void test_incremental_session()
 {
@@ -235,27 +241,117 @@ void test_checkpoints_and_config()
     const auto criteria=ppo::rl::load_metrics(metric_file);
     check(criteria.size()==2 && criteria[0].weight==100,"declarative scoring loaded");
     const auto scenario_file=temporary.path/"scenario.nav";
-    {std::ofstream file(scenario_file);file<<"navigation2d-v2\nstart 0 0 0 1\ngoal 10 0 0.5 0 0\n";}
-    check(navigation::load_scenario(scenario_file).goal.x==10,"scenario loaded");
+    {std::ofstream file(scenario_file);file<<"navigation2d-v3\nmobile 1 \"Mobile\" 0 0 0 1 2 0.5\nmobile 2 \"Goal\" 10 0 0 0 1 0.5\n";}
+    check(navigation::load_scenario(scenario_file).mobiles[1].initial.position.x==10,"scenario loaded");
     auto loaded = navigation::load_scenario(scenario_file);
-    loaded.goal_velocity = {0.1,0.2};
+    set_goal_velocity(loaded, {0.1,0.2});
     navigation::save_scenario(loaded, scenario_file);
     check(navigation::scenario_text(navigation::load_scenario(scenario_file)) == navigation::scenario_text(loaded), "canonical scenario round trip");
     { std::ofstream file(metric_file); file << ppo::rl::metrics_text(criteria); }
     check(ppo::rl::metrics_text(ppo::rl::load_metrics(metric_file)) == ppo::rl::metrics_text(criteria), "canonical metrics round trip");
-    {std::ofstream file(scenario_file);file<<"navigation2d-v2\nunknown 0\n";}
+    {std::ofstream file(scenario_file);file<<"navigation2d-v3\nunknown 0\n";}
     bool rejected=false;
     try {navigation::load_scenario(scenario_file);}
     catch(const std::invalid_argument&) {rejected=true;}
     check(rejected,"unknown config rejected");
+    { std::ofstream file(scenario_file); file << "navigation2d-v3\nmobile -1 \"Invalid\" 0 0 0 1 2 0.5\n"; }
+    rejected=false;
+    try { navigation::load_scenario(scenario_file); } catch (const std::invalid_argument&) { rejected=true; }
+    check(rejected,"negative entity IDs rejected rather than wrapping");
 }
+void test_ecs_world()
+{
+    navigation::Scenario scenario;
+    scenario.dt = 1; scenario.max_steps = 5;
+    scenario.mobiles[1].initial.position = {20,0};
+    scenario.mobiles.push_back({3,"Learner B",{{0,10},0,2},4,0.5});
+    scenario.mobiles.push_back({4,"Goal B",{{20,10},0,0},3,0.5});
+    scenario.mobiles.push_back({5,"Manual",{{-10,-10},0,1},0,0.5});
+    scenario.zones.push_back({100,"Zone",{5,5},1});
+    navigation::Environment environment(scenario);
+    check(environment.entities().size()==6, "N mobiles and zones are entities");
+    std::size_t mobiles=0, zones=0;
+    for (const auto entity:environment.registry().view<const navigation::Identity>())
+    {
+        if (environment.registry().all_of<navigation::Mobile>(entity)) ++mobiles;
+        if (environment.registry().all_of<navigation::ForbiddenZone>(entity)) ++zones;
+    }
+    check(mobiles==5 && zones==1, "real EnTT components describe all entities");
+    auto secondary=std::make_unique<RecordingLearner>();
+    auto* learner_b=secondary.get();
+    environment.set_policy(3,std::move(secondary),true);
+    auto frozen=std::make_unique<RecordingLearner>();
+    auto* prod=frozen.get();
+    environment.set_policy(2,std::move(frozen));
+    RecordingLearner primary;
+    ppo::rl::EpisodeSession session(environment,primary,5,&primary);
+    session.reset();
+    const auto handle=environment.handle(3);
+    environment.set_manual_action(5,{0,1});
+    session.advance();
+    check(environment.state(1).position.x==1 && environment.state(3).position.x==2
+        && environment.state(5).position.x==-7, "one simultaneous world step advances independent controllers");
+    check(primary.transitions.size()==1 && learner_b->transitions.size()==1 && prod->transitions.empty(), "only attached learners receive their own feedback");
+    check(std::get<std::vector<float>>(learner_b->transitions[0].observation)[1]==0.1F,
+          "secondary learner sees its own position, not primary observation");
+    environment.request_stop(); session.request_stop(); session.advance();
+    check(primary.transitions.back().truncated && learner_b->transitions.back().truncated, "external world stop closes all learners");
+    session.reset();
+    check(environment.handle(3)==handle && environment.state(3).position.x==0 && environment.entities().size()==6,
+          "reset restores every entity without changing identities or duplicating entities");
+
+    navigation::Scenario event_scenario=scenario;
+    event_scenario.zones.push_back({101,"Secondary blocker",{1,10},0.2});
+    navigation::Environment event(event_scenario);
+    auto event_learner=std::make_unique<RecordingLearner>();
+    auto* event_record=event_learner.get();
+    event.set_policy(3,std::move(event_learner),true); event.reset();
+    const auto result=event.step(std::vector<float>{0,0});
+    check(result.truncated && !result.terminated && event_record->transitions.back().terminated,
+          "another entity's terminal event truncates the primary's unfinished episode");
+    check(std::abs(event.state(1).position.x-0.4)<1e-9 && std::abs(event.state(3).position.x-0.8)<1e-9,
+          "all entities stop at the same earliest event time");
+
+    navigation::Environment editable(scenario);
+    editable.create_mobile({42,"Extra",{{-20,20},0,0},0,0.5});
+    check(editable.entities().size()==7, "create additional entity");
+    editable.remove_entity(42);
+    bool rejected=false;
+    try { editable.handle(42); } catch (const std::out_of_range&) { rejected=true; }
+    check(rejected, "removed identity is invalid");
+    rejected=false;
+    try { editable.remove_entity(2); } catch (const std::invalid_argument&) { rejected=true; }
+    check(rejected && editable.entities().size()==6, "cannot remove referenced destination; edit is atomic");
+    editable.create_zone({102,"New zone",{-30,30},2});
+    check(std::get<std::vector<float>>(editable.reset().observation).size()==16, "zone entity changes observation space on reset");
+    editable.step(std::vector<float>{0,0});
+    rejected=false;
+    try { editable.create_mobile({43,"Late",{{-40,20},0,0},0,0.5}); } catch (const std::logic_error&) { rejected=true; }
+    check(rejected, "topology cannot change during an episode");
+    std::reverse(scenario.mobiles.begin(),scenario.mobiles.end());
+    navigation::Environment reversed(scenario); reversed.reset();
+    check(reversed.entities().front()==1, "entity processing order is stable across declaration order");
 }
-int main()
+
+}
+int main(int argc, char** argv)
 {
     try
     {
-        test_navigation();test_moving_goal();test_shared_loop();test_incremental_session();test_bootstrap();test_metrics();test_checkpoints_and_config();
-        std::cout<<"7 navigation/runtime test groups passed\n";return 0;
+        if (argc > 1)
+        {
+            for (int index=1; index<argc; ++index)
+            {
+                navigation::Environment environment(navigation::load_scenario(argv[index]));
+                environment.reset();
+                environment.step(std::vector<float>{0,0});
+                check(environment.entities().size() >= 2, "packaged scenario creates ECS entities");
+            }
+            std::cout << "Packaged scenarios parsed and stepped without models\n";
+            return 0;
+        }
+        test_navigation();test_moving_goal();test_shared_loop();test_incremental_session();test_bootstrap();test_metrics();test_checkpoints_and_config();test_ecs_world();
+        std::cout<<"8 navigation/runtime test groups passed\n";return 0;
     }
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

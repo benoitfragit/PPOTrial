@@ -13,15 +13,14 @@ namespace ppo::renderer {
 namespace {
 Vector3 World(navigation::Point point, float height = 0)
 { return {static_cast<float>(point.x), height, static_cast<float>(point.y)}; }
-std::string EntityName(int index)
+std::string EntityName(const navigation::Environment& environment, navigation::EntityId id)
 {
-    if (index == 0) return "Mobile";
-    if (index == 1) return "Goal mobile";
-    return "Forbidden zone " + std::to_string(index - 1);
+    return environment.registry().get<navigation::Identity>(environment.handle(id)).name;
 }
 }
 EnvironmentRenderer::EnvironmentRenderer(navigation::Application& application) : m_application(application)
 {
+    m_selection = application.environment().scenario().controlled;
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
     InitWindow(1600, 1000, "PLAYGROUND");
     SetTargetFPS(60);
@@ -175,10 +174,7 @@ void EnvironmentRenderer::SaveSettings() const
 }
 navigation::Point EnvironmentRenderer::SelectedPosition() const
 {
-    const auto& environment = m_application.environment();
-    if (m_selection == 0) return environment.position();
-    if (m_selection == 1) return environment.goal_state().position;
-    return environment.scenario().obstacles.at(static_cast<std::size_t>(m_selection - 2)).center;
+    return m_application.environment().state(m_selection).position;
 }
 void EnvironmentRenderer::FocusSelection()
 {
@@ -207,7 +203,7 @@ void EnvironmentRenderer::DrawSimulationControls()
     ImGui::SliderFloat("Time scale", &m_timeScale, 0.1F, 20.F);
     ImGui::Text("Step: %.3f s", scenario.dt);
     ImGui::Text("World: %.1f x %.1f", 2 * scenario.half_extent, 2 * scenario.half_extent);
-    ImGui::TextWrapped("Manual: arrow keys turn and accelerate while the navigation view is focused.");
+    ImGui::TextWrapped("Manual: arrow keys control the selected manual mobile while the navigation view is focused.");
     ImGui::Separator();
     ImGui::Checkbox("Grid", &m_showGrid);
     ImGui::Checkbox("Forbidden zones", &m_showDomains);
@@ -279,27 +275,33 @@ void EnvironmentRenderer::RenderTacticalScene(int width, int height)
     if (m_showGrid) DrawGrid(100, static_cast<float>(scenario.half_extent / 50));
     const float extent = static_cast<float>(scenario.half_extent);
     DrawCubeWires({0,0,0}, 2*extent, 0.02F, 2*extent, GRAY);
-    if (m_showDomains)
-        for (const auto& obstacle : scenario.obstacles)
+    const auto& world = environment.registry();
+    for (const auto entity : world.view<const navigation::State, const navigation::ForbiddenZone>())
+    {
+        if (!m_showDomains) continue;
+        const auto point = world.get<navigation::State>(entity).position;
+        const float radius = static_cast<float>(world.get<navigation::ForbiddenZone>(entity).radius);
+        DrawCylinder(World(point), radius, radius, 0.1F, 48, Fade(ORANGE, 0.4F));
+        DrawCylinderWires(World(point), radius, radius, 0.1F, 48, ORANGE);
+    }
+    for (const auto entity : world.view<const navigation::Mobile, const navigation::State, const navigation::Identity>())
+    {
+        const auto& state = world.get<navigation::State>(entity);
+        const auto id = world.get<navigation::Identity>(entity).id;
+        const Color color = id == scenario.controlled ? SKYBLUE : GREEN;
+        DrawSphere(World(state.position, 0.25F), 0.25F, color);
+        DrawLine3D(World(state.position, 0.3F), World({state.position.x+std::cos(state.heading),state.position.y+std::sin(state.heading)},0.3F),color);
+        const auto destination = world.get<navigation::Destination>(entity);
+        if (destination.entity != navigation::no_entity)
         {
-            const float radius = static_cast<float>(obstacle.radius);
-            DrawCylinder(World(obstacle.center), radius, radius, 0.1F, 48, Fade(ORANGE, 0.4F));
-            DrawCylinderWires(World(obstacle.center), radius, radius, 0.1F, 48, ORANGE);
+            const auto goal = environment.state(destination.entity).position;
+            DrawCylinderWires(World(goal), static_cast<float>(destination.radius), static_cast<float>(destination.radius),0.1F,32,Fade(color,0.4F));
         }
-    const auto goal_state = environment.goal_state();
-    DrawCylinder(World(goal_state.position), static_cast<float>(scenario.arrival_radius), static_cast<float>(scenario.arrival_radius), 0.1F, 32, Fade(GREEN, 0.4F));
-    DrawSphere(World(goal_state.position, 0.25F), 0.25F, GREEN);
-    if (goal_state.speed > 0)
-        DrawLine3D(World(goal_state.position, 0.3F),
-                   World({goal_state.position.x + std::cos(goal_state.heading),
-                          goal_state.position.y + std::sin(goal_state.heading)}, 0.3F), GREEN);
-    DrawSphere(World(environment.position(), 0.25F), 0.25F, SKYBLUE);
-    const auto state = environment.state();
-    const auto position = state.position;
-    DrawLine3D(World(position, 0.3F), World({position.x + std::cos(state.heading), position.y + std::sin(state.heading)}, 0.3F), WHITE);
-    if (m_showTrails)
-        for (std::size_t index = 1; index < m_trail.size(); ++index)
-            DrawLine3D(World(m_trail[index-1], 0.05F), World(m_trail[index], 0.05F), Fade(SKYBLUE, 0.7F));
+        const auto found = m_trails.find(id);
+        if (m_showTrails && found != m_trails.end())
+            for (std::size_t index=1; index<found->second.size(); ++index)
+                DrawLine3D(World(found->second[index-1],0.05F),World(found->second[index],0.05F),Fade(color,0.7F));
+    }
     DrawSphereWires(World(SelectedPosition(), 0.3F), 0.4F, 8, 8, YELLOW);
     EndMode3D();
     EndTextureMode();
@@ -336,20 +338,23 @@ void EnvironmentRenderer::DrawMinimapWindow()
         const auto& scenario = environment.scenario();
         const float scale = side * m_mapZoom / static_cast<float>(2*scenario.half_extent);
         const ImVec2 center(origin.x+side/2,origin.y+side/2);
-        for (std::size_t i = 0; i < scenario.obstacles.size()+2; ++i)
+        const auto& world = environment.registry();
+        for (auto id : environment.entities())
         {
-            navigation::Point point;
+            const auto entity = environment.handle(id);
+            const auto point = environment.state(id).position;
             float radius = 4;
-            ImU32 color = IM_COL32(80,170,245,255);
-            if (i == 0) point = environment.position();
-            else if (i == 1) { point = environment.goal_state().position; color = IM_COL32(80,230,120,255); radius = std::max(4.F, scale*static_cast<float>(scenario.arrival_radius)); }
-            else { const auto& zone = scenario.obstacles[i-2]; point = zone.center; radius = scale*static_cast<float>(zone.radius); color = IM_COL32(240,140,60,200); }
+            ImU32 color = id == scenario.controlled ? IM_COL32(80,170,245,255) : IM_COL32(80,230,120,255);
+            if (const auto* zone = world.try_get<navigation::ForbiddenZone>(entity))
+            {
+                radius = scale*static_cast<float>(zone->radius); color = IM_COL32(240,140,60,200);
+            }
             const ImVec2 screen(center.x+static_cast<float>(point.x)*scale, center.y-static_cast<float>(point.y)*scale);
             draw->AddCircleFilled(screen,radius,color);
-            if (static_cast<int>(i) == m_selection) draw->AddCircle(screen,radius+3,IM_COL32(255,230,80,255));
+            if (id == m_selection) draw->AddCircle(screen,radius+3,IM_COL32(255,230,80,255));
             const auto mouse = ImGui::GetIO().MousePos;
-            const float dx = mouse.x-screen.x, dy = mouse.y-screen.y;
-            if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(0) && dx*dx+dy*dy <= (radius+5)*(radius+5)) m_selection = static_cast<int>(i);
+            const float dx=mouse.x-screen.x, dy=mouse.y-screen.y;
+            if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(0) && dx*dx+dy*dy <= (radius+5)*(radius+5)) m_selection=id;
         }
         draw->PopClipRect();
     }
@@ -360,14 +365,33 @@ void EnvironmentRenderer::DrawEntitiesWindow()
     if (ImGui::Begin("Entities"))
     {
         m_filter.Draw("Filter");
-        const auto count = m_application.environment().scenario().obstacles.size()+2;
-        for (std::size_t index = 0; index < count; ++index)
+        const auto& environment = m_application.environment();
+        for (auto id : environment.entities())
         {
-            const auto name = EntityName(static_cast<int>(index));
+            const auto name = EntityName(environment,id);
             if (!m_filter.PassFilter(name.c_str())) continue;
-            if (ImGui::Selectable(name.c_str(), m_selection == static_cast<int>(index))) m_selection = static_cast<int>(index);
-            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) { m_selection = static_cast<int>(index); FocusSelection(); }
+            const std::string label = name + "##entity-" + std::to_string(id);
+            if (ImGui::Selectable(label.c_str(),m_selection==id)) m_selection=id;
+            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) { m_selection=id; FocusSelection(); }
         }
+        ImGui::SeparatorText("Scenario");
+        ImGui::InputText("Scenario path",m_scenarioPath,sizeof(m_scenarioPath));
+        if (ImGui::Button("Load scenario"))
+        {
+            try
+            {
+                m_application.replace_scenario(navigation::load_scenario(m_scenarioPath));
+                m_selection=m_application.environment().scenario().controlled;
+                m_trails.clear(); m_lastStep=0; m_lastEpisode=0; m_error.clear();
+            }
+            catch (const std::exception& error) { m_error=error.what(); }
+        }
+        if (ImGui::Button("Save scenario"))
+        {
+            try { navigation::save_scenario(m_application.environment().scenario(),m_scenarioPath); m_error.clear(); }
+            catch (const std::exception& error) { m_error=error.what(); }
+        }
+        ImGui::TextWrapped("Declare mobiles, destinations and zones in the scenario. Stop and detach policies before loading another world.");
     }
     ImGui::End();
 }
@@ -375,27 +399,30 @@ void EnvironmentRenderer::DrawInspectorWindow()
 {
     if (ImGui::Begin("Inspection"))
     {
-        const auto point = SelectedPosition();
-        ImGui::TextUnformatted(EntityName(m_selection).c_str());
-        ImGui::Text("Position: %.4f, %.4f", point.x, point.y);
-        const auto& scenario = m_application.environment().scenario();
-        if (m_selection == 0)
+        const auto& environment = m_application.environment();
+        const auto& world = environment.registry();
+        const auto entity = environment.handle(m_selection);
+        const auto state = environment.state(m_selection);
+        ImGui::TextUnformatted(EntityName(environment,m_selection).c_str());
+        ImGui::Text("Position: %.4f, %.4f",state.position.x,state.position.y);
+        ImGui::Text("ID: %s",std::to_string(m_selection).c_str());
+        if (world.all_of<navigation::Mobile>(entity))
         {
-            const auto state = m_application.environment().state();
-            ImGui::Text("Heading: %.3f rad", state.heading);
-            ImGui::Text("Speed: %.3f", state.speed);
-            const auto goal = m_application.environment().goal_state().position;
-            const double dx = point.x-goal.x, dy = point.y-goal.y;
-            ImGui::Text("Distance: %.3f", std::hypot(dx,dy));
+            ImGui::Text("Heading: %.3f | speed: %.3f",state.heading,state.speed);
+            const auto destination = world.get<navigation::Destination>(entity);
+            if (destination.entity != navigation::no_entity)
+            {
+                ImGui::Text("Destination: %s",EntityName(environment,destination.entity).c_str());
+                const auto goal = environment.state(destination.entity).position;
+                ImGui::Text("Distance: %.3f | meeting radius: %.3f",std::hypot(state.position.x-goal.x,state.position.y-goal.y),destination.radius);
+            }
+            ImGui::TextUnformatted("Components: Identity, Mobile, State, InitialState, Destination, Commands");
         }
-        else if (m_selection == 1)
+        else
         {
-            const auto state = m_application.environment().goal_state();
-            ImGui::Text("Speed: %.3f | heading: %.3f rad", state.speed, state.heading);
-            ImGui::Text("Velocity: %.3f, %.3f", std::cos(state.heading)*state.speed, std::sin(state.heading)*state.speed);
-            ImGui::Text("Meeting radius: %.3f", scenario.arrival_radius);
+            ImGui::Text("Radius: %.3f",world.get<navigation::ForbiddenZone>(entity).radius);
+            ImGui::TextUnformatted("Components: Identity, State, ForbiddenZone");
         }
-        else ImGui::Text("Radius: %.3f", scenario.obstacles.at(static_cast<std::size_t>(m_selection-2)).radius);
     }
     ImGui::End();
 }
@@ -403,27 +430,35 @@ void EnvironmentRenderer::DrawAgentsWindow()
 {
     if (ImGui::Begin("Agents"))
     {
-        const auto& telemetry = m_application.telemetry();
+        const auto& environment = m_application.environment();
+        if (!environment.registry().all_of<navigation::Mobile>(environment.handle(m_selection)))
+        { ImGui::TextUnformatted("Select a mobile to inspect its controller."); ImGui::End(); return; }
+        const auto& telemetry = m_application.telemetry(m_selection);
+        ImGui::Text("Selected: %s",EntityName(environment,m_selection).c_str());
         if (ImGui::BeginTabBar("AgentTabs"))
         {
             if (ImGui::BeginTabItem("Controls"))
             {
-                ImGui::Combo("Mode", &m_mode, "Manual\0Training\0Frozen policy\0");
+                ImGui::Combo("Primary mode", &m_mode, "Manual\0Training\0Frozen policy\0");
                 ImGui::SliderInt("New learner rollout", &m_rollout, 64, 8192);
-                ImGui::InputText("Policy model.pt", m_checkpoint, sizeof(m_checkpoint));
-                ImGui::InputText("Goal Prod/N-1 model.pt", m_goalCheckpoint, sizeof(m_goalCheckpoint));
-                if (ImGui::Button("Apply goal controller"))
+                ImGui::InputText("Primary model.pt", m_checkpoint, sizeof(m_checkpoint));
+                if (m_selection != environment.scenario().controlled)
                 {
-                    try { m_application.set_goal_checkpoint(m_goalCheckpoint); m_error.clear(); }
-                    catch (const std::exception& error) { m_error = error.what(); }
+                    ImGui::Combo("Selected mobile mode",&m_selectedMode,"Manual\0Training\0Frozen Prod policy\0");
+                    ImGui::InputText("Selected model.pt",m_selectedCheckpoint,sizeof(m_selectedCheckpoint));
+                    if (ImGui::Button("Apply selected controller"))
+                    {
+                        try { m_application.configure_mobile(m_selection,static_cast<navigation::ControlMode>(m_selectedMode),static_cast<std::size_t>(m_rollout),m_selectedCheckpoint); m_error.clear(); }
+                        catch (const std::exception& error) { m_error=error.what(); }
+                    }
+                    ImGui::Text("Active mode: %d",static_cast<int>(m_application.mobile_mode(m_selection)));
+                    ImGui::TextWrapped("Snapshot: %s",m_application.mobile_checkpoint(m_selection).string().c_str());
                 }
-                ImGui::TextWrapped("Stop first. Select a versioned Prod model.pt for the second mobile; leave empty for constant velocity. Promotion never switches it automatically.");
-                ImGui::TextWrapped("Goal snapshot: %s", m_application.goal_checkpoint().empty() ? "constant velocity" : m_application.goal_checkpoint().string().c_str());
                 ImGui::TextWrapped("Stop before switching mode. Rollout applies when creating a learner. Pause/Play resumes the current policy.");
                 ImGui::SliderInt("Evaluation episodes", &m_evaluationEpisodes, 1, 1000);
-                if (ImGui::Button("Save candidate / evaluate / promote"))
+                if (ImGui::Button("Evaluate selected learner / promote"))
                 {
-                    try { m_application.evaluate_candidate(static_cast<std::size_t>(m_evaluationEpisodes)); m_error.clear(); }
+                    try { m_application.evaluate_candidate(static_cast<std::size_t>(m_evaluationEpisodes),m_selection); m_error.clear(); }
                     catch (const std::exception& error) { m_error = error.what(); }
                 }
                 ImGui::Text("Rollout step: %zu", telemetry.rollout_step);
@@ -437,7 +472,7 @@ void EnvironmentRenderer::DrawAgentsWindow()
             }
             if (ImGui::BeginTabItem("Snapshot"))
             {
-                const auto& values = std::get<std::vector<float>>(m_application.observation());
+                const auto values = std::get<std::vector<float>>(environment.observation(m_selection));
                 for (std::size_t index=0; index<values.size(); ++index) ImGui::Text("observation[%zu] = %.6f", index, values[index]);
                 ImGui::EndTabItem();
             }
@@ -473,7 +508,7 @@ void EnvironmentRenderer::DrawMetaCatalogWindow()
         ImGui::Text("Observation: Box float32 [%zu]", observation.size());
         ImGui::TextUnformatted("Action: Box float32 [2], range [-1, 1]");
         ImGui::TextUnformatted("Action[0]: turn; action[1]: acceleration");
-        ImGui::TextUnformatted("Info: success, collision, distance");
+        ImGui::TextUnformatted("Info: success, collision, goal_collision, distance");
         ImGui::TextWrapped("The catalog describes the example. The RL framework only sees spaces and transitions.");
     }
     ImGui::End();
@@ -493,14 +528,18 @@ bool EnvironmentRenderer::Run()
         action[0] = (IsKeyDown(KEY_RIGHT) ? 1.F:0.F) - (IsKeyDown(KEY_LEFT) ? 1.F:0.F);
         action[1] = (IsKeyDown(KEY_UP) ? 1.F:0.F) - (IsKeyDown(KEY_DOWN) ? 1.F:0.F);
     }
-    try { m_application.tick(GetFrameTime(), action, m_timeScale); }
+    try { m_application.tick(GetFrameTime(), action, m_timeScale, m_selection); }
     catch (const std::exception& error) { m_application.pause(); m_error = error.what(); }
     const auto& telemetry = m_application.telemetry();
-    if (telemetry.episodes != m_lastEpisode || telemetry.length < m_lastStep) m_trail.clear();
+    if (telemetry.episodes != m_lastEpisode || telemetry.length < m_lastStep) m_trails.clear();
     if (telemetry.length != m_lastStep)
     {
-        if (m_trail.size() == 5000) m_trail.erase(m_trail.begin());
-        m_trail.push_back(m_application.environment().position());
+        for (const auto& mobile : m_application.environment().scenario().mobiles)
+        {
+            auto& trail=m_trails[mobile.id];
+            if (trail.size()==5000) trail.erase(trail.begin());
+            trail.push_back(m_application.environment().state(mobile.id).position);
+        }
     }
     m_lastEpisode = telemetry.episodes;
     m_lastStep = telemetry.length;

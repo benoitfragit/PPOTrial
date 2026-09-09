@@ -89,3 +89,30 @@ goal collision, source replacement after pinning, and independent evaluation.
 No real model was run. Snapshot identities are unique per selection rather than
 content-addressed; changing/reselecting the goal requires a separate best-score
 store. This limitation and the original-to-navigation mapping are documented.
+
+
+## ECS restoration after functional regression
+
+The two-state port removed the original N-entity registry and multi-agent capability.
+Restored EnTT v3.16.0 in the example (never the RL core), stable IDs, mobile/zone
+components, N scenario entities, per-mobile destinations and independent controllers.
+One common world step collects all actions before physics and all transitions before
+feedback. Whole-world events truncate unrelated episodes; primary and embedded
+learners close correctly on explicit Stop. The renderer enumerates ECS components.
+Evaluation can select any learner and freezes the entire background population.
+
+The v3 scenario format replaces v2. All mobiles now obey forbidden zones; input
+width remains 10+3*zone_count. Stable IDs survive reset; topology changes require
+re-resolving EnTT handles. Policy-attached or active topology edits are rejected.
+The original worker-thread snapshot bus and meta reflection editor remain absent;
+these are documented instead of being presented as restored features. Repeated
+promotion with changing background learners needs a stable evaluation population
+or separate context store; no incomparable historical score is reused.
+
+
+ECS correction validation: local CMake Release build and four CTest suites pass
+(core contract, eight navigation/runtime groups, shipped scenario parsing/steps,
+five application control groups). The same four suites pass under ASan/UBSan in
+Debug with LeakSanitizer disabled for the ptrace environment. Main/Renderer syntax
+checks against actual dependency headers pass. PPO sources and equations are
+unchanged. The PR records the complete remote desktop build result separately.

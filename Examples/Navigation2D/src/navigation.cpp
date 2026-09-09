@@ -1,18 +1,28 @@
 #include "navigation.hpp"
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <limits>
 #include <locale>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
 
-namespace navigation {
-namespace {
-double distance(Point a, Point b) { return std::hypot(a.x-b.x,a.y-b.y); }
-bool finite_point(Point point) { return std::isfinite(point.x) && std::isfinite(point.y); }
+namespace navigation
+{
+namespace
+{
+double distance(Point a, Point b)
+{
+    return std::hypot(a.x - b.x, a.y - b.y);
+}
+bool finite_point(Point p)
+{
+    return std::isfinite(p.x) && std::isfinite(p.y);
+}
 void positive(double value, double maximum)
 {
     if (!std::isfinite(value) || value <= 0 || value > maximum)
@@ -20,112 +30,182 @@ void positive(double value, double maximum)
 }
 Scenario validate(Scenario s)
 {
-    positive(s.half_extent,1e6); positive(s.arrival_radius,s.half_extent);
-    positive(s.dt,10); positive(s.max_speed,1e4); positive(s.max_acceleration,1e4);
-    positive(s.max_turn_rate,100);
-    if (!finite_point(s.start) || !finite_point(s.goal) || !finite_point(s.goal_velocity)
-        || std::abs(s.start.x)>s.half_extent || std::abs(s.start.y)>s.half_extent
-        || std::abs(s.goal.x)+s.arrival_radius>s.half_extent
-        || std::abs(s.goal.y)+s.arrival_radius>s.half_extent
-        || !std::isfinite(s.heading) || std::abs(s.heading)>1e6
-        || !std::isfinite(s.speed) || s.speed<0 || s.speed>s.max_speed
-        || s.max_steps==0 || s.max_steps>10000000 || s.obstacles.size()>1024)
-        throw std::invalid_argument("invalid navigation scenario");
-    if (std::abs(s.goal_velocity.x / s.max_speed) > std::numeric_limits<float>::max()
-        || std::abs(s.goal_velocity.y / s.max_speed) > std::numeric_limits<float>::max())
-        throw std::invalid_argument("goal velocity cannot be represented in the observation");
-    const double duration = s.dt * static_cast<double>(s.max_steps);
-    const Point final_goal{s.goal.x + duration * s.goal_velocity.x,
-                           s.goal.y + duration * s.goal_velocity.y};
-    if (!finite_point(final_goal)
-        || std::abs(final_goal.x) + s.arrival_radius > s.half_extent
-        || std::abs(final_goal.y) + s.arrival_radius > s.half_extent)
-        throw std::invalid_argument("goal mobile trajectory leaves the world during the episode");
-    for (const auto& obstacle:s.obstacles)
+    positive(s.half_extent, 1e6);
+    positive(s.dt, 10);
+    positive(s.max_speed, 1e4);
+    positive(s.max_acceleration, 1e4);
+    positive(s.max_turn_rate, 100);
+    if (s.max_steps == 0 || s.max_steps > 10000000 || s.mobiles.empty() || s.mobiles.size() > 4096 ||
+        s.zones.size() > 1024)
+        throw std::invalid_argument("invalid world size or episode limit");
+    std::set<EntityId> ids, mobile_ids;
+    std::set<std::string> names;
+    for (const auto& mobile : s.mobiles)
     {
-        positive(obstacle.radius,s.half_extent);
-        if (!finite_point(obstacle.center)
-            || std::abs(obstacle.center.x)>s.half_extent || std::abs(obstacle.center.y)>s.half_extent
-            || distance(s.start,obstacle.center)<=obstacle.radius
-            || distance(s.goal,obstacle.center)<=obstacle.radius+s.arrival_radius)
-            throw std::invalid_argument("invalid or overlapping obstacle");
+        if (mobile.id == no_entity || !ids.insert(mobile.id).second || !names.insert(mobile.name).second ||
+            mobile.name.empty() || mobile.name.size() > 128 || mobile.name.find_first_of("\r\n") != std::string::npos ||
+            !finite_point(mobile.initial.position) || std::abs(mobile.initial.position.x) > s.half_extent ||
+            std::abs(mobile.initial.position.y) > s.half_extent || !std::isfinite(mobile.initial.heading) ||
+            std::abs(mobile.initial.heading) > 1e6 || !std::isfinite(mobile.initial.speed) ||
+            mobile.initial.speed < 0 || mobile.initial.speed > s.max_speed)
+            throw std::invalid_argument("invalid or duplicate mobile definition");
+        positive(mobile.arrival_radius, s.half_extent);
+        mobile_ids.insert(mobile.id);
     }
+    if (mobile_ids.count(s.controlled) == 0)
+        throw std::invalid_argument("controlled mobile is missing");
+    for (const auto& mobile : s.mobiles)
+        if ((mobile.destination != no_entity &&
+             (mobile.destination == mobile.id || mobile_ids.count(mobile.destination) == 0)) ||
+            (mobile.id == s.controlled && mobile.destination == no_entity))
+            throw std::invalid_argument("invalid mobile destination reference");
+    for (const auto& zone : s.zones)
+    {
+        positive(zone.radius, s.half_extent);
+        if (zone.id == no_entity || !ids.insert(zone.id).second || !names.insert(zone.name).second ||
+            zone.name.empty() || zone.name.size() > 128 || zone.name.find_first_of("\r\n") != std::string::npos ||
+            !finite_point(zone.center) || std::abs(zone.center.x) > s.half_extent ||
+            std::abs(zone.center.y) > s.half_extent)
+            throw std::invalid_argument("invalid or duplicate zone definition");
+        for (const auto& mobile : s.mobiles)
+            if (distance(mobile.initial.position, zone.center) <= zone.radius)
+                throw std::invalid_argument("mobile starts in forbidden zone");
+    }
+    // Stable observation ordering independent of declaration or EnTT storage order.
+    std::sort(s.mobiles.begin(), s.mobiles.end(),
+              [](const MobileDefinition& a, const MobileDefinition& b) { return a.id < b.id; });
+    std::sort(s.zones.begin(), s.zones.end(),
+              [](const ZoneDefinition& a, const ZoneDefinition& b) { return a.id < b.id; });
     return s;
 }
-ppo::rl::Space observation_space_for(const Scenario& scenario)
+ppo::rl::Space observation_space_for(const Scenario& s)
 {
-    const std::size_t size=10+3*scenario.obstacles.size();
-    const float infinity=std::numeric_limits<float>::infinity();
-    return ppo::rl::Box({size},std::vector<float>(size,-infinity),std::vector<float>(size,infinity));
+    const std::size_t size = 10 + 3 * s.zones.size();
+    const float infinity = std::numeric_limits<float>::infinity();
+    return ppo::rl::Box({size}, std::vector<float>(size, -infinity), std::vector<float>(size, infinity));
 }
-// First entry on segment [a,b]. Infinity denotes no intersection.
-double entry(Point a,Point b,Point center,double radius)
+// First entry on a swept segment. Infinity denotes no intersection.
+double entry(Point a, Point b, Point center, double radius)
 {
-    const double x=a.x-center.x, y=a.y-center.y;
-    const double dx=b.x-a.x,dy=b.y-a.y;
-    const double c=x*x+y*y-radius*radius;
-    if(c<=0) return 0;
-    const double length=dx*dx+dy*dy;
-    if(length==0) return std::numeric_limits<double>::infinity();
-    const double projection=x*dx+y*dy;
-    const double discriminant=projection*projection-length*c;
-    if(discriminant<0) return std::numeric_limits<double>::infinity();
-    const double time=(-projection-std::sqrt(discriminant))/length;
-    return time>=0 && time<=1 ? time : std::numeric_limits<double>::infinity();
+    const double x = a.x - center.x, y = a.y - center.y, dx = b.x - a.x, dy = b.y - a.y;
+    const double c = x * x + y * y - radius * radius;
+    if (c <= 0)
+        return 0;
+    const double length = dx * dx + dy * dy;
+    if (length == 0)
+        return std::numeric_limits<double>::infinity();
+    const double projection = x * dx + y * dy, discriminant = projection * projection - length * c;
+    if (discriminant < 0)
+        return std::numeric_limits<double>::infinity();
+    const double time = (-projection - std::sqrt(discriminant)) / length;
+    return time >= 0 && time <= 1 ? time : std::numeric_limits<double>::infinity();
 }
-double collision_time(Point from, Point to, const Scenario& scenario)
+double collision_time(Point from, Point to, const entt::registry& world, double limit)
 {
     double time = std::numeric_limits<double>::infinity();
-    for (const auto& obstacle : scenario.obstacles)
-        time = std::min(time, entry(from, to, obstacle.center, obstacle.radius));
-    const double limit = scenario.half_extent;
-    if (to.x > limit) time = std::min(time, (limit-from.x)/(to.x-from.x));
-    if (to.x < -limit) time = std::min(time, (-limit-from.x)/(to.x-from.x));
-    if (to.y > limit) time = std::min(time, (limit-from.y)/(to.y-from.y));
-    if (to.y < -limit) time = std::min(time, (-limit-from.y)/(to.y-from.y));
+    for (const auto entity : world.view<const State, const ForbiddenZone>())
+        time =
+            std::min(time, entry(from, to, world.get<State>(entity).position, world.get<ForbiddenZone>(entity).radius));
+    if (to.x > limit)
+        time = std::min(time, (limit - from.x) / (to.x - from.x));
+    if (to.x < -limit)
+        time = std::min(time, (-limit - from.x) / (to.x - from.x));
+    if (to.y > limit)
+        time = std::min(time, (limit - from.y) / (to.y - from.y));
+    if (to.y < -limit)
+        time = std::min(time, (-limit - from.y) / (to.y - from.y));
     return time;
 }
-State advance_motion(State state, const ppo::rl::Value& action, const Scenario& scenario)
+State advance_motion(State state, Commands commands, const Scenario& scenario)
 {
-    const auto& commands = std::get<std::vector<float>>(action);
     constexpr double two_pi = 6.28318530717958647692;
-    state.heading = std::remainder(state.heading + commands[0]*scenario.max_turn_rate*scenario.dt, two_pi);
-    state.speed = std::clamp(state.speed + commands[1]*scenario.max_acceleration*scenario.dt, 0.0, scenario.max_speed);
-    state.position.x += std::cos(state.heading)*state.speed*scenario.dt;
-    state.position.y += std::sin(state.heading)*state.speed*scenario.dt;
+    state.heading = std::remainder(state.heading + commands.turn * scenario.max_turn_rate * scenario.dt, two_pi);
+    state.speed = std::clamp(state.speed + commands.acceleration * scenario.max_acceleration * scenario.dt, 0.0,
+                             scenario.max_speed);
+    state.position.x += std::cos(state.heading) * state.speed * scenario.dt;
+    state.position.y += std::sin(state.heading) * state.speed * scenario.dt;
     return state;
 }
-
+Commands commands_from(const ppo::rl::Space& space, const ppo::rl::Value& value)
+{
+    if (!ppo::rl::contains(space, value))
+        throw std::invalid_argument("invalid navigation action");
+    const auto& commands = std::get<std::vector<float>>(value);
+    return {commands[0], commands[1]};
 }
+EntityId read_id(std::istream& input)
+{
+    std::string token;
+    input >> token;
+    EntityId id = no_entity;
+    const auto parsed = std::from_chars(token.data(), token.data() + token.size(), id);
+    if (token.empty() || parsed.ec != std::errc{} || parsed.ptr != token.data() + token.size())
+        input.setstate(std::ios::failbit);
+    return id;
+}
+struct PendingMotion
+{
+    State before;
+    State after;
+    double collision;
+    double arrival;
+};
+} // namespace
 Scenario load_scenario(const std::filesystem::path& path)
 {
     std::ifstream input(path);
     std::string line;
-    if(!std::getline(input,line) || line!="navigation2d-v2") throw std::invalid_argument("invalid scenario header");
+    if (!std::getline(input, line) || line != "navigation2d-v3")
+        throw std::invalid_argument("invalid scenario header (expected navigation2d-v3)");
     Scenario s;
-    while(std::getline(input,line))
+    s.mobiles.clear();
+    std::set<std::string> singleton_keys;
+    while (std::getline(input, line))
     {
-        if(line.empty() || line.front()=='#') continue;
+        if (line.empty() || line.front() == '#')
+            continue;
         std::istringstream row(line);
         row.imbue(std::locale::classic());
-        std::string key; row>>key;
-        if(key=="start") row>>s.start.x>>s.start.y>>s.heading>>s.speed;
-        else if(key=="goal") row>>s.goal.x>>s.goal.y>>s.arrival_radius>>s.goal_velocity.x>>s.goal_velocity.y;
-        else if(key=="world") row>>s.half_extent>>s.dt>>s.max_steps;
-        else if(key=="motion") row>>s.max_speed>>s.max_acceleration>>s.max_turn_rate;
-        else if(key=="obstacle")
+        std::string key;
+        row >> key;
+        if (key == "mobile")
         {
-            Obstacle obstacle;
-            row>>obstacle.center.x>>obstacle.center.y>>obstacle.radius;
-            s.obstacles.push_back(obstacle);
-            if(s.obstacles.size()>1024) throw std::invalid_argument("too many obstacles");
+            MobileDefinition mobile{};
+            mobile.id = read_id(row);
+            row >> std::quoted(mobile.name) >> mobile.initial.position.x >> mobile.initial.position.y >>
+                mobile.initial.heading >> mobile.initial.speed;
+            mobile.destination = read_id(row);
+            row >> mobile.arrival_radius;
+            s.mobiles.push_back(std::move(mobile));
         }
-        else throw std::invalid_argument("unknown scenario field: "+key);
-        if(!row) throw std::invalid_argument("invalid scenario value: "+key);
+        else if (key == "zone")
+        {
+            ZoneDefinition zone{};
+            zone.id = read_id(row);
+            row >> std::quoted(zone.name) >> zone.center.x >> zone.center.y >> zone.radius;
+            s.zones.push_back(std::move(zone));
+        }
+        else
+        {
+            if (!singleton_keys.insert(key).second)
+                throw std::invalid_argument("duplicate scenario field: " + key);
+            if (key == "primary")
+                s.controlled = read_id(row);
+            else if (key == "world")
+                row >> s.half_extent >> s.dt >> s.max_steps;
+            else if (key == "motion")
+                row >> s.max_speed >> s.max_acceleration >> s.max_turn_rate;
+            else
+                throw std::invalid_argument("unknown scenario field: " + key);
+        }
+        if (!row || s.mobiles.size() > 4096 || s.zones.size() > 1024)
+            throw std::invalid_argument("invalid scenario value: " + key);
         std::string extra;
-        if(row>>extra) throw std::invalid_argument("trailing scenario field: "+key);
+        if (row >> extra)
+            throw std::invalid_argument("trailing scenario field: " + key);
     }
-    if(input.bad()) throw std::runtime_error("scenario read failed");
+    if (input.bad())
+        throw std::runtime_error("scenario read failed");
     return validate(std::move(s));
 }
 std::string scenario_text(const Scenario& scenario)
@@ -133,14 +213,16 @@ std::string scenario_text(const Scenario& scenario)
     const auto s = validate(scenario);
     std::ostringstream output;
     output.imbue(std::locale::classic());
-    output << std::setprecision(std::numeric_limits<double>::max_digits10)
-           << "navigation2d-v2\nstart " << s.start.x << ' ' << s.start.y << ' '
-           << s.heading << ' ' << s.speed << "\ngoal " << s.goal.x << ' '
-           << s.goal.y << ' ' << s.arrival_radius << ' ' << s.goal_velocity.x << ' ' << s.goal_velocity.y << "\nworld " << s.half_extent
-           << ' ' << s.dt << ' ' << s.max_steps << "\nmotion " << s.max_speed
-           << ' ' << s.max_acceleration << ' ' << s.max_turn_rate << '\n';
-    for (const auto& obstacle : s.obstacles)
-        output << "obstacle " << obstacle.center.x << ' ' << obstacle.center.y << ' ' << obstacle.radius << '\n';
+    output << std::setprecision(std::numeric_limits<double>::max_digits10) << "navigation2d-v3\nprimary "
+           << s.controlled << "\nworld " << s.half_extent << ' ' << s.dt << ' ' << s.max_steps << "\nmotion "
+           << s.max_speed << ' ' << s.max_acceleration << ' ' << s.max_turn_rate << '\n';
+    for (const auto& m : s.mobiles)
+        output << "mobile " << m.id << ' ' << std::quoted(m.name) << ' ' << m.initial.position.x << ' '
+               << m.initial.position.y << ' ' << m.initial.heading << ' ' << m.initial.speed << ' ' << m.destination
+               << ' ' << m.arrival_radius << '\n';
+    for (const auto& z : s.zones)
+        output << "zone " << z.id << ' ' << std::quoted(z.name) << ' ' << z.center.x << ' ' << z.center.y << ' '
+               << z.radius << '\n';
     return output.str();
 }
 void save_scenario(const Scenario& scenario, const std::filesystem::path& path)
@@ -149,103 +231,302 @@ void save_scenario(const Scenario& scenario, const std::filesystem::path& path)
     std::ofstream output(path);
     output << text;
     output.close();
-    if (!output) throw std::runtime_error("cannot save scenario");
+    if (!output)
+        throw std::runtime_error("cannot save scenario");
 }
 Environment::Environment(Scenario scenario)
-    :scenario_(validate(std::move(scenario))),observations_(observation_space_for(scenario_)) {}
+    : scenario_(validate(std::move(scenario))), observations_(observation_space_for(scenario_))
+{
+    rebuild(scenario_);
+}
+void Environment::rebuild(Scenario scenario)
+{
+    auto next = validate(std::move(scenario));
+    entt::registry world;
+    std::map<EntityId, entt::entity> handles;
+    std::vector<EntityId> entities;
+    for (const auto& m : next.mobiles)
+    {
+        const auto entity = world.create();
+        handles.emplace(m.id, entity);
+        entities.push_back(m.id);
+        world.emplace<Identity>(entity, m.id, m.name);
+        world.emplace<Mobile>(entity);
+        world.emplace<State>(entity, m.initial);
+        world.emplace<InitialState>(entity, m.initial);
+        world.emplace<Destination>(entity, m.destination, m.arrival_radius);
+        world.emplace<Commands>(entity);
+    }
+    for (const auto& z : next.zones)
+    {
+        const auto entity = world.create();
+        handles.emplace(z.id, entity);
+        entities.push_back(z.id);
+        world.emplace<Identity>(entity, z.id, z.name);
+        world.emplace<State>(entity, State{z.center, 0, 0});
+        world.emplace<ForbiddenZone>(entity, z.radius);
+    }
+    auto space = observation_space_for(next);
+    world_ = std::move(world);
+    handles_ = std::move(handles);
+    entities_ = std::move(entities);
+    scenario_ = std::move(next);
+    observations_ = std::move(space);
+    steps_ = 0;
+    active_ = false;
+    transitions_.clear();
+}
+void Environment::require_editable() const
+{
+    if (active_ && steps_ != 0)
+        throw std::logic_error("finish or stop the world episode before editing");
+}
+void Environment::create_mobile(MobileDefinition mobile)
+{
+    require_editable();
+    if (!controllers_.empty())
+        throw std::logic_error("detach policies before editing topology");
+    auto next = scenario_;
+    next.mobiles.push_back(std::move(mobile));
+    rebuild(std::move(next));
+}
+void Environment::create_zone(ZoneDefinition zone)
+{
+    require_editable();
+    if (!controllers_.empty())
+        throw std::logic_error("detach policies before editing topology");
+    auto next = scenario_;
+    next.zones.push_back(std::move(zone));
+    rebuild(std::move(next));
+}
+void Environment::remove_entity(EntityId id)
+{
+    require_editable();
+    if (!controllers_.empty())
+        throw std::logic_error("detach policies before editing topology");
+    handle(id);
+    auto next = scenario_;
+    next.mobiles.erase(std::remove_if(next.mobiles.begin(), next.mobiles.end(),
+                                      [id](const MobileDefinition& m) { return m.id == id; }),
+                       next.mobiles.end());
+    next.zones.erase(
+        std::remove_if(next.zones.begin(), next.zones.end(), [id](const ZoneDefinition& z) { return z.id == id; }),
+        next.zones.end());
+    rebuild(std::move(next)); // validation rejects deleting a referenced destination or primary
+}
 ppo::rl::ResetResult Environment::reset(const ppo::rl::ResetOptions& options)
 {
-    if(!options.options.empty()) throw std::invalid_argument("no reset options supported by Navigation2D v2");
-    // Deterministic scenario: all seeds give the same initial state; no global RNG touched.
-    goal_position_ = scenario_.goal;
-    goal_heading_ = std::atan2(scenario_.goal_velocity.y, scenario_.goal_velocity.x);
-    goal_speed_ = std::hypot(scenario_.goal_velocity.x, scenario_.goal_velocity.y);
-    position_=scenario_.start; heading_=scenario_.heading; speed_=scenario_.speed; steps_=0; active_=true;
-    return {observe(),{{"environment",std::string("Navigation2D-v2")}}};
+    if (!options.options.empty())
+        throw std::invalid_argument("no custom reset options supported");
+    for (const auto entity : world_.view<Mobile, State, InitialState>())
+    {
+        world_.get<State>(entity) = world_.get<InitialState>(entity).value;
+        world_.get<Commands>(entity) = {};
+    }
+    steps_ = 0;
+    active_ = true;
+    stop_requested_ = false;
+    transitions_.clear();
+    return {observation(scenario_.controlled), {{"environment", std::string("Navigation2D-v3")}}};
+}
+void Environment::set_policy(EntityId mobile, std::unique_ptr<ppo::rl::IPolicy> policy, bool learning)
+{
+    require_editable();
+    const auto entity = handle(mobile);
+    if (!world_.all_of<Mobile>(entity) || mobile == scenario_.controlled)
+        throw std::invalid_argument("internal controller requires a non-primary mobile");
+    auto* learner = learning ? dynamic_cast<ppo::rl::ILearner*>(policy.get()) : nullptr;
+    if ((learning && !learner) || (policy && world_.get<Destination>(entity).entity == no_entity))
+        throw std::invalid_argument("controller requires a destination and a matching learner");
+    if (policy)
+        controllers_.insert_or_assign(mobile, Controller{std::move(policy), learner});
+    else
+        controllers_.erase(mobile);
 }
 void Environment::set_goal_policy(std::unique_ptr<ppo::rl::IPolicy> policy)
 {
-    if (policy && std::hypot(scenario_.goal_velocity.x, scenario_.goal_velocity.y) > scenario_.max_speed)
-        throw std::invalid_argument("initial goal speed exceeds policy motion limits");
-    goal_policy_ = std::move(policy);
-    active_ = false;
+    set_policy(world_.get<Destination>(handle(scenario_.controlled)).entity, std::move(policy));
 }
-ppo::rl::Value Environment::observe(bool goal_perspective) const
+void Environment::set_manual_action(EntityId mobile, Commands commands)
 {
-    const State own = goal_perspective ? goal_state() : state();
-    const State other = goal_perspective ? state() : goal_state();
-    std::vector<float> values{static_cast<float>(own.position.x/scenario_.half_extent),
-        static_cast<float>(own.position.y/scenario_.half_extent),
-        static_cast<float>(other.position.x/scenario_.half_extent),
-        static_cast<float>(other.position.y/scenario_.half_extent),
-        static_cast<float>(std::cos(own.heading)),static_cast<float>(std::sin(own.heading)),
-        static_cast<float>(own.speed/scenario_.max_speed),
-        static_cast<float>(steps_)/static_cast<float>(scenario_.max_steps),
-        static_cast<float>(std::cos(other.heading)*other.speed/scenario_.max_speed),
-        static_cast<float>(std::sin(other.heading)*other.speed/scenario_.max_speed)};
-    values.reserve(10+3*scenario_.obstacles.size());
-    for(const auto& obstacle:scenario_.obstacles)
+    const auto entity = handle(mobile);
+    if (!world_.all_of<Mobile>(entity) || mobile == scenario_.controlled || controllers_.count(mobile))
+        throw std::invalid_argument("manual action requires an uncontrolled non-primary mobile");
+    commands_from(actions_, std::vector<float>{commands.turn, commands.acceleration});
+    world_.get<Commands>(entity) = commands;
+}
+ppo::rl::Value Environment::observation(EntityId mobile) const
+{
+    const auto entity = handle(mobile);
+    if (!world_.all_of<Mobile>(entity))
+        throw std::invalid_argument("observation requires mobile");
+    const auto own = state(mobile);
+    const auto destination = world_.get<Destination>(entity).entity;
+    const auto other = destination == no_entity ? own : state(destination);
+    std::vector<float> values{static_cast<float>(own.position.x / scenario_.half_extent),
+                              static_cast<float>(own.position.y / scenario_.half_extent),
+                              static_cast<float>(other.position.x / scenario_.half_extent),
+                              static_cast<float>(other.position.y / scenario_.half_extent),
+                              static_cast<float>(std::cos(own.heading)),
+                              static_cast<float>(std::sin(own.heading)),
+                              static_cast<float>(own.speed / scenario_.max_speed),
+                              static_cast<float>(steps_) / static_cast<float>(scenario_.max_steps),
+                              static_cast<float>(std::cos(other.heading) * other.speed / scenario_.max_speed),
+                              static_cast<float>(std::sin(other.heading) * other.speed / scenario_.max_speed)};
+    values.reserve(10 + 3 * scenario_.zones.size());
+    for (const auto& zone : scenario_.zones)
     {
-        values.push_back(static_cast<float>(obstacle.center.x/scenario_.half_extent));
-        values.push_back(static_cast<float>(obstacle.center.y/scenario_.half_extent));
-        values.push_back(static_cast<float>(obstacle.radius/scenario_.half_extent));
+        const auto handle_ = handle(zone.id);
+        const auto center = world_.get<State>(handle_).position;
+        values.push_back(static_cast<float>(center.x / scenario_.half_extent));
+        values.push_back(static_cast<float>(center.y / scenario_.half_extent));
+        values.push_back(static_cast<float>(world_.get<ForbiddenZone>(handle_).radius / scenario_.half_extent));
     }
     return values;
 }
 ppo::rl::StepResult Environment::step(const ppo::rl::Value& action)
 {
-    if(!active_) throw std::logic_error("Navigation2D reset required");
-    if(!ppo::rl::contains(actions_,action)) throw std::invalid_argument("invalid navigation action");
-    // Both policies observe the same pre-step world, before either mobile advances.
-    ppo::rl::Value goal_action = std::vector<float>{0, 0};
-    if (goal_policy_)
+    if (!active_)
+        throw std::logic_error("Navigation2D reset required");
+    std::map<EntityId, Commands> commands;
+    commands.emplace(scenario_.controlled, commands_from(actions_, action));
+    // Collect all decisions first. Invalid actions leave every physical state unchanged.
+    for (const auto& mobile : scenario_.mobiles)
     {
-        goal_action = goal_policy_->act(observe(true));
-        if (!ppo::rl::contains(actions_, goal_action))
-            throw std::invalid_argument("invalid goal policy action");
+        if (mobile.id == scenario_.controlled)
+            continue;
+        const auto found = controllers_.find(mobile.id);
+        commands.emplace(mobile.id, found == controllers_.end()
+                                        ? world_.get<Commands>(handle(mobile.id))
+                                        : commands_from(actions_, found->second.policy->act(observation(mobile.id))));
     }
-    const double previous_distance=distance(position_,goal_position_);
-    const auto next_state = advance_motion(state(), action, scenario_);
-    heading_ = next_state.heading;
-    speed_ = next_state.speed;
-    const Point next = next_state.position;
-    if (goal_policy_)
+    std::map<EntityId, PendingMotion> motions;
+    double fraction = 1;
+    bool world_event = false;
+    for (const auto& mobile : scenario_.mobiles)
     {
-        const auto next_goal = advance_motion(goal_state(), goal_action, scenario_);
-        goal_heading_ = next_goal.heading;
-        goal_speed_ = next_goal.speed;
+        const auto before = state(mobile.id);
+        const auto after = advance_motion(before, commands.at(mobile.id), scenario_);
+        const double collision = collision_time(before.position, after.position, world_, scenario_.half_extent);
+        motions.emplace(mobile.id, PendingMotion{before, after, collision, std::numeric_limits<double>::infinity()});
+        if (collision <= 1)
+        {
+            fraction = std::min(fraction, collision);
+            world_event = true;
+        }
     }
-    const Point goal_delta{std::cos(goal_heading_)*goal_speed_*scenario_.dt,
-                           std::sin(goal_heading_)*goal_speed_*scenario_.dt};
-    // Relative swept motion detects a meeting even when both endpoints miss.
-    const Point relative_next{next.x - goal_delta.x, next.y - goal_delta.y};
-    const double arrival = entry(position_, relative_next, goal_position_, scenario_.arrival_radius);
-    const double collision = collision_time(position_, next, scenario_);
-    const Point goal_next{goal_position_.x + goal_delta.x, goal_position_.y + goal_delta.y};
-    const double goal_collision = goal_policy_ ? collision_time(goal_position_, goal_next, scenario_)
-                                               : std::numeric_limits<double>::infinity();
-    const double first_collision = std::min(collision, goal_collision);
-    const bool success = arrival <= 1 && arrival < first_collision;
-    const bool blocked = collision <= 1 && collision <= arrival && collision <= goal_collision;
-    const bool goal_blocked = goal_collision <= 1 && goal_collision <= arrival && goal_collision <= collision;
-    const double fraction = std::min(1.0, std::min(arrival, first_collision));
-    position_={position_.x+fraction*(next.x-position_.x),position_.y+fraction*(next.y-position_.y)};
-    goal_position_ = {goal_position_.x + fraction * goal_delta.x, goal_position_.y + fraction * goal_delta.y};
+    for (const auto& mobile : scenario_.mobiles)
+    {
+        if (mobile.destination == no_entity)
+            continue;
+        auto& motion = motions.at(mobile.id);
+        const auto& other = motions.at(mobile.destination);
+        const Point relative_next{motion.after.position.x - (other.after.position.x - other.before.position.x),
+                                  motion.after.position.y - (other.after.position.y - other.before.position.y)};
+        motion.arrival = entry(motion.before.position, relative_next, other.before.position, mobile.arrival_radius);
+        if (motion.arrival <= 1)
+        {
+            fraction = std::min(fraction, motion.arrival);
+            world_event = true;
+        }
+    }
+    for (const auto& mobile : scenario_.mobiles)
+    {
+        const auto& motion = motions.at(mobile.id);
+        auto after = motion.after;
+        after.position = {motion.before.position.x + fraction * (after.position.x - motion.before.position.x),
+                          motion.before.position.y + fraction * (after.position.y - motion.before.position.y)};
+        world_.get<State>(handle(mobile.id)) = after;
+    }
     ++steps_;
-    const bool truncated=steps_==scenario_.max_steps;
-    active_=!(success || blocked || goal_blocked || truncated);
-    const double remaining=distance(position_,goal_position_);
-    const double reward=(previous_distance-remaining)/scenario_.half_extent-0.001+(success?1.0:0.0)-(blocked?1.0:0.0);
-    return {observe(),reward,success || blocked || goal_blocked,truncated,
-        {{"success",success},{"collision",blocked},{"goal_collision",goal_blocked},{"distance",remaining}}};
+    active_ = !(world_event || steps_ == scenario_.max_steps || stop_requested_);
+    transitions_.clear();
+    for (const auto& mobile : scenario_.mobiles)
+    {
+        const auto& motion = motions.at(mobile.id);
+        const bool blocked = motion.collision <= fraction;
+        const bool goal_blocked =
+            mobile.destination != no_entity && motions.at(mobile.destination).collision <= fraction;
+        const bool success = motion.arrival <= fraction && !blocked && !goal_blocked;
+        const bool terminated = success || blocked || goal_blocked;
+        const bool truncated = steps_ == scenario_.max_steps || stop_requested_ || (world_event && !terminated);
+        const double previous = mobile.destination == no_entity
+                                    ? 0
+                                    : distance(motion.before.position, motions.at(mobile.destination).before.position);
+        const double remaining = mobile.destination == no_entity
+                                     ? 0
+                                     : distance(state(mobile.id).position, state(mobile.destination).position);
+        const double reward =
+            (previous - remaining) / scenario_.half_extent - 0.001 + (success ? 1.0 : 0.0) - (blocked ? 1.0 : 0.0);
+        transitions_.emplace(mobile.id, ppo::rl::StepResult{observation(mobile.id),
+                                                            reward,
+                                                            terminated,
+                                                            truncated,
+                                                            {{"success", success},
+                                                             {"collision", blocked},
+                                                             {"goal_collision", goal_blocked},
+                                                             {"distance", remaining}}});
+    }
+    // Complete all transitions before any optimiser can change a controller's weights.
+    try
+    {
+        for (auto& item : controllers_)
+            if (item.second.learner)
+                item.second.learner->observe(transitions_.at(item.first));
+    }
+    catch (...)
+    {
+        active_ = false;
+        throw;
+    } // no retry of an already advanced world
+    return transitions_.at(scenario_.controlled);
 }
-const ppo::rl::Space& Environment::observation_space() const noexcept {return observations_;}
-const ppo::rl::Space& Environment::action_space() const noexcept {return actions_;}
-State Environment::goal_state() const noexcept
+void Environment::request_stop() noexcept
 {
-    return {goal_position_, goal_heading_, goal_speed_};
+    stop_requested_ = true;
 }
-State Environment::state() const noexcept { return {position_, heading_, speed_}; }
-Point Environment::position() const noexcept {return position_;}
-const Scenario& Environment::scenario() const noexcept {return scenario_;}
+const ppo::rl::StepResult& Environment::transition(EntityId mobile) const
+{
+    return transitions_.at(mobile);
+}
+const entt::registry& Environment::registry() const noexcept
+{
+    return world_;
+}
+const std::vector<EntityId>& Environment::entities() const noexcept
+{
+    return entities_;
+}
+entt::entity Environment::handle(EntityId id) const
+{
+    return handles_.at(id);
+}
+State Environment::state(EntityId id) const
+{
+    return world_.get<State>(handle(id));
+}
+State Environment::state() const
+{
+    return state(scenario_.controlled);
+}
+State Environment::goal_state() const
+{
+    return state(world_.get<Destination>(handle(scenario_.controlled)).entity);
+}
+Point Environment::position() const
+{
+    return state().position;
+}
+const ppo::rl::Space& Environment::observation_space() const noexcept
+{
+    return observations_;
+}
+const ppo::rl::Space& Environment::action_space() const noexcept
+{
+    return actions_;
+}
+const Scenario& Environment::scenario() const noexcept
+{
+    return scenario_;
+}
 } // namespace navigation

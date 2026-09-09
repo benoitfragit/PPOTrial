@@ -30,6 +30,12 @@ testable et maintenable. Adapte des principes de `benoitfragit/MFDStudio/AGENTS.
 - Garder les conversions tensor et le device dans le backend LibTorch.
 - Garder les protocoles Protobuf et GameNetworkingSockets hors du coeur.
 - Ne pas dupliquer les regles de simulation entre entrainement et evaluation.
+- L'exemple conserve un registre EnTT avec N entites (mobiles et zones), des
+  identifiants stables et des controles par mobile. Ne jamais le reduire a une
+  paire codee en dur. EnTT reste dans l'exemple et le rendu, jamais dans `RL/`.
+- Tous les agents decident sur le meme etat avant l'avancement commun du monde.
+  Les retours sont propres a chaque mobile ; seuls les learners attaches recoivent
+  du feedback. Un reset global tronque les episodes non termines des autres agents.
 - Aucun score specifique a un exemple dans un evaluateur generique.
 
 ## C++ et nommage

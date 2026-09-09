@@ -87,7 +87,7 @@ void test_controls()
     TemporaryDirectory directory;
     FakeBackend backend;
     navigation::Scenario scenario;
-    scenario.goal = {90,0};
+    scenario.mobiles[1].initial.position = {90,0};
     navigation::Application application(scenario, directory.path / "score.metrics", directory.path / "store", backend);
     check(!application.running() && backend.counts.creations == 0 && backend.counts.loads == 0, "launch must not create a neural policy");
     application.play(navigation::ControlMode::Training, 64, {});
@@ -110,7 +110,7 @@ void test_controls()
     application.tick(1, {0,0}, 1);
     check(backend.counts.evaluation_actions == 64 && backend.counts.feedback == 2, "paused evaluation does not step or update learner");
     application.stop();
-    check(!application.evaluating() && !std::filesystem::exists(directory.path / "store/prod/best.txt"), "cancelled evaluation is not promoted");
+    check(!application.evaluating() && !std::filesystem::exists(directory.path / "store/prod/mobile-1/best.txt"), "cancelled evaluation is not promoted");
     bool rejected = false;
     try { application.play(static_cast<navigation::ControlMode>(100), 64, {}); }
     catch (const std::invalid_argument&) { rejected = true; }
@@ -126,8 +126,8 @@ void test_evaluation_context()
     first.play(navigation::ControlMode::Training, 64, {});
     first.evaluate_candidate(1);
     first.tick(0, {0,0}, 1);
-    check(!first.evaluating() && std::filesystem::exists(directory.path / "store/prod/best.txt"), "fake evaluation promotes first candidate");
-    scenario.goal.x = 11;
+    check(!first.evaluating() && std::filesystem::exists(directory.path / "store/prod/mobile-1/best.txt"), "fake evaluation promotes first candidate");
+    scenario.mobiles[1].initial.position.x = 11;
     navigation::Application different(scenario, directory.path / "score.metrics", directory.path / "store", backend);
     different.play(navigation::ControlMode::Training, 64, {});
     different.evaluate_candidate(1);
@@ -177,7 +177,7 @@ void test_goal_policy()
           "invalid goal action rejected before either state changes");
     navigation::Scenario blocked;
     blocked.dt = 1; blocked.max_steps = 2;
-    blocked.obstacles.push_back({{11,0},0.2});
+    blocked.zones.push_back({100,"Zone",{11,0},0.2});
     navigation::Environment bounded(blocked);
     bounded.set_goal_policy(std::make_unique<RecordingGoal>());
     bounded.reset();
@@ -210,13 +210,51 @@ void test_pinned_goal_checkpoint()
     catch (const std::logic_error&) { rejected = true; }
     check(rejected, "cannot switch goal during episode");
     app.evaluate_candidate(1);
-    check(backend.counts.loads == 3 && backend.loaded_paths[1].filename() == "goal-model.pt", "evaluation independently loads pinned goal and candidate");
+    check(backend.counts.loads == 3 && backend.loaded_paths[1].filename() == "model.pt", "evaluation independently loads pinned goal and candidate");
     app.tick(0, {0,0}, 1);
     check(backend.counts.feedback == 1 && backend.counts.evaluation_actions == 5, "evaluation drives both frozen policies without learner update");
     check(app.goal_checkpoint() == pinned, "promotion does not switch N-1 goal");
     app.stop();
     app.set_goal_checkpoint({});
     check(app.goal_checkpoint().empty(), "explicit return to linear goal mode");
+}
+
+void test_multiple_controllers()
+{
+    TemporaryDirectory directory;
+    FakeBackend backend;
+    const auto source=directory.path/"prod-model.pt";
+    { std::ofstream output(source); output<<"synthetic frozen policy"; }
+    navigation::Scenario scenario;
+    scenario.max_steps=2;
+    scenario.mobiles.push_back({3,"Learner B",{{0,20},0,1},4,0.5});
+    scenario.mobiles.push_back({4,"Prod B",{{10,20},0,0},3,0.5});
+    scenario.mobiles.push_back({5,"Manual",{{-10,-10},0,1},0,0.5});
+    scenario.zones.push_back({100,"Zone",{5,5},1});
+    navigation::Application app(scenario,directory.path/"score.metrics",directory.path/"store",backend);
+    app.configure_mobile(3,navigation::ControlMode::Training,64);
+    app.configure_mobile(2,navigation::ControlMode::Policy,64,source);
+    app.configure_mobile(4,navigation::ControlMode::Policy,64,source);
+    app.play(navigation::ControlMode::Training,64,{});
+    app.tick(scenario.dt,{0,1},1,5);
+    check(backend.counts.creations==2 && backend.counts.actions==2 && backend.counts.feedback==2
+        && backend.counts.evaluation_actions==2, "two learners and two frozen policies act in the same world");
+    check(app.environment().state(5).speed>1 && app.telemetry(3).length==1,
+          "selected manual entity and per-agent telemetry are independent");
+    const auto before=app.environment().state(3);
+    app.evaluate_candidate(1,3);
+    check(backend.counts.loads==6 && backend.counts.saves==2, "evaluation freezes selected learner and every other controller");
+    app.tick(0,{0,0},1);
+    check(backend.counts.feedback==2 && backend.counts.evaluation_actions==10,
+          "evaluating a non-primary learner never updates any training instance");
+    check(app.environment().state(3).position.x==before.position.x
+        && std::filesystem::exists(directory.path/"store/prod/mobile-3/best.txt"),
+          "independent evaluation publishes only the selected learner");
+    app.stop();
+    check(app.telemetry(3).truncated && backend.counts.feedback==4, "Stop closes every active learner");
+    bool rejected=false;
+    try { app.replace_scenario(scenario); } catch (const std::logic_error&) { rejected=true; }
+    check(rejected, "topology replacement cannot silently discard learners");
 }
 
 }
@@ -228,7 +266,8 @@ int main()
         test_evaluation_context();
         test_goal_policy();
         test_pinned_goal_checkpoint();
-        std::cout << "4 application control test groups passed (fake backend only)\n";
+        test_multiple_controllers();
+        std::cout << "5 application control test groups passed (fake backend only)\n";
         return 0;
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

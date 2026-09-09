@@ -1,67 +1,102 @@
 #pragma once
-#include "ppo/rl/environment.hpp"
+#include "components.hpp"
 #include "ppo/rl/runtime.hpp"
-#include <memory>
+#include <entt/entity/registry.hpp>
 #include <filesystem>
-#include <string>
+#include <map>
+#include <memory>
+#include <vector>
 
-namespace navigation {
-struct Point { double x = 0; double y = 0; };
-struct Obstacle { Point center; double radius = 1; };
+namespace navigation
+{
+struct MobileDefinition
+{
+    EntityId id;
+    std::string name;
+    State initial;
+    EntityId destination = no_entity;
+    double arrival_radius = 0.5;
+};
+struct ZoneDefinition
+{
+    EntityId id;
+    std::string name;
+    Point center;
+    double radius = 1;
+};
 struct Scenario
 {
-    Point start{0, 0};
-    Point goal{10, 0}; // initial position of the second mobile
-    Point goal_velocity{0, 0}; // constant world-space velocity
-    double heading = 0;
-    double speed = 1;
+    EntityId controlled = 1;
+    std::vector<MobileDefinition> mobiles{{1, "Mobile", {{0, 0}, 0, 1}, 2, 0.5}, {2, "Goal", {{10, 0}, 0, 0}, 1, 0.5}};
+    std::vector<ZoneDefinition> zones;
     double half_extent = 100;
-    double arrival_radius = 0.5;
     double dt = 0.2;
     double max_speed = 5;
     double max_acceleration = 2;
     double max_turn_rate = 1;
     std::size_t max_steps = 500;
-    std::vector<Obstacle> obstacles;
 };
-/// Versioned, strict text format; rejects unknown keys, trailing fields and invalid values.
+/// Strict v3 text format. Entity IDs/names must be unique; destinations reference mobiles.
 Scenario load_scenario(const std::filesystem::path& path);
-/// Validated canonical scenario serialization used for persistence and evaluation identity.
 std::string scenario_text(const Scenario& scenario);
 void save_scenario(const Scenario& scenario, const std::filesystem::path& path);
-struct State { Point position; double heading; double speed; };
-/// Local example with a moving goal mobile and circular forbidden regions.
-/// The default linear trajectory must remain inside the world for the episode horizon.
-/// An optional frozen policy controls the second mobile through the same motion rules.
-/// Kinematic update reuses the original heading/speed Euler integration principle.
+
+/// One ECS world and a Gymnasium view for scenario.controlled. All entities advance once
+/// per step, after every controller has observed the same pre-step world. Single-thread use.
+/// Other mobiles may coast, accept manual commands or own an independent generic policy.
+/// Only explicitly attached learners receive feedback. PPO/LibTorch are never referenced.
 class Environment final : public ppo::rl::IEnvironment
 {
 public:
     explicit Environment(Scenario scenario);
+    Environment(const Environment&) = delete;
+    Environment& operator=(const Environment&) = delete;
+    Environment(Environment&&) = delete;
+    Environment& operator=(Environment&&) = delete;
     ppo::rl::ResetResult reset(const ppo::rl::ResetOptions& options = {}) override;
     ppo::rl::StepResult step(const ppo::rl::Value& action) override;
     const ppo::rl::Space& observation_space() const noexcept override;
     const ppo::rl::Space& action_space() const noexcept override;
-    Point position() const noexcept;
-    State state() const noexcept;
-    State goal_state() const noexcept;
-    /// Replaces the goal controller; caller must reset before stepping again.
-    /// Only act() is used, with the same observation schema and the two roles exchanged.
+    const entt::registry& registry() const noexcept;
+    const std::vector<EntityId>& entities() const noexcept;
+    entt::entity handle(EntityId id) const; // throws for unknown IDs, including removed entities
+    State state(EntityId id) const;
+    State state() const;
+    State goal_state() const;
+    Point position() const;
+    ppo::rl::Value observation(EntityId mobile) const;
+    const ppo::rl::StepResult& transition(EntityId mobile) const;
+    /// Changes are allowed only before the first step or after an episode boundary.
+    /// The externally driven primary cannot also have an internal controller.
+    void set_policy(EntityId mobile, std::unique_ptr<ppo::rl::IPolicy> policy, bool learning = false);
+    void set_manual_action(EntityId mobile, Commands commands);
     void set_goal_policy(std::unique_ptr<ppo::rl::IPolicy> policy);
+    /// Topology edits validate a complete scenario; reject while active or policies attached.
+    /// They require reset and preserve remaining stable IDs, not EnTT handles.
+    void create_mobile(MobileDefinition mobile);
+    void create_zone(ZoneDefinition zone);
+    void remove_entity(EntityId id);
+    void request_stop() noexcept;
     const Scenario& scenario() const noexcept;
+
 private:
-    ppo::rl::Value observe(bool goal_perspective = false) const;
+    struct Controller
+    {
+        std::unique_ptr<ppo::rl::IPolicy> policy;
+        ppo::rl::ILearner* learner = nullptr; // owned by policy
+    };
+    void rebuild(Scenario scenario);
+    void require_editable() const;
     Scenario scenario_;
+    entt::registry world_;
+    std::map<EntityId, entt::entity> handles_;
+    std::vector<EntityId> entities_;
+    std::map<EntityId, Controller> controllers_;
+    std::map<EntityId, ppo::rl::StepResult> transitions_;
     ppo::rl::Space observations_;
-    ppo::rl::Space actions_ = ppo::rl::Box({2}, {-1.F,-1.F}, {1.F,1.F});
-    Point position_;
-    Point goal_position_;
-    double goal_heading_ = 0;
-    double goal_speed_ = 0;
-    std::unique_ptr<ppo::rl::IPolicy> goal_policy_;
-    double heading_ = 0;
-    double speed_ = 0;
+    ppo::rl::Space actions_ = ppo::rl::Box({2}, {-1.F, -1.F}, {1.F, 1.F});
     std::size_t steps_ = 0;
     bool active_ = false;
+    bool stop_requested_ = false;
 };
 } // namespace navigation

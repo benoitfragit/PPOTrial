@@ -2,8 +2,8 @@
 
 ## Scope and implementation
 
-The active example is now Navigation2D: a controlled mobile and a moving goal mobile, circular
-forbidden zones and square world bounds. The original PPO optimizer, rollout
+The active example is Navigation2D: an EnTT world with N mobile entities, per-mobile
+destinations and controllers, forbidden-zone entities and square world bounds. The original PPO optimizer, rollout
 collector and continuous Gaussian network are extracted rather than rewritten.
 The desktop is ported in place; the old application and compatibility layer are removed.
 
@@ -11,9 +11,9 @@ The desktop is ported in place; the old application and compatibility layer are 
 | --- | --- | --- |
 | `ppo_environment`, `RL/include`, `RL/src` | Spaces, environment API, shared episode driver, metrics, checkpoint promotion | C++17 standard library; localized Windows file publication |
 | `ppo_torch`, `RL/torch` | Existing PPO, RLAgent, Gaussian network; generic learner and frozen inference adapters | LibTorch, generic runtime |
-| `navigation_environment`, `Examples/Navigation2D` | Scenario, motion, observations, reward, collisions and arrival | generic runtime |
+| `navigation_environment`, `Examples/Navigation2D` | ECS world, scenario, shared motion, observations, reward and events | generic runtime, EnTT v3.16.0 |
 | `navigation_application`, `Main` | Desktop clock, explicit mode selection, checkpoint/evaluation orchestration | Navigation2D, injected policy backend interface |
-| `GenericRenderer`, `Renderer` | Existing desktop theme/docking, views, controls, inspection and plots | application presentation API, raylib, ImGui, ImPlot |
+| `GenericRenderer`, `Renderer` | Existing desktop theme/docking, views, controls, inspection and plots | read-only example registry, application, raylib, ImGui, ImPlot |
 | `PPO`, `Main/src/main.cpp` | The sole application entry point | controller and renderer |
 
 `ppo_torch` has no dependency on EnTT, entities, scenarios or rendering. The
@@ -48,59 +48,98 @@ are stored for their original log-probability; applied actions are clipped to
 tanh-squashed distribution. Discrete spaces are supported by the runtime, but the
 supplied Torch adapter supports float32 Box observations and continuous actions only.
 
+## ECS ownership and world lifecycle
+
+The original `Env` owned an EnTT registry and collections of entities and agents;
+it chose every agent action before advancing every entity. The first port wrongly
+reduced that to two states. The restored example keeps those ECS capabilities:
+
+- `Identity`: stable numeric scenario ID and unique name.
+- `State`: position, heading and speed for mobiles; position for zones.
+- `Mobile`, `InitialState`, `Destination`, `Commands`: mobile components.
+- `ForbiddenZone`: circular radius component on a zone entity.
+
+The registry is the sole runtime state store, not a mirror of a special pair.
+`Environment::registry()` exposes a const view for inspection/rendering on the
+same thread. EnTT handles are internal; stable `EntityId` values identify controls,
+destinations, telemetry and selections. Reset restores every mobile without
+changing handles. Validated topology edits may rebuild handles; clients must
+resolve them again from stable IDs. Unknown IDs and dangling destinations are errors.
+
+`create_mobile`, `create_zone`, `remove_entity` operate before stepping or at an
+episode boundary, with internal policies detached. Validation precedes replacement;
+a rejected edit leaves the world intact. The desktop can load/save complete
+scenarios while stopped without policies. No dynamic topology mutation is allowed
+inside a rollout. Up to 4096 mobiles and 1024 zones are accepted as input bounds,
+not an architectural pair limit. Adding new component/system types remains C++ work.
+
+The scenario's `controlled` mobile is the single-agent Gymnasium view driven by
+`EpisodeSession`. Other mobiles have coasting/manual commands or independently
+owned `IPolicy`/`ILearner` controllers. All actions are collected and validated
+against the same pre-step world, then all entities advance exactly once. All
+transitions are built before any secondary learner receives feedback. A policy is
+only an inference controller unless learning is explicitly requested. The primary
+learner receives its feedback through `EpisodeSession`; it cannot be attached twice.
+
+The first meeting, forbidden-zone entry or world-boundary crossing ends the world
+step at one common fractional time. Mobile/zone collision takes precedence over a
+meeting at the same instant. Each mobile receives its own reward, observation and
+flags: its own meeting/collision or its destination's collision terminates it;
+an event elsewhere truncates its still-open episode. The time limit and explicit
+world stop truncate unfinished episodes. Reset restores all entities together,
+matching the original global reset model. No unrelated reset observation enters GAE.
+
+For batch use with additional learners, stop the world with `request_stop()` before
+the final advance, or use the world's `max_steps`. An external single-agent runner
+limit alone cannot notify embedded learners; the application propagates its Stop
+request to both the world and primary session. Updates still run synchronously on
+the UI thread. This port does not restore the original worker-thread/snapshot bus;
+concurrent consumers require a separate snapshot/transport layer.
+
 ## Navigation semantics and configuration
 
-`navigation2d-v2` files use strict rows (see the shipped `.nav` example):
+`navigation2d-v3` files use strict rows; `multiple.nav` demonstrates five mobiles
+and two forbidden zones without writing C++:
 
 | Row | Fields |
 | --- | --- |
-| `start` | x y heading-radians speed |
-| `goal` | initial-x initial-y meeting-radius velocity-x velocity-y |
+| `primary` | externally controlled mobile ID |
 | `world` | half-extent timestep-seconds max-steps |
 | `motion` | maximum-speed maximum-acceleration maximum-turn-rate |
-| `obstacle` | center-x center-y radius; repeat for multiple obstacles |
+| `mobile` | ID "name" x y heading-radians speed destination-ID meeting-radius |
+| `zone` | ID "name" center-x center-y radius |
 
-Defaults come from `Scenario`. Unknown/trailing fields, nonfinite values,
-invalid geometry and excessive sizes are rejected. No custom reset options are
-supported in v2. Reset is deterministic for this fixed scenario; supplying any
-seed gives the same state. There is no randomized curriculum.
+Repeat mobile/zone rows. IDs and names are unique across all entity types;
+destination IDs must identify another mobile, or `0` for no destination. A learner
+or policy requires a destination. The primary always requires one. Entity order
+is normalized by ID, including zone observation order. Duplicate singleton rows,
+nonfinite values, invalid geometry and trailing fields are rejected. Mobiles may
+not start in forbidden zones. Runtime collision checks handle future world exits;
+the old full-horizon linear-goal validation has been removed.
 
-The motion preserves the simple Euler heading/speed integration pattern from the
-existing simulator, with nonnegative speed and configurable limits. Collision
-and arrival are checked along the whole step segment, preventing tunnelling.
-Meeting uses relative swept motion, rather than a check against a frozen endpoint.
-The first event stops both mobiles at the same fractional step time; collision
-takes precedence on a tie. A reset restores both initial positions.
+Motion retains heading/speed Euler integration, with normalized turn/acceleration
+actions, nonnegative speed and shared configurable limits. The same function
+advances every mobile. All mobiles obey zones and world bounds, including coasting
+ones. Relative swept motion detects a meeting between step endpoints. Reset is
+deterministic; seeds currently produce the same configured initial state.
 
-Observations contain x/y and current goal x/y normalized by world extent, cos/sin heading,
-normalized speed and elapsed-step fraction, goal velocity x/y normalized by maximum
-controlled-mobile speed, then each obstacle x/y/radius
-normalized by extent. Observation width is `10 + 3 * obstacle_count`.
-Actions are normalized turn and acceleration commands. By default the goal moves linearly at its configured velocity. Its full trajectory must
-remain inside the world (including the meeting radius); invalid paths are rejected.
-The scripted goal does not steer around obstacles. Forbidden zones constrain the
-controlled mobile; a goal inside a zone may be temporarily unreachable.
-Reward is normalized distance progress minus 0.001 per step, +1 on arrival and
--1 on collision/boundary exit. These navigation rewards intentionally replace
-old domain rewards. Arrival/collision terminate; the time limit truncates.
+Observations contain own x/y and destination x/y normalized by world extent,
+cos/sin own heading, own speed/max-speed, elapsed-step fraction, destination
+velocity x/y normalized by max-speed, then zone x/y/radius normalized by extent.
+Width is `10 + 3 * zone_count`; unrelated mobiles do not enter the observation.
+A mobile without destination uses itself for observation only, with no meeting event.
+Reward remains distance progress/world extent minus 0.001, +1 on its own meeting,
+-1 on its own collision. `goal_collision` adds no new penalty. These are the
+navigation rewards of the accepted replacement example, not the former domain rewards.
 
-The new scenario format and observation/reward contract are incompatible with old
-scenario/model semantics. Do not rename old archives and load them as Navigation2D.
-Checkpoints use a dedicated `checkpoints/navigation2d` directory. Each evaluation
-candidate stores its scenario and score configuration alongside the existing
-archive format. Historical JSON, assets and model archives remain stored under `resources/` but
-are not read, linked or copied by the new application. Preserving those data does
-not provide an old application or a compatibility mode.
-
-The GUI keeps the existing theme and dock builder plus the viewport, minimap,
-entity selection, inspection, controls, snapshot and plot panels. Their old ECS
-bindings are replaced by `navigation::Application`. `Main/src/torch_backend.cpp` alone binds the controller to Torch. The controller
-can therefore be exercised headlessly with synthetic policies. The schema catalog now
-reports Navigation2D fields instead of EnTT reflection. Domain-specific controls
-and assets have been removed; reward rules are displayed as environment data,
-not duplicated as PPO settings. Renderer display flags use a new JSON settings
-file; there is no old-settings migration. The renderer uses planar coordinates
-inside its existing perspective viewport. It does not simulate motion.
+v3 replaces v2's start/goal/obstacle rows; no compatibility shim is provided.
+Matching tensor dimensions alone do not establish old-policy compatibility:
+world termination and zone semantics changed. Old historical assets/checkpoints
+remain under `resources/`, unused by this application. The viewport remains a
+perspective presentation of 2D motion, with lists, inspection, selection, minimap
+and trails driven by all ECS entities. Controller/observation/metric panels follow
+the selected mobile. The catalog describes current component types, not old EnTT
+meta reflection. UI preferences retain their explicit separate settings file.
 
 ## Evaluation and checkpoint lifecycle
 
@@ -111,7 +150,7 @@ std (population) and rate (fraction nonzero). Keys are `episode_reward`,
 aggregation uses final episode info, not every step's info.
 
 The desktop's explicit candidate command performs: pause training -> save candidate
--> load independent frozen policy -> evaluate in a separate instance of the same
+-> load independent frozen controllers -> evaluate in a separate instance of the same
 environment -> score -> promote if strictly better. Evaluation advances at most
 64 transitions per frame, keeping the UI command path available. Pause/Play suspends/resumes evaluation. Stop cancels
 without promotion. The selected fixed scenario is deterministic; repeated episodes
@@ -122,11 +161,11 @@ across episodes, but neither optimizer state nor partial buffers are restored fr
 an inference checkpoint. Rollout settings apply only when constructing a learner.
 
 Candidates use the existing `eval/model.pt` archive layout. The historical saver
-also creates a candidate-local `prod/model.pt` on first save; only `prod/best.txt`
+also creates a candidate-local `prod/model.pt` on first save; only `prod/mobile-<id>/best.txt`
 is authoritative for promotion in the new workflow. It contains score, an immutable version directory, and a quoted evaluation-context
 string. The generic publisher treats that string as opaque and rejects mismatches
 before comparing scores. Navigation2D supplies canonical scenario/metrics text,
-episode count and seed sequence. This reference format is incompatible with the
+episode count, seed sequence and controller snapshot identities. This reference format is incompatible with the
 earlier two-line reference; use a new checkpoint root rather than silently
 comparing against a score without evaluation provenance. Publication uses rename on POSIX or MoveFileExW on
 Windows, guarded by an exclusive directory lock. Copy/write failure cannot point
@@ -146,93 +185,59 @@ The protocol needs implementation-side bounds, stale-response checks, explicit
 timeouts and idempotency rules before production use. No GNS transport or Python
 bridge is implemented, and protoc generation is not in the default build.
 
+## Frozen Prod/N-1 and multiple learners
+
+Choose a versioned `model.pt` for any selected mobile through **Agents / Selected
+mobile mode / Frozen Prod policy**. The primary has its own mode/path controls.
+A private snapshot is copied on explicit selection and stays fixed after promotion.
+Separate learners use separate `work/mobile-<id>` directories; no mutable model or
+rollout is shared by default. Manual arrows affect only the selected manual mobile.
+
+**Evaluate selected learner / promote** evaluates any learner, including a
+non-primary one, by making it the primary view of a separate world. Every other
+controller is independently loaded and frozen. Background learners are saved at
+that instant; background frozen policies use their pinned archives. Candidate
+folders contain the evaluated scenario, criteria, full evaluation context and
+`controllers/<id>/...` archives. Training-world positions and weights remain untouched
+by evaluation. References are isolated under `prod/mobile-<id>/best.txt`.
+
+Snapshot identities enter the score context. Changing/reselecting a frozen
+controller creates a new identity. Evaluating with background learners also takes
+new snapshots each time. Previously stored scores from different backgrounds are
+rejected; use a separate checkpoint root or explicitly freeze a stable population
+for repeated comparable evaluations. Automatic re-evaluation of the previous best
+against a changing population and a content-addressed checkpoint registry are not
+implemented. This limitation is explicit; stale scores are never silently compared.
+
 ## Validation limits
 
-The standard-library test suites use scripted/fake policies and synthetic
-checkpoint files. They exercise spaces, lifecycle, shared training/evaluation,
-arrival ordering, swept collisions, time limits, bootstrap conversion, metrics,
-configuration parsing and checkpoint promotion. They never execute a neural model.
+The tests use only scripted/fake policies and synthetic checkpoint files. Coverage
+includes all previous navigation/runtime regressions, N ECS entities, multiple
+learners with independent feedback, selected manual control, frozen Prod policies,
+non-primary evaluation with a fully frozen background, common event timing, global
+reset/truncation, stable IDs, topology validation and scenario round trips.
 
-Direct GCC builds are supported as a fallback if CMake is unavailable. LibTorch,
-raylib and protoc must be built in an
-environment with those dependencies before considering their paths validated.
-The ported renderer is syntax-checked against real dependency headers; this does
-not validate graphics linking or interactive behavior. CMake is unavailable in
-the execution environment. No training, learned-model evaluation or checkpoint loading was performed during
-this refactoring. See the PR for exact commands/results and outstanding gates.
-
-## Moving-goal correction
-
-The earlier fixed-only goal was an excessive simplification of the requested
-navigation example. Version 2 restores the ability to reach another moving point
-in the toy 2D environment, without a new guidance law or a PPO change. Existing
-progress/reward coefficients are retained; distance now measures the two current
-positions, so movement of either mobile affects distance progress.
-
-The default scenario contains a moving goal. A deterministic test reaches that
-goal with a forbidden zone present; additional tests check encounters between
-step endpoints, collision-before-meeting, reset, moving-state observations and
-invalid velocities/paths. Training and evaluation exercise the same moving-goal
-environment through the existing runtime. No learned policy is run by these tests.
-
-
-## Frozen Prod/N-1 as the second mobile
-
-The desktop can select an explicit versioned `prod/<version>/eval/model.pt` in
-**Goal Prod/N-1 model.pt**, then **Apply goal controller**, after stopping the
-episode. Empty input restores constant velocity. This selection is independent
-of the first mobile's Manual/Training/Frozen policy mode. No model loads at launch.
-
-`Environment` owns an optional generic `IPolicy` for the second mobile. It calls
-only `act`, with the same v2 observation schema from that mobile's perspective:
-own position/heading/speed first, the other mobile's position and current velocity,
-then the unchanged world zones and episode clock. Both actions are based on the
-pre-step state. The same motion function applies to both mobiles. Reset restores
-both initial states; the provided Gaussian policies have no recurrent state.
-The initial goal velocity supplies its heading and speed and must not exceed the
-shared speed limit when a policy is selected. The scenario's baseline linear path
-validation still applies even when a policy will control it.
-
-A policy-controlled goal is subject to zones and world bounds. Its first collision
-ends the episode with `goal_collision=true`, without awarding meeting success or
-adding a new goal-collision reward. Both mobiles stop at the same fractional event
-time. The default scripted linear mode retains its existing zone semantics.
-
-`Application` loads a private copy through `IPolicyBackend::load_policy`, which the
-Torch backend implements with deterministic `FrozenTorchPolicy`. The goal never
-receives `observe`/PPO feedback. The learner and goal have independent ownership.
-The snapshot remains selected until an explicit change, even after promotion.
-Evaluation loads two new frozen instances, candidate and the same goal snapshot;
-the training instances are untouched. Each candidate contains `goal-model.pt`
-when applicable, plus `evaluation-context.txt`, scenario and score criteria.
-
-Snapshot files under `goal-snapshots/` have unique identities. Their identity is
-included in score-comparison context. Selecting a checkpoint again creates a new
-identity, even for identical bytes; comparison with an existing best then requires
-a separate checkpoint root. This conservative first implementation does not
-provide a content-addressed model registry, automatic opponent rotation, recurrent
-policy resets, or resumption of optimiser state. Historical non-v2 policies are
-not compatible. These remain explicit limits, not silently guessed migrations.
-
-Tests use fake policies only: perspective and simultaneous observations, live
-velocity, reset, invalid-action atomicity, swept goal collision, source-file
-replacement after selection, independent evaluation loads, and feedback restricted
-to the primary learner. They do not measure learned navigation performance.
+Local CMake headless builds now use the real EnTT v3.16.0 headers. Renderer/Main
+syntax checks use the actual graphics headers. CI validates Linux Debug/Release
+and a complete Windows LibTorch/graphics build. No model or desktop window is
+executed by these checks; interactive graphical smoke testing remains outstanding.
 
 ## Correspondence with the original example
 
-| Original concept | Current implementation | Nature of the change |
-| --- | --- | --- |
-| Aircraft | `navigation::State`: planar position, heading, speed | Kinematic representation replaces the old entity; same simple heading/speed integration principle |
-| Other Aircraft / destination | Second state, `goal_state()`, optional frozen Prod/N-1 policy | Moving destination restored; own observation perspective and identical motion controls |
-| SAM regions | `navigation::Obstacle`: circular center and radius | Geometric forbidden regions replace old entities/systems |
-| Distance-based completion | `arrival_radius`, relative swept meeting, `info.success` | Meeting tolerance, with continuous segment event detection |
-| Destruction/end flags | `collision`, `goal_collision`, `terminated` | Explicit navigation events, no old destruction system |
-| SNA / domain controllers | Two normalized turn/acceleration commands through the environment | Old source systems removed, not merely renamed |
-| Training/evaluation environment variants | One `Environment`, driven by `EpisodeSession` | Shared simulation contract |
-| Existing graphical shell | Main + Renderer with Navigation2D state bindings | Docking/panels retained, old entity bindings replaced |
+| Original concept | Restored Navigation2D implementation |
+| --- | --- |
+| Registry and N entities | EnTT registry, stable identities, component views and N entity scenario rows |
+| Aircraft | Mobile entity with State, InitialState, Destination and Commands |
+| Other Aircraft / destination | Reference to any mobile ID; independent manual, learner or frozen Prod controller |
+| SAM regions | ForbiddenZone entities with State and circular radius |
+| Distance tolerance | Per-mobile Destination radius and relative swept meeting |
+| End/destruction flags | Per-mobile success/collision/goal_collision and terminated/truncated |
+| SNA / domain controllers | Normalized turn/acceleration commands; no old domain systems restored |
+| Agent collections | Controllers keyed by mobile ID, simultaneous decisions and separate learner feedback |
+| Shared reset | Whole-world reset; final transitions close all affected rollouts |
+| Renderer entity bindings | Read-only ECS views, N selections, trails, inspection and controller panels |
 
-This is a replacement of the example approved during the port, not full behavioral
-equivalence with the original simulator. Its observations, navigation rewards and
-scenario format changed; PPO's optimisation equations did not change in this port.
-The simulation remains 2D, drawn in the existing perspective viewport.
+The neutral example remains a port, not numerical equivalence with the original
+domain simulation. The ECS/N-entity capability is restored; the old domain-specific
+systems, JSON schema, worker thread and meta-reflection editor are not restored.
+PPO's optimisation equations are unchanged by this ECS correction.
