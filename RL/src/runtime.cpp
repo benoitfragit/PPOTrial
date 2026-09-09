@@ -18,39 +18,10 @@ namespace {
 Episode execute(IEnvironment& environment, IPolicy& policy, ILearner* learner,
                 const ResetOptions& reset, std::size_t max_steps)
 {
-    if (max_steps == 0)
-        throw std::invalid_argument("max_steps must be positive");
-    auto initial = environment.reset(reset);
-    if (!contains(environment.observation_space(), initial.observation))
-        throw std::runtime_error("reset observation outside space");
-    Value observation = std::move(initial.observation);
-    Episode episode;
-    for (std::size_t index = 0; index < max_steps; ++index)
-    {
-        auto action = policy.act(observation);
-        if (!contains(environment.action_space(), action))
-            throw std::runtime_error("policy action outside space");
-        auto result = environment.step(action);
-        if (!contains(environment.observation_space(), result.observation) || !std::isfinite(result.reward))
-            throw std::runtime_error("invalid environment transition");
-        if (index == max_steps - 1)
-            result.truncated = true;
-        if (learner != nullptr)
-            learner->observe(result);
-        episode.reward += result.reward;
-        if (!std::isfinite(episode.reward))
-            throw std::overflow_error("episode reward overflow");
-        ++episode.length;
-        observation = std::move(result.observation);
-        if (result.terminated || result.truncated)
-        {
-            episode.final_info = std::move(result.info);
-            episode.terminated = result.terminated;
-            episode.truncated = result.truncated;
-            return episode;
-        }
-    }
-    throw std::logic_error("episode limit not applied");
+    EpisodeSession session(environment, policy, max_steps, learner);
+    session.reset(reset);
+    while (!session.finished()) session.advance();
+    return session.episode();
 }
 
 double metric_value(const Episode& episode, const std::string& key)
@@ -67,6 +38,56 @@ double metric_value(const Episode& episode, const std::string& key)
     throw std::invalid_argument("nonnumeric metric: " + key);
 }
 }
+EpisodeSession::EpisodeSession(IEnvironment& environment, IPolicy& policy,
+                               std::size_t max_steps, ILearner* learner)
+    : environment_(environment), policy_(policy), learner_(learner), max_steps_(max_steps)
+{
+    if (max_steps == 0) throw std::invalid_argument("max_steps must be positive");
+    if (learner != nullptr && static_cast<IPolicy*>(learner) != &policy)
+        throw std::invalid_argument("learner must be the acting policy");
+}
+void EpisodeSession::reset(const ResetOptions& options)
+{
+    if (faulted_) throw std::logic_error("recreate session and policy after a failed transition");
+    if (!finished_) throw std::logic_error("finish the current episode before reset");
+    auto initial = environment_.reset(options);
+    if (!contains(environment_.observation_space(), initial.observation))
+        throw std::runtime_error("reset observation outside space");
+    transition_ = {std::move(initial.observation), 0, false, false, std::move(initial.info)};
+    episode_ = {};
+    stop_requested_ = false;
+    finished_ = false;
+}
+const StepResult& EpisodeSession::advance()
+{
+    if (finished_) throw std::logic_error("reset required before advance");
+    // Fail closed on an exception: never reuse a possibly pending learner transition.
+    finished_ = true;
+    faulted_ = true;
+    auto action = policy_.act(transition_.observation);
+    if (!contains(environment_.action_space(), action))
+        throw std::runtime_error("policy action outside space");
+    auto result = environment_.step(action);
+    if (!contains(environment_.observation_space(), result.observation) || !std::isfinite(result.reward))
+        throw std::runtime_error("invalid environment transition");
+    if (episode_.length == max_steps_ - 1 || stop_requested_) result.truncated = true;
+    if (learner_ != nullptr) learner_->observe(result);
+    episode_.reward += result.reward;
+    if (!std::isfinite(episode_.reward)) throw std::overflow_error("episode reward overflow");
+    ++episode_.length;
+    episode_.final_info = result.info;
+    episode_.terminated = result.terminated;
+    episode_.truncated = result.truncated;
+    transition_ = std::move(result);
+    finished_ = transition_.terminated || transition_.truncated;
+    faulted_ = false;
+    return transition_;
+}
+void EpisodeSession::request_stop() noexcept { stop_requested_ = true; }
+bool EpisodeSession::finished() const noexcept { return finished_; }
+const Episode& EpisodeSession::episode() const noexcept { return episode_; }
+const Value& EpisodeSession::observation() const noexcept { return transition_.observation; }
+
 Episode run_episode(IEnvironment& env, IPolicy& policy, const ResetOptions& reset, std::size_t limit)
 { return execute(env, policy, nullptr, reset, limit); }
 Episode train_episode(IEnvironment& env, ILearner& learner, const ResetOptions& reset, std::size_t limit)

@@ -1,138 +1,21 @@
-/**
-* @file Main/src/main.cpp
-* @brief Application entry point and scenario bootstrap.
-* @author PPOTrial
-* @date 2026-03-29
-* @copyright Copyright (c) 2026 PPOTrial
-* @license MIT
-*/
-#include "utils.hpp"
-#include "environment.hpp"
-#include "serializer.hpp"
-#include "objective.hpp"
-#include "Interception.hpp"
-#include "targetselector.hpp"
-#include "sam.hpp"
-
+#include "application.hpp"
 #include "environmentrenderer.hpp"
-#include "metaregistry.hpp"
-#include "scenarioconfig.hpp"
+#include <iostream>
 
-namespace {
-
-/**
-* @brief Tells whether one scenario entity type requires a platform file.
-* @param entityType Scenario type string.
-* @return True when the type needs a platform JSON file.
-*/
-bool
-RequiresPlatform(std::string const& entityType) noexcept
+int main(int argc, char** argv)
 {
-    // Preserve the historical platform-loading behavior.
-    return entityType == "Aircraft" || entityType == "SAM";
-}
-
-/**
-* @brief Instantiates entities and agents from one scenario file.
-*
-* The loader creates each entity, stores its metadata, instantiates the agents
-* declared in the scenario, and resolves target names once all entities exist.
-*
-* @param scenarioPath Path to the scenario JSON file.
-* @param environment Environment that receives the instantiated content.
-*/
-void
-LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment& environment)
-{
-    auto const scenario = ppo::config::LoadScenarioDefinition(scenarioPath);
-    std::map<ppo::model::Entity*, std::string> targetMapping{};
-    std::map<std::string, ppo::model::Entity*> entityMapping{};
-
-    for (auto const& entityDef : scenario.m_entities)
+    try
     {
-        if (RequiresPlatform(entityDef.m_type) && entityDef.m_platform.empty())
-            continue;
-
-        auto entity = ppo::reflection::CreateEntity(
-            entityDef.m_type,
-            environment,
-            entityDef.m_platform,
-            entityDef.m_side);
-
-        if (entity == nullptr)
-            continue;
-
-        entity->add<ppo::model::sEntityMetadata>(ppo::model::sEntityMetadata{
-            entityDef.m_name,
-            entityDef.m_platform.empty() ? entityDef.m_type : entityDef.m_platform
-        });
-
-        for (auto const& agentName : entityDef.m_agents)
-        {
-            auto agent = ppo::reflection::CreateAgent(agentName, environment, *entity.get());
-        }
-
-        if (!entityDef.m_target.empty())
-            targetMapping[entity.get()] = entityDef.m_target;
-
-        entityMapping[entityDef.m_name] = entity.get();
+        const std::filesystem::path resources = NAVIGATION_RESOURCE_PATH;
+        const auto scenario = navigation::load_scenario(argc > 1 ? std::filesystem::path(argv[1]) : resources / "default.nav");
+        navigation::Application application(scenario, resources / "score.metrics", "checkpoints/navigation2d");
+        ppo::renderer::EnvironmentRenderer renderer(application);
+        while (renderer.Run()) {}
+        return 0;
     }
-
-    for (auto const& [entity, target] : targetMapping)
+    catch (const std::exception& error)
     {
-        if (entity == nullptr
-            || !entity->has<ppo::model::sSNAState>())
-        {
-            continue;
-        }
-
-        if (auto iter = entityMapping.find(target);
-            iter != entityMapping.end()
-            && iter->second != nullptr)
-        {
-            auto [snaState] = entity->get<ppo::model::sSNAState>();
-            snaState.m_target = iter->second->uniqid();
-        }
+        std::cerr << "PPOTrial: " << error.what() << '\n';
+        return 1;
     }
-}
-
-} // namespace
-
-/**
-* @brief Runs the desktop application loop.
-* @param argc Command-line argument count.
-* @param argv Command-line argument vector.
-* @return Process exit code.
-*/
-int
-main(int argc, char** argv)
-{
-    ppo::reflection::RegisterAllMeta();
-
-    ppo::serialization::Serializer& serializer{ ppo::serialization::Serializer::GetInstance() };
-    std::filesystem::path serializationPath{ RESOURCE_PATH };
-    serializer.SetPath(serializationPath);
-
-    ppo::renderer::EnvironmentRenderer& environmentRenderer{
-        ppo::renderer::EnvironmentRenderer::GetInstance("PLAYGROUND")
-    };
-
-    ppo::model::Environment environment{};
-
-    std::filesystem::path scenarioPath{
-        std::filesystem::path(RESOURCE_PATH) / "Scenarios" / "Scenario1.json"
-    };
-    LoadScenario(scenarioPath, environment);
-
-    serializer.Load();
-    environmentRenderer.SetEnvironment(environment);
-
-    // Drive the whole application from the renderer until the window closes.
-    while (environmentRenderer.Run())
-    {
-    }
-
-    serializer.Save();
-
-    return 0;
 }

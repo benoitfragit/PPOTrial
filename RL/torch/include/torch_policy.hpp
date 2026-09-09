@@ -14,6 +14,9 @@ public:
     ~TorchLearner() override;
     Value act(const Value& observation) override;
     void observe(const StepResult& transition) override;
+    /// Read-only telemetry from the existing backend.
+    model::PPOOutputs outputs() const noexcept;
+    std::size_t rollout_step() const noexcept;
     /// Saves an eval/model.pt candidate using the existing archive layout.
     void save_candidate(const std::filesystem::path& path);
 private:

@@ -19,9 +19,10 @@ testable et maintenable. Adapte des principes de `benoitfragit/MFDStudio/AGENTS.
 
 - `RL/include` et `RL/src` portent le contrat et le runtime generiques,
   sans LibTorch, EnTT, rendu, entites ou scenarios. `RL/torch` isole LibTorch.
-- `PPO/` ne conserve que la compatibilite historique. Le backend extrait
-  est `ppo_torch` ; ne pas lui ajouter `GenericEntities`. `Examples/Navigation2D`
-  implemente le nouvel environnement. Voir `docs/rl-contract.md`.
+- `RL/torch` contient le backend extrait `ppo_torch`. `Examples/Navigation2D`
+  implemente l'environnement. `Main` orchestre l'application unique `PPO` ;
+  `Renderer` conserve la presentation ImGui/raylib. Aucun chemin legacy, shim
+  ou deuxieme application. Voir `docs/rl-contract.md`.
 - Le framework ne doit connaitre aucun type metier. Un environnement produit
   observations, actions, rewards et metriques par le contrat public.
 - Les adaptateurs dependent des contrats ; les contrats ne dependent jamais
@@ -85,8 +86,10 @@ testable et maintenable. Adapte des principes de `benoitfragit/MFDStudio/AGENTS.
   fichier, fonction, scenario, cause, impact, correction et test attendu.
 - Pour ce contrat : `cmake -S RL -B build/rl`,
   `cmake --build build/rl`, `ctest --test-dir build/rl --output-on-failure`.
-- Le build historique utilise actuellement LibTorch Windows/MSVC ; ne pas
-  annoncer sa validation a partir d'un simple build Linux du contrat.
+- Le desktop exige LibTorch et raylib/ImGui/ImPlot. Ne pas annoncer sa
+  validation a partir du seul build du contrat ou d'un controle syntaxique.
+- Le portage Navigation2D remplace explicitement l'ancien exemple et ses
+  configurations ; ne pas retablir de compatibilite avec les anciens agents.
 
 ## Definition de termine
 

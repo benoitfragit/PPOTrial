@@ -5,30 +5,30 @@
 The active example is now Navigation2D: one mobile, a fixed destination, circular
 forbidden zones and square world bounds. The original PPO optimizer, rollout
 collector and continuous Gaussian network are extracted rather than rewritten.
-Old integration remains available only as an optional compatibility application.
+The desktop is ported in place; the old application and compatibility layer are removed.
 
 | Target / directory | Responsibility | Dependencies |
 | --- | --- | --- |
 | `ppo_environment`, `RL/include`, `RL/src` | Spaces, environment API, shared episode driver, metrics, checkpoint promotion | C++17 standard library; localized Windows file publication |
 | `ppo_torch`, `RL/torch` | Existing PPO, RLAgent, Gaussian network; generic learner and frozen inference adapters | LibTorch, generic runtime |
 | `navigation_environment`, `Examples/Navigation2D` | Scenario, motion, observations, reward, collisions and arrival | generic runtime |
-| `navigation2d` | Scripted example | Navigation2D |
-| `navigation2d_policy`, `navigation2d_train` | Optional frozen evaluation and training/promotion CLI | Navigation2D, ppo_torch |
-| `navigation2d_viewer` | Optional manual visualization | Navigation2D, installed raylib |
-| `PPO/`, legacy directories | Historical compatibility wrappers/application | legacy simulator dependencies |
+| `navigation_application`, `Main` | Desktop clock, explicit mode selection, checkpoint/evaluation orchestration | Navigation2D, public Torch adapter |
+| `GenericRenderer`, `Renderer` | Existing desktop theme/docking, views, controls, inspection and plots | application presentation API, raylib, ImGui, ImPlot |
+| `PPO`, `Main/src/main.cpp` | The sole application entry point | controller and renderer |
 
-`ppo_torch` has no dependency on EnTT, entities, scenarios or rendering. Historical
-`GenericPPO` is explicitly a compatibility wrapper, not the reusable backend.
-The implementations moved from `PPO/src` and the former example network each have
-one definition under `RL/torch`; their old headers forward to the extracted ones.
-PPO parameter/loss types no longer pull in `components.hpp` or `IEvaluator`.
-The legacy spelling `PPOParamters` and network parameter names remain for source
-and archive compatibility. The optimizer equations/defaults are retained.
+`ppo_torch` has no dependency on EnTT, entities, scenarios or rendering. The
+optimizer, rollout collector and network each have one definition under `RL/torch`.
+The internal spelling `PPOParamters` and archive parameter names remain unchanged;
+there are no old-header forwarding shims or old application build switches.
 
 ## Shared lifecycle and truncation
 
-Training and evaluation use the same `execute` episode loop, via `train_episode`
-and `run_episode`. The latter never invokes learner feedback. Evaluation accepts
+Training and evaluation use `EpisodeSession`, incrementally in the desktop and
+via `train_episode` / `run_episode` for batch callers. `run_episode` never invokes
+learner feedback. A session completes act/step/observe before returning control to
+the UI. Pause does not reset anything. An external Stop marks the next complete
+transition truncated, then pauses; it executes one final action. Reset rejects an
+active episode, preventing accidental loss of the rollout boundary. Evaluation accepts
 a policy interface, and `FrozenTorchPolicy` owns a separately loaded network,
 uses mean actions and a no-grad guard, and has no optimizer.
 
@@ -80,10 +80,20 @@ old domain rewards. Arrival/collision terminate; the time limit truncates.
 
 The new scenario format and observation/reward contract are incompatible with old
 scenario/model semantics. Do not rename old archives and load them as Navigation2D.
-Use separate training output directories. A training run refuses an existing output
-path and stores its scenario and scoring configuration. The old ECS renderer and
-JSON loading remain in the legacy application; the navigation viewer is small and
-independent. The legacy UI has not been migrated wholesale.
+Checkpoints use a dedicated `checkpoints/navigation2d` directory. Each evaluation
+candidate stores its scenario and score configuration alongside the existing
+archive format. Historical JSON, assets and model archives remain stored under `resources/` but
+are not read, linked or copied by the new application. Preserving those data does
+not provide an old application or a compatibility mode.
+
+The GUI keeps the existing theme and dock builder plus the viewport, minimap,
+entity selection, inspection, controls, snapshot and plot panels. Their old ECS
+bindings are replaced by `navigation::Application`. The schema catalog now
+reports Navigation2D fields instead of EnTT reflection. Domain-specific controls
+and assets have been removed; reward rules are displayed as environment data,
+not duplicated as PPO settings. Renderer display flags use a new JSON settings
+file; there is no old-settings migration. The renderer uses planar coordinates
+inside its existing perspective viewport. It does not simulate motion.
 
 ## Evaluation and checkpoint lifecycle
 
@@ -93,16 +103,19 @@ std (population) and rate (fraction nonzero). Keys are `episode_reward`,
 `score` is the weighted sum; negative weights express minimization. Initial metric
 aggregation uses final episode info, not every step's info.
 
-The opt-in training CLI performs: collect episode -> save immutable candidate ->
-load independent frozen policy -> evaluate in a separate environment -> score ->
-promote if strictly better. The default example is deterministic and evaluates
-one episode of the same fixed scenario; it is a wiring example, not evidence of
-out-of-distribution performance. Partial rollouts are retained across episodes;
-only full buffers trigger the reused optimizer. A final partial buffer is not
-optimized automatically and is not saved for training resume.
+The desktop's explicit candidate command performs: pause training -> save candidate
+-> load independent frozen policy -> evaluate in a separate instance of the same
+environment -> score -> promote if strictly better. Evaluation advances at most
+64 transitions per frame, keeping the UI command path available. Stop cancels
+without promotion. The selected fixed scenario is deterministic; repeated episodes
+are a wiring check, not evidence of generalization. No background training starts
+at application launch. Full rollouts trigger the original optimizer synchronously;
+a PPO update may therefore stall a UI frame. Partial rollouts remain in memory
+across episodes, but neither optimizer state nor partial buffers are restored from
+an inference checkpoint. Rollout settings apply only when constructing a learner.
 
 Candidates use the existing `eval/model.pt` archive layout. The historical saver
-also creates a candidate-local `prod/model.pt` on first save; only `best/best.txt`
+also creates a candidate-local `prod/model.pt` on first save; only `prod/best.txt`
 is authoritative for promotion in the new workflow. It contains score and an
 immutable version directory. Publication uses rename on POSIX or MoveFileExW on
 Windows, guarded by an exclusive directory lock. Copy/write failure cannot point
@@ -130,7 +143,9 @@ arrival ordering, swept collisions, time limits, bootstrap conversion, metrics,
 configuration parsing and checkpoint promotion. They never execute a neural model.
 
 Direct GCC builds are supported as a fallback if CMake is unavailable. LibTorch,
-raylib, the Windows compatibility application and protoc must be built in an
+raylib and protoc must be built in an
 environment with those dependencies before considering their paths validated.
-No training, learned-model evaluation or checkpoint loading was performed during
+The ported renderer is syntax-checked against real dependency headers; this does
+not validate graphics linking or interactive behavior. CMake is unavailable in
+the execution environment. No training, learned-model evaluation or checkpoint loading was performed during
 this refactoring. See the PR for exact commands/results and outstanding gates.

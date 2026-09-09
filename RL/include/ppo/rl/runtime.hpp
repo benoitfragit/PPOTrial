@@ -24,6 +24,33 @@ struct Episode
     bool terminated = false;
     bool truncated = false;
 };
+/// Incremental episode driver shared by desktop, training and evaluation.
+/// References must outlive the session. Each advance completes act/step/observe.
+/// A learner is notified only when explicitly supplied as the acting policy.
+class EpisodeSession
+{
+public:
+    EpisodeSession(IEnvironment& environment, IPolicy& policy, std::size_t max_steps,
+                   ILearner* learner = nullptr);
+    void reset(const ResetOptions& options = {});
+    const StepResult& advance();
+    /// Marks the next complete transition as truncated (external stop).
+    /// It still executes one action; no reset or observation substitution occurs.
+    void request_stop() noexcept;
+    bool finished() const noexcept;
+    const Episode& episode() const noexcept;
+    const Value& observation() const noexcept;
+private:
+    IEnvironment& environment_;
+    IPolicy& policy_;
+    ILearner* learner_;
+    std::size_t max_steps_;
+    Episode episode_;
+    StepResult transition_;
+    bool finished_ = true;
+    bool stop_requested_ = false;
+    bool faulted_ = false;
+};
 /// One implementation of the episode loop for training and evaluation.
 /// max_steps is an external time limit; zero is rejected. Does not autoreset at the end.
 Episode run_episode(IEnvironment& environment, IPolicy& policy,

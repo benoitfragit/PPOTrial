@@ -97,6 +97,9 @@ void TorchLearner::observe(const StepResult& transition)
     impl_->agent->SetNewState(reward,transition.terminated || transition.truncated);
     impl_->pending=false;
 }
+model::PPOOutputs TorchLearner::outputs() const noexcept { return impl_->agent->GetOutputs(); }
+std::size_t TorchLearner::rollout_step() const noexcept
+{ return static_cast<std::size_t>(impl_->agent->GetCurrentStep()); }
 void TorchLearner::save_candidate(const std::filesystem::path& path)
 {
     if(impl_->pending) throw std::logic_error("cannot checkpoint a pending transition");

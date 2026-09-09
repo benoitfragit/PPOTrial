@@ -14,7 +14,7 @@ FULL_PATH_NAMES        = YES
 STRIP_FROM_PATH        = .
 CASE_SENSE_NAMES       = YES
 
-INPUT                  = Agents Entities Env Evaluation Initializer Main Meta PPO Renderer Serialization docs/doxygen
+INPUT                  = RL Examples Main Renderer docs/doxygen
 FILE_PATTERNS          = *.hpp *.cpp *.md
 RECURSIVE              = YES
 EXCLUDE                = out docs/generated
@@ -74,3 +74,4 @@ UML_LOOK               = YES
 DOT_GRAPH_MAX_NODES    = 80
 MAX_DOT_GRAPH_DEPTH    = 2
 DOT_CLEANUP            = YES
+

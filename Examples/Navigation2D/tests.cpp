@@ -72,6 +72,37 @@ void test_shared_loop()
     catch(const std::invalid_argument&) {invalid=true;}
     check(invalid && first.position().x==scenario.start.x,"invalid action does not mutate environment");
 }
+void test_incremental_session()
+{
+    navigation::Scenario scenario;
+    navigation::Environment first(scenario), second(scenario);
+    RecordingLearner learner, other;
+    ppo::rl::EpisodeSession session(first, learner, 20, &learner);
+    bool rejected = false;
+    try { session.advance(); } catch (const std::logic_error&) { rejected = true; }
+    check(rejected, "advance requires reset");
+    session.reset();
+    session.advance();
+    const auto paused = first.position();
+    check(session.episode().length == 1 && learner.transitions.size() == 1, "one complete transition per advance");
+    rejected = false;
+    try { session.reset(); } catch (const std::logic_error&) { rejected = true; }
+    check(rejected && first.position().x == paused.x, "active reset cannot discard a rollout boundary");
+    session.request_stop();
+    const auto final = session.advance();
+    check(session.finished() && final.truncated && !final.terminated, "external stop truncates");
+    check(learner.transitions.back().observation == final.observation, "stop sends final observation to learner");
+    const auto reward = session.episode().reward;
+    const auto batch = ppo::rl::train_episode(second, other, {}, 2);
+    check(batch.reward == reward && batch.length == session.episode().length, "desktop and batch loop agree");
+    const auto count = learner.transitions.size();
+    session.reset();
+    check(session.episode().length == 0 && learner.transitions.size() == count, "reset never updates learner");
+    rejected = false;
+    try { ppo::rl::EpisodeSession invalid(first, learner, 20, &other); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    check(rejected, "feedback cannot go to a different policy");
+}
 void test_bootstrap()
 {
     check(std::abs(ppo::rl::bootstrap_reward(1,false,true,10,0.9F)-10)<1e-6,"truncation bootstrap once");
@@ -129,8 +160,8 @@ int main()
 {
     try
     {
-        test_navigation();test_shared_loop();test_bootstrap();test_metrics();test_checkpoints_and_config();
-        std::cout<<"5 navigation/runtime test groups passed\n";return 0;
+        test_navigation();test_shared_loop();test_incremental_session();test_bootstrap();test_metrics();test_checkpoints_and_config();
+        std::cout<<"6 navigation/runtime test groups passed\n";return 0;
     }
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }
