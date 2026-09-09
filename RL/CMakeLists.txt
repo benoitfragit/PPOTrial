@@ -1,0 +1,16 @@
+cmake_minimum_required(VERSION 3.15)
+project(PPOEnvironmentContract LANGUAGES CXX)
+
+add_library(ppo_environment STATIC src/environment.cpp)
+add_library(ppo::environment ALIAS ppo_environment)
+target_include_directories(ppo_environment PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_features(ppo_environment PUBLIC cxx_std_17)
+set_target_properties(ppo_environment PROPERTIES CXX_EXTENSIONS OFF)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(environment_contract_tests tests/environment_tests.cpp)
+    target_link_libraries(environment_contract_tests PRIVATE ppo::environment)
+    set_target_properties(environment_contract_tests PROPERTIES CXX_EXTENSIONS OFF)
+    add_test(NAME environment_contract COMMAND environment_contract_tests)
+endif()
