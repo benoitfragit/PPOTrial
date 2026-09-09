@@ -76,7 +76,7 @@ Observations contain x/y and current goal x/y normalized by world extent, cos/si
 normalized speed and elapsed-step fraction, goal velocity x/y normalized by maximum
 controlled-mobile speed, then each obstacle x/y/radius
 normalized by extent. Observation width is `10 + 3 * obstacle_count`.
-Actions are normalized turn and acceleration commands. The goal moves linearly at its configured velocity. Its full trajectory must
+Actions are normalized turn and acceleration commands. By default the goal moves linearly at its configured velocity. Its full trajectory must
 remain inside the world (including the meeting radius); invalid paths are rejected.
 The scripted goal does not steer around obstacles. Forbidden zones constrain the
 controlled mobile; a goal inside a zone may be temporarily unreachable.
@@ -174,3 +174,65 @@ goal with a forbidden zone present; additional tests check encounters between
 step endpoints, collision-before-meeting, reset, moving-state observations and
 invalid velocities/paths. Training and evaluation exercise the same moving-goal
 environment through the existing runtime. No learned policy is run by these tests.
+
+
+## Frozen Prod/N-1 as the second mobile
+
+The desktop can select an explicit versioned `prod/<version>/eval/model.pt` in
+**Goal Prod/N-1 model.pt**, then **Apply goal controller**, after stopping the
+episode. Empty input restores constant velocity. This selection is independent
+of the first mobile's Manual/Training/Frozen policy mode. No model loads at launch.
+
+`Environment` owns an optional generic `IPolicy` for the second mobile. It calls
+only `act`, with the same v2 observation schema from that mobile's perspective:
+own position/heading/speed first, the other mobile's position and current velocity,
+then the unchanged world zones and episode clock. Both actions are based on the
+pre-step state. The same motion function applies to both mobiles. Reset restores
+both initial states; the provided Gaussian policies have no recurrent state.
+The initial goal velocity supplies its heading and speed and must not exceed the
+shared speed limit when a policy is selected. The scenario's baseline linear path
+validation still applies even when a policy will control it.
+
+A policy-controlled goal is subject to zones and world bounds. Its first collision
+ends the episode with `goal_collision=true`, without awarding meeting success or
+adding a new goal-collision reward. Both mobiles stop at the same fractional event
+time. The default scripted linear mode retains its existing zone semantics.
+
+`Application` loads a private copy through `IPolicyBackend::load_policy`, which the
+Torch backend implements with deterministic `FrozenTorchPolicy`. The goal never
+receives `observe`/PPO feedback. The learner and goal have independent ownership.
+The snapshot remains selected until an explicit change, even after promotion.
+Evaluation loads two new frozen instances, candidate and the same goal snapshot;
+the training instances are untouched. Each candidate contains `goal-model.pt`
+when applicable, plus `evaluation-context.txt`, scenario and score criteria.
+
+Snapshot files under `goal-snapshots/` have unique identities. Their identity is
+included in score-comparison context. Selecting a checkpoint again creates a new
+identity, even for identical bytes; comparison with an existing best then requires
+a separate checkpoint root. This conservative first implementation does not
+provide a content-addressed model registry, automatic opponent rotation, recurrent
+policy resets, or resumption of optimiser state. Historical non-v2 policies are
+not compatible. These remain explicit limits, not silently guessed migrations.
+
+Tests use fake policies only: perspective and simultaneous observations, live
+velocity, reset, invalid-action atomicity, swept goal collision, source-file
+replacement after selection, independent evaluation loads, and feedback restricted
+to the primary learner. They do not measure learned navigation performance.
+
+## Correspondence with the original example
+
+| Original concept | Current implementation | Nature of the change |
+| --- | --- | --- |
+| Aircraft | `navigation::State`: planar position, heading, speed | Kinematic representation replaces the old entity; same simple heading/speed integration principle |
+| Other Aircraft / destination | Second state, `goal_state()`, optional frozen Prod/N-1 policy | Moving destination restored; own observation perspective and identical motion controls |
+| SAM regions | `navigation::Obstacle`: circular center and radius | Geometric forbidden regions replace old entities/systems |
+| Distance-based completion | `arrival_radius`, relative swept meeting, `info.success` | Meeting tolerance, with continuous segment event detection |
+| Destruction/end flags | `collision`, `goal_collision`, `terminated` | Explicit navigation events, no old destruction system |
+| SNA / domain controllers | Two normalized turn/acceleration commands through the environment | Old source systems removed, not merely renamed |
+| Training/evaluation environment variants | One `Environment`, driven by `EpisodeSession` | Shared simulation contract |
+| Existing graphical shell | Main + Renderer with Navigation2D state bindings | Docking/panels retained, old entity bindings replaced |
+
+This is a replacement of the example approved during the port, not full behavioral
+equivalence with the original simulator. Its observations, navigation rewards and
+scenario format changed; PPO's optimisation equations did not change in this port.
+The simulation remains 2D, drawn in the existing perspective viewport.

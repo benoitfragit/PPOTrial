@@ -1,5 +1,7 @@
 #pragma once
 #include "ppo/rl/environment.hpp"
+#include "ppo/rl/runtime.hpp"
+#include <memory>
 #include <filesystem>
 #include <string>
 
@@ -29,7 +31,8 @@ std::string scenario_text(const Scenario& scenario);
 void save_scenario(const Scenario& scenario, const std::filesystem::path& path);
 struct State { Point position; double heading; double speed; };
 /// Local example with a moving goal mobile and circular forbidden regions.
-/// Its linear trajectory must remain inside the world for the episode horizon.
+/// The default linear trajectory must remain inside the world for the episode horizon.
+/// An optional frozen policy controls the second mobile through the same motion rules.
 /// Kinematic update reuses the original heading/speed Euler integration principle.
 class Environment final : public ppo::rl::IEnvironment
 {
@@ -42,14 +45,20 @@ public:
     Point position() const noexcept;
     State state() const noexcept;
     State goal_state() const noexcept;
+    /// Replaces the goal controller; caller must reset before stepping again.
+    /// Only act() is used, with the same observation schema and the two roles exchanged.
+    void set_goal_policy(std::unique_ptr<ppo::rl::IPolicy> policy);
     const Scenario& scenario() const noexcept;
 private:
-    ppo::rl::Value observe() const;
+    ppo::rl::Value observe(bool goal_perspective = false) const;
     Scenario scenario_;
     ppo::rl::Space observations_;
     ppo::rl::Space actions_ = ppo::rl::Box({2}, {-1.F,-1.F}, {1.F,1.F});
     Point position_;
     Point goal_position_;
+    double goal_heading_ = 0;
+    double goal_speed_ = 0;
+    std::unique_ptr<ppo::rl::IPolicy> goal_policy_;
     double heading_ = 0;
     double speed_ = 0;
     std::size_t steps_ = 0;

@@ -31,6 +31,7 @@ struct Application::Impl
     std::unique_ptr<ppo::rl::EpisodeSession> session;
     ControlMode mode = ControlMode::Manual;
     std::filesystem::path loaded_checkpoint;
+    std::filesystem::path goal_snapshot;
     Telemetry telemetry;
     bool running = false;
     double elapsed = 0;
@@ -99,6 +100,42 @@ Application::Application(Scenario scenario, std::filesystem::path metrics, std::
                          IPolicyBackend& backend)
     : impl_(std::make_unique<Impl>(std::move(scenario), std::move(metrics), std::move(checkpoints), backend)) {}
 Application::~Application() = default;
+void Application::set_goal_checkpoint(const std::filesystem::path& checkpoint)
+{
+    if (impl_->running || evaluating() || (!impl_->session->finished() && impl_->session->episode().length != 0))
+        throw std::logic_error("Stop the current episode before changing the goal controller");
+    std::unique_ptr<ppo::rl::IPolicy> policy;
+    std::filesystem::path snapshot;
+    if (!checkpoint.empty())
+    {
+        const auto directory = impl_->checkpoints / "goal-snapshots";
+        std::filesystem::create_directories(directory);
+        const auto serial = std::chrono::system_clock::now().time_since_epoch().count();
+        snapshot = std::filesystem::absolute(directory / ("goal-" + std::to_string(serial) + ".pt"));
+        std::filesystem::copy_file(checkpoint, snapshot); // no overwrite; later Prod promotion cannot replace this snapshot
+        try
+        {
+            const auto dimensions = std::get<std::vector<float>>(impl_->session->observation()).size();
+            policy = impl_->backend.load_policy(dimensions, 2, snapshot);
+            if (!policy) throw std::runtime_error("backend returned no goal policy");
+        }
+        catch (...)
+        {
+            std::error_code error;
+            std::filesystem::remove(snapshot, error);
+            throw;
+        }
+    }
+    auto session = std::make_unique<ppo::rl::EpisodeSession>(impl_->environment, *impl_->policy,
+        impl_->environment.scenario().max_steps, impl_->learner);
+    impl_->environment.set_goal_policy(std::move(policy));
+    session->reset();
+    impl_->session = std::move(session);
+    impl_->goal_snapshot = std::move(snapshot);
+    impl_->elapsed = 0;
+    impl_->status = impl_->goal_snapshot.empty() ? "Goal: constant velocity" : "Goal: pinned frozen policy";
+}
+const std::filesystem::path& Application::goal_checkpoint() const noexcept { return impl_->goal_snapshot; }
 void Application::play(ControlMode mode, std::size_t rollout, const std::filesystem::path& checkpoint)
 {
     if (mode != ControlMode::Manual && mode != ControlMode::Training && mode != ControlMode::Policy)
@@ -212,16 +249,30 @@ void Application::evaluate_candidate(std::size_t episodes)
     if (!criteria) throw std::runtime_error("cannot save candidate scoring criteria");
     auto environment = std::make_unique<Environment>(impl_->environment.scenario());
     const auto dimensions = std::get<std::vector<float>>(impl_->session->observation()).size();
+    if (!impl_->goal_snapshot.empty())
+    {
+        const auto goal_archive = candidate / "goal-model.pt";
+        std::filesystem::copy_file(impl_->goal_snapshot, goal_archive);
+        auto goal_policy = impl_->backend.load_policy(dimensions, 2, goal_archive);
+        if (!goal_policy) throw std::runtime_error("backend returned no evaluation goal policy");
+        environment->set_goal_policy(std::move(goal_policy));
+    }
     auto policy = impl_->backend.load_policy(dimensions, 2, candidate / "eval" / "model.pt");
     if (!policy) throw std::runtime_error("backend returned no evaluation policy");
     auto session = std::make_unique<ppo::rl::EpisodeSession>(*environment, *policy, environment->scenario().max_steps);
     session->reset({0, {}});
+    const auto evaluation_context = scenario_text(impl_->environment.scenario()) + criteria_text
+        + "episodes " + std::to_string(episodes) + "\nseed-sequence 0..episodes-1\n"
+        + "goal-controller " + (impl_->goal_snapshot.empty() ? std::string("linear") : impl_->goal_snapshot.generic_string()) + "\n";
+    std::ofstream context(candidate / "evaluation-context.txt", std::ios::binary);
+    context << evaluation_context;
+    context.close();
+    if (!context) throw std::runtime_error("cannot save candidate evaluation context");
     impl_->evaluation_environment = std::move(environment);
     impl_->evaluation_policy = std::move(policy);
     impl_->evaluation_session = std::move(session);
     impl_->evaluation_metrics = std::move(metrics);
-    impl_->evaluation_context = scenario_text(impl_->environment.scenario()) + criteria_text
-        + "episodes " + std::to_string(episodes) + "\nseed-sequence 0..episodes-1\n";
+    impl_->evaluation_context = evaluation_context;
     impl_->evaluation_paused = false;
     impl_->evaluation_episodes.clear();
     impl_->evaluation_count = episodes;

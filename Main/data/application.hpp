@@ -32,6 +32,10 @@ public:
     void stop();
     void tick(double elapsed, const std::vector<float>& manual_action, double time_scale);
     void evaluate_candidate(std::size_t episodes);
+    /// Select an explicit immutable Prod/N-1 model.pt, or an empty path for linear motion.
+    /// Stop the current episode first. A private snapshot is pinned until changed explicitly.
+    void set_goal_checkpoint(const std::filesystem::path& checkpoint);
+    const std::filesystem::path& goal_checkpoint() const noexcept;
     const Environment& environment() const noexcept;
     const ppo::rl::Value& observation() const noexcept;
     const Telemetry& telemetry() const noexcept;

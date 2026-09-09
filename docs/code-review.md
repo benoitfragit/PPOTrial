@@ -72,3 +72,20 @@ to reach another mobile. The example now supports a constant-velocity goal mobil
 current position/velocity observations, relative swept meeting detection and live
 display. This is an environment schema change (v2), not a change to PPO. Old v1
 policies are incompatible. See the contract and PR for the new verification results.
+
+
+## Follow-up: frozen Prod/N-1 destination
+
+The linear-only moving goal still omitted the user's earlier-policy destination
+workflow. Added an optional generic goal policy to the same environment, with
+role-swapped pre-step observations and shared kinematics/collision functions.
+Application pins a separate checkpoint snapshot; evaluation loads independent
+candidate and goal policies. Only the primary learner receives feedback. Snapshot
+identity is part of evaluation context and the goal archive is stored with each
+candidate. UI exposes separate first-mobile and goal-controller selections.
+
+Headless tests cover ownership/feedback, viewpoint, reset, invalid goal action,
+goal collision, source replacement after pinning, and independent evaluation.
+No real model was run. Snapshot identities are unique per selection rather than
+content-addressed; changing/reselecting the goal requires a separate best-score
+store. This limitation and the original-to-navigation mapping are documented.

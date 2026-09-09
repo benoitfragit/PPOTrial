@@ -1,5 +1,6 @@
 #include "application.hpp"
 #include <chrono>
+#include <cmath>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -42,6 +43,7 @@ class FakeBackend final : public navigation::IPolicyBackend
 {
 public:
     Counts counts;
+    std::vector<std::filesystem::path> loaded_paths;
     std::unique_ptr<ppo::rl::ILearner> create_learner(
         std::size_t, std::size_t, std::size_t, const std::filesystem::path&) override
     {
@@ -49,8 +51,9 @@ public:
         return std::make_unique<FakeLearner>(counts);
     }
     std::unique_ptr<ppo::rl::IPolicy> load_policy(
-        std::size_t, std::size_t, const std::filesystem::path&) override
+        std::size_t, std::size_t, const std::filesystem::path& path) override
     {
+        loaded_paths.push_back(path);
         ++counts.loads;
         return std::make_unique<FakePolicy>(counts);
     }
@@ -134,6 +137,88 @@ void test_evaluation_context()
     check(rejected && !different.evaluating(), "different scenarios cannot share a best score");
     check(backend.counts.feedback == 0, "evaluation never updates either learner");
 }
+class RecordingGoal final : public ppo::rl::ILearner
+{
+public:
+    ppo::rl::Value last_observation;
+    int calls = 0, feedback = 0;
+    ppo::rl::Value action = std::vector<float>{0, 1};
+    ppo::rl::Value act(const ppo::rl::Value& observation) override
+    {
+        ++calls;
+        last_observation = observation;
+        return action;
+    }
+    void observe(const ppo::rl::StepResult&) override { ++feedback; }
+};
+void test_goal_policy()
+{
+    navigation::Scenario scenario;
+    scenario.dt = 1;
+    scenario.max_steps = 2;
+    navigation::Environment environment(scenario);
+    auto goal = std::make_unique<RecordingGoal>();
+    auto* recording = goal.get();
+    environment.set_goal_policy(std::move(goal));
+    environment.reset();
+    environment.step(std::vector<float>{0,0});
+    const auto& view = std::get<std::vector<float>>(recording->last_observation);
+    check(std::abs(view[0] - 0.1F) < 1e-6F && view[2] == 0, "goal sees itself first and controlled mobile second, before motion");
+    check(std::abs(view[8] - 0.2F) < 1e-6F, "goal sees other mobile velocity");
+    check(environment.goal_state().position.x == 12 && environment.goal_state().speed == 2, "goal policy controls acceleration");
+    check(recording->calls == 1 && recording->feedback == 0, "goal policy only acts, never learns");
+    const auto observation = std::get<std::vector<float>>(environment.reset().observation);
+    check(environment.goal_state().position.x == 10 && observation[8] == 0, "reset restores goal motion");
+    recording->action = std::vector<float>{9,0};
+    bool rejected = false;
+    try { environment.step(std::vector<float>{0,1}); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    check(rejected && environment.state().speed == 1 && environment.goal_state().position.x == 10,
+          "invalid goal action rejected before either state changes");
+    navigation::Scenario blocked;
+    blocked.dt = 1; blocked.max_steps = 2;
+    blocked.obstacles.push_back({{11,0},0.2});
+    navigation::Environment bounded(blocked);
+    bounded.set_goal_policy(std::make_unique<RecordingGoal>());
+    bounded.reset();
+    const auto result = bounded.step(std::vector<float>{0,0});
+    check(result.terminated && std::get<bool>(result.info.at("goal_collision")) && !std::get<bool>(result.info.at("success")),
+          "goal policy collision ends episode without meeting success");
+    check(std::abs(bounded.goal_state().position.x-10.8) < 1e-10, "goal cannot tunnel through forbidden zone");
+}
+void test_pinned_goal_checkpoint()
+{
+    TemporaryDirectory directory;
+    FakeBackend backend;
+    const auto source = directory.path / "prod-model.pt";
+    { std::ofstream output(source); output << "N-1 synthetic"; }
+    navigation::Scenario scenario;
+    scenario.max_steps = 2;
+    navigation::Application app(scenario, directory.path / "score.metrics", directory.path / "store", backend);
+    app.set_goal_checkpoint(source);
+    const auto pinned = app.goal_checkpoint();
+    check(pinned != source && std::filesystem::exists(pinned), "selected Prod is privately pinned");
+    { std::ofstream output(source); output << "N synthetic"; }
+    std::ifstream input(pinned);
+    std::string bytes; std::getline(input, bytes);
+    check(bytes == "N-1 synthetic", "later source replacement cannot change pinned goal");
+    app.play(navigation::ControlMode::Training, 64, {});
+    app.tick(scenario.dt, {0,0}, 1);
+    check(backend.counts.feedback == 1 && backend.counts.evaluation_actions == 1, "training updates only main learner while frozen goal acts");
+    bool rejected = false;
+    try { app.set_goal_checkpoint({}); }
+    catch (const std::logic_error&) { rejected = true; }
+    check(rejected, "cannot switch goal during episode");
+    app.evaluate_candidate(1);
+    check(backend.counts.loads == 3 && backend.loaded_paths[1].filename() == "goal-model.pt", "evaluation independently loads pinned goal and candidate");
+    app.tick(0, {0,0}, 1);
+    check(backend.counts.feedback == 1 && backend.counts.evaluation_actions == 5, "evaluation drives both frozen policies without learner update");
+    check(app.goal_checkpoint() == pinned, "promotion does not switch N-1 goal");
+    app.stop();
+    app.set_goal_checkpoint({});
+    check(app.goal_checkpoint().empty(), "explicit return to linear goal mode");
+}
+
 }
 int main()
 {
@@ -141,7 +226,9 @@ int main()
     {
         test_controls();
         test_evaluation_context();
-        std::cout << "2 application control test groups passed (fake backend only)\n";
+        test_goal_policy();
+        test_pinned_goal_checkpoint();
+        std::cout << "4 application control test groups passed (fake backend only)\n";
         return 0;
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

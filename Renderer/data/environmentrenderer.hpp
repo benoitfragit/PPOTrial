@@ -48,6 +48,7 @@ private:
     int m_rollout = 2048;
     int m_evaluationEpisodes = 10;
     char m_checkpoint[1024] = {};
+    char m_goalCheckpoint[1024] = {};
     ImGuiTextFilter m_filter;
     std::string m_error;
     std::vector<navigation::Point> m_trail;

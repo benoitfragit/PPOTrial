@@ -392,7 +392,7 @@ void EnvironmentRenderer::DrawInspectorWindow()
         {
             const auto state = m_application.environment().goal_state();
             ImGui::Text("Speed: %.3f | heading: %.3f rad", state.speed, state.heading);
-            ImGui::Text("Velocity: %.3f, %.3f", scenario.goal_velocity.x, scenario.goal_velocity.y);
+            ImGui::Text("Velocity: %.3f, %.3f", std::cos(state.heading)*state.speed, std::sin(state.heading)*state.speed);
             ImGui::Text("Meeting radius: %.3f", scenario.arrival_radius);
         }
         else ImGui::Text("Radius: %.3f", scenario.obstacles.at(static_cast<std::size_t>(m_selection-2)).radius);
@@ -411,6 +411,14 @@ void EnvironmentRenderer::DrawAgentsWindow()
                 ImGui::Combo("Mode", &m_mode, "Manual\0Training\0Frozen policy\0");
                 ImGui::SliderInt("New learner rollout", &m_rollout, 64, 8192);
                 ImGui::InputText("Policy model.pt", m_checkpoint, sizeof(m_checkpoint));
+                ImGui::InputText("Goal Prod/N-1 model.pt", m_goalCheckpoint, sizeof(m_goalCheckpoint));
+                if (ImGui::Button("Apply goal controller"))
+                {
+                    try { m_application.set_goal_checkpoint(m_goalCheckpoint); m_error.clear(); }
+                    catch (const std::exception& error) { m_error = error.what(); }
+                }
+                ImGui::TextWrapped("Stop first. Select a versioned Prod model.pt for the second mobile; leave empty for constant velocity. Promotion never switches it automatically.");
+                ImGui::TextWrapped("Goal snapshot: %s", m_application.goal_checkpoint().empty() ? "constant velocity" : m_application.goal_checkpoint().string().c_str());
                 ImGui::TextWrapped("Stop before switching mode. Rollout applies when creating a learner. Pause/Play resumes the current policy.");
                 ImGui::SliderInt("Evaluation episodes", &m_evaluationEpisodes, 1, 1000);
                 if (ImGui::Button("Save candidate / evaluate / promote"))

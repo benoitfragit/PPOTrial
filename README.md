@@ -87,3 +87,11 @@ each step, while forbidden zones still terminate the controlled mobile's episode
 The new `navigation2d-v2` schema has `10 + 3 * obstacle_count` observation values.
 Policies trained with the previous observation width cannot be reused. No policy
 training or avoidance performance has been measured by this change.
+
+
+The second mobile can also use a frozen **Prod/N-1** checkpoint. Stop the episode,
+enter a versioned `model.pt` in **Goal Prod/N-1 model.pt**, and apply the controller;
+then select Training for the first mobile. A private snapshot stays fixed until
+explicitly changed. Evaluation uses independently loaded copies of both policies.
+See [the contract and migration mapping](docs/rl-contract.md#frozen-prodn-1-as-the-second-mobile)
+for observation perspectives, checkpoint identity and compatibility limits.
