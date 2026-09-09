@@ -1,5 +1,5 @@
 /**
-* @file PPO/data/trainingnet.hpp
+* @file RL/torch/include/trainingnet.hpp
 * @brief Declarations for trainingnet.
 * @author PPOTrial
 * @date 2026-03-29

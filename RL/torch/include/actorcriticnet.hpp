@@ -1,5 +1,5 @@
 /**
-* @file Agents/Generic/data/actorcriticnet.hpp
+* @file RL/torch/include/actorcriticnet.hpp
 * @brief Declarations for actorcriticnet.
 * @author PPOTrial
 * @date 2026-03-29

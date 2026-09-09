@@ -1,7 +1,7 @@
 name: Build and contract tests
 on:
   push:
-    branches: [master, refactor/generic-environment-contract]
+    branches: [master]
   pull_request:
     branches: [master]
 permissions:

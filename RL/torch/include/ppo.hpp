@@ -1,5 +1,5 @@
 /**
-* @file PPO/data/ppo.hpp
+* @file RL/torch/include/ppo.hpp
 * @brief Declarations for ppo.
 * @author PPOTrial
 * @date 2026-03-29

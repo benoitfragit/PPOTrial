@@ -1,5 +1,5 @@
 /**
-* @file Agents/Generic/src/actorcriticnet.cpp
+* @file RL/torch/src/actorcriticnet.cpp
 * @brief Implementation of the continuous-action actor-critic networks.
 * @author PPOTrial
 * @date 2026-03-29

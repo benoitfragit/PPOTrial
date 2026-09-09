@@ -73,13 +73,17 @@ struct Metric
 /// Missing, nonnumeric and nonfinite metrics fail explicitly, never silently become zero.
 /// Strict text rows: metric-key reduction weight. Lines starting with # are comments.
 std::vector<Metric> load_metrics(const std::filesystem::path& path);
+/// Canonical text representation, independent of comments/formatting in an input file.
+std::string metrics_text(const std::vector<Metric>& metrics);
 double aggregate(const std::vector<Episode>& episodes, const Metric& metric);
 double score(const std::vector<Episode>& episodes, const std::vector<Metric>& metrics);
 /// Immutable candidate directory + single atomic best-reference file.
 /// Caller supplies a fully saved candidate and its independently evaluated score.
+/// Context is an opaque identity for comparable evaluation conditions (at most 1 MiB).
+/// A different context or malformed best reference is rejected before comparing scores.
 /// Returns false for ties/worse candidates. Existing candidate directories are never overwritten.
 /// Publication failure throws, preserving the previous best reference.
 bool promote_checkpoint(const std::filesystem::path& candidate,
                         const std::filesystem::path& store, const std::string& version,
-                        double candidate_score);
+                        double candidate_score, const std::string& evaluation_context = {});
 } // namespace ppo::rl

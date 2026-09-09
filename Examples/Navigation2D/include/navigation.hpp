@@ -1,7 +1,7 @@
 #pragma once
 #include "ppo/rl/environment.hpp"
 #include <filesystem>
-#include <random>
+#include <string>
 
 namespace navigation {
 struct Point { double x = 0; double y = 0; };
@@ -23,6 +23,10 @@ struct Scenario
 };
 /// Versioned, strict text format; rejects unknown keys, trailing fields and invalid values.
 Scenario load_scenario(const std::filesystem::path& path);
+/// Validated canonical scenario serialization used for persistence and evaluation identity.
+std::string scenario_text(const Scenario& scenario);
+void save_scenario(const Scenario& scenario, const std::filesystem::path& path);
+struct State { Point position; double heading; double speed; };
 /// Local example with fixed destination and circular forbidden regions.
 /// Kinematic update reuses the original heading/speed Euler integration principle.
 class Environment final : public ppo::rl::IEnvironment
@@ -34,6 +38,7 @@ public:
     const ppo::rl::Space& observation_space() const noexcept override;
     const ppo::rl::Space& action_space() const noexcept override;
     Point position() const noexcept;
+    State state() const noexcept;
     const Scenario& scenario() const noexcept;
 private:
     ppo::rl::Value observe() const;

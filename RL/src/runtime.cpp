@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <locale>
 #include <stdexcept>
 #include <sstream>
 #ifdef _WIN32
@@ -114,6 +115,7 @@ std::vector<Metric> load_metrics(const std::filesystem::path& path)
     {
         if (line.empty() || line.front() == '#') continue;
         std::istringstream row(line);
+        row.imbue(std::locale::classic());
         Metric metric;
         std::string reduction, extra;
         if (!(row >> metric.key >> reduction >> metric.weight) || (row >> extra)
@@ -130,6 +132,33 @@ std::vector<Metric> load_metrics(const std::filesystem::path& path)
     }
     if (input.bad() || result.empty()) throw std::invalid_argument("empty or unreadable metrics configuration");
     return result;
+}
+
+std::string metrics_text(const std::vector<Metric>& metrics)
+{
+    if (metrics.empty() || metrics.size() > 1024) throw std::invalid_argument("invalid scoring criteria count");
+    std::ostringstream output;
+    output.imbue(std::locale::classic());
+    output << std::setprecision(std::numeric_limits<double>::max_digits10);
+    for (const auto& metric : metrics)
+    {
+        if (metric.key.empty() || metric.key.front() == '#'
+            || metric.key.find_first_of(" \t\r\n") != std::string::npos || !std::isfinite(metric.weight))
+            throw std::invalid_argument("invalid metric key or weight");
+        const char* reduction = nullptr;
+        switch (metric.reduction)
+        {
+        case Reduction::Mean: reduction = "mean"; break;
+        case Reduction::Sum: reduction = "sum"; break;
+        case Reduction::Min: reduction = "min"; break;
+        case Reduction::Max: reduction = "max"; break;
+        case Reduction::Std: reduction = "std"; break;
+        case Reduction::Rate: reduction = "rate"; break;
+        default: throw std::invalid_argument("unknown metric reduction");
+        }
+        output << metric.key << ' ' << reduction << ' ' << metric.weight << '\n';
+    }
+    return output.str();
 }
 
 double aggregate(const std::vector<Episode>& episodes, const Metric& metric)
@@ -158,7 +187,10 @@ double aggregate(const std::vector<Episode>& episodes, const Metric& metric)
     case Reduction::Sum: result = sum; break;
     case Reduction::Min: result = minimum; break;
     case Reduction::Max: result = maximum; break;
-    case Reduction::Std: result = std::sqrt(std::max(0.0, squares / static_cast<double>(count))); break;
+    case Reduction::Std:
+        if (!std::isfinite(squares)) throw std::overflow_error("variance accumulation overflow");
+        result = std::sqrt(std::max(0.0, squares / static_cast<double>(count)));
+        break;
     case Reduction::Rate: result = static_cast<double>(nonzero) / static_cast<double>(count); break;
     default: throw std::invalid_argument("unknown metric reduction");
     }
@@ -179,9 +211,9 @@ double score(const std::vector<Episode>& episodes, const std::vector<Metric>& me
 }
 
 bool promote_checkpoint(const std::filesystem::path& candidate, const std::filesystem::path& store,
-                        const std::string& version, double candidate_score)
+                        const std::string& version, double candidate_score, const std::string& evaluation_context)
 {
-    if (!std::isfinite(candidate_score) || version.empty()
+    if (evaluation_context.size() > 1024 * 1024 || !std::isfinite(candidate_score) || version.empty()
         || version.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") != std::string::npos)
         throw std::invalid_argument("invalid checkpoint version or score");
     if (!std::filesystem::is_directory(candidate) || std::filesystem::is_empty(candidate))
@@ -195,11 +227,17 @@ bool promote_checkpoint(const std::filesystem::path& candidate, const std::files
         const auto best = store / "best.txt";
         if (std::filesystem::exists(best))
         {
-            std::ifstream input(best);
+            std::ifstream input(best, std::ios::binary);
+            input.imbue(std::locale::classic());
             double best_score;
-            std::string best_version;
-            if (!(input >> best_score >> best_version) || !std::isfinite(best_score))
+            std::string best_version, best_context;
+            if (!(input >> best_score >> best_version >> std::quoted(best_context)) || !std::isfinite(best_score)
+                || best_version.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") != std::string::npos)
                 throw std::runtime_error("invalid best checkpoint reference");
+            input >> std::ws;
+            if (!input.eof()) throw std::runtime_error("trailing best checkpoint reference data");
+            if (best_context != evaluation_context)
+                throw std::invalid_argument("evaluation context differs; use a separate checkpoint store");
             if (candidate_score <= best_score)
             {
                 std::filesystem::remove(lock);
@@ -217,8 +255,9 @@ bool promote_checkpoint(const std::filesystem::path& candidate, const std::files
         std::filesystem::copy(candidate, destination, std::filesystem::copy_options::recursive);
         const auto temporary = lock / "best.txt";
         {
-            std::ofstream output(temporary);
-            output << std::setprecision(17) << candidate_score << '\n' << version << '\n';
+            std::ofstream output(temporary, std::ios::binary);
+            output.imbue(std::locale::classic());
+            output << std::setprecision(17) << candidate_score << '\n' << version << '\n' << std::quoted(evaluation_context) << '\n';
             output.close();
             if (!output) throw std::runtime_error("cannot write checkpoint reference");
         }

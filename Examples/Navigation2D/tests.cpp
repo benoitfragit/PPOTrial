@@ -128,6 +128,12 @@ void test_metrics()
     try {ppo::rl::aggregate(episodes,{"missing"});}
     catch(const std::invalid_argument&) {missing=true;}
     check(missing,"missing metrics do not silently score zero");
+    episodes[0].reward = 1e308;
+    episodes[1].reward = -1e308;
+    bool overflow = false;
+    try { ppo::rl::aggregate(episodes, {"episode_reward", ppo::rl::Reduction::Std}); }
+    catch (const std::overflow_error&) { overflow = true; }
+    check(overflow, "overflowing variance must not report zero");
 }
 void test_checkpoints_and_config()
 {
@@ -142,6 +148,10 @@ void test_checkpoints_and_config()
     check(ppo::rl::promote_checkpoint(candidate,store,"v3",2),"better candidate promoted");
     std::ifstream best(store/"best.txt");double score;std::string version;best>>score>>version;
     check(score==2 && version=="v3","best reference updated");
+    bool context_mismatch = false;
+    try { ppo::rl::promote_checkpoint(candidate, store, "v4", 100, "different conditions"); }
+    catch (const std::invalid_argument&) { context_mismatch = true; }
+    check(context_mismatch && !std::filesystem::exists(store / "v4"), "incomparable candidate rejected before copying");
     const auto metric_file=temporary.path/"score.metrics";
     {std::ofstream file(metric_file);file<<"success rate 100\nepisode_reward mean 1\n";}
     const auto criteria=ppo::rl::load_metrics(metric_file);
@@ -149,6 +159,11 @@ void test_checkpoints_and_config()
     const auto scenario_file=temporary.path/"scenario.nav";
     {std::ofstream file(scenario_file);file<<"navigation2d-v1\nstart 0 0 0 1\ngoal 10 0 0.5\n";}
     check(navigation::load_scenario(scenario_file).goal.x==10,"scenario loaded");
+    const auto loaded = navigation::load_scenario(scenario_file);
+    navigation::save_scenario(loaded, scenario_file);
+    check(navigation::scenario_text(navigation::load_scenario(scenario_file)) == navigation::scenario_text(loaded), "canonical scenario round trip");
+    { std::ofstream file(metric_file); file << ppo::rl::metrics_text(criteria); }
+    check(ppo::rl::metrics_text(ppo::rl::load_metrics(metric_file)) == ppo::rl::metrics_text(criteria), "canonical metrics round trip");
     {std::ofstream file(scenario_file);file<<"navigation2d-v1\nunknown 0\n";}
     bool rejected=false;
     try {navigation::load_scenario(scenario_file);}

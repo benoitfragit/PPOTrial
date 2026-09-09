@@ -1,5 +1,5 @@
 /**
-* @file PPO/src/ppo.cpp
+* @file RL/torch/src/ppo.cpp
 * @brief Implementation of the PPO optimizer wrapper.
 * @author PPOTrial
 * @date 2026-03-29

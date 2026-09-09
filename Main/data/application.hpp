@@ -1,6 +1,6 @@
 #pragma once
 #include "navigation.hpp"
-#include "ppo/rl/runtime.hpp"
+#include "policybackend.hpp"
 #include <memory>
 #include <string>
 
@@ -23,7 +23,9 @@ struct Telemetry
 class Application
 {
 public:
-    Application(Scenario scenario, std::filesystem::path metrics, std::filesystem::path checkpoints);
+    /// backend must outlive this application. Construction starts paused in manual mode.
+    Application(Scenario scenario, std::filesystem::path metrics, std::filesystem::path checkpoints,
+                IPolicyBackend& backend);
     ~Application();
     void play(ControlMode mode, std::size_t rollout, const std::filesystem::path& checkpoint);
     void pause();

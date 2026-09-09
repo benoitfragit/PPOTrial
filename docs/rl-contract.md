@@ -12,7 +12,7 @@ The desktop is ported in place; the old application and compatibility layer are 
 | `ppo_environment`, `RL/include`, `RL/src` | Spaces, environment API, shared episode driver, metrics, checkpoint promotion | C++17 standard library; localized Windows file publication |
 | `ppo_torch`, `RL/torch` | Existing PPO, RLAgent, Gaussian network; generic learner and frozen inference adapters | LibTorch, generic runtime |
 | `navigation_environment`, `Examples/Navigation2D` | Scenario, motion, observations, reward, collisions and arrival | generic runtime |
-| `navigation_application`, `Main` | Desktop clock, explicit mode selection, checkpoint/evaluation orchestration | Navigation2D, public Torch adapter |
+| `navigation_application`, `Main` | Desktop clock, explicit mode selection, checkpoint/evaluation orchestration | Navigation2D, injected policy backend interface |
 | `GenericRenderer`, `Renderer` | Existing desktop theme/docking, views, controls, inspection and plots | application presentation API, raylib, ImGui, ImPlot |
 | `PPO`, `Main/src/main.cpp` | The sole application entry point | controller and renderer |
 
@@ -88,7 +88,8 @@ not provide an old application or a compatibility mode.
 
 The GUI keeps the existing theme and dock builder plus the viewport, minimap,
 entity selection, inspection, controls, snapshot and plot panels. Their old ECS
-bindings are replaced by `navigation::Application`. The schema catalog now
+bindings are replaced by `navigation::Application`. `Main/src/torch_backend.cpp` alone binds the controller to Torch. The controller
+can therefore be exercised headlessly with synthetic policies. The schema catalog now
 reports Navigation2D fields instead of EnTT reflection. Domain-specific controls
 and assets have been removed; reward rules are displayed as environment data,
 not duplicated as PPO settings. Renderer display flags use a new JSON settings
@@ -106,7 +107,7 @@ aggregation uses final episode info, not every step's info.
 The desktop's explicit candidate command performs: pause training -> save candidate
 -> load independent frozen policy -> evaluate in a separate instance of the same
 environment -> score -> promote if strictly better. Evaluation advances at most
-64 transitions per frame, keeping the UI command path available. Stop cancels
+64 transitions per frame, keeping the UI command path available. Pause/Play suspends/resumes evaluation. Stop cancels
 without promotion. The selected fixed scenario is deterministic; repeated episodes
 are a wiring check, not evidence of generalization. No background training starts
 at application launch. Full rollouts trigger the original optimizer synchronously;
@@ -116,8 +117,12 @@ an inference checkpoint. Rollout settings apply only when constructing a learner
 
 Candidates use the existing `eval/model.pt` archive layout. The historical saver
 also creates a candidate-local `prod/model.pt` on first save; only `prod/best.txt`
-is authoritative for promotion in the new workflow. It contains score and an
-immutable version directory. Publication uses rename on POSIX or MoveFileExW on
+is authoritative for promotion in the new workflow. It contains score, an immutable version directory, and a quoted evaluation-context
+string. The generic publisher treats that string as opaque and rejects mismatches
+before comparing scores. Navigation2D supplies canonical scenario/metrics text,
+episode count and seed sequence. This reference format is incompatible with the
+earlier two-line reference; use a new checkpoint root rather than silently
+comparing against a score without evaluation provenance. Publication uses rename on POSIX or MoveFileExW on
 Windows, guarded by an exclusive directory lock. Copy/write failure cannot point
 best at a partial candidate. A failed copy can leave an unreferenced version;
 remove it manually before retrying that version. A process crash can leave the

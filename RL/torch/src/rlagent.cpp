@@ -1,5 +1,5 @@
 /**
-* @file PPO/src/rlagent.cpp
+* @file RL/torch/src/rlagent.cpp
 * @brief Implementation of the rollout-collection RL agent wrapper.
 * @author PPOTrial
 * @date 2026-03-29
@@ -226,8 +226,7 @@ RLAgent::Impl::SetNewState(float reward, bool done)
         }
         else
         {
-            auto [_, __, last_val] = p_ppo->SelectAction(m_state_t);
-            m_last_values = last_val;
+            m_last_values = std::get<2>(p_ppo->SelectAction(m_state_t));
         }
 
         UpdatePolicy();

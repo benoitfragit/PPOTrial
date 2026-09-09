@@ -2,7 +2,9 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
 #include <limits>
+#include <locale>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -72,6 +74,7 @@ Scenario load_scenario(const std::filesystem::path& path)
     {
         if(line.empty() || line.front()=='#') continue;
         std::istringstream row(line);
+        row.imbue(std::locale::classic());
         std::string key; row>>key;
         if(key=="start") row>>s.start.x>>s.start.y>>s.heading>>s.speed;
         else if(key=="goal") row>>s.goal.x>>s.goal.y>>s.arrival_radius;
@@ -91,6 +94,29 @@ Scenario load_scenario(const std::filesystem::path& path)
     }
     if(input.bad()) throw std::runtime_error("scenario read failed");
     return validate(std::move(s));
+}
+std::string scenario_text(const Scenario& scenario)
+{
+    const auto s = validate(scenario);
+    std::ostringstream output;
+    output.imbue(std::locale::classic());
+    output << std::setprecision(std::numeric_limits<double>::max_digits10)
+           << "navigation2d-v1\nstart " << s.start.x << ' ' << s.start.y << ' '
+           << s.heading << ' ' << s.speed << "\ngoal " << s.goal.x << ' '
+           << s.goal.y << ' ' << s.arrival_radius << "\nworld " << s.half_extent
+           << ' ' << s.dt << ' ' << s.max_steps << "\nmotion " << s.max_speed
+           << ' ' << s.max_acceleration << ' ' << s.max_turn_rate << '\n';
+    for (const auto& obstacle : s.obstacles)
+        output << "obstacle " << obstacle.center.x << ' ' << obstacle.center.y << ' ' << obstacle.radius << '\n';
+    return output.str();
+}
+void save_scenario(const Scenario& scenario, const std::filesystem::path& path)
+{
+    const auto text = scenario_text(scenario);
+    std::ofstream output(path);
+    output << text;
+    output.close();
+    if (!output) throw std::runtime_error("cannot save scenario");
 }
 Environment::Environment(Scenario scenario)
     :scenario_(validate(std::move(scenario))),observations_(observation_space_for(scenario_)) {}
@@ -153,6 +179,7 @@ ppo::rl::StepResult Environment::step(const ppo::rl::Value& action)
 }
 const ppo::rl::Space& Environment::observation_space() const noexcept {return observations_;}
 const ppo::rl::Space& Environment::action_space() const noexcept {return actions_;}
+State Environment::state() const noexcept { return {position_, heading_, speed_}; }
 Point Environment::position() const noexcept {return position_;}
 const Scenario& Environment::scenario() const noexcept {return scenario_;}
 } // namespace navigation

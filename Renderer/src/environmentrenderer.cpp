@@ -288,9 +288,9 @@ void EnvironmentRenderer::RenderTacticalScene(int width, int height)
         }
     DrawCylinder(World(scenario.goal), static_cast<float>(scenario.arrival_radius), static_cast<float>(scenario.arrival_radius), 0.1F, 32, GREEN);
     DrawSphere(World(environment.position(), 0.25F), 0.25F, SKYBLUE);
-    const auto& observation = std::get<std::vector<float>>(m_application.observation());
-    const auto position = environment.position();
-    DrawLine3D(World(position, 0.3F), World({position.x + observation[4], position.y + observation[5]}, 0.3F), WHITE);
+    const auto state = environment.state();
+    const auto position = state.position;
+    DrawLine3D(World(position, 0.3F), World({position.x + std::cos(state.heading), position.y + std::sin(state.heading)}, 0.3F), WHITE);
     if (m_showTrails)
         for (std::size_t index = 1; index < m_trail.size(); ++index)
             DrawLine3D(World(m_trail[index-1], 0.05F), World(m_trail[index], 0.05F), Fade(SKYBLUE, 0.7F));
@@ -375,9 +375,9 @@ void EnvironmentRenderer::DrawInspectorWindow()
         const auto& scenario = m_application.environment().scenario();
         if (m_selection == 0)
         {
-            const auto& values = std::get<std::vector<float>>(m_application.observation());
-            ImGui::Text("Heading: %.3f rad", std::atan2(values[5],values[4]));
-            ImGui::Text("Speed: %.3f", values[6]*scenario.max_speed);
+            const auto state = m_application.environment().state();
+            ImGui::Text("Heading: %.3f rad", state.heading);
+            ImGui::Text("Speed: %.3f", state.speed);
             const double dx = point.x-scenario.goal.x, dy = point.y-scenario.goal.y;
             ImGui::Text("Distance: %.3f", std::hypot(dx,dy));
         }

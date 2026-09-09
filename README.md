@@ -27,7 +27,9 @@ cmake --build build/desktop --config Release
 
 On Windows use a matching MSVC generator and LibTorch package. Torch DLLs are copied
 beside `PPO.exe`. The app loads the shipped scenario by default; its first optional
-argument selects a `.nav` scenario. It starts stopped in manual mode and does not
+argument selects a `.nav` scenario; a second optional argument selects the checkpoint
+root. The default scenario files are copied beside the executable under `scenarios/`,
+so the source checkout is not needed at runtime. It starts stopped in manual mode and does not
 create or run a neural policy until explicitly requested in the UI.
 
 ## Desktop
@@ -46,12 +48,15 @@ create or run a neural policy until explicitly requested in the UI.
 Pause preserves the current episode. Stop truncates on one final complete
 transition, so the learner receives a final observation for bootstrap. Play starts
 a new episode after Stop. Evaluation pauses training and loads an independent,
-deterministic policy; Stop cancels evaluation without promoting it.
+deterministic policy; Pause/Play suspends/resumes that evaluation, and Stop cancels
+it without promotion.
 
 Display preferences are saved explicitly to `NavigationRenderer.json`; docking
 uses ImGui's settings. Scenario and score configuration live in
 `Examples/Navigation2D/scenarios`. Checkpoints are isolated under
-`checkpoints/navigation2d`; the promotion reference is `prod/best.txt`.
+`checkpoints/navigation2d`; the promotion reference is `prod/best.txt`. Scores are
+compared only when scenario, criteria, episode count and seed sequence agree.
+Use another checkpoint root for a different evaluation context.
 
 ## Migration and validation
 
@@ -70,6 +75,6 @@ or a model. Check the PR checks for their actual outcome.
 
 Verified in the refactoring environment: direct GCC Release builds and deterministic
 contract/runtime tests; syntax compilation of the ported desktop sources against
-real dependency headers. No neural model was executed. A complete LibTorch/graphics
-build and an interactive desktop smoke test remain required; syntax checking does
-not establish GUI functionality or successful linking.
+real dependency headers. No neural model was executed. The preceding implementation passed a complete Windows LibTorch/graphics CI build;
+the latest PR checks validate this revision. An interactive desktop smoke test
+remains required. See [code review](docs/code-review.md) for fixes and limitations.
