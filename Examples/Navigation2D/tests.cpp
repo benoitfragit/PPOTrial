@@ -52,9 +52,87 @@ void test_navigation()
     check(std::get<bool>(boundary.step(std::vector<float>{0,0}).info.at("collision")),"boundary crossing");
     check(std::abs(boundary.position().x-4)<1e-9,"boundary position");
 }
+void test_moving_goal()
+{
+    navigation::Scenario scenario;
+    scenario.goal = {2,0};
+    scenario.goal_velocity = {0.5,0};
+    scenario.arrival_radius = 0.25;
+    scenario.speed = 1;
+    scenario.dt = 1;
+    scenario.max_steps = 20;
+    scenario.obstacles = {{{2,2},0.3}};
+    navigation::Environment environment(scenario);
+    const auto initial = environment.reset({42,{}});
+    const auto& observed = std::get<std::vector<float>>(initial.observation);
+    check(observed.size() == 13 && std::abs(observed[8] - 0.1F) < 1e-6F, "goal velocity included in observation");
+    auto transition = environment.step(std::vector<float>{0,0});
+    check(environment.goal_state().position.x == 2.5 && !transition.terminated, "second mobile advances");
+    for (int i = 0; i < 3 && !transition.terminated; ++i)
+        transition = environment.step(std::vector<float>{0,0});
+    check(transition.terminated && std::get<bool>(transition.info.at("success")), "controlled mobile reaches moving mobile with zone present");
+    check(std::abs(environment.position().x - 3.5) < 1e-9
+        && std::abs(environment.goal_state().position.x - 3.75) < 1e-9, "both mobiles stop at the same meeting instant");
+    environment.reset({42,{}});
+    check(environment.goal_state().position.x == 2 && environment.position().x == 0, "reset restores both mobiles");
+
+    // Replay a simple detour: north, east, east, south, east. No learned policy.
+    navigation::Scenario detour_scenario;
+    detour_scenario.goal = {2,0};
+    detour_scenario.goal_velocity = {0.1,0};
+    detour_scenario.arrival_radius = 0.25;
+    detour_scenario.speed = 1;
+    detour_scenario.dt = 1;
+    detour_scenario.max_steps = 20;
+    detour_scenario.max_turn_rate = 1.5707963267948966;
+    detour_scenario.obstacles = {{{1,0},0.2}};
+    navigation::Environment detour(detour_scenario);
+    detour.reset();
+    const float turns[] = {1,-1,0,-1,1};
+    ppo::rl::StepResult result;
+    for (float turn : turns)
+    {
+        result = detour.step(std::vector<float>{turn,0});
+        check(!std::get<bool>(result.info.at("collision")), "scripted detour remains outside the zone");
+        if (result.terminated) break;
+    }
+    check(result.terminated && std::get<bool>(result.info.at("success")), "detour reaches another moving mobile around a blocking zone");
+
+    scenario.goal = {4,0};
+    scenario.goal_velocity = {-5,0};
+    scenario.speed = 5;
+    scenario.max_steps = 1;
+    scenario.obstacles.clear();
+    navigation::Environment crossing(scenario);
+    crossing.reset();
+    const auto meeting = crossing.step(std::vector<float>{0,0});
+    check(std::get<bool>(meeting.info.at("success"))
+        && std::abs(crossing.position().x - 1.875) < 1e-9
+        && std::abs(crossing.goal_state().position.x - 2.125) < 1e-9, "relative sweep detects meeting between endpoints");
+
+    scenario.goal_velocity = {-1,0};
+    scenario.obstacles = {{{1,0},0.1}};
+    navigation::Environment blocked(scenario);
+    blocked.reset();
+    const auto collision = blocked.step(std::vector<float>{0,0});
+    check(std::get<bool>(collision.info.at("collision")) && !std::get<bool>(collision.info.at("success")), "forbidden zone reached before moving goal");
+    check(std::abs(blocked.goal_state().position.x - 3.82) < 1e-9, "goal uses collision event time too");
+
+    scenario.obstacles.clear();
+    scenario.goal_velocity = {1000,0};
+    bool rejected = false;
+    try { navigation::Environment invalid(scenario); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    check(rejected, "goal trajectory outside world rejected");
+    scenario.goal_velocity.x = std::numeric_limits<double>::quiet_NaN();
+    rejected = false;
+    try { navigation::Environment invalid(scenario); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    check(rejected, "nonfinite goal velocity rejected");
+}
 void test_shared_loop()
 {
-    navigation::Scenario scenario; scenario.max_steps=2;
+    navigation::Scenario scenario; scenario.max_steps=2; scenario.goal_velocity={0.5,0.2};
     navigation::Environment first(scenario),second(scenario);
     RecordingLearner training,evaluation;
     const auto train=ppo::rl::train_episode(first,training,{42,{}},10);
@@ -157,14 +235,15 @@ void test_checkpoints_and_config()
     const auto criteria=ppo::rl::load_metrics(metric_file);
     check(criteria.size()==2 && criteria[0].weight==100,"declarative scoring loaded");
     const auto scenario_file=temporary.path/"scenario.nav";
-    {std::ofstream file(scenario_file);file<<"navigation2d-v1\nstart 0 0 0 1\ngoal 10 0 0.5\n";}
+    {std::ofstream file(scenario_file);file<<"navigation2d-v2\nstart 0 0 0 1\ngoal 10 0 0.5 0 0\n";}
     check(navigation::load_scenario(scenario_file).goal.x==10,"scenario loaded");
-    const auto loaded = navigation::load_scenario(scenario_file);
+    auto loaded = navigation::load_scenario(scenario_file);
+    loaded.goal_velocity = {0.1,0.2};
     navigation::save_scenario(loaded, scenario_file);
     check(navigation::scenario_text(navigation::load_scenario(scenario_file)) == navigation::scenario_text(loaded), "canonical scenario round trip");
     { std::ofstream file(metric_file); file << ppo::rl::metrics_text(criteria); }
     check(ppo::rl::metrics_text(ppo::rl::load_metrics(metric_file)) == ppo::rl::metrics_text(criteria), "canonical metrics round trip");
-    {std::ofstream file(scenario_file);file<<"navigation2d-v1\nunknown 0\n";}
+    {std::ofstream file(scenario_file);file<<"navigation2d-v2\nunknown 0\n";}
     bool rejected=false;
     try {navigation::load_scenario(scenario_file);}
     catch(const std::invalid_argument&) {rejected=true;}
@@ -175,8 +254,8 @@ int main()
 {
     try
     {
-        test_navigation();test_shared_loop();test_incremental_session();test_bootstrap();test_metrics();test_checkpoints_and_config();
-        std::cout<<"6 navigation/runtime test groups passed\n";return 0;
+        test_navigation();test_moving_goal();test_shared_loop();test_incremental_session();test_bootstrap();test_metrics();test_checkpoints_and_config();
+        std::cout<<"7 navigation/runtime test groups passed\n";return 0;
     }
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

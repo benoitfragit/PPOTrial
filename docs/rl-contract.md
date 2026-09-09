@@ -2,7 +2,7 @@
 
 ## Scope and implementation
 
-The active example is now Navigation2D: one mobile, a fixed destination, circular
+The active example is now Navigation2D: a controlled mobile and a moving goal mobile, circular
 forbidden zones and square world bounds. The original PPO optimizer, rollout
 collector and continuous Gaussian network are extracted rather than rewritten.
 The desktop is ported in place; the old application and compatibility layer are removed.
@@ -50,30 +50,36 @@ supplied Torch adapter supports float32 Box observations and continuous actions 
 
 ## Navigation semantics and configuration
 
-`navigation2d-v1` files use strict rows (see the shipped `.nav` example):
+`navigation2d-v2` files use strict rows (see the shipped `.nav` example):
 
 | Row | Fields |
 | --- | --- |
 | `start` | x y heading-radians speed |
-| `goal` | x y arrival-radius |
+| `goal` | initial-x initial-y meeting-radius velocity-x velocity-y |
 | `world` | half-extent timestep-seconds max-steps |
 | `motion` | maximum-speed maximum-acceleration maximum-turn-rate |
 | `obstacle` | center-x center-y radius; repeat for multiple obstacles |
 
 Defaults come from `Scenario`. Unknown/trailing fields, nonfinite values,
 invalid geometry and excessive sizes are rejected. No custom reset options are
-supported in v1. Reset is deterministic for this fixed scenario; supplying any
+supported in v2. Reset is deterministic for this fixed scenario; supplying any
 seed gives the same state. There is no randomized curriculum.
 
 The motion preserves the simple Euler heading/speed integration pattern from the
 existing simulator, with nonnegative speed and configurable limits. Collision
 and arrival are checked along the whole step segment, preventing tunnelling.
-The first event stops the mobile; collision takes precedence on a tie.
+Meeting uses relative swept motion, rather than a check against a frozen endpoint.
+The first event stops both mobiles at the same fractional step time; collision
+takes precedence on a tie. A reset restores both initial positions.
 
-Observations contain x/y and goal x/y normalized by world extent, cos/sin heading,
-normalized speed and elapsed-step fraction, then each obstacle x/y/radius
-normalized by extent. Observation width is `8 + 3 * obstacle_count`.
-Actions are normalized turn and acceleration commands. The destination stays fixed.
+Observations contain x/y and current goal x/y normalized by world extent, cos/sin heading,
+normalized speed and elapsed-step fraction, goal velocity x/y normalized by maximum
+controlled-mobile speed, then each obstacle x/y/radius
+normalized by extent. Observation width is `10 + 3 * obstacle_count`.
+Actions are normalized turn and acceleration commands. The goal moves linearly at its configured velocity. Its full trajectory must
+remain inside the world (including the meeting radius); invalid paths are rejected.
+The scripted goal does not steer around obstacles. Forbidden zones constrain the
+controlled mobile; a goal inside a zone may be temporarily unreachable.
 Reward is normalized distance progress minus 0.001 per step, +1 on arrival and
 -1 on collision/boundary exit. These navigation rewards intentionally replace
 old domain rewards. Arrival/collision terminate; the time limit truncates.
@@ -154,3 +160,17 @@ The ported renderer is syntax-checked against real dependency headers; this does
 not validate graphics linking or interactive behavior. CMake is unavailable in
 the execution environment. No training, learned-model evaluation or checkpoint loading was performed during
 this refactoring. See the PR for exact commands/results and outstanding gates.
+
+## Moving-goal correction
+
+The earlier fixed-only goal was an excessive simplification of the requested
+navigation example. Version 2 restores the ability to reach another moving point
+in the toy 2D environment, without a new guidance law or a PPO change. Existing
+progress/reward coefficients are retained; distance now measures the two current
+positions, so movement of either mobile affects distance progress.
+
+The default scenario contains a moving goal. A deterministic test reaches that
+goal with a forbidden zone present; additional tests check encounters between
+step endpoints, collision-before-meeting, reset, moving-state observations and
+invalid velocities/paths. Training and evaluation exercise the same moving-goal
+environment through the existing runtime. No learned policy is run by these tests.

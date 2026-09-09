@@ -16,7 +16,7 @@ Vector3 World(navigation::Point point, float height = 0)
 std::string EntityName(int index)
 {
     if (index == 0) return "Mobile";
-    if (index == 1) return "Destination";
+    if (index == 1) return "Goal mobile";
     return "Forbidden zone " + std::to_string(index - 1);
 }
 }
@@ -177,7 +177,7 @@ navigation::Point EnvironmentRenderer::SelectedPosition() const
 {
     const auto& environment = m_application.environment();
     if (m_selection == 0) return environment.position();
-    if (m_selection == 1) return environment.scenario().goal;
+    if (m_selection == 1) return environment.goal_state().position;
     return environment.scenario().obstacles.at(static_cast<std::size_t>(m_selection - 2)).center;
 }
 void EnvironmentRenderer::FocusSelection()
@@ -286,7 +286,13 @@ void EnvironmentRenderer::RenderTacticalScene(int width, int height)
             DrawCylinder(World(obstacle.center), radius, radius, 0.1F, 48, Fade(ORANGE, 0.4F));
             DrawCylinderWires(World(obstacle.center), radius, radius, 0.1F, 48, ORANGE);
         }
-    DrawCylinder(World(scenario.goal), static_cast<float>(scenario.arrival_radius), static_cast<float>(scenario.arrival_radius), 0.1F, 32, GREEN);
+    const auto goal_state = environment.goal_state();
+    DrawCylinder(World(goal_state.position), static_cast<float>(scenario.arrival_radius), static_cast<float>(scenario.arrival_radius), 0.1F, 32, Fade(GREEN, 0.4F));
+    DrawSphere(World(goal_state.position, 0.25F), 0.25F, GREEN);
+    if (goal_state.speed > 0)
+        DrawLine3D(World(goal_state.position, 0.3F),
+                   World({goal_state.position.x + std::cos(goal_state.heading),
+                          goal_state.position.y + std::sin(goal_state.heading)}, 0.3F), GREEN);
     DrawSphere(World(environment.position(), 0.25F), 0.25F, SKYBLUE);
     const auto state = environment.state();
     const auto position = state.position;
@@ -336,7 +342,7 @@ void EnvironmentRenderer::DrawMinimapWindow()
             float radius = 4;
             ImU32 color = IM_COL32(80,170,245,255);
             if (i == 0) point = environment.position();
-            else if (i == 1) { point = scenario.goal; color = IM_COL32(80,230,120,255); radius = std::max(4.F, scale*static_cast<float>(scenario.arrival_radius)); }
+            else if (i == 1) { point = environment.goal_state().position; color = IM_COL32(80,230,120,255); radius = std::max(4.F, scale*static_cast<float>(scenario.arrival_radius)); }
             else { const auto& zone = scenario.obstacles[i-2]; point = zone.center; radius = scale*static_cast<float>(zone.radius); color = IM_COL32(240,140,60,200); }
             const ImVec2 screen(center.x+static_cast<float>(point.x)*scale, center.y-static_cast<float>(point.y)*scale);
             draw->AddCircleFilled(screen,radius,color);
@@ -378,10 +384,17 @@ void EnvironmentRenderer::DrawInspectorWindow()
             const auto state = m_application.environment().state();
             ImGui::Text("Heading: %.3f rad", state.heading);
             ImGui::Text("Speed: %.3f", state.speed);
-            const double dx = point.x-scenario.goal.x, dy = point.y-scenario.goal.y;
+            const auto goal = m_application.environment().goal_state().position;
+            const double dx = point.x-goal.x, dy = point.y-goal.y;
             ImGui::Text("Distance: %.3f", std::hypot(dx,dy));
         }
-        else if (m_selection == 1) ImGui::Text("Arrival radius: %.3f", scenario.arrival_radius);
+        else if (m_selection == 1)
+        {
+            const auto state = m_application.environment().goal_state();
+            ImGui::Text("Speed: %.3f | heading: %.3f rad", state.speed, state.heading);
+            ImGui::Text("Velocity: %.3f, %.3f", scenario.goal_velocity.x, scenario.goal_velocity.y);
+            ImGui::Text("Meeting radius: %.3f", scenario.arrival_radius);
+        }
         else ImGui::Text("Radius: %.3f", scenario.obstacles.at(static_cast<std::size_t>(m_selection-2)).radius);
     }
     ImGui::End();
@@ -446,7 +459,7 @@ void EnvironmentRenderer::DrawMetaCatalogWindow()
     {
         ImGui::TextUnformatted("Navigation2D schema");
         ImGui::BulletText("Mobile: position, heading, speed");
-        ImGui::BulletText("Destination: position, arrival radius");
+        ImGui::BulletText("Goal mobile: position, velocity, meeting radius");
         ImGui::BulletText("Forbidden zone: center, radius");
         const auto& observation = std::get<std::vector<float>>(m_application.observation());
         ImGui::Text("Observation: Box float32 [%zu]", observation.size());

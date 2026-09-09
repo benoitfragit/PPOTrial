@@ -1,7 +1,7 @@
 # PPOTrial
 
 Reusable C++17 reinforcement-learning components and one desktop application,
-`PPO`, demonstrating Navigation2D: a mobile reaches a fixed destination while
+`PPO`, demonstrating Navigation2D: a controlled mobile reaches another moving mobile while
 avoiding circular forbidden zones. The existing ImGui/ImPlot/raylib desktop shell
 is connected to this environment. There is no legacy application or separate viewer.
 
@@ -37,7 +37,7 @@ create or run a neural policy until explicitly requested in the UI.
 - **Simulation:** Play/Pause/Stop, clock scale, display flags and camera controls.
 - **Navigation View:** the existing docked viewport with orbit/pan/zoom, selection
   follow and trails. The underlying simulation is planar.
-- **Minimap / Entities / Inspection:** select a mobile, destination or zone and
+- **Minimap / Entities / Inspection:** select either mobile or a zone and
   inspect its current values; double-click an entity to focus the camera.
 - **Agents:** manual, training or frozen-policy mode; rollout for a new learner;
   observation snapshot, episode rewards and PPO loss curves; candidate evaluation
@@ -78,3 +78,12 @@ contract/runtime tests; syntax compilation of the ported desktop sources against
 real dependency headers. No neural model was executed. The preceding implementation passed a complete Windows LibTorch/graphics CI build;
 the latest PR checks validate this revision. An interactive desktop smoke test
 remains required. See [code review](docs/code-review.md) for fixes and limitations.
+
+The goal mobile has a configurable constant velocity (`goal x y radius vx vy`).
+Its full linear path must remain within the world for the episode duration; zero
+velocity provides a stationary goal. Observations contain its current position
+and velocity. Meeting detection uses the relative motion of both mobiles during
+each step, while forbidden zones still terminate the controlled mobile's episode.
+The new `navigation2d-v2` schema has `10 + 3 * obstacle_count` observation values.
+Policies trained with the previous observation width cannot be reused. No policy
+training or avoidance performance has been measured by this change.

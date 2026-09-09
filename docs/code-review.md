@@ -37,7 +37,7 @@ application controller, renderer, CMake, protocol draft and documentation.
 ## Limits and explicit migrations
 
 This is not a behavior-identical port of the initial simulator: the agreed
-Navigation2D example has a fixed destination and geometric zones. It replaces
+Navigation2D example now has a scripted moving goal mobile and geometric zones. It replaces
 old observations, rewards and scenario semantics, as documented in the PR.
 
 The desktop keeps its original shell and major panels; exact interactive parity
@@ -64,3 +64,11 @@ test groups. Main/Renderer/Torch binding syntax checked using the actual depende
 headers, without running a model. Full CMake builds and tests are run in PR CI:
 Linux Debug/Release and Windows Release with LibTorch. The PR records the outcome
 for the correction commit; previous green checks do not validate a later revision.
+
+## Subsequent correction: moving goal
+
+The fixed-only goal in the review baseline did not preserve the user's requirement
+to reach another mobile. The example now supports a constant-velocity goal mobile,
+current position/velocity observations, relative swept meeting detection and live
+display. This is an environment schema change (v2), not a change to PPO. Old v1
+policies are incompatible. See the contract and PR for the new verification results.
