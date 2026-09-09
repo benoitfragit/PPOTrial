@@ -64,6 +64,9 @@ struct Application::Impl
         : environment(std::move(scenario)), backend(policy_backend), metrics(std::move(metrics_path)),
           checkpoints(std::move(root))
     {
+        for (const auto& mobile : environment.scenario().mobiles)
+            if (mobile.id != environment.scenario().controlled)
+                controls.emplace(mobile.id, MobileControl{});
         policy = std::make_unique<ManualPolicy>();
         session = std::make_unique<ppo::rl::EpisodeSession>(environment, *policy, environment.scenario().max_steps);
         session->reset();

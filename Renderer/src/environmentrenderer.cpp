@@ -451,7 +451,10 @@ void EnvironmentRenderer::DrawAgentsWindow()
                         try { m_application.configure_mobile(m_selection,static_cast<navigation::ControlMode>(m_selectedMode),static_cast<std::size_t>(m_rollout),m_selectedCheckpoint); m_error.clear(); }
                         catch (const std::exception& error) { m_error=error.what(); }
                     }
-                    ImGui::Text("Active mode: %d",static_cast<int>(m_application.mobile_mode(m_selection)));
+                    const auto active_mode = m_application.mobile_mode(m_selection);
+                    const char* active_name = active_mode == navigation::ControlMode::Manual ? "Manual"
+                        : active_mode == navigation::ControlMode::Training ? "Training" : "Frozen policy";
+                    ImGui::Text("Active mode: %s", active_name);
                     ImGui::TextWrapped("Snapshot: %s",m_application.mobile_checkpoint(m_selection).string().c_str());
                 }
                 ImGui::TextWrapped("Stop before switching mode. Rollout applies when creating a learner. Pause/Play resumes the current policy.");

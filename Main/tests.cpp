@@ -239,7 +239,7 @@ void test_multiple_controllers()
     app.tick(scenario.dt,{0,1},1,5);
     check(backend.counts.creations==2 && backend.counts.actions==2 && backend.counts.feedback==2
         && backend.counts.evaluation_actions==2, "two learners and two frozen policies act in the same world");
-    check(app.environment().state(5).speed>1 && app.telemetry(3).length==1,
+    check(app.environment().state(5).speed>1 && app.telemetry(3).length==1 && app.telemetry(5).length==1,
           "selected manual entity and per-agent telemetry are independent");
     const auto before=app.environment().state(3);
     app.evaluate_candidate(1,3);
