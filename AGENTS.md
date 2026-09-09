@@ -17,10 +17,11 @@ testable et maintenable. Adapte des principes de `benoitfragit/MFDStudio/AGENTS.
 
 ## Architecture et dependances
 
-- `RL/` porte le contrat generique d'environnement, sans LibTorch, EnTT, rendu,
-  entites, scenarios ou dependances reseau.
-- `PPO/` contient encore des interfaces historiques couplees au simulateur :
-  ne pas presenter l'extraction comme terminee. Voir `docs/rl-contract.md`.
+- `RL/include` et `RL/src` portent le contrat et le runtime generiques,
+  sans LibTorch, EnTT, rendu, entites ou scenarios. `RL/torch` isole LibTorch.
+- `PPO/` ne conserve que la compatibilite historique. Le backend extrait
+  est `ppo_torch` ; ne pas lui ajouter `GenericEntities`. `Examples/Navigation2D`
+  implemente le nouvel environnement. Voir `docs/rl-contract.md`.
 - Le framework ne doit connaitre aucun type metier. Un environnement produit
   observations, actions, rewards et metriques par le contrat public.
 - Les adaptateurs dependent des contrats ; les contrats ne dependent jamais

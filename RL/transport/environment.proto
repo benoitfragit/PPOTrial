@@ -1,0 +1,34 @@
+syntax = "proto3";
+package ppo.transport.v1;
+
+// Transport-neutral wire draft. A GNS adapter owns serialization and validation.
+message FloatValues { repeated float values = 1; }
+message Value { oneof value { FloatValues floats = 1; sint64 discrete = 2; } }
+message InfoValue { oneof value { bool flag = 1; sint64 integer = 2; double number = 3; string text = 4; } }
+message Box { repeated uint64 shape = 1; repeated float low = 2; repeated float high = 3; }
+message Discrete { sint64 count = 1; sint64 start = 2; }
+message Space { oneof space { Box box = 1; Discrete discrete = 2; } }
+message Description { string name = 1; string schema = 2; Space observation_space = 3; Space action_space = 4; }
+message Describe {}
+message Reset { oneof seeding { uint64 seed = 1; } map<string, InfoValue> options = 2; }
+message Step { Value action = 1; }
+message Close {}
+message ResetResult { Value observation = 1; map<string, InfoValue> info = 2; }
+message StepResult { Value observation = 1; double reward = 2; bool terminated = 3; bool truncated = 4; map<string, InfoValue> info = 5; }
+message Error { string code = 1; string message = 2; }
+message Request {
+  uint32 protocol_version = 1;
+  uint64 environment_id = 2;
+  uint64 episode_id = 3;
+  uint64 step_id = 4;
+  uint64 request_id = 5;
+  oneof payload { Describe describe = 6; Reset reset = 7; Step step = 8; Close close = 9; }
+}
+message Response {
+  uint32 protocol_version = 1;
+  uint64 environment_id = 2;
+  uint64 episode_id = 3;
+  uint64 step_id = 4;
+  uint64 request_id = 5;
+  oneof payload { Description description = 6; ResetResult reset = 7; StepResult step = 8; Error error = 9; Close closed = 10; }
+}

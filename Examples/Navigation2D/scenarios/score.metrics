@@ -1,0 +1,4 @@
+# metric reduction weight
+success rate 100
+episode_reward mean 1
+episode_length mean -0.01

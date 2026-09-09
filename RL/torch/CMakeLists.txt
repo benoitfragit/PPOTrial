@@ -1,0 +1,12 @@
+find_package(Torch REQUIRED)
+add_library(ppo_torch STATIC src/ppo.cpp src/rlagent.cpp src/actorcriticnet.cpp src/policy.cpp)
+target_include_directories(ppo_torch PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(ppo_torch PUBLIC ppo_environment ${TORCH_LIBRARIES})
+target_compile_features(ppo_torch PUBLIC cxx_std_17)
+set_target_properties(ppo_torch PROPERTIES CXX_EXTENSIONS OFF)
+separate_arguments(PPO_TORCH_FLAGS NATIVE_COMMAND "${TORCH_CXX_FLAGS}")
+target_compile_options(ppo_torch PUBLIC ${PPO_TORCH_FLAGS})
+
+if(MSVC)
+    target_compile_options(ppo_torch PUBLIC /Zc:__cplusplus)
+endif()
