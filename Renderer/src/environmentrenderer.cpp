@@ -449,6 +449,14 @@ void EnvironmentRenderer::DrawInspectorWindow()
         if (world.all_of<navigation::Mobile>(entity))
         {
             ImGui::Text("Heading: %.3f | speed: %.3f",state.heading,state.speed);
+            const auto& endurance = world.get<navigation::EnergyModel>(entity);
+            const auto& fuel = world.get<navigation::EnergyState>(entity);
+            if (endurance.capacity > 0)
+                ImGui::Text("Energy: %.3f / %.3f | last burn: %.5f",
+                            fuel.remaining, endurance.capacity, fuel.last_burn);
+            if (endurance.min_speed > 0)
+                ImGui::Text("Minimum viable speed: %.3f", endurance.min_speed);
+
             const auto destination = world.get<navigation::Destination>(entity);
             if (destination.entity != navigation::no_entity)
             {
@@ -511,7 +519,7 @@ void EnvironmentRenderer::DrawAgentsWindow()
                 ImGui::Text("Loss %.5f | actor %.5f", telemetry.loss, telemetry.actor_loss);
                 ImGui::Text("Critic %.5f | entropy %.5f", telemetry.critic_loss, telemetry.entropy);
                 ImGui::SeparatorText("Environment reward");
-                ImGui::TextWrapped("Progress / world extent - 0.001 per step; arrival +1; collision -1. These rules belong to Navigation2D.");
+                ImGui::TextWrapped("Navigation2D: progress reward, time cost, early zone/boundary avoidance, arrival bonus, collision and optional energy penalties.");
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Snapshot"))
