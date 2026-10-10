@@ -108,6 +108,8 @@ and two forbidden zones without writing C++:
 | `motion` | maximum-speed maximum-acceleration maximum-turn-rate |
 | `mobile` | ID "name" x y heading-radians speed destination-ID meeting-radius |
 | `zone` | ID "name" center-x center-y radius |
+| `energy` | mobile-ID minimum-speed capacity idle-rate speed-cubic-rate turn-cost (optional) |
+| `reward` | mobile-ID progress step-cost arrival collision zone-caution boundary-caution fuel-cost failure (optional) |
 
 Repeat mobile/zone rows. IDs and names are unique across all entity types;
 destination IDs must identify another mobile, or `0` for no destination. A learner
@@ -131,7 +133,7 @@ cos/sin own heading, own speed/max-speed, elapsed-step fraction, destination
 velocity x/y normalized by max-speed, then zone x/y/radius normalized by extent.
 Width is `10 + optional_energy_feature + 3 * zone_count + 61`; the last 61 values are a heading-relative, 360-degree ray-cast scan at six-degree increments, including the repeated endpoint. Rays intersect the nearest forbidden-circle boundary or square work-area edge. Normalization uses `distance/(distance+reference)`, with circle radius or the work-area half-diagonal as reference; raw distances are exposed separately for visualization. Unrelated mobiles do not enter the observation.
 A mobile without destination uses itself for observation only, with no meeting event.
-Reward includes distance progress/world extent minus 0.001, optional dense proximity penalties near forbidden zones and the work-area perimeter, +1 on its own meeting,
+Reward is decomposed per mobile into progress, step cost, zone and perimeter caution, optional fuel consumption, success bonus, collision and endurance failure. Each channel has a tunable nonnegative coefficient persisted in the Navigation2D scenario and shown in the desktop Agents panel. Defaults retain distance progress/world extent minus 0.001, optional dense proximity penalties near forbidden zones and the work-area perimeter, +1 on its own meeting,
 -1 on its own collision. `goal_collision` adds no new penalty. These are the
 navigation rewards of the accepted replacement example, not the former domain rewards.
 
