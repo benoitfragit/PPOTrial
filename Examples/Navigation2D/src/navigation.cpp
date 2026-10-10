@@ -298,9 +298,9 @@ std::vector<Scenario> load_episode_cases(const std::filesystem::path& manifest)
     std::string line;
     while (std::getline(input, line))
     {
-        const auto first = line.find_first_not_of(" \\t\\r");
+        const auto first = line.find_first_not_of(" \t\r");
         if (first == std::string::npos || line[first] == '#') continue;
-        const auto last = line.find_last_not_of(" \\t\\r");
+        const auto last = line.find_last_not_of(" \t\r");
         const auto name = line.substr(first, last - first + 1);
         if (cases.size() >= 10000)
             throw std::invalid_argument("too many episode cases");
@@ -685,6 +685,10 @@ const ppo::rl::Space& Environment::observation_space() const noexcept
 const ppo::rl::Space& Environment::action_space() const noexcept
 {
     return actions_;
+}
+const Scenario& Environment::baseline_scenario() const noexcept
+{
+    return baseline_scenario_;
 }
 const Scenario& Environment::scenario() const noexcept
 {
