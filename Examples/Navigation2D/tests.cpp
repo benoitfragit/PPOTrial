@@ -358,6 +358,32 @@ void test_reward_channel_controls()
     check(rejected && environment.reward_weights(1).progress == 0,
           "invalid reward scaling never changes the agent");
 }
+void test_live_world_controls()
+{
+    navigation::Scenario scenario;
+    navigation::Environment environment(scenario);
+    environment.reset();
+    environment.configure_world(200, 0.1);
+    check(environment.scenario().half_extent == 200
+          && environment.scenario().dt == 0.1
+          && environment.baseline_scenario().dt == 0.1,
+          "work-area extent and timestep can be changed without replacing the ECS world");
+    environment.step(std::vector<float>{0,0});
+    bool rejected = false;
+    try { environment.configure_world(1, 0.1); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    check(rejected && environment.scenario().half_extent == 200
+          && environment.scenario().dt == 0.1,
+          "invalid live resize is rejected atomically");
+    auto case_b = scenario;
+    case_b.mobiles[0].initial.position = {-50,0};
+    environment.configure_initialization(navigation::InitializationMode::PresetCases,
+                                         {scenario, case_b});
+    environment.configure_world(180, 0.05);
+    environment.reset({1,{}});
+    check(environment.position().x == -50 && environment.scenario().dt == 0.05,
+          "live timing change is applied to all replayed evaluation cases");
+}
 void test_shared_loop()
 {
     navigation::Scenario scenario; scenario.max_steps=2; set_goal_velocity(scenario, {0.5,0.2});
@@ -572,8 +598,8 @@ int main(int argc, char** argv)
             std::cout << "Packaged scenarios parsed and stepped without models\n";
             return 0;
         }
-        test_navigation();test_moving_goal();test_lidar();test_avoidance_reward();test_episode_initialization();test_navigation_energy();test_reward_channel_controls();test_shared_loop();test_incremental_session();test_bootstrap();test_metrics();test_checkpoints_and_config();test_ecs_world();
-        std::cout<<"13 navigation/runtime test groups passed\n";return 0;
+        test_navigation();test_moving_goal();test_lidar();test_avoidance_reward();test_episode_initialization();test_navigation_energy();test_reward_channel_controls();test_live_world_controls();test_shared_loop();test_incremental_session();test_bootstrap();test_metrics();test_checkpoints_and_config();test_ecs_world();
+        std::cout<<"14 navigation/runtime test groups passed\n";return 0;
     }
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }
