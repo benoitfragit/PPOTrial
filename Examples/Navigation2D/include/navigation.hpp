@@ -19,6 +19,7 @@ struct MobileDefinition
     EntityId destination = no_entity;
     double arrival_radius = 0.5;
     EnergyModel energy{};
+    RewardWeights rewards{};
 };
 struct ZoneDefinition
 {
@@ -65,6 +66,9 @@ public:
     /// Configure varied episode starts without invalidating attached mobile controllers.
     /// Only accepted at an episode boundary; seed reproducibility is preserved.
     void configure_initialization(InitializationMode mode, std::vector<Scenario> cases = {});
+    /// Reward channels are per mobile and may be tuned at runtime on this thread.
+    void set_reward_weights(EntityId mobile, RewardWeights weights);
+    RewardWeights reward_weights(EntityId mobile) const;
     InitializationMode initialization_mode() const noexcept;
     const std::vector<Scenario>& episode_cases() const noexcept;
     ppo::rl::StepResult step(const ppo::rl::Value& action) override;
