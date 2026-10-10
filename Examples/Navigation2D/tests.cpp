@@ -215,6 +215,61 @@ void test_avoidance_reward()
         < clear.step(std::vector<float>{0,0}).reward,
         "approaching work-area edge incurs dense safety penalty");
 }
+void test_episode_initialization()
+{
+    navigation::Scenario baseline;
+    baseline.zones = {{100,"Circle",{5,5},1}};
+    navigation::Environment environment(baseline);
+    environment.configure_initialization(navigation::InitializationMode::Randomized);
+    const auto first = environment.reset({1234, {}});
+    const auto pos1 = environment.position();
+    const auto goal1 = environment.goal_state().position;
+    const auto second = environment.reset({1234, {}});
+    check(environment.position().x == pos1.x && environment.position().y == pos1.y
+          && environment.goal_state().position.x == goal1.x
+          && environment.goal_state().position.y == goal1.y,
+          "random initialization reproduces all entities with the same seed");
+    check(std::get<std::vector<float>>(first.observation)
+              == std::get<std::vector<float>>(second.observation),
+          "random seeded reset reproduces observations including LiDAR");
+    environment.reset({1235, {}});
+    check(environment.position().x != pos1.x || environment.position().y != pos1.y,
+          "a different seed changes randomized initial state");
+
+    auto other = baseline;
+    other.mobiles[0].initial.position = {-10,-10};
+    other.mobiles[1].initial.position = {25,10};
+    environment.configure_initialization(navigation::InitializationMode::PresetCases, {baseline, other});
+    environment.reset({1,{}});
+    check(environment.position().x == -10 && environment.goal_state().position.x == 25,
+          "preset evaluation case swaps complete mobile world");
+    environment.reset({0,{}});
+    check(environment.position().x == 0 && environment.goal_state().position.x == 10,
+          "preset selection uses the supplied episode index");
+
+    auto invalid = other;
+    invalid.mobiles[1].id = 999;
+    bool rejected = false;
+    try { environment.configure_initialization(navigation::InitializationMode::PresetCases,{invalid}); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    check(rejected && environment.episode_cases().size() == 2,
+          "invalid preset topology is rejected atomically");
+    environment.configure_initialization(navigation::InitializationMode::Fixed);
+    environment.reset();
+    check(environment.position().x == 0 && environment.goal_state().position.x == 10,
+          "fixed initialization restores the original world");
+
+    TemporaryDirectory directory;
+    navigation::save_scenario(baseline, directory.path / "case-a.nav");
+    navigation::save_scenario(other, directory.path / "case-b.nav");
+    {
+        std::ofstream manifest(directory.path / "evaluation.cases");
+        manifest << "# Evaluation scenarios\\ncase-a.nav\\ncase-b.nav\\n";
+    }
+    const auto cases = navigation::load_episode_cases(directory.path / "evaluation.cases");
+    check(cases.size() == 2 && cases[1].mobiles[0].initial.position.x == -10,
+          "case manifest loads multiple complete named scenarios");
+}
 void test_shared_loop()
 {
     navigation::Scenario scenario; scenario.max_steps=2; set_goal_velocity(scenario, {0.5,0.2});
@@ -429,8 +484,8 @@ int main(int argc, char** argv)
             std::cout << "Packaged scenarios parsed and stepped without models\n";
             return 0;
         }
-        test_navigation();test_moving_goal();test_lidar();test_avoidance_reward();test_shared_loop();test_incremental_session();test_bootstrap();test_metrics();test_checkpoints_and_config();test_ecs_world();
-        std::cout<<"10 navigation/runtime test groups passed\n";return 0;
+        test_navigation();test_moving_goal();test_lidar();test_avoidance_reward();test_episode_initialization();test_shared_loop();test_incremental_session();test_bootstrap();test_metrics();test_checkpoints_and_config();test_ecs_world();
+        std::cout<<"11 navigation/runtime test groups passed\n";return 0;
     }
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }
