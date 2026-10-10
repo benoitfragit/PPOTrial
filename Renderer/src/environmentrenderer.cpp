@@ -23,6 +23,8 @@ std::string EntityName(const navigation::Environment& environment, navigation::E
 EnvironmentRenderer::EnvironmentRenderer(navigation::Application& application) : m_application(application)
 {
     m_selection = application.environment().scenario().controlled;
+    m_editHalfExtent = application.environment().scenario().half_extent;
+    m_editDt = application.environment().scenario().dt;
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
     InitWindow(1600, 1000, "PLAYGROUND");
     SetTargetFPS(60);
@@ -217,6 +219,17 @@ void EnvironmentRenderer::DrawSimulationControls()
     ImGui::SliderFloat("Time scale", &m_timeScale, 0.1F, 20.F);
     ImGui::Text("Step: %.3f s", scenario.dt);
     ImGui::Text("World: %.1f x %.1f", 2 * scenario.half_extent, 2 * scenario.half_extent);
+    ImGui::InputDouble("Half work-area width", &m_editHalfExtent, 0, 0, "%.3f");
+    ImGui::InputDouble("Simulation dt (s)", &m_editDt, 0, 0, "%.4f");
+    if (ImGui::Button("Apply world geometry and dt"))
+    {
+        try
+        {
+            m_application.configure_world(m_editHalfExtent, m_editDt);
+            m_error.clear();
+        }
+        catch (const std::exception& error) { m_error = error.what(); }
+    }
     ImGui::TextWrapped("Manual: arrow keys control the selected manual mobile while the navigation view is focused.");
     ImGui::SeparatorText("Episode initialization");
     ImGui::Combo("Start mode", &m_initializationMode, "Fixed\0Randomized\0Preset cases\0");
@@ -448,6 +461,8 @@ void EnvironmentRenderer::DrawEntitiesWindow()
             {
                 m_application.replace_scenario(navigation::load_scenario(m_scenarioPath));
                 m_selection=m_application.environment().scenario().controlled;
+                m_editHalfExtent=m_application.environment().scenario().half_extent;
+                m_editDt=m_application.environment().scenario().dt;
                 m_trails.clear(); m_rewardEdits.clear(); m_lastStep=0; m_lastEpisode=0; m_error.clear();
             }
             catch (const std::exception& error) { m_error=error.what(); }
