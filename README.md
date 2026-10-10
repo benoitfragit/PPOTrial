@@ -93,7 +93,7 @@ Presets retain every mobile/zone ID and all attached controller relationships.
 Frozen-policy evaluations use the same configured distribution and record the
 configuration in the candidate score context.
 
-Editable rewards can be configured independently for each mobile in the **Agents** panel.
+Editable rewards can be configured independently for each mobile in the **Agents** panel. The **PPO configuration** tab exposes gamma, GAE lambda, clipping, optimizer rate, epochs, batch size, KL, entropy and value weights for *newly created* learners. Running learners are not silently reconfigured.
 Optional `reward` rows persist eight nonnegative channel weights:
 `reward mobile_id progress step_cost arrival collision zone_caution edge_caution fuel_cost failure`.
 These change the scoring signals, not the shared motion or RL backend.
@@ -102,6 +102,8 @@ For the former minimum-speed/fuel feature, an optional `energy` row may be added
 `energy mobile_id minimum_speed fuel_capacity idle_rate speed_cubic_rate turn_rate_cost`.
 The physical 2D model uses `idle + speed_cubic * speed^3 + turn_cost * turn_rate^2`
 units per second; capacity zero disables fuel. `energy-demo.nav` shows the feature.
+World half-extent and simulation timestep may be adjusted from **Simulation** without replacing running controllers; invalid resizes are rejected atomically. The original optional GLB mobile artwork is copied beside the application, with a procedural fallback and a persisted display toggle.
+
 Energy exhaustion or too-low speed ends the mobile's episode; the inspector shows
 energy remaining and last-step consumption. This remains an example-level behavior,
 not a dependency of the generic RL engine.
