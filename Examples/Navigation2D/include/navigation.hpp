@@ -1,5 +1,6 @@
 #pragma once
 #include "components.hpp"
+#include "lidar.hpp"
 #include "ppo/rl/runtime.hpp"
 #include <entt/entity/registry.hpp>
 #include <filesystem>
@@ -65,6 +66,8 @@ public:
     State goal_state() const;
     Point position() const;
     ppo::rl::Value observation(EntityId mobile) const;
+    /// Independent 360-degree scan for any mobile, including non-primary agents.
+    LidarScan lidar(EntityId mobile) const;
     const ppo::rl::StepResult& transition(EntityId mobile) const;
     /// Changes are allowed only before the first step or after an episode boundary.
     /// The externally driven primary cannot also have an internal controller.
