@@ -43,7 +43,16 @@ class FakeBackend final : public navigation::IPolicyBackend
 {
 public:
     Counts counts;
+    navigation::TrainingParameters last_training_parameters{};
     std::vector<std::filesystem::path> loaded_paths;
+    std::unique_ptr<ppo::rl::ILearner> create_learner_configured(
+        std::size_t observations, std::size_t actions, std::size_t rollout,
+        const std::filesystem::path& root, const navigation::TrainingParameters& settings) override
+    {
+        navigation::validate_training_parameters(settings);
+        last_training_parameters = settings;
+        return create_learner(observations, actions, rollout, root);
+    }
     std::unique_ptr<ppo::rl::ILearner> create_learner(
         std::size_t, std::size_t, std::size_t, const std::filesystem::path&) override
     {
@@ -115,6 +124,35 @@ void test_controls()
     try { application.play(static_cast<navigation::ControlMode>(100), 64, {}); }
     catch (const std::invalid_argument&) { rejected = true; }
     check(rejected, "invalid mode is not silently treated as manual");
+}
+void test_training_settings()
+{
+    TemporaryDirectory directory;
+    FakeBackend backend;
+    navigation::Scenario scenario;
+    scenario.mobiles[1].initial.position = {90,0};
+    navigation::Application application(scenario, directory.path / "score.metrics",
+                                        directory.path / "store", backend);
+    auto parameters = application.training_parameters();
+    parameters.learning_rate = 0.0005F;
+    parameters.gamma = 0.97F;
+    parameters.epochs = 7;
+    application.set_training_parameters(parameters);
+    check(application.training_parameters().gamma == 0.97F, "PPO settings accepted before training");
+    application.play(navigation::ControlMode::Training, 128, {});
+    check(backend.last_training_parameters.learning_rate == 0.0005F
+          && backend.last_training_parameters.epochs == 7,
+          "primary learner receives new PPO hyperparameters");
+    bool rejected = false;
+    parameters.gamma = 2;
+    try { application.set_training_parameters(parameters); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    check(rejected, "out-of-range PPO options rejected even while running");
+    parameters.gamma = 0.99F;
+    rejected = false;
+    try { application.set_training_parameters(parameters); }
+    catch (const std::logic_error&) { rejected = true; }
+    check(rejected, "optimizer options cannot silently mutate a running learner");
 }
 void test_evaluation_context()
 {
@@ -262,7 +300,7 @@ int main()
 {
     try
     {
-        test_controls();
+        test_controls();test_training_settings();
         test_evaluation_context();
         test_goal_policy();
         test_pinned_goal_checkpoint();
