@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <filesystem>
 #include <stdexcept>
 #include <utility>
 
@@ -25,6 +26,14 @@ EnvironmentRenderer::EnvironmentRenderer(navigation::Application& application) :
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
     InitWindow(1600, 1000, "PLAYGROUND");
     SetTargetFPS(60);
+    // Models are optional decorative assets. A procedural symbol remains the fallback.
+    const auto models = std::filesystem::path(GetApplicationDirectory()) / "models";
+    const auto primary = models / "blue_fighter_poly_pizza.glb";
+    const auto other = models / "red_jet_poly_pizza.glb";
+    if (std::filesystem::exists(primary))
+        m_primaryMobileModel = LoadModel(primary.string().c_str());
+    if (std::filesystem::exists(other))
+        m_otherMobileModel = LoadModel(other.string().c_str());
     rlImGuiSetup(true);
     ImPlot::CreateContext();
     ApplyTheme();
@@ -39,6 +48,8 @@ EnvironmentRenderer::EnvironmentRenderer(navigation::Application& application) :
 EnvironmentRenderer::~EnvironmentRenderer()
 {
     if (m_texture.id) UnloadRenderTexture(m_texture);
+    if (m_primaryMobileModel.meshCount > 0) UnloadModel(m_primaryMobileModel);
+    if (m_otherMobileModel.meshCount > 0) UnloadModel(m_otherMobileModel);
     ImPlot::DestroyContext();
     rlImGuiShutdown();
     CloseWindow();
@@ -160,6 +171,7 @@ void EnvironmentRenderer::LoadSettings()
         m_showGrid = settings.value("Grid", true);
         m_showDomains = settings.value("Zones", true);
         m_showLidar = settings.value("Lidar", true);
+        m_showMobileModels = settings.value("MobileModels", true);
         m_showTrails = settings.value("Trails", true);
         m_showMetaCatalog = settings.value("Catalog", true);
         const float zoom = settings.value("MapZoom", 1.F);
@@ -170,7 +182,7 @@ void EnvironmentRenderer::LoadSettings()
 void EnvironmentRenderer::SaveSettings() const
 {
     const nlohmann::json settings = {{"FollowSelection",m_autoAttachCamera}, {"Grid",m_showGrid},
-        {"Zones",m_showDomains}, {"Lidar",m_showLidar}, {"Trails",m_showTrails}, {"Catalog",m_showMetaCatalog}, {"MapZoom",m_mapZoom}};
+        {"Zones",m_showDomains}, {"Lidar",m_showLidar}, {"MobileModels",m_showMobileModels}, {"Trails",m_showTrails}, {"Catalog",m_showMetaCatalog}, {"MapZoom",m_mapZoom}};
     std::ofstream output("NavigationRenderer.json");
     if (!output || !(output << settings.dump(2))) throw std::runtime_error("Cannot save renderer settings");
 }
@@ -231,6 +243,7 @@ void EnvironmentRenderer::DrawSimulationControls()
     ImGui::Checkbox("Grid", &m_showGrid);
     ImGui::Checkbox("Forbidden zones", &m_showDomains);
     ImGui::Checkbox("Pseudo-LiDAR (61 rays)", &m_showLidar);
+    ImGui::Checkbox("Mobile 3D artwork", &m_showMobileModels);
     ImGui::Checkbox("Trails", &m_showTrails);
     ImGui::Checkbox("Follow selection", &m_autoAttachCamera);
     ImGui::Checkbox("Meta catalog", &m_showMetaCatalog);
@@ -329,7 +342,20 @@ void EnvironmentRenderer::RenderTacticalScene(int width, int height)
             }
         }
         const Color color = id == scenario.controlled ? SKYBLUE : GREEN;
-        DrawSphere(World(state.position, 0.25F), 0.25F, color);
+        const Model& artwork = id == scenario.controlled ? m_primaryMobileModel : m_otherMobileModel;
+        if (m_showMobileModels && artwork.meshCount > 0)
+        {
+            const auto bounds = GetModelBoundingBox(artwork);
+            const float span = std::max({bounds.max.x - bounds.min.x,
+                                         bounds.max.y - bounds.min.y,
+                                         bounds.max.z - bounds.min.z, 0.001F});
+            const float scale = 0.8F / span;
+            DrawModelEx(artwork, World(state.position, 0.25F), {0,1,0},
+                        static_cast<float>(-state.heading * RAD2DEG),
+                        {scale, scale, scale}, color);
+        }
+        else
+            DrawSphere(World(state.position, 0.25F), 0.25F, color);
         DrawLine3D(World(state.position, 0.3F), World({state.position.x+std::cos(state.heading),state.position.y+std::sin(state.heading)},0.3F),color);
         const auto destination = world.get<navigation::Destination>(entity);
         if (destination.entity != navigation::no_entity)
