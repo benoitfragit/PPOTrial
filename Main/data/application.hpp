@@ -43,6 +43,9 @@ public:
     /// Change only while stopped, before an episode starts or after it finishes.
     void configure_episode_initialization(InitializationMode mode, std::vector<Scenario> cases = {});
     void set_reward_weights(EntityId mobile, RewardWeights weights);
+    /// PPO settings used only for subsequently created training controllers.
+    void set_training_parameters(TrainingParameters parameters);
+    const TrainingParameters& training_parameters() const noexcept;
     /// Configure any additional mobile independently, at a stopped episode boundary.
     void configure_mobile(EntityId mobile, ControlMode mode, std::size_t rollout,
                           const std::filesystem::path& checkpoint = {});
