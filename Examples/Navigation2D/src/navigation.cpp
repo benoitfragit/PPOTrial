@@ -51,6 +51,14 @@ Scenario validate(Scenario s)
             mobile.initial.speed < 0 || mobile.initial.speed > s.max_speed)
             throw std::invalid_argument("invalid or duplicate mobile definition");
         positive(mobile.arrival_radius, s.half_extent);
+        const auto& e = mobile.energy;
+        if (!std::isfinite(e.min_speed) || e.min_speed < 0 || e.min_speed > s.max_speed
+            || !std::isfinite(e.capacity) || e.capacity < 0 || e.capacity > 1e12
+            || !std::isfinite(e.idle) || e.idle < 0 || e.idle > 1e12
+            || !std::isfinite(e.speed_cubic) || e.speed_cubic < 0 || e.speed_cubic > 1e12
+            || !std::isfinite(e.turning) || e.turning < 0 || e.turning > 1e12
+            || (e.capacity == 0 && (e.idle != 0 || e.speed_cubic != 0 || e.turning != 0)))
+            throw std::invalid_argument("invalid mobile energy configuration");
         mobile_ids.insert(mobile.id);
     }
     if (mobile_ids.count(s.controlled) == 0)
@@ -91,7 +99,12 @@ bool same_topology(const Scenario& a, const Scenario& b)
         if (a.mobiles[i].id != b.mobiles[i].id
             || a.mobiles[i].name != b.mobiles[i].name
             || a.mobiles[i].destination != b.mobiles[i].destination
-            || a.mobiles[i].arrival_radius != b.mobiles[i].arrival_radius)
+            || a.mobiles[i].arrival_radius != b.mobiles[i].arrival_radius
+            || a.mobiles[i].energy.min_speed != b.mobiles[i].energy.min_speed
+            || a.mobiles[i].energy.capacity != b.mobiles[i].energy.capacity
+            || a.mobiles[i].energy.idle != b.mobiles[i].energy.idle
+            || a.mobiles[i].energy.speed_cubic != b.mobiles[i].energy.speed_cubic
+            || a.mobiles[i].energy.turning != b.mobiles[i].energy.turning)
             return false;
     for (std::size_t i = 0; i < a.zones.size(); ++i)
         if (a.zones[i].id != b.zones[i].id
@@ -134,9 +147,17 @@ Scenario random_episode(const Scenario& baseline, std::mt19937_64& random)
     }
     throw std::runtime_error("failed to sample valid Navigation2D initial states");
 }
+bool energy_enabled(const Scenario& s)
+{
+    return std::any_of(s.mobiles.begin(), s.mobiles.end(), [](const MobileDefinition& mobile)
+    {
+        return mobile.energy.capacity > 0 || mobile.energy.min_speed > 0;
+    });
+}
 ppo::rl::Space observation_space_for(const Scenario& s)
 {
-    const std::size_t size = 10 + 3 * s.zones.size() + kLidarBinCount;
+    const std::size_t size = 10 + (energy_enabled(s) ? 1 : 0)
+        + 3 * s.zones.size() + kLidarBinCount;
     const float infinity = std::numeric_limits<float>::infinity();
     return ppo::rl::Box({size}, std::vector<float>(size, -infinity), std::vector<float>(size, infinity));
 }
@@ -332,6 +353,8 @@ void Environment::rebuild(Scenario scenario)
         world.emplace<InitialState>(entity, m.initial);
         world.emplace<Destination>(entity, m.destination, m.arrival_radius);
         world.emplace<Commands>(entity);
+        world.emplace<EnergyModel>(entity, m.energy);
+        world.emplace<EnergyState>(entity, m.energy.capacity, 0.0, false, false);
     }
     for (const auto& z : next.zones)
     {
@@ -441,6 +464,7 @@ ppo::rl::ResetResult Environment::reset(const ppo::rl::ResetOptions& options)
         const auto entity = handle(mobile.id);
         world_.get<State>(entity) = mobile.initial;
         world_.get<Commands>(entity) = {};
+        world_.get<EnergyState>(entity) = {mobile.energy.capacity, 0.0, false, false};
     }
     for (const auto& zone : scenario_.zones)
         world_.get<State>(handle(zone.id)).position = zone.center;
@@ -495,7 +519,15 @@ ppo::rl::Value Environment::observation(EntityId mobile) const
                               static_cast<float>(steps_) / static_cast<float>(scenario_.max_steps),
                               static_cast<float>(std::cos(other.heading) * other.speed / scenario_.max_speed),
                               static_cast<float>(std::sin(other.heading) * other.speed / scenario_.max_speed)};
-    values.reserve(10 + 3 * scenario_.zones.size() + kLidarBinCount);
+    values.reserve(10 + (energy_enabled(scenario_) ? 1 : 0)
+                   + 3 * scenario_.zones.size() + kLidarBinCount);
+    if (energy_enabled(scenario_))
+    {
+        const auto& fuel = world_.get<EnergyState>(entity);
+        const auto& model = world_.get<EnergyModel>(entity);
+        values.push_back(model.capacity > 0
+            ? static_cast<float>(fuel.remaining / model.capacity) : 1.F);
+    }
     for (const auto& zone : scenario_.zones)
     {
         const auto handle_ = handle(zone.id);
