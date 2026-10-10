@@ -48,6 +48,8 @@ private:
     int m_mode = 0;
     int m_rollout = 2048;
     int m_evaluationEpisodes = 10;
+    int m_initializationMode = 0;
+    char m_caseManifest[1024] = "scenarios/evaluation.cases";
     char m_checkpoint[1024] = {};
     int m_selectedMode = 0;
     char m_selectedCheckpoint[1024] = {};
