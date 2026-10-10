@@ -25,10 +25,24 @@ void append_sample(std::vector<float>& values, float value)
     values.push_back(value);
 }
 } // namespace
+void validate_training_parameters(const TrainingParameters& parameters)
+{
+    const auto finite_unit = [](float value) { return std::isfinite(value) && value >= 0.F && value <= 1.F; };
+    if (!finite_unit(parameters.gamma) || !finite_unit(parameters.lambda_gae)
+        || !std::isfinite(parameters.clip_epsilon) || parameters.clip_epsilon <= 0
+        || parameters.clip_epsilon > 1
+        || !std::isfinite(parameters.value_coefficient) || parameters.value_coefficient < 0
+        || !std::isfinite(parameters.entropy_coefficient) || parameters.entropy_coefficient < 0
+        || !std::isfinite(parameters.learning_rate) || parameters.learning_rate <= 0
+        || !std::isfinite(parameters.target_kl) || parameters.target_kl <= 0
+        || parameters.epochs < 1 || parameters.epochs > 10000 || parameters.batch_size < 1)
+        throw std::invalid_argument("invalid PPO training parameters");
+}
 struct Application::Impl
 {
     Environment environment;
     IPolicyBackend& backend;
+    TrainingParameters training_parameters;
     ppo::rl::ILearner* learner = nullptr; // owned by policy
     bool evaluation_paused = false;
     std::string evaluation_context;
@@ -161,6 +175,17 @@ Application::Application(Scenario scenario, std::filesystem::path metrics, std::
 {
 }
 Application::~Application() = default;
+void Application::set_training_parameters(TrainingParameters parameters)
+{
+    validate_training_parameters(parameters);
+    if (impl_->running || evaluating())
+        throw std::logic_error("stop the simulation before changing PPO settings");
+    impl_->training_parameters = parameters;
+}
+const TrainingParameters& Application::training_parameters() const noexcept
+{
+    return impl_->training_parameters;
+}
 void Application::set_reward_weights(EntityId mobile, RewardWeights weights)
 {
     if (evaluating())
@@ -236,8 +261,9 @@ void Application::configure_mobile(EntityId mobile, ControlMode mode, std::size_
     }
     else if (mode == ControlMode::Training)
     {
-        auto learner = impl_->backend.create_learner(
-            dimensions, 2, rollout, impl_->checkpoints / "work" / ("mobile-" + std::to_string(mobile)));
+        auto learner = impl_->backend.create_learner_configured(
+            dimensions, 2, rollout, impl_->checkpoints / "work" / ("mobile-" + std::to_string(mobile)),
+            impl_->training_parameters);
         if (!learner)
             throw std::runtime_error("backend returned no learner");
         control.learner = learner.get();
@@ -308,9 +334,10 @@ void Application::play(ControlMode mode, std::size_t rollout, const std::filesys
         ppo::rl::ILearner* learner = nullptr;
         if (mode == ControlMode::Training)
         {
-            auto training = impl_->backend.create_learner(
+            auto training = impl_->backend.create_learner_configured(
                 dimensions, 2, rollout,
-                impl_->checkpoints / "work" / ("mobile-" + std::to_string(impl_->environment.scenario().controlled)));
+                impl_->checkpoints / "work" / ("mobile-" + std::to_string(impl_->environment.scenario().controlled)),
+                impl_->training_parameters);
             learner = training.get();
             next = std::move(training);
         }
