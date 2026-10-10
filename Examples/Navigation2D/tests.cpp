@@ -375,6 +375,10 @@ void test_live_world_controls()
     check(rejected && environment.scenario().half_extent == 200
           && environment.scenario().dt == 0.1,
           "invalid live resize is rejected atomically");
+    environment.request_stop();
+    environment.step(std::vector<float>{0,0});
+    scenario.half_extent = 200;
+    scenario.dt = 0.1;
     auto case_b = scenario;
     case_b.mobiles[0].initial.position = {-50,0};
     environment.configure_initialization(navigation::InitializationMode::PresetCases,
