@@ -151,6 +151,24 @@ void test_lidar()
     check(std::abs(scan.normalized[30] - 0.8F) < 1e-6F,
           "LiDAR preserves legacy d/(d+radius) normalization");
     check(std::abs(scan.distances[0] - 10.0) < 1e-6, "LiDAR sees west work-area boundary");
+    check(std::abs(scan.normalized[0] - static_cast<float>(10.0 / (10.0 + std::sqrt(200.0)))) < 1e-6F,
+          "work-area boundary uses its diagonal reference");
+    check(std::abs(scan.distances[60] - scan.distances[0]) < 1e-6,
+          "first and final 360-degree rays coincide");
+    navigation::Scenario closer = scenario;
+    closer.zones.push_back({101, "Closer", {3,0}, 0.5});
+    navigation::Environment competing(closer);
+    const auto nearest = competing.lidar(1);
+    check(std::abs(nearest.distances[30] - 2.5) < 1e-6,
+          "nearest of multiple circles determines raw range");
+    check(std::abs(nearest.normalized[30] - static_cast<float>(2.5 / 3.5)) < 1e-6F,
+          "normalized LiDAR value follows physically nearest obstacle");
+    navigation::Scenario rotated = scenario;
+    rotated.mobiles[0].initial.heading = 1.5707963267948966;
+    rotated.zones[0].center = {0,5};
+    navigation::Environment turned(rotated);
+    check(std::abs(turned.lidar(1).distances[30] - 4.0) < 1e-6,
+          "LiDAR rays rotate with mobile heading");
     const auto& obs = std::get<std::vector<float>>(first.observation);
     check(obs.size() == 13 + navigation::kLidarBinCount, "LiDAR is in learner observation");
     check(std::abs(obs[13+30] - scan.normalized[30]) < 1e-6, "observation uses same scan");
