@@ -49,6 +49,7 @@ private:
     int m_mode = 0;
     int m_rollout = 2048;
     int m_evaluationEpisodes = 10;
+    navigation::TrainingParameters m_trainingEdits{};
     int m_initializationMode = 0;
     char m_caseManifest[1024] = "scenarios/evaluation.cases";
     char m_checkpoint[1024] = {};
