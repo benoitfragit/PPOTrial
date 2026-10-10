@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <limits>
 #include <locale>
+#include <random>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -77,6 +78,61 @@ Scenario validate(Scenario s)
     std::sort(s.zones.begin(), s.zones.end(),
               [](const ZoneDefinition& a, const ZoneDefinition& b) { return a.id < b.id; });
     return s;
+}
+bool same_topology(const Scenario& a, const Scenario& b)
+{
+    if (a.controlled != b.controlled || a.mobiles.size() != b.mobiles.size()
+        || a.zones.size() != b.zones.size()
+        || a.half_extent != b.half_extent || a.dt != b.dt
+        || a.max_steps != b.max_steps || a.max_speed != b.max_speed
+        || a.max_acceleration != b.max_acceleration || a.max_turn_rate != b.max_turn_rate)
+        return false;
+    for (std::size_t i = 0; i < a.mobiles.size(); ++i)
+        if (a.mobiles[i].id != b.mobiles[i].id
+            || a.mobiles[i].name != b.mobiles[i].name
+            || a.mobiles[i].destination != b.mobiles[i].destination
+            || a.mobiles[i].arrival_radius != b.mobiles[i].arrival_radius)
+            return false;
+    for (std::size_t i = 0; i < a.zones.size(); ++i)
+        if (a.zones[i].id != b.zones[i].id
+            || a.zones[i].name != b.zones[i].name
+            || a.zones[i].radius != b.zones[i].radius)
+            return false;
+    return true;
+}
+Scenario random_episode(const Scenario& baseline, std::mt19937_64& random)
+{
+    // Randomize the complete mobile population without altering world topology.
+    // Rejection sampling keeps every mobile outside forbidden circles.
+    std::uniform_real_distribution<double> location(-0.85 * baseline.half_extent,
+                                                     0.85 * baseline.half_extent);
+    std::uniform_real_distribution<double> heading(-3.14159265358979323846,
+                                                    3.14159265358979323846);
+    std::uniform_real_distribution<double> speed(0.0, baseline.max_speed);
+    for (int attempt = 0; attempt < 128; ++attempt)
+    {
+        auto candidate = baseline;
+        for (auto& mobile : candidate.mobiles)
+        {
+            mobile.initial.position = {location(random), location(random)};
+            mobile.initial.heading = heading(random);
+            mobile.initial.speed = speed(random);
+        }
+        bool collision = false;
+        for (const auto& mobile : candidate.mobiles)
+        {
+            for (const auto& zone : candidate.zones)
+                if (distance(mobile.initial.position, zone.center) <= zone.radius)
+                    collision = true;
+            for (const auto& destination : candidate.mobiles)
+                if (mobile.destination == destination.id
+                    && distance(mobile.initial.position, destination.initial.position)
+                        <= mobile.arrival_radius)
+                    collision = true;
+        }
+        if (!collision) return candidate;
+    }
+    throw std::runtime_error("failed to sample valid Navigation2D initial states");
 }
 ppo::rl::Space observation_space_for(const Scenario& s)
 {
@@ -234,6 +290,26 @@ void save_scenario(const Scenario& scenario, const std::filesystem::path& path)
     if (!output)
         throw std::runtime_error("cannot save scenario");
 }
+std::vector<Scenario> load_episode_cases(const std::filesystem::path& manifest)
+{
+    std::ifstream input(manifest);
+    if (!input) throw std::runtime_error("cannot open episode-case manifest");
+    std::vector<Scenario> cases;
+    std::string line;
+    while (std::getline(input, line))
+    {
+        const auto first = line.find_first_not_of(" \\t\\r");
+        if (first == std::string::npos || line[first] == '#') continue;
+        const auto last = line.find_last_not_of(" \\t\\r");
+        const auto name = line.substr(first, last - first + 1);
+        if (cases.size() >= 10000)
+            throw std::invalid_argument("too many episode cases");
+        cases.push_back(load_scenario(manifest.parent_path() / name));
+    }
+    if (input.bad()) throw std::runtime_error("episode-case manifest read failed");
+    if (cases.empty()) throw std::invalid_argument("episode-case manifest is empty");
+    return cases;
+}
 Environment::Environment(Scenario scenario)
     : scenario_(validate(std::move(scenario))), observations_(observation_space_for(scenario_))
 {
@@ -272,6 +348,10 @@ void Environment::rebuild(Scenario scenario)
     entities_ = std::move(entities);
     scenario_ = std::move(next);
     observations_ = std::move(space);
+    baseline_scenario_ = scenario_;
+    episode_cases_.clear();
+    initialization_mode_ = InitializationMode::Fixed;
+    episode_index_ = 0;
     steps_ = 0;
     active_ = false;
     transitions_.clear();
@@ -314,15 +394,57 @@ void Environment::remove_entity(EntityId id)
         next.zones.end());
     rebuild(std::move(next)); // validation rejects deleting a referenced destination or primary
 }
+void Environment::configure_initialization(InitializationMode mode, std::vector<Scenario> cases)
+{
+    require_editable();
+    if (mode == InitializationMode::PresetCases)
+    {
+        if (cases.empty()) throw std::invalid_argument("preset mode needs at least one case");
+        for (auto& episode : cases)
+        {
+            episode = validate(std::move(episode));
+            if (!same_topology(baseline_scenario_, episode))
+                throw std::invalid_argument("episode case has different topology or motion rules");
+        }
+    }
+    else if (!cases.empty())
+        throw std::invalid_argument("cases are only valid in preset initialization mode");
+    episode_cases_ = std::move(cases);
+    initialization_mode_ = mode;
+    episode_index_ = 0;
+}
+InitializationMode Environment::initialization_mode() const noexcept
+{
+    return initialization_mode_;
+}
+const std::vector<Scenario>& Environment::episode_cases() const noexcept
+{
+    return episode_cases_;
+}
 ppo::rl::ResetResult Environment::reset(const ppo::rl::ResetOptions& options)
 {
     if (!options.options.empty())
         throw std::invalid_argument("no custom reset options supported");
-    for (const auto entity : world_.view<Mobile, State, InitialState>())
+    if (options.seed && initialization_mode_ == InitializationMode::Randomized)
+        random_engine_.seed(*options.seed);
+    Scenario chosen = baseline_scenario_;
+    if (initialization_mode_ == InitializationMode::Randomized)
+        chosen = random_episode(baseline_scenario_, random_engine_);
+    else if (initialization_mode_ == InitializationMode::PresetCases)
     {
-        world_.get<State>(entity) = world_.get<InitialState>(entity).value;
+        const auto index = (options.seed ? *options.seed : episode_index_) % episode_cases_.size();
+        chosen = episode_cases_.at(static_cast<std::size_t>(index));
+    }
+    scenario_ = std::move(chosen);
+    for (const auto& mobile : scenario_.mobiles)
+    {
+        const auto entity = handle(mobile.id);
+        world_.get<State>(entity) = mobile.initial;
         world_.get<Commands>(entity) = {};
     }
+    for (const auto& zone : scenario_.zones)
+        world_.get<State>(handle(zone.id)).position = zone.center;
+    ++episode_index_;
     steps_ = 0;
     active_ = true;
     stop_requested_ = false;
