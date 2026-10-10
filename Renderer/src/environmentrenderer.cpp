@@ -539,6 +539,25 @@ void EnvironmentRenderer::DrawAgentsWindow()
                 ImGui::TextWrapped("Navigation2D: progress reward, time cost, early zone/boundary avoidance, arrival bonus, collision and optional energy penalties.");
                 ImGui::EndTabItem();
             }
+            if (ImGui::BeginTabItem("PPO configuration"))
+            {
+                ImGui::TextWrapped("Applies to new training controllers only. Existing learners keep their optimizer settings.");
+                ImGui::InputFloat("Gamma", &m_trainingEdits.gamma, 0, 0, "%.5f");
+                ImGui::InputFloat("GAE lambda", &m_trainingEdits.lambda_gae, 0, 0, "%.5f");
+                ImGui::InputFloat("Clip epsilon", &m_trainingEdits.clip_epsilon, 0, 0, "%.5f");
+                ImGui::InputFloat("Value coefficient", &m_trainingEdits.value_coefficient, 0, 0, "%.5f");
+                ImGui::InputFloat("Entropy coefficient", &m_trainingEdits.entropy_coefficient, 0, 0, "%.5f");
+                ImGui::InputFloat("Learning rate", &m_trainingEdits.learning_rate, 0, 0, "%.6f");
+                ImGui::InputInt("Epochs", &m_trainingEdits.epochs);
+                ImGui::InputInt("Mini-batch", &m_trainingEdits.batch_size);
+                ImGui::InputFloat("Target KL", &m_trainingEdits.target_kl, 0, 0, "%.6f");
+                if (ImGui::Button("Apply to new learners"))
+                {
+                    try { m_application.set_training_parameters(m_trainingEdits); m_error.clear(); }
+                    catch (const std::exception& error) { m_error = error.what(); }
+                }
+                ImGui::EndTabItem();
+            }
             if (ImGui::BeginTabItem("Snapshot"))
             {
                 const auto values = std::get<std::vector<float>>(environment.observation(m_selection));
