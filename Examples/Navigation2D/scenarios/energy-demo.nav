@@ -1,0 +1,9 @@
+navigation2d-v3
+primary 1
+world 100 0.2 500
+motion 5 2 1
+mobile 1 "Endurance learner" -25 -5 0 2 2 0.5
+mobile 2 "Moving goal" 30 10 2.5 0.75 1 0.5
+zone 100 "Protected disk" 3 0 6
+energy 1 1 150 0.5 0.003 0.1
+energy 2 0.5 100 0.2 0.001 0.02
