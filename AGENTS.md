@@ -94,8 +94,12 @@ testable et maintenable. Adapte des principes de `benoitfragit/MFDStudio/AGENTS.
   `cmake --build build/rl`, `ctest --test-dir build/rl --output-on-failure`.
 - Le desktop exige LibTorch et raylib/ImGui/ImPlot. Ne pas annoncer sa
   validation a partir du seul build du contrat ou d'un controle syntaxique.
-- Le portage Navigation2D remplace explicitement l'ancien exemple et ses
-  configurations ; ne pas retablir de compatibilite avec les anciens agents.
+- Le portage Navigation2D remplace explicitement les anciens noms metier, et non
+  leurs capacites : preservation fonctionnelle de la simulation 2D, perception,
+  controle multi-agent, initialisations, evaluation et rendu. Toute fonction
+  deliberement simplifiee doit etre repertoriee avec un test de non-regression
+  et l'accord explicite du mainteneur. Ne pas reintroduire les anciens noms
+  d'entites, ni de shim pour les checkpoints neuronaux historiques.
 
 ## Definition de termine
 
