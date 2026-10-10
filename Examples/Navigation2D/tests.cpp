@@ -172,6 +172,31 @@ void test_lidar()
     try { navigation::Environment forbidden(scenario); } catch (const std::invalid_argument&) { invalid = true; }
     check(invalid, "inside-zone initial state is rejected");
 }
+void test_avoidance_reward()
+{
+    navigation::Scenario near_zone;
+    near_zone.mobiles[0].initial = {{0,0}, 0, 0};
+    near_zone.mobiles[1].initial.position = {8,8};
+    near_zone.zones = {{100,"Nearby zone",{1.5,0},0.4}};
+    navigation::Scenario far_zone = near_zone;
+    far_zone.zones[0].center = {5,5};
+    navigation::Environment near(near_zone), far(far_zone);
+    near.reset(); far.reset();
+    const auto near_reward = near.step(std::vector<float>{0,0}).reward;
+    const auto far_reward = far.step(std::vector<float>{0,0}).reward;
+    check(near_reward < far_reward, "early zone proximity incurs dense safety penalty");
+
+    navigation::Scenario edge = near_zone;
+    edge.zones.clear();
+    edge.mobiles[0].initial.position = {99.5,0};
+    navigation::Scenario middle = edge;
+    middle.mobiles[0].initial.position = {0,0};
+    navigation::Environment boundary(edge), clear(middle);
+    boundary.reset(); clear.reset();
+    check(boundary.step(std::vector<float>{0,0}).reward
+        < clear.step(std::vector<float>{0,0}).reward,
+        "approaching work-area edge incurs dense safety penalty");
+}
 void test_shared_loop()
 {
     navigation::Scenario scenario; scenario.max_steps=2; set_goal_velocity(scenario, {0.5,0.2});
@@ -386,8 +411,8 @@ int main(int argc, char** argv)
             std::cout << "Packaged scenarios parsed and stepped without models\n";
             return 0;
         }
-        test_navigation();test_moving_goal();test_lidar();test_shared_loop();test_incremental_session();test_bootstrap();test_metrics();test_checkpoints_and_config();test_ecs_world();
-        std::cout<<"9 navigation/runtime test groups passed\n";return 0;
+        test_navigation();test_moving_goal();test_lidar();test_avoidance_reward();test_shared_loop();test_incremental_session();test_bootstrap();test_metrics();test_checkpoints_and_config();test_ecs_world();
+        std::cout<<"10 navigation/runtime test groups passed\n";return 0;
     }
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }
