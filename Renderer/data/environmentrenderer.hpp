@@ -2,6 +2,7 @@
 #include "application.hpp"
 #include "raylib.h"
 #include "imgui.h"
+#include <map>
 #include <string>
 #include <vector>
 
@@ -57,6 +58,7 @@ private:
     ImGuiTextFilter m_filter;
     std::string m_error;
     std::map<navigation::EntityId, std::vector<navigation::Point>> m_trails;
+    std::map<navigation::EntityId, navigation::RewardWeights> m_rewardEdits;
     std::size_t m_lastEpisode = 0;
     std::size_t m_lastStep = 0;
 };
