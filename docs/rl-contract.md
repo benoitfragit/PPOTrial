@@ -126,16 +126,16 @@ deterministic; seeds currently produce the same configured initial state.
 Observations contain own x/y and destination x/y normalized by world extent,
 cos/sin own heading, own speed/max-speed, elapsed-step fraction, destination
 velocity x/y normalized by max-speed, then zone x/y/radius normalized by extent.
-Width is `10 + 3 * zone_count`; unrelated mobiles do not enter the observation.
+Width is `10 + 3 * zone_count + 61`; the last 61 values are a heading-relative, 360-degree ray-cast scan at six-degree increments, including the repeated endpoint. Rays intersect the nearest forbidden-circle boundary or square work-area edge. Normalization uses `distance/(distance+reference)`, with circle radius or the work-area half-diagonal as reference; raw distances are exposed separately for visualization. Unrelated mobiles do not enter the observation.
 A mobile without destination uses itself for observation only, with no meeting event.
-Reward remains distance progress/world extent minus 0.001, +1 on its own meeting,
+Reward includes distance progress/world extent minus 0.001, optional dense proximity penalties near forbidden zones and the work-area perimeter, +1 on its own meeting,
 -1 on its own collision. `goal_collision` adds no new penalty. These are the
 navigation rewards of the accepted replacement example, not the former domain rewards.
 
 v3 replaces v2's start/goal/obstacle rows; no compatibility shim is provided.
 Matching tensor dimensions alone do not establish old-policy compatibility:
 world termination and zone semantics changed. Old historical assets/checkpoints
-remain under `resources/`, unused by this application. The viewport remains a
+remain under `resources/`, unused by this application. The selected mobile's rays may be displayed in the desktop viewport; the display toggle is saved separately from simulation state. The viewport remains a
 perspective presentation of 2D motion, with lists, inspection, selection, minimap
 and trails driven by all ECS entities. Controller/observation/metric panels follow
 the selected mobile. The catalog describes current component types, not old EnTT
