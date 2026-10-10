@@ -82,6 +82,25 @@ real dependency headers. No neural model was executed. The preceding implementat
 the latest PR checks validate this revision. An interactive desktop smoke test
 remains required. See [code review](docs/code-review.md) for fixes and limitations.
 
+## Episode starts and generic motion endurance
+
+A Navigation2D episode can start from its original fixed scene, use a randomized
+set of mobile states (seeded resets are reproducible), or replay complete-world
+presets from a manifest. The desktop **Simulation > Episode initialization**
+selects these modes; use `scenarios/evaluation.cases` for the bundled default
+scenario. Each line names a `navigation2d-v3` file relative to the manifest.
+Presets retain every mobile/zone ID and all attached controller relationships.
+Frozen-policy evaluations use the same configured distribution and record the
+configuration in the candidate score context.
+
+For the former minimum-speed/fuel feature, an optional `energy` row may be added:
+`energy mobile_id minimum_speed fuel_capacity idle_rate speed_cubic_rate turn_rate_cost`.
+The physical 2D model uses `idle + speed_cubic * speed^3 + turn_cost * turn_rate^2`
+units per second; capacity zero disables fuel. `energy-demo.nav` shows the feature.
+Energy exhaustion or too-low speed ends the mobile's episode; the inspector shows
+energy remaining and last-step consumption. This remains an example-level behavior,
+not a dependency of the generic RL engine.
+
 ## Multiple entities and controllers
 
 `scenarios/multiple.nav` contains five mobiles and two zones. Start `PPO` with that
