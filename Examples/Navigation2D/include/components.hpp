@@ -30,6 +30,23 @@ struct ForbiddenZone
 {
     double radius;
 };
+/// Optional 2D mobility endurance model. Capacity 0 disables fuel accounting.
+/// Burn per second: idle + speed_cubic * v^3 + turning * omega^2.
+struct EnergyModel
+{
+    double min_speed = 0;
+    double capacity = 0;
+    double idle = 0;
+    double speed_cubic = 0;
+    double turning = 0;
+};
+struct EnergyState
+{
+    double remaining = 0;
+    double last_burn = 0;
+    bool exhausted = false;
+    bool stalled = false;
+};
 struct Destination
 {
     EntityId entity;
