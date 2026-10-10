@@ -93,6 +93,11 @@ Presets retain every mobile/zone ID and all attached controller relationships.
 Frozen-policy evaluations use the same configured distribution and record the
 configuration in the candidate score context.
 
+Editable rewards can be configured independently for each mobile in the **Agents** panel.
+Optional `reward` rows persist eight nonnegative channel weights:
+`reward mobile_id progress step_cost arrival collision zone_caution edge_caution fuel_cost failure`.
+These change the scoring signals, not the shared motion or RL backend.
+
 For the former minimum-speed/fuel feature, an optional `energy` row may be added:
 `energy mobile_id minimum_speed fuel_capacity idle_rate speed_cubic_rate turn_rate_cost`.
 The physical 2D model uses `idle + speed_cubic * speed^3 + turn_cost * turn_rate^2`
