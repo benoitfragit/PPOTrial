@@ -93,7 +93,9 @@ For batch use with additional learners, stop the world with `request_stop()` bef
 the final advance, or use the world's `max_steps`. An external single-agent runner
 limit alone cannot notify embedded learners; the application propagates its Stop
 request to both the world and primary session. Updates still run synchronously on
-the UI thread. This port does not restore the original worker-thread/snapshot bus;
+the UI thread. The desktop can atomically change world half-extent and dt
+between steps with validation of all configured episode cases and live positions;
+no learner or controller is re-created by that operation. This port does not restore the original worker-thread/snapshot bus;
 concurrent consumers require a separate snapshot/transport layer.
 
 ## Navigation semantics and configuration
@@ -144,7 +146,9 @@ remain under `resources/`, unused by this application. The selected mobile's ray
 perspective presentation of 2D motion, with lists, inspection, selection, minimap
 and trails driven by all ECS entities. Controller/observation/metric panels follow
 the selected mobile. The catalog describes current component types, not old EnTT
-meta reflection. UI preferences retain their explicit separate settings file.
+meta reflection. Optional 3D mobile assets from the existing repository are packaged next to
+the executable, loaded only if present, and have procedural symbol fallbacks.
+UI preferences retain their explicit separate settings file.
 
 ## Evaluation and checkpoint lifecycle
 
@@ -160,6 +164,12 @@ Exhaustion and stalls terminate that mobile (and truncate unrelated episodes)
 without changing the generic action space. Enabled energy accounts add one
 normalized capacity-remaining observation. A two-dimensional `energy-demo.nav`
 is supplied. Defaults leave this entire mechanic disabled.
+
+Training parameters are chosen at the application/backend boundary and applied
+to newly created Torch learners, without adding Torch or optimizer types to
+the public RL environment. The desktop exposes gamma, lambda, clipping, value
+and entropy weights, learning rate, mini-batch, epochs and target KL.
+Changing these parameters does not rewrite a running optimizer.
 
 The desktop's explicit candidate command performs: pause training -> save candidate
 -> load independent frozen controllers -> evaluate in a separate instance of the same
