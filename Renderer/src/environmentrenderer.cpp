@@ -205,6 +205,27 @@ void EnvironmentRenderer::DrawSimulationControls()
     ImGui::Text("Step: %.3f s", scenario.dt);
     ImGui::Text("World: %.1f x %.1f", 2 * scenario.half_extent, 2 * scenario.half_extent);
     ImGui::TextWrapped("Manual: arrow keys control the selected manual mobile while the navigation view is focused.");
+    ImGui::SeparatorText("Episode initialization");
+    ImGui::Combo("Start mode", &m_initializationMode, "Fixed\\0Randomized\\0Preset cases\\0");
+    if (m_initializationMode == static_cast<int>(navigation::InitializationMode::PresetCases))
+        ImGui::InputText("Cases manifest", m_caseManifest, sizeof(m_caseManifest));
+    if (ImGui::Button("Apply episode starts"))
+    {
+        try
+        {
+            const auto mode = static_cast<navigation::InitializationMode>(m_initializationMode);
+            auto cases = mode == navigation::InitializationMode::PresetCases
+                ? navigation::load_episode_cases(m_caseManifest) : std::vector<navigation::Scenario>{};
+            m_application.configure_episode_initialization(mode, std::move(cases));
+            m_error.clear();
+        }
+        catch (const std::exception& error) { m_error = error.what(); }
+    }
+    const char* const starts[] = {"Fixed", "Randomized", "Preset cases"};
+    const auto current_mode = static_cast<int>(m_application.environment().initialization_mode());
+    if (current_mode >= 0 && current_mode < 3)
+        ImGui::Text("Active: %s", starts[current_mode]);
+
     ImGui::Separator();
     ImGui::Checkbox("Grid", &m_showGrid);
     ImGui::Checkbox("Forbidden zones", &m_showDomains);
