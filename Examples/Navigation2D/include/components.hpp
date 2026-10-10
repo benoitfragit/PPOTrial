@@ -40,6 +40,18 @@ struct EnergyModel
     double speed_cubic = 0;
     double turning = 0;
 };
+/// Editable reward-channel weights for an individual mobile.
+struct RewardWeights
+{
+    double progress = 1.0;
+    double step_cost = 0.001;
+    double arrival = 1.0;
+    double collision = 1.0;
+    double safety = 0.05;
+    double boundary = 0.05;
+    double fuel = 0.01;
+    double failure = 1.0;
+};
 struct EnergyState
 {
     double remaining = 0;
