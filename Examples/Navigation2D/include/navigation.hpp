@@ -18,6 +18,7 @@ struct MobileDefinition
     State initial;
     EntityId destination = no_entity;
     double arrival_radius = 0.5;
+    EnergyModel energy{};
 };
 struct ZoneDefinition
 {
