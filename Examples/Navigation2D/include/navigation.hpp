@@ -92,6 +92,8 @@ public:
     void remove_entity(EntityId id);
     void request_stop() noexcept;
     const Scenario& scenario() const noexcept;
+    /// The initial scenario stays fixed even while episode presets are active.
+    const Scenario& baseline_scenario() const noexcept;
 
 private:
     struct Controller
