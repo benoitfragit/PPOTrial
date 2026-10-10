@@ -16,7 +16,9 @@ constexpr std::size_t kLidarBinCount = 61;
 
 struct LidarScan
 {
-    /// 1 means no obstacle; 0 means contact. Obstacle-specific range scaling.
+    /// The nearest ray hit, normalized as d / (d + reference), where reference
+    /// is the hit circle's radius (at least 1) or the world half-diagonal.
+    /// 1 means no obstacle; 0 means contact.
     std::array<float, kLidarBinCount> normalized{};
     /// Physical distance to the nearest intersection along each ray.
     /// Infinity means there is no intersection.
