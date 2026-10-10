@@ -422,7 +422,7 @@ void EnvironmentRenderer::DrawEntitiesWindow()
             {
                 m_application.replace_scenario(navigation::load_scenario(m_scenarioPath));
                 m_selection=m_application.environment().scenario().controlled;
-                m_trails.clear(); m_lastStep=0; m_lastEpisode=0; m_error.clear();
+                m_trails.clear(); m_rewardEdits.clear(); m_lastStep=0; m_lastEpisode=0; m_error.clear();
             }
             catch (const std::exception& error) { m_error=error.what(); }
         }
@@ -518,6 +518,23 @@ void EnvironmentRenderer::DrawAgentsWindow()
                 ImGui::Text("Terminated: %s | truncated: %s", telemetry.terminated ? "yes":"no", telemetry.truncated ? "yes":"no");
                 ImGui::Text("Loss %.5f | actor %.5f", telemetry.loss, telemetry.actor_loss);
                 ImGui::Text("Critic %.5f | entropy %.5f", telemetry.critic_loss, telemetry.entropy);
+                ImGui::SeparatorText("Reward channels (selected mobile)");
+                auto reward_editor = m_rewardEdits.try_emplace(
+                    m_selection, environment.reward_weights(m_selection)).first;
+                auto& weights = reward_editor->second;
+                ImGui::InputDouble("Progress", &weights.progress, 0.0, 0.0, "%.5f");
+                ImGui::InputDouble("Step cost", &weights.step_cost, 0.0, 0.0, "%.5f");
+                ImGui::InputDouble("Arrival bonus", &weights.arrival, 0.0, 0.0, "%.5f");
+                ImGui::InputDouble("Collision penalty", &weights.collision, 0.0, 0.0, "%.5f");
+                ImGui::InputDouble("Zone caution", &weights.safety, 0.0, 0.0, "%.5f");
+                ImGui::InputDouble("World-edge caution", &weights.boundary, 0.0, 0.0, "%.5f");
+                ImGui::InputDouble("Consumption cost", &weights.fuel, 0.0, 0.0, "%.5f");
+                ImGui::InputDouble("Endurance failure", &weights.failure, 0.0, 0.0, "%.5f");
+                if (ImGui::Button("Apply selected reward weights"))
+                {
+                    try { m_application.set_reward_weights(m_selection, weights); m_error.clear(); }
+                    catch (const std::exception& error) { m_error = error.what(); }
+                }
                 ImGui::SeparatorText("Environment reward");
                 ImGui::TextWrapped("Navigation2D: progress reward, time cost, early zone/boundary avoidance, arrival bonus, collision and optional energy penalties.");
                 ImGui::EndTabItem();
