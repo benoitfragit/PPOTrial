@@ -120,13 +120,16 @@ the old full-horizon linear-goal validation has been removed.
 Motion retains heading/speed Euler integration, with normalized turn/acceleration
 actions, nonnegative speed and shared configurable limits. The same function
 advances every mobile. All mobiles obey zones and world bounds, including coasting
-ones. Relative swept motion detects a meeting between step endpoints. Reset is
-deterministic; seeds currently produce the same configured initial state.
+ones. Relative swept motion detects a meeting between step endpoints. Reset is deterministic in fixed mode. Configurable initialization additionally
+supports seed-reproducible randomized mobile states and replay of complete-world
+preset cases from a manifest. All agent decisions still use the same pre-step
+world. Presets validate identical IDs, destinations, zones, radii and motion rules,
+so frozen and learning controllers remain attached safely.
 
 Observations contain own x/y and destination x/y normalized by world extent,
 cos/sin own heading, own speed/max-speed, elapsed-step fraction, destination
 velocity x/y normalized by max-speed, then zone x/y/radius normalized by extent.
-Width is `10 + 3 * zone_count + 61`; the last 61 values are a heading-relative, 360-degree ray-cast scan at six-degree increments, including the repeated endpoint. Rays intersect the nearest forbidden-circle boundary or square work-area edge. Normalization uses `distance/(distance+reference)`, with circle radius or the work-area half-diagonal as reference; raw distances are exposed separately for visualization. Unrelated mobiles do not enter the observation.
+Width is `10 + optional_energy_feature + 3 * zone_count + 61`; the last 61 values are a heading-relative, 360-degree ray-cast scan at six-degree increments, including the repeated endpoint. Rays intersect the nearest forbidden-circle boundary or square work-area edge. Normalization uses `distance/(distance+reference)`, with circle radius or the work-area half-diagonal as reference; raw distances are exposed separately for visualization. Unrelated mobiles do not enter the observation.
 A mobile without destination uses itself for observation only, with no meeting event.
 Reward includes distance progress/world extent minus 0.001, optional dense proximity penalties near forbidden zones and the work-area perimeter, +1 on its own meeting,
 -1 on its own collision. `goal_collision` adds no new penalty. These are the
@@ -149,12 +152,21 @@ std (population) and rate (fraction nonzero). Keys are `episode_reward`,
 `score` is the weighted sum; negative weights express minimization. Initial metric
 aggregation uses final episode info, not every step's info.
 
+An optional per-mobile `energy` record specifies a minimum sustainable speed,
+initial capacity and positive idle/cubic-speed/quadratic-turn consumption.
+Exhaustion and stalls terminate that mobile (and truncate unrelated episodes)
+without changing the generic action space. Enabled energy accounts add one
+normalized capacity-remaining observation. A two-dimensional `energy-demo.nav`
+is supplied. Defaults leave this entire mechanic disabled.
+
 The desktop's explicit candidate command performs: pause training -> save candidate
 -> load independent frozen controllers -> evaluate in a separate instance of the same
 environment -> score -> promote if strictly better. Evaluation advances at most
 64 transitions per frame, keeping the UI command path available. Pause/Play suspends/resumes evaluation. Stop cancels
-without promotion. The selected fixed scenario is deterministic; repeated episodes
-are a wiring check, not evidence of generalization. No background training starts
+without promotion. The initialized evaluation world supports fixed, deterministic randomized or
+full-world preset episode cases; preset manifests provide varied initial
+positions. The chosen initialization mode, every preset case and the seed
+sequence are captured in evaluation provenance and the best-score context. No background training starts
 at application launch. Full rollouts trigger the original optimizer synchronously;
 a PPO update may therefore stall a UI frame. Partial rollouts remain in memory
 across episodes, but neither optimizer state nor partial buffers are restored from
