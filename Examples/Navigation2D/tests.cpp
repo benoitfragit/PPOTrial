@@ -71,7 +71,7 @@ void test_moving_goal()
     navigation::Environment environment(scenario);
     const auto initial = environment.reset({42,{}});
     const auto& observed = std::get<std::vector<float>>(initial.observation);
-    check(observed.size() == 13 && std::abs(observed[8] - 0.1F) < 1e-6F, "goal velocity included in observation");
+    check(observed.size() == 13 + navigation::kLidarBinCount && std::abs(observed[8] - 0.1F) < 1e-6F, "goal velocity included in observation");
     auto transition = environment.step(std::vector<float>{0,0});
     check(environment.goal_state().position.x == 2.5 && !transition.terminated, "second mobile advances");
     for (int i = 0; i < 3 && !transition.terminated; ++i)
@@ -135,6 +135,42 @@ void test_moving_goal()
     try { navigation::Environment invalid(scenario); }
     catch (const std::invalid_argument&) { rejected = true; }
     check(rejected, "nonfinite goal velocity rejected");
+}
+void test_lidar()
+{
+    navigation::Scenario scenario;
+    scenario.half_extent = 10;
+    scenario.mobiles[0].initial = {{0,0}, 0, 0};
+    scenario.mobiles[1].initial.position = {8,8};
+    scenario.zones = {{100, "Forward obstacle", {5,0}, 1}};
+    navigation::Environment environment(scenario);
+    const auto first = environment.reset();
+    const auto scan = environment.lidar(1);
+    // The central ray points along the mobile's heading (positive x).
+    check(std::abs(scan.distances[30] - 4.0) < 1e-6, "LiDAR hits circular zone before boundary");
+    check(std::abs(scan.normalized[30] - 0.8F) < 1e-6F,
+          "LiDAR preserves legacy d/(d+radius) normalization");
+    check(std::abs(scan.distances[0] - 10.0) < 1e-6, "LiDAR sees west work-area boundary");
+    const auto& obs = std::get<std::vector<float>>(first.observation);
+    check(obs.size() == 13 + navigation::kLidarBinCount, "LiDAR is in learner observation");
+    check(std::abs(obs[13+30] - scan.normalized[30]) < 1e-6, "observation uses same scan");
+    check(environment.lidar(2).normalized.size() == navigation::kLidarBinCount,
+          "each independent mobile has its own scan");
+    bool rejects_zone = false;
+    try { (void)environment.lidar(100); } catch (const std::invalid_argument&) { rejects_zone = true; }
+    check(rejects_zone, "zones cannot masquerade as sensing mobiles");
+
+    scenario.zones.clear();
+    navigation::Environment boundaries(scenario);
+    const auto empty = boundaries.lidar(1);
+    check(std::abs(empty.distances[30] - 10.0) < 1e-6,
+          "boundary alone is visible to LiDAR");
+    check(empty.normalized[30] < 1, "boundary range is normalized for the learner");
+    scenario.zones = {{100,"Inside", {0,0}, 1}};
+    // Valid topology forbids spawning a mobile inside an obstacle.
+    bool invalid = false;
+    try { navigation::Environment forbidden(scenario); } catch (const std::invalid_argument&) { invalid = true; }
+    check(invalid, "inside-zone initial state is rejected");
 }
 void test_shared_loop()
 {
@@ -323,7 +359,7 @@ void test_ecs_world()
     try { editable.remove_entity(2); } catch (const std::invalid_argument&) { rejected=true; }
     check(rejected && editable.entities().size()==6, "cannot remove referenced destination; edit is atomic");
     editable.create_zone({102,"New zone",{-30,30},2});
-    check(std::get<std::vector<float>>(editable.reset().observation).size()==16, "zone entity changes observation space on reset");
+    check(std::get<std::vector<float>>(editable.reset().observation).size()==16 + navigation::kLidarBinCount, "zone entity changes observation space on reset");
     editable.step(std::vector<float>{0,0});
     rejected=false;
     try { editable.create_mobile({43,"Late",{{-40,20},0,0},0,0.5}); } catch (const std::logic_error&) { rejected=true; }
@@ -350,8 +386,8 @@ int main(int argc, char** argv)
             std::cout << "Packaged scenarios parsed and stepped without models\n";
             return 0;
         }
-        test_navigation();test_moving_goal();test_shared_loop();test_incremental_session();test_bootstrap();test_metrics();test_checkpoints_and_config();test_ecs_world();
-        std::cout<<"8 navigation/runtime test groups passed\n";return 0;
+        test_navigation();test_moving_goal();test_lidar();test_shared_loop();test_incremental_session();test_bootstrap();test_metrics();test_checkpoints_and_config();test_ecs_world();
+        std::cout<<"9 navigation/runtime test groups passed\n";return 0;
     }
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }
