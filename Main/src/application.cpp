@@ -161,6 +161,21 @@ Application::Application(Scenario scenario, std::filesystem::path metrics, std::
 {
 }
 Application::~Application() = default;
+void Application::configure_episode_initialization(InitializationMode mode, std::vector<Scenario> cases)
+{
+    if (impl_->running || evaluating()
+        || (!impl_->session->finished() && impl_->session->episode().length != 0))
+        throw std::logic_error("stop the episode before changing its initialization");
+    impl_->environment.configure_initialization(mode, std::move(cases));
+    // Refresh both the environment and the episode driver's observation.
+    // Doing it at a step-free boundary preserves all attached controllers.
+    auto next = std::make_unique<ppo::rl::EpisodeSession>(
+        impl_->environment, *impl_->policy, impl_->environment.scenario().max_steps, impl_->learner);
+    next->reset();
+    impl_->session = std::move(next);
+    impl_->elapsed = 0;
+    impl_->status = "Episode initialization configured";
+}
 void Application::set_goal_checkpoint(const std::filesystem::path& checkpoint)
 {
     const auto& env = impl_->environment;
@@ -430,7 +445,7 @@ void Application::evaluate_candidate(std::size_t episodes, EntityId evaluated_mo
     if (std::filesystem::exists(candidate))
         throw std::runtime_error("candidate already exists");
     impl_->backend.save(*learner, candidate);
-    auto evaluated_scenario = impl_->environment.scenario();
+    auto evaluated_scenario = impl_->environment.baseline_scenario();
     evaluated_scenario.controlled = evaluated_mobile;
     save_scenario(evaluated_scenario, candidate / "scenario.nav");
     // Serialize the parsed criteria, not a file which may change after it was read.
@@ -441,6 +456,20 @@ void Application::evaluate_candidate(std::size_t episodes, EntityId evaluated_mo
     if (!criteria)
         throw std::runtime_error("cannot save candidate scoring criteria");
     auto environment = std::make_unique<Environment>(evaluated_scenario);
+    const auto initialization = impl_->environment.initialization_mode();
+    std::string initialization_context = "initialization " + std::to_string(static_cast<int>(initialization)) + "\\n";
+    if (initialization == InitializationMode::PresetCases)
+    {
+        auto cases = impl_->environment.episode_cases();
+        for (auto& episode : cases)
+        {
+            episode.controlled = evaluated_mobile;
+            initialization_context += scenario_text(episode);
+        }
+        environment->configure_initialization(initialization, std::move(cases));
+    }
+    else
+        environment->configure_initialization(initialization);
     const auto dimensions = std::get<std::vector<float>>(impl_->session->observation()).size();
     std::string controller_context;
     for (const auto& definition : impl_->environment.scenario().mobiles)
@@ -481,7 +510,8 @@ void Application::evaluate_candidate(std::size_t episodes, EntityId evaluated_mo
         throw std::runtime_error("backend returned no evaluation policy");
     auto session = std::make_unique<ppo::rl::EpisodeSession>(*environment, *policy, environment->scenario().max_steps);
     session->reset({0, {}});
-    const auto evaluation_context = scenario_text(evaluated_scenario) + criteria_text + "episodes " +
+    const auto evaluation_context = scenario_text(evaluated_scenario) + initialization_context
+                                    + criteria_text + "episodes " +
                                     std::to_string(episodes) + "\nseed-sequence 0..episodes-1\n" + controller_context;
     std::ofstream context(candidate / "evaluation-context.txt", std::ios::binary);
     context << evaluation_context;
