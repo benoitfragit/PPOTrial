@@ -4,6 +4,10 @@ on:
     branches: [master]
   pull_request:
     branches: [master, refactor/generic-environment-contract, fix/restore-navigation2d-lidar-safety]
+# Keep one active validation per branch/PR as draft parity corrections land.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
