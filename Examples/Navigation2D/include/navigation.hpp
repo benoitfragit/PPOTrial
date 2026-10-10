@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <random>
 #include <vector>
 
 namespace navigation
@@ -37,10 +38,15 @@ struct Scenario
     double max_turn_rate = 1;
     std::size_t max_steps = 500;
 };
+enum class InitializationMode { Fixed, Randomized, PresetCases };
+
 /// Strict v3 text format. Entity IDs/names must be unique; destinations reference mobiles.
 Scenario load_scenario(const std::filesystem::path& path);
 std::string scenario_text(const Scenario& scenario);
 void save_scenario(const Scenario& scenario, const std::filesystem::path& path);
+/// Manifest: one scenario filename per line, relative to the manifest directory.
+/// Cases must contain the same mobile and zone IDs and controller relationships.
+std::vector<Scenario> load_episode_cases(const std::filesystem::path& manifest);
 
 /// One ECS world and a Gymnasium view for scenario.controlled. All entities advance once
 /// per step, after every controller has observed the same pre-step world. Single-thread use.
@@ -55,6 +61,11 @@ public:
     Environment(Environment&&) = delete;
     Environment& operator=(Environment&&) = delete;
     ppo::rl::ResetResult reset(const ppo::rl::ResetOptions& options = {}) override;
+    /// Configure varied episode starts without invalidating attached mobile controllers.
+    /// Only accepted at an episode boundary; seed reproducibility is preserved.
+    void configure_initialization(InitializationMode mode, std::vector<Scenario> cases = {});
+    InitializationMode initialization_mode() const noexcept;
+    const std::vector<Scenario>& episode_cases() const noexcept;
     ppo::rl::StepResult step(const ppo::rl::Value& action) override;
     const ppo::rl::Space& observation_space() const noexcept override;
     const ppo::rl::Space& action_space() const noexcept override;
@@ -91,6 +102,11 @@ private:
     void rebuild(Scenario scenario);
     void require_editable() const;
     Scenario scenario_;
+    Scenario baseline_scenario_;
+    InitializationMode initialization_mode_ = InitializationMode::Fixed;
+    std::vector<Scenario> episode_cases_;
+    std::mt19937_64 random_engine_{5489};
+    std::size_t episode_index_ = 0;
     entt::registry world_;
     std::map<EntityId, entt::entity> handles_;
     std::vector<EntityId> entities_;
