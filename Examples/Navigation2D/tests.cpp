@@ -312,7 +312,7 @@ void test_navigation_energy()
     {
         std::ofstream output(bad);
         output << navigation::scenario_text(scenario);
-        output << "energy 12345 1 0 0 0 0\\n";
+        output << "energy 12345 1 0 0 0 0\n";
     }
     bool invalid = false;
     try { (void)navigation::load_scenario(bad); }
