@@ -305,7 +305,7 @@ int main()
         test_goal_policy();
         test_pinned_goal_checkpoint();
         test_multiple_controllers();
-        std::cout << "5 application control test groups passed (fake backend only)\n";
+        std::cout << "6 application control test groups passed (fake backend only)\n";
         return 0;
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
