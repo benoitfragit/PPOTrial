@@ -80,7 +80,7 @@ Scenario validate(Scenario s)
 }
 ppo::rl::Space observation_space_for(const Scenario& s)
 {
-    const std::size_t size = 10 + 3 * s.zones.size();
+    const std::size_t size = 10 + 3 * s.zones.size() + kLidarBinCount;
     const float infinity = std::numeric_limits<float>::infinity();
     return ppo::rl::Box({size}, std::vector<float>(size, -infinity), std::vector<float>(size, infinity));
 }
@@ -373,7 +373,7 @@ ppo::rl::Value Environment::observation(EntityId mobile) const
                               static_cast<float>(steps_) / static_cast<float>(scenario_.max_steps),
                               static_cast<float>(std::cos(other.heading) * other.speed / scenario_.max_speed),
                               static_cast<float>(std::sin(other.heading) * other.speed / scenario_.max_speed)};
-    values.reserve(10 + 3 * scenario_.zones.size());
+    values.reserve(10 + 3 * scenario_.zones.size() + kLidarBinCount);
     for (const auto& zone : scenario_.zones)
     {
         const auto handle_ = handle(zone.id);
@@ -382,7 +382,15 @@ ppo::rl::Value Environment::observation(EntityId mobile) const
         values.push_back(static_cast<float>(center.y / scenario_.half_extent));
         values.push_back(static_cast<float>(world_.get<ForbiddenZone>(handle_).radius / scenario_.half_extent));
     }
+    const auto scan = lidar(mobile);
+    values.insert(values.end(), scan.normalized.begin(), scan.normalized.end());
     return values;
+}
+LidarScan Environment::lidar(EntityId mobile) const
+{
+    if (!world_.all_of<Mobile>(handle(mobile)))
+        throw std::invalid_argument("LiDAR requires mobile");
+    return scan_lidar(state(mobile), scenario_.half_extent, scenario_.zones);
 }
 ppo::rl::StepResult Environment::step(const ppo::rl::Value& action)
 {
