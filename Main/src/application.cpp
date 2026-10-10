@@ -161,6 +161,12 @@ Application::Application(Scenario scenario, std::filesystem::path metrics, std::
 {
 }
 Application::~Application() = default;
+void Application::set_reward_weights(EntityId mobile, RewardWeights weights)
+{
+    if (evaluating())
+        throw std::logic_error("cannot change training rewards during candidate evaluation");
+    impl_->environment.set_reward_weights(mobile, weights);
+}
 void Application::configure_episode_initialization(InitializationMode mode, std::vector<Scenario> cases)
 {
     if (impl_->running || evaluating()
