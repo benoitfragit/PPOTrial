@@ -451,6 +451,10 @@ void Environment::remove_entity(EntityId id)
 void Environment::configure_initialization(InitializationMode mode, std::vector<Scenario> cases)
 {
     require_editable();
+    if (mode != InitializationMode::Fixed
+        && mode != InitializationMode::Randomized
+        && mode != InitializationMode::PresetCases)
+        throw std::invalid_argument("invalid Navigation2D initialization mode");
     if (mode == InitializationMode::PresetCases)
     {
         if (cases.empty()) throw std::invalid_argument("preset mode needs at least one case");
