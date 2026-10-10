@@ -237,6 +237,7 @@ Scenario load_scenario(const std::filesystem::path& path)
     Scenario s;
     s.mobiles.clear();
     std::set<std::string> singleton_keys;
+    std::map<EntityId, EnergyModel> energy_config;
     while (std::getline(input, line))
     {
         if (line.empty() || line.front() == '#')
@@ -254,6 +255,15 @@ Scenario load_scenario(const std::filesystem::path& path)
             mobile.destination = read_id(row);
             row >> mobile.arrival_radius;
             s.mobiles.push_back(std::move(mobile));
+        }
+        else if (key == "energy")
+        {
+            const auto id = read_id(row);
+            EnergyModel model;
+            row >> model.min_speed >> model.capacity >> model.idle
+                >> model.speed_cubic >> model.turning;
+            if (id == no_entity || !energy_config.emplace(id, model).second)
+                throw std::invalid_argument("duplicate or invalid energy model ID");
         }
         else if (key == "zone")
         {
@@ -283,6 +293,16 @@ Scenario load_scenario(const std::filesystem::path& path)
     }
     if (input.bad())
         throw std::runtime_error("scenario read failed");
+    for (auto& mobile : s.mobiles)
+    {
+        const auto it = energy_config.find(mobile.id);
+        if (it != energy_config.end())
+            mobile.energy = it->second;
+    }
+    for (const auto& configured : energy_config)
+        if (std::none_of(s.mobiles.begin(), s.mobiles.end(), [&](const MobileDefinition& mobile)
+                         { return mobile.id == configured.first; }))
+            throw std::invalid_argument("energy model refers to unknown mobile");
     return validate(std::move(s));
 }
 std::string scenario_text(const Scenario& scenario)
@@ -297,6 +317,14 @@ std::string scenario_text(const Scenario& scenario)
         output << "mobile " << m.id << ' ' << std::quoted(m.name) << ' ' << m.initial.position.x << ' '
                << m.initial.position.y << ' ' << m.initial.heading << ' ' << m.initial.speed << ' ' << m.destination
                << ' ' << m.arrival_radius << '\n';
+    for (const auto& mobile : s.mobiles)
+    {
+        const auto& e = mobile.energy;
+        if (e.min_speed != 0 || e.capacity != 0 || e.idle != 0
+            || e.speed_cubic != 0 || e.turning != 0)
+            output << "energy " << mobile.id << ' ' << e.min_speed << ' ' << e.capacity
+                   << ' ' << e.idle << ' ' << e.speed_cubic << ' ' << e.turning << '\\n';
+    }
     for (const auto& z : s.zones)
         output << "zone " << z.id << ' ' << std::quoted(z.name) << ' ' << z.center.x << ' ' << z.center.y << ' '
                << z.radius << '\n';
