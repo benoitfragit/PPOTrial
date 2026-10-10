@@ -270,6 +270,55 @@ void test_episode_initialization()
     check(cases.size() == 2 && cases[1].mobiles[0].initial.position.x == -10,
           "case manifest loads multiple complete named scenarios");
 }
+void test_navigation_energy()
+{
+    navigation::Scenario scenario;
+    scenario.mobiles[1].initial.position = {90,0};
+    scenario.mobiles[0].energy = {0, 0.45, 1, 0, 0};
+    scenario.max_steps = 20;
+    navigation::Environment environment(scenario);
+    const auto start = environment.reset();
+    check(std::get<std::vector<float>>(start.observation).size()
+          == 10 + 1 + navigation::kLidarBinCount,
+          "energy-enabled scenario adds one bounded fuel feature");
+    check(std::abs(std::get<std::vector<float>>(start.observation)[10] - 1.F) < 1e-6F,
+          "full battery at initial reset");
+    ppo::rl::StepResult result;
+    for (int step = 0; step < 5; ++step)
+    {
+        result = environment.step(std::vector<float>{0,0});
+        if (result.terminated) break;
+    }
+    check(result.terminated && std::get<bool>(result.info.at("fuel_exhausted"))
+          && std::get<double>(result.info.at("fuel_remaining")) == 0,
+          "energy exhaustion terminates the controlled mobile");
+    environment.reset();
+    check(std::abs(std::get<std::vector<float>>(environment.observation(1))[10] - 1.F) < 1e-6F,
+          "reset fully restores energy state");
+
+    scenario.mobiles[0].energy = {3, 0, 0, 0, 0};
+    navigation::Environment low_speed(scenario);
+    low_speed.reset();
+    result = low_speed.step(std::vector<float>{0,0});
+    check(result.terminated && std::get<bool>(result.info.at("speed_stall")),
+          "minimum sustainable speed is enforced");
+
+    TemporaryDirectory directory;
+    navigation::save_scenario(scenario, directory.path / "energy.nav");
+    const auto loaded = navigation::load_scenario(directory.path / "energy.nav");
+    check(loaded.mobiles[0].energy.min_speed == 3,
+          "energy configuration survives Nav2D scenario round-trip");
+    const auto bad = directory.path / "bad-energy.nav";
+    {
+        std::ofstream output(bad);
+        output << navigation::scenario_text(scenario);
+        output << "energy 12345 1 0 0 0 0\\n";
+    }
+    bool invalid = false;
+    try { (void)navigation::load_scenario(bad); }
+    catch (const std::invalid_argument&) { invalid = true; }
+    check(invalid, "unbound energy component is rejected");
+}
 void test_shared_loop()
 {
     navigation::Scenario scenario; scenario.max_steps=2; set_goal_velocity(scenario, {0.5,0.2});
@@ -484,8 +533,8 @@ int main(int argc, char** argv)
             std::cout << "Packaged scenarios parsed and stepped without models\n";
             return 0;
         }
-        test_navigation();test_moving_goal();test_lidar();test_avoidance_reward();test_episode_initialization();test_shared_loop();test_incremental_session();test_bootstrap();test_metrics();test_checkpoints_and_config();test_ecs_world();
-        std::cout<<"11 navigation/runtime test groups passed\n";return 0;
+        test_navigation();test_moving_goal();test_lidar();test_avoidance_reward();test_episode_initialization();test_navigation_energy();test_shared_loop();test_incremental_session();test_bootstrap();test_metrics();test_checkpoints_and_config();test_ecs_world();
+        std::cout<<"12 navigation/runtime test groups passed\n";return 0;
     }
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }
