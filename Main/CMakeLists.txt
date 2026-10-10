@@ -16,7 +16,9 @@ add_executable(PPO src/main.cpp src/torch_backend.cpp)
 target_link_libraries(PPO PRIVATE navigation_application GenericRenderer ppo_torch)
 add_custom_command(TARGET PPO POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${PROJECT_SOURCE_DIR}/Examples/Navigation2D/scenarios" "$<TARGET_FILE_DIR:PPO>/scenarios")
+        "${PROJECT_SOURCE_DIR}/Examples/Navigation2D/scenarios" "$<TARGET_FILE_DIR:PPO>/scenarios"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${PROJECT_SOURCE_DIR}/resources/3D/aircraft" "$<TARGET_FILE_DIR:PPO>/models")
 set_target_properties(PPO PROPERTIES CXX_EXTENSIONS OFF)
 if(MSVC)
     target_compile_options(PPO PRIVATE /Zc:__cplusplus)
