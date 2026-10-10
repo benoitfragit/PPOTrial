@@ -457,7 +457,7 @@ void Application::evaluate_candidate(std::size_t episodes, EntityId evaluated_mo
         throw std::runtime_error("cannot save candidate scoring criteria");
     auto environment = std::make_unique<Environment>(evaluated_scenario);
     const auto initialization = impl_->environment.initialization_mode();
-    std::string initialization_context = "initialization " + std::to_string(static_cast<int>(initialization)) + "\\n";
+    std::string initialization_context = "initialization " + std::to_string(static_cast<int>(initialization)) + "\n";
     if (initialization == InitializationMode::PresetCases)
     {
         auto cases = impl_->environment.episode_cases();
