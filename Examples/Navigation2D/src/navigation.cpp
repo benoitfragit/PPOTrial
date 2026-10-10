@@ -226,6 +226,9 @@ struct PendingMotion
     State after;
     double collision;
     double arrival;
+    double energy_event = std::numeric_limits<double>::infinity();
+    double fuel_burn = 0;
+    bool speed_stall = false;
 };
 } // namespace
 Scenario load_scenario(const std::filesystem::path& path)
@@ -598,10 +601,20 @@ ppo::rl::StepResult Environment::step(const ppo::rl::Value& action)
         const auto before = state(mobile.id);
         const auto after = advance_motion(before, commands.at(mobile.id), scenario_);
         const double collision = collision_time(before.position, after.position, world_, scenario_.half_extent);
-        motions.emplace(mobile.id, PendingMotion{before, after, collision, std::numeric_limits<double>::infinity()});
-        if (collision <= 1)
+        const auto& model = world_.get<EnergyModel>(handle(mobile.id));
+        const auto& fuel = world_.get<EnergyState>(handle(mobile.id));
+        const double turn_rate = commands.at(mobile.id).turn * scenario_.max_turn_rate;
+        const double fuel_burn = model.capacity > 0
+            ? (model.idle + model.speed_cubic * after.speed * after.speed * after.speed
+               + model.turning * turn_rate * turn_rate) * scenario_.dt : 0.0;
+        const double exhaustion_time = fuel_burn > 0 && fuel.remaining <= fuel_burn
+            ? fuel.remaining / fuel_burn : std::numeric_limits<double>::infinity();
+        const bool speed_stall = model.min_speed > 0 && 2.0 * after.speed < model.min_speed;
+        motions.emplace(mobile.id, PendingMotion{before, after, collision,
+            std::numeric_limits<double>::infinity(), exhaustion_time, fuel_burn, speed_stall});
+        if (collision <= 1 || exhaustion_time <= 1 || speed_stall)
         {
-            fraction = std::min(fraction, collision);
+            fraction = std::min(fraction, std::min(collision, exhaustion_time));
             world_event = true;
         }
     }
@@ -627,6 +640,11 @@ ppo::rl::StepResult Environment::step(const ppo::rl::Value& action)
         after.position = {motion.before.position.x + fraction * (after.position.x - motion.before.position.x),
                           motion.before.position.y + fraction * (after.position.y - motion.before.position.y)};
         world_.get<State>(handle(mobile.id)) = after;
+        auto& fuel = world_.get<EnergyState>(handle(mobile.id));
+        fuel.last_burn = std::min(fuel.remaining, motion.fuel_burn * fraction);
+        fuel.remaining = std::max(0.0, fuel.remaining - fuel.last_burn);
+        fuel.exhausted = motion.energy_event <= fraction;
+        fuel.stalled = motion.speed_stall && fraction >= 1.0;
     }
     ++steps_;
     active_ = !(world_event || steps_ == scenario_.max_steps || stop_requested_);
@@ -635,10 +653,14 @@ ppo::rl::StepResult Environment::step(const ppo::rl::Value& action)
     {
         const auto& motion = motions.at(mobile.id);
         const bool blocked = motion.collision <= fraction;
-        const bool goal_blocked =
-            mobile.destination != no_entity && motions.at(mobile.destination).collision <= fraction;
-        const bool success = motion.arrival <= fraction && !blocked && !goal_blocked;
-        const bool terminated = success || blocked || goal_blocked;
+        const auto& own_fuel = world_.get<EnergyState>(handle(mobile.id));
+        const bool energy_failure = own_fuel.exhausted || own_fuel.stalled;
+        const bool goal_blocked = mobile.destination != no_entity
+            && (motions.at(mobile.destination).collision <= fraction
+                || world_.get<EnergyState>(handle(mobile.destination)).exhausted
+                || world_.get<EnergyState>(handle(mobile.destination)).stalled);
+        const bool success = motion.arrival <= fraction && !blocked && !goal_blocked && !energy_failure;
+        const bool terminated = success || blocked || goal_blocked || energy_failure;
         const bool truncated = steps_ == scenario_.max_steps || stop_requested_ || (world_event && !terminated);
         const double previous = mobile.destination == no_entity
                                     ? 0
@@ -678,7 +700,11 @@ ppo::rl::StepResult Environment::step(const ppo::rl::Value& action)
         const double reward =
             (previous - remaining) / scenario_.half_extent - 0.001
             + (success ? 1.0 : 0.0) - (blocked ? 1.0 : 0.0)
-            + safety_penalty + boundary_penalty;
+            + safety_penalty + boundary_penalty
+            - (energy_failure ? 1.0 : 0.0)
+            - (scenario_.mobiles.empty() || world_.get<EnergyModel>(handle(mobile.id)).capacity == 0
+                ? 0.0 : 0.01 * own_fuel.last_burn
+                    / world_.get<EnergyModel>(handle(mobile.id)).capacity);
         transitions_.emplace(mobile.id, ppo::rl::StepResult{observation(mobile.id),
                                                             reward,
                                                             terminated,
@@ -686,6 +712,9 @@ ppo::rl::StepResult Environment::step(const ppo::rl::Value& action)
                                                             {{"success", success},
                                                              {"collision", blocked},
                                                              {"goal_collision", goal_blocked},
+                                                             {"fuel_exhausted", own_fuel.exhausted},
+                                                             {"speed_stall", own_fuel.stalled},
+                                                             {"fuel_remaining", own_fuel.remaining},
                                                              {"distance", remaining}}});
     }
     // Complete all transitions before any optimiser can change a controller's weights.
