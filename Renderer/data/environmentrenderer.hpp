@@ -47,6 +47,8 @@ private:
     bool m_showMetaCatalog = true;
     bool m_showTrails = true;
     float m_timeScale = 1;
+    double m_editHalfExtent = 100;
+    double m_editDt = 0.2;
     float m_mapZoom = 1;
     navigation::EntityId m_selection = 1;
     int m_mode = 0;
