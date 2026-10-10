@@ -186,6 +186,14 @@ const TrainingParameters& Application::training_parameters() const noexcept
 {
     return impl_->training_parameters;
 }
+void Application::configure_world(double half_extent, double dt)
+{
+    if (evaluating())
+        throw std::logic_error("cannot modify Navigation2D world while evaluating a candidate");
+    impl_->environment.configure_world(half_extent, dt);
+    // Recalculate time accumulation from the new step size.
+    impl_->elapsed = 0;
+}
 void Application::set_reward_weights(EntityId mobile, RewardWeights weights)
 {
     if (evaluating())
