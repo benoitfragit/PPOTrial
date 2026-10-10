@@ -59,6 +59,11 @@ Scenario validate(Scenario s)
             || !std::isfinite(e.turning) || e.turning < 0 || e.turning > 1e12
             || (e.capacity == 0 && (e.idle != 0 || e.speed_cubic != 0 || e.turning != 0)))
             throw std::invalid_argument("invalid mobile energy configuration");
+        const auto& w = mobile.rewards;
+        for (double value : {w.progress, w.step_cost, w.arrival, w.collision,
+                             w.safety, w.boundary, w.fuel, w.failure})
+            if (!std::isfinite(value) || value < 0 || value > 1e6)
+                throw std::invalid_argument("invalid Navigation2D reward weight");
         mobile_ids.insert(mobile.id);
     }
     if (mobile_ids.count(s.controlled) == 0)
@@ -104,7 +109,15 @@ bool same_topology(const Scenario& a, const Scenario& b)
             || a.mobiles[i].energy.capacity != b.mobiles[i].energy.capacity
             || a.mobiles[i].energy.idle != b.mobiles[i].energy.idle
             || a.mobiles[i].energy.speed_cubic != b.mobiles[i].energy.speed_cubic
-            || a.mobiles[i].energy.turning != b.mobiles[i].energy.turning)
+            || a.mobiles[i].energy.turning != b.mobiles[i].energy.turning
+            || a.mobiles[i].rewards.progress != b.mobiles[i].rewards.progress
+            || a.mobiles[i].rewards.step_cost != b.mobiles[i].rewards.step_cost
+            || a.mobiles[i].rewards.arrival != b.mobiles[i].rewards.arrival
+            || a.mobiles[i].rewards.collision != b.mobiles[i].rewards.collision
+            || a.mobiles[i].rewards.safety != b.mobiles[i].rewards.safety
+            || a.mobiles[i].rewards.boundary != b.mobiles[i].rewards.boundary
+            || a.mobiles[i].rewards.fuel != b.mobiles[i].rewards.fuel
+            || a.mobiles[i].rewards.failure != b.mobiles[i].rewards.failure)
             return false;
     for (std::size_t i = 0; i < a.zones.size(); ++i)
         if (a.zones[i].id != b.zones[i].id
@@ -385,6 +398,7 @@ void Environment::rebuild(Scenario scenario)
         world.emplace<Destination>(entity, m.destination, m.arrival_radius);
         world.emplace<Commands>(entity);
         world.emplace<EnergyModel>(entity, m.energy);
+        world.emplace<RewardWeights>(entity, m.rewards);
         world.emplace<EnergyState>(entity, m.energy.capacity, 0.0, false, false);
     }
     for (const auto& z : next.zones)
@@ -448,6 +462,33 @@ void Environment::remove_entity(EntityId id)
         next.zones.end());
     rebuild(std::move(next)); // validation rejects deleting a referenced destination or primary
 }
+RewardWeights Environment::reward_weights(EntityId mobile) const
+{
+    const auto entity = handle(mobile);
+    if (!world_.all_of<Mobile>(entity))
+        throw std::invalid_argument("reward configuration requires mobile");
+    return world_.get<RewardWeights>(entity);
+}
+void Environment::set_reward_weights(EntityId mobile, RewardWeights weights)
+{
+    const auto entity = handle(mobile);
+    if (!world_.all_of<Mobile>(entity))
+        throw std::invalid_argument("reward configuration requires mobile");
+    for (double value : {weights.progress, weights.step_cost, weights.arrival,
+                         weights.collision, weights.safety, weights.boundary,
+                         weights.fuel, weights.failure})
+        if (!std::isfinite(value) || value < 0 || value > 1e6)
+            throw std::invalid_argument("invalid Navigation2D reward weight");
+    world_.get<RewardWeights>(entity) = weights;
+    const auto assign = [mobile, weights](Scenario& scenario)
+    {
+        for (auto& definition : scenario.mobiles)
+            if (definition.id == mobile) definition.rewards = weights;
+    };
+    assign(scenario_);
+    assign(baseline_scenario_);
+    for (auto& episode : episode_cases_) assign(episode);
+}
 void Environment::configure_initialization(InitializationMode mode, std::vector<Scenario> cases)
 {
     require_editable();
@@ -500,6 +541,7 @@ ppo::rl::ResetResult Environment::reset(const ppo::rl::ResetOptions& options)
         world_.get<State>(entity) = mobile.initial;
         world_.get<Commands>(entity) = {};
         world_.get<EnergyState>(entity) = {mobile.energy.capacity, 0.0, false, false};
+        world_.get<RewardWeights>(entity) = mobile.rewards;
     }
     for (const auto& zone : scenario_.zones)
         world_.get<State>(handle(zone.id)).position = zone.center;
