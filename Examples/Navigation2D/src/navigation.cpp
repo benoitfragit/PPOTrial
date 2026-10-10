@@ -326,7 +326,7 @@ std::string scenario_text(const Scenario& scenario)
         if (e.min_speed != 0 || e.capacity != 0 || e.idle != 0
             || e.speed_cubic != 0 || e.turning != 0)
             output << "energy " << mobile.id << ' ' << e.min_speed << ' ' << e.capacity
-                   << ' ' << e.idle << ' ' << e.speed_cubic << ' ' << e.turning << '\\n';
+                   << ' ' << e.idle << ' ' << e.speed_cubic << ' ' << e.turning << '\n';
     }
     for (const auto& z : s.zones)
         output << "zone " << z.id << ' ' << std::quoted(z.name) << ' ' << z.center.x << ' ' << z.center.y << ' '
