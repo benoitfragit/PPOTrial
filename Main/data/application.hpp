@@ -39,6 +39,9 @@ public:
     void tick(double elapsed, const std::vector<float>& manual_action, double time_scale,
               EntityId manual_mobile = no_entity);
     void evaluate_candidate(std::size_t episodes, EntityId evaluated_mobile = no_entity);
+    /// Fixed, seed-randomized or explicitly replayed complete-world starts.
+    /// Change only while stopped, before an episode starts or after it finishes.
+    void configure_episode_initialization(InitializationMode mode, std::vector<Scenario> cases = {});
     /// Configure any additional mobile independently, at a stopped episode boundary.
     void configure_mobile(EntityId mobile, ControlMode mode, std::size_t rollout,
                           const std::filesystem::path& checkpoint = {});
