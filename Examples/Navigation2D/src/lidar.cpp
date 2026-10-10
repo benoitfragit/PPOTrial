@@ -12,11 +12,23 @@ namespace
 constexpr double pi = 3.14159265358979323846;
 constexpr double epsilon = 1e-9;
 
-void intersect(double distance, double scale, double& closest, float& normalized)
+// Always normalize the physically nearest intersection. Comparing normalized
+// distances across different reference scales would make a farther boundary
+// override a closer zone even when the ray actually hits the zone first.
+void accumulate_hit(double distance, double scale, double& closest, float& normalized)
 {
     if (distance < 0 || !std::isfinite(distance)) return;
-    closest = std::min(closest, distance);
-    normalized = std::min(normalized, static_cast<float>(distance / (distance + scale)));
+    if (distance > closest) return;
+    const auto candidate = static_cast<float>(distance / (distance + scale));
+    if (distance < closest)
+    {
+        closest = distance;
+        normalized = candidate;
+    }
+    else
+    {
+        normalized = std::min(normalized, candidate);
+    }
 }
 
 double boundary_hit(Point position, double dx, double dy, double limit)
@@ -60,7 +72,7 @@ LidarScan scan_lidar(const State& own, double half_extent,
         const double dy = std::sin(angle);
         auto& closest = scan.distances[i];
         auto& normalized = scan.normalized[i];
-        intersect(boundary_hit(own.position, dx, dy, half_extent),
+        accumulate_hit(boundary_hit(own.position, dx, dy, half_extent),
                   boundary_scale, closest, normalized);
         for (const auto& zone : zones)
         {
@@ -77,8 +89,8 @@ LidarScan scan_lidar(const State& own, double half_extent,
             const double delta = b * b - c;
             if (delta < 0) continue;
             const double root = std::sqrt(delta);
-            intersect(-b - root, std::max(zone.radius, 1.0), closest, normalized);
-            intersect(-b + root, std::max(zone.radius, 1.0), closest, normalized);
+            accumulate_hit(-b - root, std::max(zone.radius, 1.0), closest, normalized);
+            accumulate_hit(-b + root, std::max(zone.radius, 1.0), closest, normalized);
         }
     }
     return scan;
