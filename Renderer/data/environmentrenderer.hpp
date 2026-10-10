@@ -36,6 +36,9 @@ private:
     navigation::Application& m_application;
     Camera3D m_camera{};
     RenderTexture2D m_texture{};
+    Model m_primaryMobileModel{};
+    Model m_otherMobileModel{};
+    bool m_showMobileModels = true;
     bool m_layoutInitialized = false;
     bool m_autoAttachCamera = false;
     bool m_showGrid = true;
