@@ -8,6 +8,7 @@
 #include <cmath>
 #include <fstream>
 #include <stdexcept>
+#include <utility>
 
 namespace ppo::renderer {
 namespace {
@@ -206,7 +207,7 @@ void EnvironmentRenderer::DrawSimulationControls()
     ImGui::Text("World: %.1f x %.1f", 2 * scenario.half_extent, 2 * scenario.half_extent);
     ImGui::TextWrapped("Manual: arrow keys control the selected manual mobile while the navigation view is focused.");
     ImGui::SeparatorText("Episode initialization");
-    ImGui::Combo("Start mode", &m_initializationMode, "Fixed\\0Randomized\\0Preset cases\\0");
+    ImGui::Combo("Start mode", &m_initializationMode, "Fixed\0Randomized\0Preset cases\0");
     if (m_initializationMode == static_cast<int>(navigation::InitializationMode::PresetCases))
         ImGui::InputText("Cases manifest", m_caseManifest, sizeof(m_caseManifest));
     if (ImGui::Button("Apply episode starts"))
