@@ -464,8 +464,40 @@ ppo::rl::StepResult Environment::step(const ppo::rl::Value& action)
         const double remaining = mobile.destination == no_entity
                                      ? 0
                                      : distance(state(mobile.id).position, state(mobile.destination).position);
+        // The LiDAR describes geometry; this dense safety term teaches the policy
+        // to turn away *before* entering an obstacle, including the map boundary.
+        const auto& after_state = state(mobile.id);
+        const double heading = after_state.heading;
+        double nearest_margin = scenario_.half_extent
+            - std::max(std::abs(after_state.position.x), std::abs(after_state.position.y));
+        double nearest_scale = std::max(scenario_.half_extent, 1.0);
+        double nearest_alignment = 0.0;
+        for (const auto& zone : scenario_.zones)
+        {
+            const double dx = zone.center.x - after_state.position.x;
+            const double dy = zone.center.y - after_state.position.y;
+            const double distance_to_center = std::hypot(dx, dy);
+            const double margin = distance_to_center - zone.radius;
+            if (margin < nearest_margin)
+            {
+                nearest_margin = margin;
+                nearest_scale = std::max(zone.radius, 1.0);
+                nearest_alignment = distance_to_center > 1e-9
+                    ? (dx * std::cos(heading) + dy * std::sin(heading)) / distance_to_center : 1.0;
+            }
+        }
+        const double boundary_margin = scenario_.half_extent
+            - std::max(std::abs(after_state.position.x), std::abs(after_state.position.y));
+        const double caution_distance = std::max(2.0 * scenario_.max_speed * scenario_.dt, nearest_scale * 0.25);
+        const double proximity = std::clamp(1.0 - nearest_margin / caution_distance, 0.0, 1.0);
+        const double approaching = std::max(0.0, nearest_alignment);
+        const double safety_penalty = -0.05 * proximity * (1.0 + approaching);
+        const double boundary_proximity = std::clamp(1.0 - boundary_margin / caution_distance, 0.0, 1.0);
+        const double boundary_penalty = -0.05 * boundary_proximity;
         const double reward =
-            (previous - remaining) / scenario_.half_extent - 0.001 + (success ? 1.0 : 0.0) - (blocked ? 1.0 : 0.0);
+            (previous - remaining) / scenario_.half_extent - 0.001
+            + (success ? 1.0 : 0.0) - (blocked ? 1.0 : 0.0)
+            + safety_penalty + boundary_penalty;
         transitions_.emplace(mobile.id, ppo::rl::StepResult{observation(mobile.id),
                                                             reward,
                                                             terminated,
