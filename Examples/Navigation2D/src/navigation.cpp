@@ -468,9 +468,8 @@ ppo::rl::StepResult Environment::step(const ppo::rl::Value& action)
         // to turn away *before* entering an obstacle, including the map boundary.
         const auto& after_state = state(mobile.id);
         const double heading = after_state.heading;
-        double nearest_margin = scenario_.half_extent
-            - std::max(std::abs(after_state.position.x), std::abs(after_state.position.y));
-        double nearest_scale = std::max(scenario_.half_extent, 1.0);
+        double nearest_margin = std::numeric_limits<double>::infinity();
+        double nearest_scale = 1.0;
         double nearest_alignment = 0.0;
         for (const auto& zone : scenario_.zones)
         {
