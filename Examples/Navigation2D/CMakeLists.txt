@@ -16,5 +16,6 @@ if(BUILD_TESTING)
     add_test(NAME navigation_runtime COMMAND navigation_tests)
     add_test(NAME navigation_scenarios COMMAND navigation_tests
         "${CMAKE_CURRENT_SOURCE_DIR}/scenarios/default.nav"
-        "${CMAKE_CURRENT_SOURCE_DIR}/scenarios/multiple.nav")
+        "${CMAKE_CURRENT_SOURCE_DIR}/scenarios/multiple.nav"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scenarios/energy-demo.nav")
 endif()
