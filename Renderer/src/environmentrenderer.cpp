@@ -158,6 +158,7 @@ void EnvironmentRenderer::LoadSettings()
         m_autoAttachCamera = settings.value("FollowSelection", false);
         m_showGrid = settings.value("Grid", true);
         m_showDomains = settings.value("Zones", true);
+        m_showLidar = settings.value("Lidar", true);
         m_showTrails = settings.value("Trails", true);
         m_showMetaCatalog = settings.value("Catalog", true);
         const float zoom = settings.value("MapZoom", 1.F);
@@ -168,7 +169,7 @@ void EnvironmentRenderer::LoadSettings()
 void EnvironmentRenderer::SaveSettings() const
 {
     const nlohmann::json settings = {{"FollowSelection",m_autoAttachCamera}, {"Grid",m_showGrid},
-        {"Zones",m_showDomains}, {"Trails",m_showTrails}, {"Catalog",m_showMetaCatalog}, {"MapZoom",m_mapZoom}};
+        {"Zones",m_showDomains}, {"Lidar",m_showLidar}, {"Trails",m_showTrails}, {"Catalog",m_showMetaCatalog}, {"MapZoom",m_mapZoom}};
     std::ofstream output("NavigationRenderer.json");
     if (!output || !(output << settings.dump(2))) throw std::runtime_error("Cannot save renderer settings");
 }
@@ -207,6 +208,7 @@ void EnvironmentRenderer::DrawSimulationControls()
     ImGui::Separator();
     ImGui::Checkbox("Grid", &m_showGrid);
     ImGui::Checkbox("Forbidden zones", &m_showDomains);
+    ImGui::Checkbox("Pseudo-LiDAR (61 rays)", &m_showLidar);
     ImGui::Checkbox("Trails", &m_showTrails);
     ImGui::Checkbox("Follow selection", &m_autoAttachCamera);
     ImGui::Checkbox("Meta catalog", &m_showMetaCatalog);
@@ -288,6 +290,22 @@ void EnvironmentRenderer::RenderTacticalScene(int width, int height)
     {
         const auto& state = world.get<navigation::State>(entity);
         const auto id = world.get<navigation::Identity>(entity).id;
+        if (m_showLidar && id == m_selection)
+        {
+            const auto scan = environment.lidar(id);
+            constexpr double pi = 3.14159265358979323846;
+            for (std::size_t beam = 0; beam < navigation::kLidarBinCount; ++beam)
+            {
+                if (!std::isfinite(scan.distances[beam])) continue;
+                const double angle = state.heading - pi + 2.0 * pi * beam
+                    / (navigation::kLidarBinCount - 1);
+                const double reach = scan.distances[beam];
+                const navigation::Point end{state.position.x + std::cos(angle) * reach,
+                                            state.position.y + std::sin(angle) * reach};
+                DrawLine3D(World(state.position, 0.15F), World(end, 0.15F),
+                           Fade(RED, 0.25F));
+            }
+        }
         const Color color = id == scenario.controlled ? SKYBLUE : GREEN;
         DrawSphere(World(state.position, 0.25F), 0.25F, color);
         DrawLine3D(World(state.position, 0.3F), World({state.position.x+std::cos(state.heading),state.position.y+std::sin(state.heading)},0.3F),color);
@@ -417,6 +435,7 @@ void EnvironmentRenderer::DrawInspectorWindow()
                 ImGui::Text("Distance: %.3f | meeting radius: %.3f",std::hypot(state.position.x-goal.x,state.position.y-goal.y),destination.radius);
             }
             ImGui::TextUnformatted("Components: Identity, Mobile, State, InitialState, Destination, Commands");
+            ImGui::Text("LiDAR: 61 rays / 360 deg; boundaries and forbidden zones");
         }
         else
         {
