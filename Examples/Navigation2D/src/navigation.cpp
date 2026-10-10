@@ -490,6 +490,34 @@ void Environment::remove_entity(EntityId id)
         next.zones.end());
     rebuild(std::move(next)); // validation rejects deleting a referenced destination or primary
 }
+void Environment::configure_world(double half_extent, double dt)
+{
+    auto active = scenario_;
+    auto baseline = baseline_scenario_;
+    auto cases = episode_cases_;
+    active.half_extent = half_extent;
+    active.dt = dt;
+    baseline.half_extent = half_extent;
+    baseline.dt = dt;
+    active = validate(std::move(active));
+    baseline = validate(std::move(baseline));
+    for (auto& candidate : cases)
+    {
+        candidate.half_extent = half_extent;
+        candidate.dt = dt;
+        candidate = validate(std::move(candidate));
+    }
+    // Do not permit shrinking the map across a currently moving entity.
+    for (const auto& mobile : scenario_.mobiles)
+    {
+        const auto position = state(mobile.id).position;
+        if (std::abs(position.x) > half_extent || std::abs(position.y) > half_extent)
+            throw std::invalid_argument("current mobile falls outside resized work area");
+    }
+    scenario_ = std::move(active);
+    baseline_scenario_ = std::move(baseline);
+    episode_cases_ = std::move(cases);
+}
 RewardWeights Environment::reward_weights(EntityId mobile) const
 {
     const auto entity = handle(mobile);
