@@ -319,6 +319,45 @@ void test_navigation_energy()
     catch (const std::invalid_argument&) { invalid = true; }
     check(invalid, "unbound energy component is rejected");
 }
+void test_reward_channel_controls()
+{
+    navigation::Scenario scenario;
+    scenario.mobiles[1].initial.position = {60,0};
+    navigation::Environment environment(scenario);
+    auto weight = environment.reward_weights(1);
+    weight.progress = 0;
+    weight.step_cost = 0;
+    weight.arrival = 0;
+    weight.collision = 0;
+    weight.safety = 0;
+    weight.boundary = 0;
+    weight.fuel = 0;
+    weight.failure = 0;
+    environment.set_reward_weights(1, weight);
+    const auto goal_weights = environment.reward_weights(2);
+    check(goal_weights.progress == 1.0, "reward editing is local to one agent");
+    environment.reset();
+    const auto transition = environment.step(std::vector<float>{0,0});
+    check(std::abs(transition.reward) < 1e-12,
+          "all disabled reward channels yield zero reward");
+    check(std::get<double>(transition.info.at("reward_progress")) == 0,
+          "reward decomposition is visible in transition info");
+    environment.reset();
+    check(environment.reward_weights(1).progress == 0,
+          "reward edits survive episode reset");
+
+    TemporaryDirectory directory;
+    navigation::save_scenario(environment.baseline_scenario(), directory.path / "reward.nav");
+    const auto loaded = navigation::load_scenario(directory.path / "reward.nav");
+    check(loaded.mobiles[0].rewards.progress == 0,
+          "reward-channel configuration round-trips in Navigation2D scenario");
+    bool rejected = false;
+    weight.progress = -1;
+    try { environment.set_reward_weights(1, weight); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    check(rejected && environment.reward_weights(1).progress == 0,
+          "invalid reward scaling never changes the agent");
+}
 void test_shared_loop()
 {
     navigation::Scenario scenario; scenario.max_steps=2; set_goal_velocity(scenario, {0.5,0.2});
@@ -533,8 +572,8 @@ int main(int argc, char** argv)
             std::cout << "Packaged scenarios parsed and stepped without models\n";
             return 0;
         }
-        test_navigation();test_moving_goal();test_lidar();test_avoidance_reward();test_episode_initialization();test_navigation_energy();test_shared_loop();test_incremental_session();test_bootstrap();test_metrics();test_checkpoints_and_config();test_ecs_world();
-        std::cout<<"12 navigation/runtime test groups passed\n";return 0;
+        test_navigation();test_moving_goal();test_lidar();test_avoidance_reward();test_episode_initialization();test_navigation_energy();test_reward_channel_controls();test_shared_loop();test_incremental_session();test_bootstrap();test_metrics();test_checkpoints_and_config();test_ecs_world();
+        std::cout<<"13 navigation/runtime test groups passed\n";return 0;
     }
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }
