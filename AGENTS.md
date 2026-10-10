@@ -33,6 +33,8 @@ testable et maintenable. Adapte des principes de `benoitfragit/MFDStudio/AGENTS.
 - L'exemple conserve un registre EnTT avec N entites (mobiles et zones), des
   identifiants stables et des controles par mobile. Ne jamais le reduire a une
   paire codee en dur. EnTT reste dans l'exemple et le rendu, jamais dans `RL/`.
+- Les recompenses doivent rester decomposables et parametrables par mobile :
+  eviter les coefficients non documentes disperses dans la logique de simulation.
 - Tous les agents decident sur le meme etat avant l'avancement commun du monde.
   Les retours sont propres a chaque mobile ; seuls les learners attaches recoivent
   du feedback. Un reset global tronque les episodes non termines des autres agents.
