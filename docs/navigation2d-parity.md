@@ -26,8 +26,9 @@ Replacements must use generic mobile / circular-zone / work-area terms.
 | Independent background evaluator with live progress | `Evaluation/src/evaluator.cpp` | **Not restored** | Cancellation/PAUSE safe; training unaffected |
 | Per-track attention/pooled variable-N neural network | `Agents/mission/actorcriticmission.cpp` | **Not restored** | Configurable model selection and padded/masked track observations |
 | Perception of unrelated moving mobiles | mission `SetNewState` | **Not restored** | Sensor/track slots beyond designated destination |
-| Dynamic world limits and time step through desktop controls | `Env::SetMaxRange`, `SetTimeStep` | **Not restored** | Atomic safe command handling |
-| 3D model assets, destroyed markers, explosions, mission visualization | old `Renderer` | **Not restored** | Generic, theme-preserving visual equivalents |
+| Dynamic world limits and time step through desktop controls | `Env::SetMaxRange`, `SetTimeStep` | **Adapted** in PR #15 | Atomic UI-thread updates, safe validation, preserved controller instances |
+| Optional 3D mobile assets | old `Renderer` | **Adapted** in PR #15 | GLB artwork packaged with a procedural glyph fallback |
+| Destroyed markers, explosions and specialized visualization | old `Renderer` | **Not restored** | Generic visual events and no regression in tactical display |
 | Full reflection / runtime component editor | old `Meta`, `Renderer` | **Not restored** | Schema/typed components inspection and safe editing |
 | Declarative JSON scene platforms / agent factory configuration | `Meta`, `Serializer`, `Env/scenarioconfig.cpp` | **Not restored** | New Navigation2D schema, no old names required |
 | Original model checkpoint compatibility | old `.pt` | **Explicitly out of scope** | User accepts retraining and loss of historical weights |
