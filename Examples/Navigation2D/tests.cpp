@@ -264,7 +264,7 @@ void test_episode_initialization()
     navigation::save_scenario(other, directory.path / "case-b.nav");
     {
         std::ofstream manifest(directory.path / "evaluation.cases");
-        manifest << "# Evaluation scenarios\\ncase-a.nav\\ncase-b.nav\\n";
+        manifest << "# Evaluation scenarios\ncase-a.nav\ncase-b.nav\n";
     }
     const auto cases = navigation::load_episode_cases(directory.path / "evaluation.cases");
     check(cases.size() == 2 && cases[1].mobiles[0].initial.position.x == -10,
