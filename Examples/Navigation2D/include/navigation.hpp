@@ -69,6 +69,8 @@ public:
     /// Reward channels are per mobile and may be tuned at runtime on this thread.
     void set_reward_weights(EntityId mobile, RewardWeights weights);
     RewardWeights reward_weights(EntityId mobile) const;
+    /// Change world extent/time-step atomically between single-threaded steps.
+    void configure_world(double half_extent, double dt);
     InitializationMode initialization_mode() const noexcept;
     const std::vector<Scenario>& episode_cases() const noexcept;
     ppo::rl::StepResult step(const ppo::rl::Value& action) override;
