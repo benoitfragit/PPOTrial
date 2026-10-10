@@ -768,17 +768,21 @@ ppo::rl::StepResult Environment::step(const ppo::rl::Value& action)
         const double caution_distance = std::max(2.0 * scenario_.max_speed * scenario_.dt, nearest_scale * 0.25);
         const double proximity = std::clamp(1.0 - nearest_margin / caution_distance, 0.0, 1.0);
         const double approaching = std::max(0.0, nearest_alignment);
-        const double safety_penalty = -0.05 * proximity * (1.0 + approaching);
+        const auto& weights = world_.get<RewardWeights>(handle(mobile.id));
+        const auto& energy_model = world_.get<EnergyModel>(handle(mobile.id));
+        const double progress_reward = weights.progress * (previous - remaining) / scenario_.half_extent;
+        const double step_penalty = -weights.step_cost;
+        const double arrival_reward = success ? weights.arrival : 0.0;
+        const double collision_penalty = blocked ? -weights.collision : 0.0;
+        const double safety_penalty = -weights.safety * proximity * (1.0 + approaching);
         const double boundary_proximity = std::clamp(1.0 - boundary_margin / caution_distance, 0.0, 1.0);
-        const double boundary_penalty = -0.05 * boundary_proximity;
-        const double reward =
-            (previous - remaining) / scenario_.half_extent - 0.001
-            + (success ? 1.0 : 0.0) - (blocked ? 1.0 : 0.0)
-            + safety_penalty + boundary_penalty
-            - (energy_failure ? 1.0 : 0.0)
-            - (scenario_.mobiles.empty() || world_.get<EnergyModel>(handle(mobile.id)).capacity == 0
-                ? 0.0 : 0.01 * own_fuel.last_burn
-                    / world_.get<EnergyModel>(handle(mobile.id)).capacity);
+        const double boundary_penalty = -weights.boundary * boundary_proximity;
+        const double fuel_penalty = energy_model.capacity > 0
+            ? -weights.fuel * own_fuel.last_burn / energy_model.capacity : 0.0;
+        const double failure_penalty = energy_failure ? -weights.failure : 0.0;
+        const double reward = progress_reward + step_penalty + arrival_reward
+            + collision_penalty + safety_penalty + boundary_penalty
+            + fuel_penalty + failure_penalty;
         transitions_.emplace(mobile.id, ppo::rl::StepResult{observation(mobile.id),
                                                             reward,
                                                             terminated,
@@ -789,6 +793,14 @@ ppo::rl::StepResult Environment::step(const ppo::rl::Value& action)
                                                              {"fuel_exhausted", own_fuel.exhausted},
                                                              {"speed_stall", own_fuel.stalled},
                                                              {"fuel_remaining", own_fuel.remaining},
+                                                             {"reward_progress", progress_reward},
+                                                             {"reward_step", step_penalty},
+                                                             {"reward_arrival", arrival_reward},
+                                                             {"reward_collision", collision_penalty},
+                                                             {"reward_safety", safety_penalty},
+                                                             {"reward_boundary", boundary_penalty},
+                                                             {"reward_fuel", fuel_penalty},
+                                                             {"reward_failure", failure_penalty},
                                                              {"distance", remaining}}});
     }
     // Complete all transitions before any optimiser can change a controller's weights.
