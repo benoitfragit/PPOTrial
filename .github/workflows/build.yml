@@ -3,7 +3,7 @@ on:
   push:
     branches: [master]
   pull_request:
-    branches: [master, refactor/generic-environment-contract]
+    branches: [master, refactor/generic-environment-contract, fix/restore-navigation2d-lidar-safety]
 permissions:
   contents: read
 jobs:
