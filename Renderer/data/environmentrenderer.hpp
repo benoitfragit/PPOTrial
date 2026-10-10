@@ -39,6 +39,7 @@ private:
     bool m_autoAttachCamera = false;
     bool m_showGrid = true;
     bool m_showDomains = true;
+    bool m_showLidar = true;
     bool m_showMetaCatalog = true;
     bool m_showTrails = true;
     float m_timeScale = 1;
