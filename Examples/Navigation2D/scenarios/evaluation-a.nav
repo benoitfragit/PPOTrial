@@ -1,0 +1,7 @@
+navigation2d-v3
+primary 1
+world 100 0.2 500
+motion 5 2 1
+mobile 1 "Mobile" -20 -5 0.2 1 2 0.5
+mobile 2 "Goal" 20 15 -1 1 1 0.5
+zone 100 "Forbidden zone" 2 4 1
