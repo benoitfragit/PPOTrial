@@ -254,6 +254,7 @@ Scenario load_scenario(const std::filesystem::path& path)
     s.mobiles.clear();
     std::set<std::string> singleton_keys;
     std::map<EntityId, EnergyModel> energy_config;
+    std::map<EntityId, RewardWeights> reward_config;
     while (std::getline(input, line))
     {
         if (line.empty() || line.front() == '#')
@@ -271,6 +272,15 @@ Scenario load_scenario(const std::filesystem::path& path)
             mobile.destination = read_id(row);
             row >> mobile.arrival_radius;
             s.mobiles.push_back(std::move(mobile));
+        }
+        else if (key == "reward")
+        {
+            const auto id = read_id(row);
+            RewardWeights w;
+            row >> w.progress >> w.step_cost >> w.arrival >> w.collision
+                >> w.safety >> w.boundary >> w.fuel >> w.failure;
+            if (id == no_entity || !reward_config.emplace(id, w).second)
+                throw std::invalid_argument("duplicate or invalid reward model ID");
         }
         else if (key == "energy")
         {
@@ -314,11 +324,17 @@ Scenario load_scenario(const std::filesystem::path& path)
         const auto it = energy_config.find(mobile.id);
         if (it != energy_config.end())
             mobile.energy = it->second;
+        const auto reward = reward_config.find(mobile.id);
+        if (reward != reward_config.end()) mobile.rewards = reward->second;
     }
     for (const auto& configured : energy_config)
         if (std::none_of(s.mobiles.begin(), s.mobiles.end(), [&](const MobileDefinition& mobile)
                          { return mobile.id == configured.first; }))
             throw std::invalid_argument("energy model refers to unknown mobile");
+    for (const auto& configured : reward_config)
+        if (std::none_of(s.mobiles.begin(), s.mobiles.end(), [&](const MobileDefinition& mobile)
+                         { return mobile.id == configured.first; }))
+            throw std::invalid_argument("reward model refers to unknown mobile");
     return validate(std::move(s));
 }
 std::string scenario_text(const Scenario& scenario)
@@ -340,6 +356,18 @@ std::string scenario_text(const Scenario& scenario)
             || e.speed_cubic != 0 || e.turning != 0)
             output << "energy " << mobile.id << ' ' << e.min_speed << ' ' << e.capacity
                    << ' ' << e.idle << ' ' << e.speed_cubic << ' ' << e.turning << '\n';
+    }
+    for (const auto& mobile : s.mobiles)
+    {
+        const RewardWeights defaults;
+        const auto& w = mobile.rewards;
+        if (w.progress != defaults.progress || w.step_cost != defaults.step_cost
+            || w.arrival != defaults.arrival || w.collision != defaults.collision
+            || w.safety != defaults.safety || w.boundary != defaults.boundary
+            || w.fuel != defaults.fuel || w.failure != defaults.failure)
+            output << "reward " << mobile.id << ' ' << w.progress << ' ' << w.step_cost
+                   << ' ' << w.arrival << ' ' << w.collision << ' ' << w.safety
+                   << ' ' << w.boundary << ' ' << w.fuel << ' ' << w.failure << '\n';
     }
     for (const auto& z : s.zones)
         output << "zone " << z.id << ' ' << std::quoted(z.name) << ' ' << z.center.x << ' ' << z.center.y << ' '
