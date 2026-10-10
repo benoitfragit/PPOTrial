@@ -2,7 +2,7 @@
 
 Reusable C++17 reinforcement-learning components and one desktop application,
 `PPO`, demonstrating Navigation2D: an EnTT world with N mobiles, per-mobile
-destinations/controllers, and circular forbidden-zone entities. The existing ImGui/ImPlot/raylib desktop shell
+destinations/controllers, and circular forbidden-zone entities. Each mobile also receives a 61-ray 360-degree pseudo-LiDAR against forbidden zones and work-area boundaries; proximity penalties provide dense avoidance feedback. The existing ImGui/ImPlot/raylib desktop shell
 is connected to this environment. There is no legacy application or separate viewer.
 
 ## Build
@@ -35,7 +35,7 @@ create or run a neural policy until explicitly requested in the UI.
 
 ## Desktop
 
-- **Simulation:** Play/Pause/Stop, clock scale, display flags and camera controls.
+- **Simulation:** Play/Pause/Stop, clock scale, display flags and camera controls; optional per-selected-mobile LiDAR rays.
 - **Navigation View:** the existing docked viewport with orbit/pan/zoom, selection
   follow and trails. The underlying simulation is planar.
 - **Minimap / Entities / Inspection:** select any mobile or zone and
@@ -98,7 +98,7 @@ world and promotes only the selected learner. Prod selection never follows a
 new promotion automatically. All decisions precede the single shared physics step.
 
 The v3 scenario format replaces the pair-specific v2 format. Observations retain
-`10 + 3 * zone_count` values from each mobile's viewpoint; additional unrelated
+`10 + 3 * zone_count + 61` values from each mobile's viewpoint; additional unrelated
 mobiles are not automatically added to the policy input. All mobiles now obey zone
 and world bounds, including coasting mobiles. Do not assume old trained models
 remain behaviorally equivalent merely because tensor widths match.
