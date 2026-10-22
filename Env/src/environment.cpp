@@ -128,6 +128,7 @@ struct Environment::Impl
     void                    Start         (void);
     void                    CreateSnapshot(void);
     void                    SyncDestroyedStateHistory(void);
+    void                    ResolveDestructions(void);
     void                    RecordExplosionEvents(void);
     void                    PruneExplosionEvents(void);
 
@@ -328,6 +329,47 @@ Environment::Impl::SyncDestroyedStateHistory(void)
 }
 
 /**
+* @brief Resolves all destruction events after the world has advanced.
+*
+* The original entity iteration order and threshold are preserved.
+*/
+void
+Environment::Impl::ResolveDestructions(void)
+{
+    // Resolve destruction outcomes only after every entity has advanced.
+    for (auto& entity: m_entities)
+    {
+        if (entity == nullptr
+        ||  !entity->has<sEntityState, sSNAState>())
+            continue;
+    
+        auto const [entityState, snaState] = entity->get<sEntityState, sSNAState>();
+    
+        if (entityState.m_destroyed)
+            continue;
+    
+        for (auto& otherEntity : m_entities)
+        {
+            if (otherEntity == entity
+            || !otherEntity->has<sEntityState>())
+                continue;
+    
+            auto [otherEntityState] = otherEntity->get<sEntityState>();
+    
+            if (otherEntityState.m_destroyed) 
+                continue;
+    
+            if (float pk{ SNASystem::EvaluateDestruction(*entity.get(), *otherEntity.get()) };
+                0.95F < pk)
+            {
+                otherEntityState.m_destroyed = true;
+                otherEntityState.m_destroyedById = entity->uniqid();
+            } 
+        }
+    }
+}
+
+/**
 * @brief Records one explosion event for every fresh destruction.
 *
 * The resulting event buffer is independent from entity lifetime so that the
@@ -427,37 +469,7 @@ Environment::Impl::Run(void)
                 },
                 [&]()
                 {
-                // Resolve destruction outcomes only after every entity has advanced.
-                for (auto& entity: m_entities)
-                {
-                    if (entity == nullptr
-                    ||  !entity->has<sEntityState, sSNAState>())
-                        continue;
-
-                    auto const [entityState, snaState] = entity->get<sEntityState, sSNAState>();
-
-                    if (entityState.m_destroyed)
-                        continue;
-
-                    for (auto& otherEntity : m_entities)
-                    {
-                        if (otherEntity == entity
-                        || !otherEntity->has<sEntityState>())
-                            continue;
-
-                        auto [otherEntityState] = otherEntity->get<sEntityState>();
-
-                        if (otherEntityState.m_destroyed) 
-                            continue;
-
-                        if (float pk{ SNASystem::EvaluateDestruction(*entity.get(), *otherEntity.get()) };
-                            0.95F < pk)
-                        {
-                            otherEntityState.m_destroyed = true;
-                            otherEntityState.m_destroyedById = entity->uniqid();
-                        } 
-                    }
-                }
+                    ResolveDestructions();
                     RecordExplosionEvents();
                 },
                 [](IAgent& agent) { return agent.SetNewState(); });
