@@ -78,9 +78,10 @@ change does not add a second application.
 
 This PR is an **incremental** architectural extraction, not a completed
 replacement of the legacy application. Existing evaluation orchestration,
-serialization callbacks and UI remain domain-specific. The prior evaluator
-double-buffer lifetime concern and global Serializer callback lifetime still
-require separate verified fixes. The legacy PPO tensor mathematics and
+serialization callbacks and UI remain domain-specific. The evaluator's public state snapshots are now published and read under a
+mutex, preventing concurrent readers from accessing a buffer being rewritten.
+The global Serializer callback lifetime still requires separate lifecycle
+validation. The legacy PPO tensor mathematics and
 checkpoint archive serialization are intentionally untouched.
 
 The core-only test exercises reset/advance/done, feedback and four-phase
@@ -88,6 +89,26 @@ ordering; it does not demonstrate compiled Windows desktop compatibility or
 numerical policy parity. Such validation requires matching LibTorch and full
 simulation test fixtures, and must be recorded separately.
 
+
+## Runtime dependency direction
+
+```text
+New environments                  Existing EnTT application
+  IEnvironment                     Env / Evaluation / Renderer
+       |                                  |
+  EpisodeRunner                       ECS adapter
+       |                                  |
+   ILearner                  Generic StepAgents / RunEvaluation
+       |                                  |
+  TorchLearner                   Legacy agents, evaluator score
+       |
+  RLAgent -> PPO -> injected ITrainingNet
+```
+
+The generic contracts schedule operations and own no model-specific state,
+observation layouts, entity list, score or checkpoint files. The application
+owns initialization order, fixed `dt`, entity and agent lifetimes, settings,
+renderer and worker threads.
 
 ## Multi-agent runtime and evaluation orchestration
 
@@ -109,3 +130,15 @@ The ECS adapter `Entities/data/entityruntime.hpp` advances only live entities
 and retains their existing iteration order. The live environment's vector
 and evaluator's ordered map remain unchanged. Their intentionally distinct
 destruction rules are not merged.
+
+## Read-only compatibility smoke test
+
+`Tests/model_checkpoint_tests.cpp` loads both existing production archives
+(`RLSNA` 6 inputs/2 outputs and `RLMission` 152 inputs/3 outputs) with the
+unchanged production wrappers. It checks inference shape, finite values and
+repeatability without optimizer updates, serializing anything or writing to
+the model directory. `PolicyCheckpointTests` is registered with desktop CTest
+on Windows alongside the existing headless core tests.
+
+The original checkpoint files remain untouched. The smoke test does not
+establish training-time numeric parity or replace functional scenario tests.
