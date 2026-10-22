@@ -15,6 +15,7 @@
 #include <functional>
 #include <memory>
 #include <cstring>
+#include <stdexcept>
 
 #include <torch/torch.h>
 
@@ -68,6 +69,15 @@ ProdAgent<Policy, Model>::ChooseAction(void)
         return;
 
     torch::Tensor actions_t = p_policy->forward(m_states_t);
+
+    // The production policy is replaceable: reject malformed tensors before
+    // copying them into the fixed-size action buffer owned by the model.
+    if (!actions_t.defined() || actions_t.dim() != 2 || actions_t.size(0) != 1
+        || actions_t.size(1) != static_cast<int64_t>(m_actionVector.size())
+        || actions_t.scalar_type() != torch::kFloat || !actions_t.is_contiguous())
+    {
+        throw std::runtime_error("ProdAgent: policy returned invalid action shape or dtype");
+    }
 
     // Copy the torch output tensor back into the fixed-size action buffer.
     float const* srcActionPtr = actions_t.data_ptr<float>();
