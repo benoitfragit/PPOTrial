@@ -424,76 +424,76 @@ Environment::Impl::Run(void)
             // Preserve the existing all-agents / all-entities step ordering.
             ppo::core::StepWorld(
                 [&]() {
-                for (auto& agent : m_agents)
-                {
-                    // Each agent observes the latest state and emits one action.
-                    if (agent == nullptr)
-                        continue;
-                        
-                    agent->ChooseAction();
+                    for (auto& agent : m_agents)
+                    {
+                        // Each agent observes the latest state and emits one action.
+                        if (agent == nullptr)
+                            continue;
+                            
+                        agent->ChooseAction();
                 }
                 },
                 [&]() {
-                for (auto& entity : m_entities)
-                {
-                    if (entity == nullptr)
-                        continue;
-
-                    if (entity->has<sEntityState>())
+                    for (auto& entity : m_entities)
                     {
-                        auto [entityState] = entity->get<sEntityState>();
+                        if (entity == nullptr)
+                            continue;
+
+                        if (entity->has<sEntityState>())
+                        {
+                            auto [entityState] = entity->get<sEntityState>();
+
+                            if (entityState.m_destroyed)
+                                continue;
+                        }
+
+                        // Apply the previously selected action to update entity state.
+                        entity->Run();
+                }
+                },
+                [&]() {
+                    // Resolve destruction outcomes only after every entity has advanced.
+                    for (auto& entity: m_entities)
+                    {
+                        if (entity == nullptr
+                        ||  !entity->has<sEntityState, sSNAState>())
+                            continue;
+
+                        auto const [entityState, snaState] = entity->get<sEntityState, sSNAState>();
 
                         if (entityState.m_destroyed)
                             continue;
-                    }
 
-                    // Apply the previously selected action to update entity state.
-                    entity->Run();
-                }
-                },
-                [&]() {
-                // Resolve destruction outcomes only after every entity has advanced.
-                for (auto& entity: m_entities)
-                {
-                    if (entity == nullptr
-                    ||  !entity->has<sEntityState, sSNAState>())
-                        continue;
-
-                    auto const [entityState, snaState] = entity->get<sEntityState, sSNAState>();
-
-                    if (entityState.m_destroyed)
-                        continue;
-
-                    for (auto& otherEntity : m_entities)
-                    {
-                        if (otherEntity == entity
-                        || !otherEntity->has<sEntityState>())
-                            continue;
-
-                        auto [otherEntityState] = otherEntity->get<sEntityState>();
-
-                        if (otherEntityState.m_destroyed) 
-                            continue;
-
-                        if (float pk{ SNASystem::EvaluateDestruction(*entity.get(), *otherEntity.get()) };
-                            0.95F < pk)
+                        for (auto& otherEntity : m_entities)
                         {
-                            otherEntityState.m_destroyed = true;
-                            otherEntityState.m_destroyedById = entity->uniqid();
-                        } 
-                    }
+                            if (otherEntity == entity
+                            || !otherEntity->has<sEntityState>())
+                                continue;
+
+                            auto [otherEntityState] = otherEntity->get<sEntityState>();
+
+                            if (otherEntityState.m_destroyed) 
+                                continue;
+
+                            if (float pk{ SNASystem::EvaluateDestruction(*entity.get(), *otherEntity.get()) };
+                                0.95F < pk)
+                            {
+                                otherEntityState.m_destroyed = true;
+                                otherEntityState.m_destroyedById = entity->uniqid();
+                            } 
+                        }
                 }
 
                 RecordExplosionEvents();
                 },
                 [&]() {
-                // Push the resulting transitions back into every agent.
-                for (auto& agent : m_agents)
-                {
-                    if (agent == nullptr)
-                        continue;
+                    // Push the resulting transitions back into every agent.
+                    for (auto& agent : m_agents)
+                    {
+                        if (agent == nullptr)
+                            continue;
 
-                    reinitrequest |= agent->SetNewState();
+                        reinitrequest |= agent->SetNewState();
                 }
                 });
 

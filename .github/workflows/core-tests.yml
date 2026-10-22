@@ -1,0 +1,24 @@
+name: Core C++17 tests
+on:
+  push:
+    branches:
+      - refactor/master-generic-rl-core-20261023
+  pull_request:
+    paths:
+      - 'Core/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/core-tests.yml'
+jobs:
+  core:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build/core -DPPO_BUILD_DESKTOP=OFF -DPPO_BUILD_CORE_TESTS=ON
+      - name: Build
+        run: cmake --build build/core --config Release
+      - name: Test
+        run: ctest --test-dir build/core -C Release --output-on-failure

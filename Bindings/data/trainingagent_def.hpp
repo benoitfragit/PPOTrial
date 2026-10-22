@@ -8,9 +8,11 @@
 */
 #pragma once
 #include "serializer.hpp"
+#include <algorithm>
 #include <array>
 
 #include <vector>
+#include <cstring>
 #include <functional>
 #include <string>
 
