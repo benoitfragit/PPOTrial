@@ -4,6 +4,7 @@ project(GenericPPO LANGUAGES CXX)
 add_library(${PROJECT_NAME}
 	STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/data/iagent.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/ppoparameters.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/ppo.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/rlagent.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/trainingnet.hpp

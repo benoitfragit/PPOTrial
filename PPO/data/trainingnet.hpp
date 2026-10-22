@@ -8,7 +8,6 @@
 */
 #pragma once
 
-#include "iagent.hpp"
 
 #include <torch/torch.h>
 #include <tuple>
