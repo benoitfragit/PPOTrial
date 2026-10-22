@@ -11,6 +11,7 @@
 #include "ppo.hpp"
 
 #include <torch/torch.h>
+#include <cstring>
 
 namespace ppo::model {
 

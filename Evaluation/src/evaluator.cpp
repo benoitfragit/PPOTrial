@@ -636,36 +636,36 @@ Evaluator::Impl::Run(void)
             // Identical action/advance/outcome/feedback order as the training world.
             ppo::core::StepWorld(
                 [&]() {
-                for (auto& agent : m_agents)
-                {
-                    if (agent != nullptr)
-                        agent->ChooseAction();
-                }
-                },
-                [&]() {
-                for (auto& [_, entity] : m_entities)
-                {
-                    if (entity == nullptr)
-                        continue;
-
-                    if (entity->has<ppo::model::sEntityState>())
+                    for (auto& agent : m_agents)
                     {
-                        auto [entityState] = entity->get<ppo::model::sEntityState>();
-                        if (entityState.m_destroyed)
-                            continue;
-                    }
-
-                    entity->Run();
+                        if (agent != nullptr)
+                            agent->ChooseAction();
                 }
                 },
                 [&]() {
-                ResolveDestructions();
+                    for (auto& [_, entity] : m_entities)
+                    {
+                        if (entity == nullptr)
+                            continue;
+
+                        if (entity->has<ppo::model::sEntityState>())
+                        {
+                            auto [entityState] = entity->get<ppo::model::sEntityState>();
+                            if (entityState.m_destroyed)
+                                continue;
+                        }
+
+                        entity->Run();
+                }
                 },
                 [&]() {
-                for (auto& agent : m_agents)
-                {
-                    if (agent != nullptr)
-                        agent->SetNewState();
+                    ResolveDestructions();
+                },
+                [&]() {
+                    for (auto& agent : m_agents)
+                    {
+                        if (agent != nullptr)
+                            agent->SetNewState();
                 }
                 });
 

@@ -8,11 +8,13 @@
 */
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <vector>
 #include <functional>
 #include <memory>
+#include <cstring>
 
 #include <torch/torch.h>
 
