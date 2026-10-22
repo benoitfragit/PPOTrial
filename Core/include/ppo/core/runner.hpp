@@ -21,6 +21,8 @@ public:
         : environment_(environment), policy_(learner), learner_(&learner) {}
 
     Observation const& Reset() {
+        // Reset can fail after mutating the world. Never keep old observations valid.
+        initialized_ = false;
         Observation next = environment_.Reset();
         ValidateObservation(next);
         observation_ = std::move(next);

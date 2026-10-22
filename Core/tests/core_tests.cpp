@@ -13,7 +13,11 @@ class FakeEnvironment final : public ppo::core::IEnvironment {
 public:
     std::size_t ObservationSize() const noexcept override { return 1U; }
     std::size_t ActionSize() const noexcept override { return 1U; }
-    ppo::core::Observation Reset() override { position_ = 0.F; return { position_ }; }
+    ppo::core::Observation Reset() override {
+        position_ = 0.F;
+        return invalid_reset ? ppo::core::Observation{} : ppo::core::Observation{position_};
+    }
+    bool invalid_reset = false;
     ppo::core::Transition Step(ppo::core::Action const& action) override {
         position_ += action.at(0);
         if (invalid_observation) return {{}, position_, false};
@@ -97,6 +101,17 @@ int main() {
     Check(inference.Reset().at(0) == 0.F);
     Check(inference.Advance().reward == 1.F);
     Check(learner.observed == 3);
+    env.invalid_reset = true;
+    rejected = false;
+    try { inference.Reset(); }
+    catch (std::invalid_argument const&) { rejected = true; }
+    Check(rejected);
+    env.invalid_reset = false;
+    rejected = false;
+    try { inference.Advance(); }
+    catch (std::logic_error const&) { rejected = true; }
+    Check(rejected);
+    Check(inference.Reset().at(0) == 0.F);
 
     std::vector<int> steps;
     ppo::core::StepWorld(
