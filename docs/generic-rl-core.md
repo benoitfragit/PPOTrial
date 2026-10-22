@@ -19,7 +19,7 @@ does **not** claim that the existing desktop has been migrated to EpisodeRunner.
 | `Renderer`, `Main` | Existing desktop and orchestration | the above and graphics |
 
 The old `TrainingAgent<Policy, Model>` and `ProdAgent<Policy, Model>`
-templates are preserved byte-for-byte in `Bindings/data`. They are not part
+templates retain their implementations in `Bindings/data` (only explicit standard-library includes were added). They are not part
 of the PPO engine library. Concrete networks remain in `Agents/` and are
 supplied through the existing `ITrainingNet` contract. The new `TorchLearner`
 accepts **any PPO-compatible `ITrainingNet`**, not an arbitrary neural

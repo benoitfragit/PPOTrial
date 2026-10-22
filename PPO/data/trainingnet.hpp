@@ -8,6 +8,8 @@
 */
 #pragma once
 
+#include "ppoparameters.hpp"
+
 
 #include <torch/torch.h>
 #include <tuple>
