@@ -15,6 +15,7 @@
 #include "entt/entt.hpp"
 
 #include "entitytypes.hpp"
+#include "ppo/core/evaluator_state.hpp"
 
 namespace ppo::model {
 
@@ -249,33 +250,6 @@ struct sFlightModelState
     * @brief Maximum fuel quantity.
     */
     float m_maxfuel{ 0.F };
-};
-
-/**
-* @brief State snapshot published by the asynchronous evaluator.
-*/
-struct sEvaluatorState
-{
-    /**
-    * @brief Number of steps executed per test.
-    */
-    unsigned int m_nbstep{ 0 };
-    /**
-    * @brief Total number of evaluation tests.
-    */
-    unsigned int m_nbtests{ 0 };
-    /**
-    * @brief Current evaluation score.
-    */
-    float m_notation{ 0.F };
-    /**
-    * @brief Progress ratio in the range [0, 1].
-    */
-    float m_progress{ 0.F };
-    /**
-    * @brief True while an evaluation is running.
-    */
-    bool m_inprogress{ false };
 };
 
 /**

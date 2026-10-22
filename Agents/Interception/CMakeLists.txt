@@ -16,7 +16,7 @@ target_link_libraries(${PROJECT_NAME}
 								GenericEnv
 								Evaluation
 								EntityInitializer
-								GenericPPO)
+								GenericPPO GenericRLBindings)
 
 set(RESOURCE_RLSNAMODEL_PATH "${CMAKE_SOURCE_DIR}/resources/model/RLSNA")
 target_compile_definitions(${PROJECT_NAME} PUBLIC RESOURCE_RLSNAMODEL_PATH="${RESOURCE_RLSNAMODEL_PATH}")

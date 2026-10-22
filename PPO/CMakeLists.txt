@@ -5,10 +5,6 @@ add_library(${PROJECT_NAME}
 	STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/data/iagent.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/ppo.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/trainingagent.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/trainingagent_def.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/prodagent.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/prodagent_def.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/rlagent.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/trainingnet.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rlagent.cpp
@@ -16,4 +12,4 @@ add_library(${PROJECT_NAME}
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/data)
 
-target_link_libraries(${PROJECT_NAME} PUBLIC "${TORCH_LIBRARIES}" GenericEntities)
+target_link_libraries(${PROJECT_NAME} PUBLIC "${TORCH_LIBRARIES}" GenericRLCore)

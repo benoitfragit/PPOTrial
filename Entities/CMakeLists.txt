@@ -25,7 +25,7 @@ add_library(${PROJECT_NAME}
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/data)
 
-target_link_libraries(${PROJECT_NAME} PUBLIC GenericSerializer EnTT::EnTT)
+target_link_libraries(${PROJECT_NAME} PUBLIC GenericSerializer GenericRLCore EnTT::EnTT)
 
 set(RESOURCE_PATH "${CMAKE_SOURCE_DIR}/resources/settings")
 target_compile_definitions(${PROJECT_NAME} PUBLIC RESOURCE_PATH="${RESOURCE_PATH}")
