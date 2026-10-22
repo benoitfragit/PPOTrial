@@ -8,7 +8,9 @@ add_library(${PROJECT_NAME}
     ${CMAKE_CURRENT_SOURCE_DIR}/data/rlagent.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/trainingnet.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/rlagent.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/ppo.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ppo.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/torchlearner.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/torchlearner.cpp)
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/data)
 
