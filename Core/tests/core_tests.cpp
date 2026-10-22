@@ -66,6 +66,12 @@ int main() {
     catch (std::invalid_argument const&) { rejected = true; }
     Check(rejected);
     learner.invalid_action = false;
+    rejected = false;
+    try { runner.Advance(); }
+    catch (std::logic_error const&) { rejected = true; }
+    Check(rejected);
+    Check(runner.Reset().at(0) == 0.F);
+
     env.invalid_observation = true;
     rejected = false;
     try { runner.Advance(); }
