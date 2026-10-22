@@ -7,6 +7,7 @@
 * @license MIT
 */
 #include "evaluator.hpp"
+#include "ppo/core/runner.hpp"
 
 #include "aircraft.hpp"
 #include "entity.hpp"
@@ -632,34 +633,41 @@ Evaluator::Impl::Run(void)
             if (!m_running.load(std::memory_order_acquire))
                 break;
 
-            for (auto& agent : m_agents)
-            {
-                if (agent != nullptr)
-                    agent->ChooseAction();
-            }
-
-            for (auto& [_, entity] : m_entities)
-            {
-                if (entity == nullptr)
-                    continue;
-
-                if (entity->has<ppo::model::sEntityState>())
+            // Identical action/advance/outcome/feedback order as the training world.
+            ppo::core::StepWorld(
+                [&]() {
+                for (auto& agent : m_agents)
                 {
-                    auto [entityState] = entity->get<ppo::model::sEntityState>();
-                    if (entityState.m_destroyed)
-                        continue;
+                    if (agent != nullptr)
+                        agent->ChooseAction();
                 }
+                },
+                [&]() {
+                for (auto& [_, entity] : m_entities)
+                {
+                    if (entity == nullptr)
+                        continue;
 
-                entity->Run();
-            }
+                    if (entity->has<ppo::model::sEntityState>())
+                    {
+                        auto [entityState] = entity->get<ppo::model::sEntityState>();
+                        if (entityState.m_destroyed)
+                            continue;
+                    }
 
-            ResolveDestructions();
-
-            for (auto& agent : m_agents)
-            {
-                if (agent != nullptr)
-                    agent->SetNewState();
-            }
+                    entity->Run();
+                }
+                },
+                [&]() {
+                ResolveDestructions();
+                },
+                [&]() {
+                for (auto& agent : m_agents)
+                {
+                    if (agent != nullptr)
+                        agent->SetNewState();
+                }
+                });
 
             if (p_evaluated->has<ppo::model::sSNAState>())
             {
