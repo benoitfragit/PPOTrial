@@ -46,17 +46,24 @@ void CheckCheckpoint(std::filesystem::path const& path,
 int main()
 {
     const std::filesystem::path root{PPO_MODEL_RESOURCE_DIR};
-    // Dimensions match the committed legacy model layouts; no weights change.
-    rl::ActorCriticNetProd interception{6, 2};
-    CheckCheckpoint(root / "RLSNA" / "prod" / "model.pt", interception, 6, 2);
-
+    // Verify both production and candidate-evaluation archives. Loading either
+    // must not modify weights or run an optimizer.
     constexpr auto missionDim = rl::MissionObservationLayout::kStateDimension;
     constexpr auto missionActions = rl::MissionObservationLayout::kActionCount;
-    rl::ActorCriticTrackAttentionProd mission{
-        static_cast<int64_t>(missionDim),
-        static_cast<int64_t>(missionActions)
-    };
-    CheckCheckpoint(root / "RLMission" / "prod" / "model.pt", mission,
-                    static_cast<int64_t>(missionDim),
-                    static_cast<int64_t>(missionActions));
+
+    for (auto const* version : {"prod", "eval"})
+    {
+        rl::ActorCriticNetProd interception{6, 2};
+        CheckCheckpoint(root / "RLSNA" / version / "model.pt",
+                        interception, 6, 2);
+
+        rl::ActorCriticTrackAttentionProd mission{
+            static_cast<int64_t>(missionDim),
+            static_cast<int64_t>(missionActions)
+        };
+        CheckCheckpoint(root / "RLMission" / version / "model.pt",
+                        mission,
+                        static_cast<int64_t>(missionDim),
+                        static_cast<int64_t>(missionActions));
+    }
 }
