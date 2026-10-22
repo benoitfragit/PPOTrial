@@ -640,7 +640,7 @@ Evaluator::Impl::Run(void)
                     {
                         if (agent != nullptr)
                             agent->ChooseAction();
-                }
+                    }
                 },
                 [&]() {
                     for (auto& [_, entity] : m_entities)
@@ -656,7 +656,7 @@ Evaluator::Impl::Run(void)
                         }
 
                         entity->Run();
-                }
+                    }
                 },
                 [&]() {
                     ResolveDestructions();
@@ -666,7 +666,7 @@ Evaluator::Impl::Run(void)
                     {
                         if (agent != nullptr)
                             agent->SetNewState();
-                }
+                    }
                 });
 
             if (p_evaluated->has<ppo::model::sSNAState>())

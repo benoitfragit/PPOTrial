@@ -431,7 +431,7 @@ Environment::Impl::Run(void)
                             continue;
                             
                         agent->ChooseAction();
-                }
+                    }
                 },
                 [&]() {
                     for (auto& entity : m_entities)
@@ -449,7 +449,7 @@ Environment::Impl::Run(void)
 
                         // Apply the previously selected action to update entity state.
                         entity->Run();
-                }
+                    }
                 },
                 [&]() {
                     // Resolve destruction outcomes only after every entity has advanced.
@@ -482,9 +482,9 @@ Environment::Impl::Run(void)
                                 otherEntityState.m_destroyedById = entity->uniqid();
                             } 
                         }
-                }
+                    }
 
-                RecordExplosionEvents();
+                    RecordExplosionEvents();
                 },
                 [&]() {
                     // Push the resulting transitions back into every agent.
@@ -494,7 +494,7 @@ Environment::Impl::Run(void)
                             continue;
 
                         reinitrequest |= agent->SetNewState();
-                }
+                    }
                 });
 
         }
