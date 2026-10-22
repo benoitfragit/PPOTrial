@@ -7,7 +7,8 @@
 * @license MIT
 */
 #include "environment.hpp"
-#include "ppo/core/runner.hpp"
+#include "ppo/core/multi_agent.hpp"
+#include "entityruntime.hpp"
 #include "utils.hpp"
 #include "serializer.hpp"
 #include "snasystem.hpp"
@@ -410,92 +411,56 @@ Environment::Impl::Run(void)
                 }
 
                 // Initialize agents only after every entity has rebuilt its state.
-                for (auto& agent : m_agents)
-                {
-                    if (agent == nullptr)
-                        continue;
-                 
-                    agent->Init();
-                }
+                ppo::core::ResetAgents(m_agents, [](IAgent& agent) { agent.Init(); });
 
                 reinitrequest = false;
             }
 
-            // Preserve the existing all-agents / all-entities step ordering.
-            ppo::core::StepWorld(
-                [&]() {
-                    for (auto& agent : m_agents)
-                    {
-                        // Each agent observes the latest state and emits one action.
-                        if (agent == nullptr)
-                            continue;
-                            
-                        agent->ChooseAction();
-                    }
+            // Reuse the domain-neutral multi-agent scheduler. The ECS update,
+            // outcome rules, and snapshots remain environment-owned.
+            reinitrequest |= ppo::core::StepAgents(
+                m_agents,
+                [](IAgent& agent) { agent.ChooseAction(); },
+                [&]()
+                {
+                    AdvanceLivingEntities(m_entities, [](auto& entity) -> auto& { return entity; });
                 },
-                [&]() {
-                    for (auto& entity : m_entities)
+                [&]()
+                {
+                // Resolve destruction outcomes only after every entity has advanced.
+                for (auto& entity: m_entities)
+                {
+                    if (entity == nullptr
+                    ||  !entity->has<sEntityState, sSNAState>())
+                        continue;
+
+                    auto const [entityState, snaState] = entity->get<sEntityState, sSNAState>();
+
+                    if (entityState.m_destroyed)
+                        continue;
+
+                    for (auto& otherEntity : m_entities)
                     {
-                        if (entity == nullptr)
+                        if (otherEntity == entity
+                        || !otherEntity->has<sEntityState>())
                             continue;
 
-                        if (entity->has<sEntityState>())
+                        auto [otherEntityState] = otherEntity->get<sEntityState>();
+
+                        if (otherEntityState.m_destroyed) 
+                            continue;
+
+                        if (float pk{ SNASystem::EvaluateDestruction(*entity.get(), *otherEntity.get()) };
+                            0.95F < pk)
                         {
-                            auto [entityState] = entity->get<sEntityState>();
-
-                            if (entityState.m_destroyed)
-                                continue;
-                        }
-
-                        // Apply the previously selected action to update entity state.
-                        entity->Run();
+                            otherEntityState.m_destroyed = true;
+                            otherEntityState.m_destroyedById = entity->uniqid();
+                        } 
                     }
-                },
-                [&]() {
-                    // Resolve destruction outcomes only after every entity has advanced.
-                    for (auto& entity: m_entities)
-                    {
-                        if (entity == nullptr
-                        ||  !entity->has<sEntityState, sSNAState>())
-                            continue;
-
-                        auto const [entityState, snaState] = entity->get<sEntityState, sSNAState>();
-
-                        if (entityState.m_destroyed)
-                            continue;
-
-                        for (auto& otherEntity : m_entities)
-                        {
-                            if (otherEntity == entity
-                            || !otherEntity->has<sEntityState>())
-                                continue;
-
-                            auto [otherEntityState] = otherEntity->get<sEntityState>();
-
-                            if (otherEntityState.m_destroyed) 
-                                continue;
-
-                            if (float pk{ SNASystem::EvaluateDestruction(*entity.get(), *otherEntity.get()) };
-                                0.95F < pk)
-                            {
-                                otherEntityState.m_destroyed = true;
-                                otherEntityState.m_destroyedById = entity->uniqid();
-                            } 
-                        }
-                    }
-
+                }
                     RecordExplosionEvents();
                 },
-                [&]() {
-                    // Push the resulting transitions back into every agent.
-                    for (auto& agent : m_agents)
-                    {
-                        if (agent == nullptr)
-                            continue;
-
-                        reinitrequest |= agent->SetNewState();
-                    }
-                });
+                [](IAgent& agent) { return agent.SetNewState(); });
 
         }
 
