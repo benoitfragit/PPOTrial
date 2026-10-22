@@ -13,6 +13,8 @@
 #include <filesystem>
 
 #include "trainingnet.hpp"
+#include "ppoparameters.hpp"
+#include "iagent.hpp"
 
 namespace ppo::model {
 

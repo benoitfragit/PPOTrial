@@ -12,6 +12,7 @@
 #include <filesystem>
 
 #include "trainingnet.hpp"
+#include "iagent.hpp"
 #include <torch/torch.h>
 
 namespace ppo::model {

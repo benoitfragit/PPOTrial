@@ -47,6 +47,7 @@ private:
     std::vector<float> observation_;
     std::vector<float> action_;
     RLAgent agent_;
+    bool pending_action_ = false;
 };
 
 } // namespace ppo::model

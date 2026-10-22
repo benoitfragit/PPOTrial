@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <filesystem>
 #include "trainingnet.hpp"
+#include "iagent.hpp"
 
 namespace ppo::model {
 
