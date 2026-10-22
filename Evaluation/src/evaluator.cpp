@@ -689,14 +689,14 @@ Evaluator::Impl::Run(void)
         },
         [&](int testIndex, int stepIndex)
         {
-        primaryPkill += testPrimaryPk;
-        secondaryDestroyed += testSecondaryDestroyed;
-        missionDuration += static_cast<float>(state.m_nbstep + 1) / static_cast<float>(stepIndex + 1);
-        state.m_inprogress = true;
-        state.m_progress = static_cast<float>(testIndex + 1) / static_cast<float>(std::max(state.m_nbtests, 1U));
-        UpdateDoubleBuffer();
+            primaryPkill += testPrimaryPk;
+            secondaryDestroyed += testSecondaryDestroyed;
+            missionDuration += static_cast<float>(state.m_nbstep + 1) / static_cast<float>(stepIndex + 1);
+            state.m_inprogress = true;
+            state.m_progress = static_cast<float>(testIndex + 1) / static_cast<float>(std::max(state.m_nbtests, 1U));
+            UpdateDoubleBuffer();
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(3));
+            std::this_thread::sleep_for(std::chrono::milliseconds(3));
         });
 
     notation = 100.F * (

@@ -1,7 +1,10 @@
 #include "ppo/core/runner.hpp"
+#include "ppo/core/multi_agent.hpp"
+#include "ppo/core/evaluation.hpp"
 #include "ppo/core/evaluator_state.hpp"
 
 #include <stdexcept>
+#include <memory>
 #include <vector>
 
 namespace {
@@ -44,7 +47,83 @@ public:
 };
 } // namespace
 
+
+void TestMultiAgentPhases() {
+    struct Agent { int id; };
+    auto a = std::make_shared<Agent>(Agent{1});
+    auto b = std::make_shared<Agent>(Agent{2});
+    std::vector<std::shared_ptr<Agent>> agents{a, nullptr, b};
+    std::vector<int> events{};
+
+    ppo::core::ResetAgents(agents, [&](Agent& agent) { events.push_back(10 + agent.id); });
+    Check(events == std::vector<int>({11, 12}));
+    events.clear();
+
+    bool const reset = ppo::core::StepAgents(
+        agents,
+        [&](Agent& agent) { events.push_back(10 + agent.id); },
+        [&]() { events.push_back(20); },
+        [&]() { events.push_back(30); },
+        [&](Agent& agent) {
+            events.push_back(40 + agent.id);
+            return agent.id == 1;
+        });
+    Check(reset);
+    Check(events == std::vector<int>({11, 12, 20, 30, 41, 42}));
+
+    std::vector<std::shared_ptr<Agent>> empty{};
+    events.clear();
+    bool const noReset = ppo::core::StepAgents(
+        empty,
+        [&](Agent&) { events.push_back(-1); },
+        [&]() { events.push_back(20); },
+        [&]() { events.push_back(30); },
+        [&](Agent&) { events.push_back(-2); return true; });
+    Check(!noReset);
+    Check(events == std::vector<int>({20, 30}));
+}
+
+void TestEvaluationScheduling() {
+    std::vector<int> events{};
+    // Early termination at step 1 of test 0, normal exhaustion for test 1.
+    ppo::core::RunEvaluation(
+        2, 3,
+        [] { return true; },
+        [&](int test) { events.push_back(10 + test); return true; },
+        [&](int test, int step) {
+            events.push_back(100 + test * 10 + step);
+            return test == 0 && step == 1;
+        },
+        [&](int test, int step) { events.push_back(200 + test * 10 + step); });
+    Check(events == std::vector<int>({10, 100, 101, 201,
+                                      11, 110, 111, 112, 213}));
+
+    // Cancel mid-test: the completion callback still receives the current
+    // zero-based step index, matching the legacy evaluator.
+    events.clear();
+    bool running = true;
+    ppo::core::RunEvaluation(
+        3, 4,
+        [&] { return running; },
+        [&](int test) { events.push_back(test); return true; },
+        [&](int, int step) { events.push_back(10 + step); running = false; return false; },
+        [&](int test, int step) { events.push_back(100 + test * 10 + step); });
+    Check(events == std::vector<int>({0, 10, 101}));
+
+    // Failed reset aborts without counting or completing that test.
+    events.clear();
+    ppo::core::RunEvaluation(
+        3, 2,
+        [] { return true; },
+        [&](int test) { events.push_back(test); return test == 0; },
+        [&](int, int) { return false; },
+        [&](int, int) { events.push_back(99); });
+    Check(events == std::vector<int>({0, 99, 1}));
+}
+
 int main() {
+    TestMultiAgentPhases();
+    TestEvaluationScheduling();
     FakeEnvironment env;
     FakeLearner learner;
     ppo::core::EpisodeRunner runner(env, learner);
