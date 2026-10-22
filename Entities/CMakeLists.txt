@@ -5,6 +5,7 @@ add_library(${PROJECT_NAME}
 	STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/data/baseentity.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/entity.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/entityruntime.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/interface.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/entitytypes.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/components.hpp
