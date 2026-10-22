@@ -87,3 +87,25 @@ The core-only test exercises reset/advance/done, feedback and four-phase
 ordering; it does not demonstrate compiled Windows desktop compatibility or
 numerical policy parity. Such validation requires matching LibTorch and full
 simulation test fixtures, and must be recorded separately.
+
+
+## Multi-agent runtime and evaluation orchestration
+
+`ppo/core/multi_agent.hpp` runs any nullable pointer-like agent collection
+without referring to EnTT, torch or network dimensions. `ResetAgents`
+maintains the caller's order; `StepAgents` executes all decisions, advances the
+world once, resolves outcomes once, and delivers feedback to every agent. A
+rollout-reset request from one agent does not skip feedback for later agents.
+It is used by the original environment and evaluator.
+
+`ppo/core/evaluation.hpp` provides the synchronous `RunEvaluation` campaign
+scheduler. It manages test/step iteration, cancellation, early termination and
+per-test completion, leaving scenario initialization, the number of agents,
+domain dynamics, mission score and checkpoint promotion with the evaluator.
+Callbacks run on the *existing* evaluator thread, with unchanged steps and
+zero-based indices. No new thread, RNG, checkpoint or training run is created.
+
+The ECS adapter `Entities/data/entityruntime.hpp` advances only live entities
+and retains their existing iteration order. The live environment's vector
+and evaluator's ordered map remain unchanged. Their intentionally distinct
+destruction rules are not merged.
