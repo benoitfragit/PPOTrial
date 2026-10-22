@@ -205,8 +205,10 @@ struct Evaluator::Impl
     std::string                              m_primaryTargetName{};
     entt::entity                             m_primaryTargetId{ entt::null };
     std::unordered_map<entt::entity, std::string> m_entityNames{};
-    ppo::model::sEvaluatorState              m_buffers[2]{};
-    std::atomic<uint32_t>                    m_index{ 0 };
+    // UI snapshots are copies. A mutex prevents readers from racing with
+    // evaluator publication while preserving the public state format.
+    mutable std::mutex                        m_snapshotMutex{};
+    ppo::model::sEvaluatorState              m_snapshot{};
 
     static inline const ppo::model::sEvaluatorState EMPTY_STATE{};
     static constexpr float SECONDARY_BONUS = 0.25F;
@@ -249,9 +251,8 @@ void
 Evaluator::Impl::UpdateDoubleBuffer(void)
 {
     auto const& state{ m_world.ctx().get<ppo::model::sEvaluatorState>() };
-    uint32_t const next = 1u - m_index.load(std::memory_order_relaxed);
-    m_buffers[next] = state;
-    m_index.store(next, std::memory_order_release);
+    std::lock_guard<std::mutex> lock{ m_snapshotMutex };
+    m_snapshot = state;
 }
 
 bool
@@ -423,7 +424,11 @@ Evaluator::Impl::LoadScenario(std::string const& name)
     if (!ValidateBuffer())
         return false;
 
-    ppo::model::sEvaluatorState persistedState = m_buffers[m_index.load(std::memory_order_acquire)];
+    ppo::model::sEvaluatorState persistedState{};
+    {
+        std::lock_guard<std::mutex> lock{ m_snapshotMutex };
+        persistedState = m_snapshot;
+    }
 
     m_agents.clear();
     m_entities.clear();
@@ -743,7 +748,8 @@ Evaluator::GetSnapshot(void) const noexcept
     if (p_impl == nullptr)
         return Impl::EMPTY_STATE;
 
-    return p_impl->m_buffers[p_impl->m_index.load(std::memory_order_acquire)];
+    std::lock_guard<std::mutex> lock{ p_impl->m_snapshotMutex };
+    return p_impl->m_snapshot;
 }
 
 void
