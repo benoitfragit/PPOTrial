@@ -7,7 +7,9 @@
 * @license MIT
 */
 #include "evaluator.hpp"
-#include "ppo/core/runner.hpp"
+#include "ppo/core/multi_agent.hpp"
+#include "ppo/core/evaluation.hpp"
+#include "entityruntime.hpp"
 
 #include "aircraft.hpp"
 #include "entity.hpp"
@@ -501,11 +503,8 @@ Evaluator::Impl::ResetEntitiesForTest(std::size_t testIndex)
         ApplyInitialState(entity, stateIter->second);
     }
 
-    for (auto& agent : m_agents)
-    {
-        if (agent != nullptr)
-            agent->Init();
-    }
+    ppo::core::ResetAgents(
+        m_agents, [](ppo::model::IAgent& agent) { agent.Init(); });
 
     return true;
 }
@@ -617,57 +616,33 @@ Evaluator::Impl::Run(void)
     state.m_progress = 0.F;
     UpdateDoubleBuffer();
 
-    for (int testIndex = 0; testIndex < static_cast<int>(state.m_nbtests); ++testIndex)
-    {
-        if (!m_running.load(std::memory_order_acquire))
-            break;
-
-        if (!ResetEntitiesForTest(static_cast<std::size_t>(testIndex)))
-            break;
-
-        int stepIndex{ 0 };
-        float testPrimaryPk{ 0.F };
-        float testSecondaryDestroyed{ 0.F };
-        for (; stepIndex < static_cast<int>(state.m_nbstep); ++stepIndex)
+    // Scheduling is generic. Scenario resets, entity dynamics and the exact
+    // scoring calculations below remain owned by this evaluation adapter.
+    float testPrimaryPk{ 0.F };
+    float testSecondaryDestroyed{ 0.F };
+    ppo::core::RunEvaluation(
+        static_cast<int>(state.m_nbtests),
+        static_cast<int>(state.m_nbstep),
+        [&]() { return m_running.load(std::memory_order_acquire); },
+        [&](int testIndex)
         {
-            if (!m_running.load(std::memory_order_acquire))
-                break;
-
-            // Identical action/advance/outcome/feedback order as the training world.
-            ppo::core::StepWorld(
-                [&]() {
-                    for (auto& agent : m_agents)
-                    {
-                        if (agent != nullptr)
-                            agent->ChooseAction();
-                    }
+            testPrimaryPk = 0.F;
+            testSecondaryDestroyed = 0.F;
+            return ResetEntitiesForTest(static_cast<std::size_t>(testIndex));
+        },
+        [&](int, int)
+        {
+            // All agents act before any entity advances, then all observe.
+            (void)ppo::core::StepAgents(
+                m_agents,
+                [](ppo::model::IAgent& agent) { agent.ChooseAction(); },
+                [&]()
+                {
+                    ppo::model::AdvanceLivingEntities(
+                        m_entities, [](auto& entry) -> auto& { return entry.second; });
                 },
-                [&]() {
-                    for (auto& [_, entity] : m_entities)
-                    {
-                        if (entity == nullptr)
-                            continue;
-
-                        if (entity->has<ppo::model::sEntityState>())
-                        {
-                            auto [entityState] = entity->get<ppo::model::sEntityState>();
-                            if (entityState.m_destroyed)
-                                continue;
-                        }
-
-                        entity->Run();
-                    }
-                },
-                [&]() {
-                    ResolveDestructions();
-                },
-                [&]() {
-                    for (auto& agent : m_agents)
-                    {
-                        if (agent != nullptr)
-                            agent->SetNewState();
-                    }
-                });
+                [&]() { ResolveDestructions(); },
+                [](ppo::model::IAgent& agent) { return agent.SetNewState(); });
 
             if (p_evaluated->has<ppo::model::sSNAState>())
             {
@@ -710,11 +685,10 @@ Evaluator::Impl::Run(void)
 
                 testSecondaryDestroyed += 1.F;
             }
-
-            if (goToNextTest)
-                break;
-        }
-
+            return goToNextTest;
+        },
+        [&](int testIndex, int stepIndex)
+        {
         primaryPkill += testPrimaryPk;
         secondaryDestroyed += testSecondaryDestroyed;
         missionDuration += static_cast<float>(state.m_nbstep + 1) / static_cast<float>(stepIndex + 1);
@@ -723,7 +697,7 @@ Evaluator::Impl::Run(void)
         UpdateDoubleBuffer();
 
         std::this_thread::sleep_for(std::chrono::milliseconds(3));
-    }
+        });
 
     notation = 100.F * (
         targetDestroyed
