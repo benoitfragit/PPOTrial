@@ -71,7 +71,9 @@ FetchContent_MakeAvailable(raylib)
 FetchContent_Declare(
     rlimgui
     GIT_REPOSITORY https://github.com/raylib-extras/rlImGui.git
-    GIT_TAG main
+    # Frozen at the rlImGui implementation for Dear ImGui 1.92.1.
+    # Do not follow main: it now requires newer ImFontConfig APIs.
+    GIT_TAG 4d8a61842903978bc42adf3347cd34f4e6524efc
 )
 FetchContent_MakeAvailable(rlimgui)
 
