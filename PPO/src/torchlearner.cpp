@@ -38,8 +38,8 @@ TorchLearner::TorchLearner(
     std::int64_t rollout_size,
     PPOParamters const& parameters,
     bool load_existing_model)
-    : observation_(observation_size, 0.F),
-      action_(action_size, 0.F),
+    : observation_(static_cast<std::size_t>(CheckedDimension(observation_size)), 0.F),
+      action_(static_cast<std::size_t>(CheckedDimension(action_size)), 0.F),
       agent_(CheckedPolicy(std::move(policy)),
              modelpath,
              CheckedDimension(observation_size),

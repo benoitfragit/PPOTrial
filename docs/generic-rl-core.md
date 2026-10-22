@@ -30,17 +30,21 @@ module without action sampling / log-probability / value/entropy support.
 Implement `ppo::core::IEnvironment` with owned flattened float observations,
 actions, `Reset`, and `Step`. The environment supplies the next observation,
 reward and existing-compatible `done` flag. The contract intentionally does
-not reinterpret done into other termination semantics. `EpisodeRunner` calls
-the injected policy, steps the environment and optionally notifies the learner.
+not reinterpret done into other termination semantics. `EpisodeRunner` calls the injected policy, steps the environment and
+notifies the learner **automatically when constructed with an ILearner**.
+The overload taking a plain IPolicy is inference-only.
 
 For the existing LibTorch PPO backend, create a network implementing the
 unchanged `ppo::model::ITrainingNet`; pass it to
 `ppo::model::TorchLearner(policy, modelpath, obs_size, action_size, rollout_size,
-parameters, load_existing_model)`. Use this learner as the acting policy
-and as the optional learner argument of `ppo::core::EpisodeRunner`.
-Call `ResetRollout()` after a completed rollout before collecting another;
+parameters, load_existing_model)`. Pass this learner directly to `ppo::core::EpisodeRunner(environment, learner)`;
+the learner receives every transition, without a separate feedback argument.
+Call `ResetRollout()` after a completed rollout before collecting another
+(or explicitly to discard an invalid/incomplete rollout);
 this resets only the collection buffers, not the environment or optimizer.
 The client decides when to reset the episode; there is no auto-reset.
+A failed world step or malformed next observation requires Reset before
+advancing again; if training, discard the inconsistent rollout explicitly.
 
 `TorchLearner` owns the memory behind the existing RLAgent
 `torch::from_blob` view. It cannot be moved or copied. It forwards the raw

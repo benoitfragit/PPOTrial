@@ -12,6 +12,7 @@
 
 #include <torch/torch.h>
 #include <cstring>
+#include <stdexcept>
 
 namespace ppo::model {
 
@@ -157,6 +158,7 @@ void
 RLAgent::Impl::ChooseAction(void)
 {
     if (p_stateVector == nullptr
+        || p_actionVector == nullptr
         || m_step >= m_maxStep
         || p_ppo == nullptr)
     {
@@ -166,6 +168,15 @@ RLAgent::Impl::ChooseAction(void)
     torch::NoGradGuard no_grad;
 
     auto [action, logpb, values] = p_ppo->SelectAction(m_state_t);
+
+    // Do not let an incompatible ITrainingNet overrun the externally owned
+    // fixed-width action buffer. Existing networks return [1, actionDim].
+    if (!action.defined() || action.dim() != 2 || action.size(0) != 1
+        || action.size(1) != m_actionDim || action.scalar_type() != torch::kFloat
+        || !action.is_contiguous())
+    {
+        throw std::runtime_error("RLAgent: policy returned invalid action shape or dtype");
+    }
 
     // Persist the transition data required by PPO.
     m_states[m_step] = m_state_t.squeeze(0);
