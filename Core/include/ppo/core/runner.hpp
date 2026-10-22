@@ -32,12 +32,13 @@ public:
     Transition const& Advance() {
         if (!initialized_ || finished_)
             throw std::logic_error("EpisodeRunner: reset required before advance");
+        // Any exception after entering policy selection may leave learner state
+        // inconsistent; requiring Reset prevents reusing a stale observation.
+        initialized_ = false;
         Action action = policy_.ChooseAction(observation_);
         if (action.size() != environment_.ActionSize())
             throw std::invalid_argument("EpisodeRunner: invalid action size");
-        // Once Step has been invoked the world may have changed, even if the
-        // step or its returned observation fails. Require explicit Reset.
-        initialized_ = false;
+        // A failing step may also have mutated the world.
         Transition next = environment_.Step(action);
         ValidateObservation(next.observation);
         transition_ = std::move(next);
@@ -60,7 +61,7 @@ private:
 
     IEnvironment& environment_;
     IPolicy& policy_;
-    ILearner* learner_;
+    ILearner* learner_ = nullptr;
     Observation observation_;
     Transition transition_;
     bool initialized_ = false;
