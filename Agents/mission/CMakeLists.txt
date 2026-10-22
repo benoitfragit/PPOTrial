@@ -17,7 +17,7 @@ target_link_libraries(${PROJECT_NAME}
 								Evaluation
 								EntityInitializer
 								GenericSerializer 
-								GenericPPO)
+								GenericPPO GenericRLBindings)
 
 add_dependencies(${PROJECT_NAME} GenericEntities 
 								 Evaluation
