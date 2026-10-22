@@ -11,8 +11,14 @@ namespace ppo::core {
 // terminal/bootstrap semantics. An adapter defines what its domain 'done' means.
 class EpisodeRunner {
 public:
-    EpisodeRunner(IEnvironment& environment, IPolicy& policy, ILearner* learner = nullptr)
-        : environment_(environment), policy_(policy), learner_(learner) {}
+    // Inference-only. Passing an ILearner instead selects the overload below,
+    // ensuring feedback cannot be accidentally omitted from training.
+    EpisodeRunner(IEnvironment& environment, IPolicy& policy)
+        : environment_(environment), policy_(policy) {}
+
+    // Acting policy and learner are the same object: no mismatched transitions.
+    EpisodeRunner(IEnvironment& environment, ILearner& learner)
+        : environment_(environment), policy_(learner), learner_(&learner) {}
 
     Observation const& Reset() {
         Observation next = environment_.Reset();
@@ -29,6 +35,9 @@ public:
         Action action = policy_.ChooseAction(observation_);
         if (action.size() != environment_.ActionSize())
             throw std::invalid_argument("EpisodeRunner: invalid action size");
+        // Once Step has been invoked the world may have changed, even if the
+        // step or its returned observation fails. Require explicit Reset.
+        initialized_ = false;
         Transition next = environment_.Step(action);
         ValidateObservation(next.observation);
         transition_ = std::move(next);
@@ -36,6 +45,7 @@ public:
         finished_ = transition_.done;
         if (learner_ != nullptr)
             learner_->Observe(transition_);
+        initialized_ = true;
         return transition_;
     }
 

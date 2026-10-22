@@ -43,7 +43,7 @@ public:
 int main() {
     FakeEnvironment env;
     FakeLearner learner;
-    ppo::core::EpisodeRunner runner(env, learner, &learner);
+    ppo::core::EpisodeRunner runner(env, learner);
     bool rejected = false;
     try { runner.Advance(); }
     catch (std::logic_error const&) { rejected = true; }
@@ -72,6 +72,25 @@ int main() {
     catch (std::invalid_argument const&) { rejected = true; }
     Check(rejected);
     env.invalid_observation = false;
+    // The world was stepped before malformed output was discovered: the old
+    // observation must not be reused without an explicit reset.
+    rejected = false;
+    try { runner.Advance(); }
+    catch (std::logic_error const&) { rejected = true; }
+    Check(rejected);
+    Check(runner.Reset().at(0) == 0.F);
+
+    // A policy-only runner is inference: no learner feedback is generated.
+    class ConstantPolicy final : public ppo::core::IPolicy {
+    public:
+        ppo::core::Action ChooseAction(ppo::core::Observation const&) override {
+            return {1.F};
+        }
+    } policy;
+    ppo::core::EpisodeRunner inference(env, policy);
+    Check(inference.Reset().at(0) == 0.F);
+    Check(inference.Advance().reward == 1.F);
+    Check(learner.observed == 3);
 
     std::vector<int> steps;
     ppo::core::StepWorld(
