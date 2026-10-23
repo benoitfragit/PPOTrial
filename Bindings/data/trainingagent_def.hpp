@@ -226,6 +226,9 @@ TrainingAgent<Policy, Model>::SetNewState(void)
         {
             sEvaluatorState state = p_evaluator->GetSnapshot();
             m_internal.m_notation = state.m_notation;
+            m_internal.m_latestEvaluationNotation = state.m_latestNotation;
+            m_internal.m_completedEvaluations = state.m_completedCampaigns;
+            m_internal.m_hasLatestEvaluation = state.m_hasLatestNotation;
             m_internal.m_evaluationprogress = state.m_progress;
             m_internal.m_evaluationinprogress = state.m_inprogress;
         }
@@ -369,6 +372,9 @@ TrainingAgent<Policy, Model>::GetSnapshot(void) const noexcept
     {
         sEvaluatorState const evaluatorState = p_evaluator->GetSnapshot();
         commonState.m_notation = evaluatorState.m_notation;
+        commonState.m_latestEvaluationNotation = evaluatorState.m_latestNotation;
+        commonState.m_completedEvaluations = evaluatorState.m_completedCampaigns;
+        commonState.m_hasLatestEvaluation = evaluatorState.m_hasLatestNotation;
         commonState.m_evaluationprogress = evaluatorState.m_progress;
         commonState.m_evaluationinprogress = evaluatorState.m_inprogress;
     }
