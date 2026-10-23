@@ -160,8 +160,11 @@ cmake --build build/release --config Release
 ctest --test-dir build/release -C Release --output-on-failure
 ```
 
-The Debug binary remains the default, matching the existing project. When
-checkpoint tests are enabled, CMake rejects mixed multi-configuration builds
+The Debug binary remains the default, matching the existing project. The optional checkpoint tests are disabled by default to preserve the legacy
+Visual Studio multi-configuration setup. Enable them explicitly with
+`-DPPO_BUILD_CHECKPOINT_TESTS=ON` in the matching single-configuration build
+folders shown above. When checkpoint tests are enabled, CMake rejects mixed
+multi-configuration builds
 because they can crash even when compilation succeeds. The CI now validates
 both configurations against the corresponding LibTorch archives. No model
 architecture, weights or checkpoint format is changed.
