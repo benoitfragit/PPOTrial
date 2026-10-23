@@ -233,6 +233,8 @@ TrainingAgent<Policy, Model>::SetNewState(void)
             m_internal.m_latestEvaluationSurvivalRate = state.m_latestSurvivalRate;
             m_internal.m_latestEvaluationTestCount = state.m_lastCompletedTestCount;
             m_internal.m_evaluationTestsFinished = state.m_testsFinished;
+            m_internal.m_evaluationTimeoutTests = state.m_timeoutTests;
+            m_internal.m_latestEvaluationTimeoutRate = state.m_latestTimeoutRate;
             m_internal.m_evaluationStepsExecuted = state.m_stepsExecuted;
             m_internal.m_evaluationStepsPerSecond = state.m_stepsPerSecond;
             m_internal.m_evaluationElapsedSeconds = state.m_elapsedSeconds;
@@ -386,6 +388,8 @@ TrainingAgent<Policy, Model>::GetSnapshot(void) const noexcept
         commonState.m_latestEvaluationSurvivalRate = evaluatorState.m_latestSurvivalRate;
         commonState.m_latestEvaluationTestCount = evaluatorState.m_lastCompletedTestCount;
         commonState.m_evaluationTestsFinished = evaluatorState.m_testsFinished;
+        commonState.m_evaluationTimeoutTests = evaluatorState.m_timeoutTests;
+        commonState.m_latestEvaluationTimeoutRate = evaluatorState.m_latestTimeoutRate;
         commonState.m_evaluationStepsExecuted = evaluatorState.m_stepsExecuted;
         commonState.m_evaluationStepsPerSecond = evaluatorState.m_stepsPerSecond;
         commonState.m_evaluationElapsedSeconds = evaluatorState.m_elapsedSeconds;
