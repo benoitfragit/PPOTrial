@@ -19,6 +19,11 @@ struct sEvaluatorState {
     float m_latestSuccessRate{ 0.F };
     float m_latestSurvivalRate{ 0.F };
     unsigned int m_lastCompletedTestCount{ 0U };
+    // Live performance counters for the running (or most recent) campaign.
+    unsigned int m_testsFinished{ 0U };
+    unsigned long long m_stepsExecuted{ 0ULL };
+    float m_stepsPerSecond{ 0.F };
+    float m_elapsedSeconds{ 0.F };
 };
 
 } // namespace ppo::model
