@@ -3413,12 +3413,14 @@ EnvironmentRenderer::Run(void)
 
         if (m_showSimulation)
         {
-            ImGui::Begin("Simulation", &m_showSimulation);
-            DrawSimulationControls();
-            if (ImGui::CollapsingHeader("Scene details"))
-                DrawStatusBar(snapshot);
-            if (p_pinnedPlot != nullptr && ImGui::CollapsingHeader("Pinned diagnostics"))
-                DrawOneAgentPlot(*p_pinnedPlot);
+            if (ImGui::Begin("Simulation", &m_showSimulation))
+            {
+                DrawSimulationControls();
+                if (ImGui::CollapsingHeader("Scene details"))
+                    DrawStatusBar(snapshot);
+                if (p_pinnedPlot != nullptr && ImGui::CollapsingHeader("Pinned diagnostics"))
+                    DrawOneAgentPlot(*p_pinnedPlot);
+            }
             ImGui::End();
         }
 
