@@ -373,7 +373,7 @@ TrainingAgent<Policy, Model>::GetSnapshot(void) const noexcept
         commonState.m_evaluationinprogress = evaluatorState.m_inprogress;
     }
 
-    memcpy(&snapshot.m_common, &commonState, sizeof(sCommonAgentState));
+    snapshot.m_common = commonState;
 
     for (auto reward : m_rewardVector)
         snapshot.m_rewards.push_back(reward);
