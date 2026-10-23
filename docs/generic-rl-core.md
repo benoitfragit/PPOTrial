@@ -179,3 +179,17 @@ before. Fixed-width state and action arrays are copied through the standard
 `ppo::core::Observation`/`Action` contract, keeping their element order and
 ownership explicit. RLAgent and PPO mathematics remain unchanged, and
 TorchLearner still uses the existing training policy and checkpoint format.
+
+## Existing production agents use IPolicy
+
+`ProdAgent<Policy, Model>` now invokes
+`TorchProductionPolicy<Policy> : ppo::core::IPolicy` rather than calling the
+LibTorch wrapper from inside the domain agent. The adapter owns the tensor
+view used for inference and calls the **existing** production network
+`load()`/`forward()` methods. The original fixed-size observation and
+action layouts and missing-checkpoint behavior are preserved.
+
+The full Windows checkpoint tests compare element-by-element the generic
+`IPolicy` result against the original production network for each of the
+existing `prod` and `eval` model archives, both architectures, in Debug and
+Release. No training or modification of model files is performed.

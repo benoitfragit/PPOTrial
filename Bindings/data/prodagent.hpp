@@ -11,7 +11,8 @@
 #include <memory>
 #include <filesystem>
 
-#include "trainingnet.hpp"
+#include "torchproductionpolicy.hpp"
+#include "ppo/core/buffers.hpp"
 #include "iagent.hpp"
 #include <torch/torch.h>
 
@@ -101,13 +102,7 @@ private:
     /**
     * @brief Production policy network.
     */
-    std::shared_ptr<Policy> p_policy{ nullptr };
-    /**
-    * @brief Torch view over the state buffer.
-    */
-    torch::Tensor m_states_t{
-        torch::from_blob(m_stateVector.data(), { 1, std::tuple_size<StateVector>::value }, torch::kFloat)
-    };
+    std::unique_ptr<ppo::core::IPolicy> p_policy{ nullptr };
     /**
     * @brief Unique runtime identifier.
     */
