@@ -142,3 +142,26 @@ on Windows alongside the existing headless core tests.
 
 The original checkpoint files remain untouched. The smoke test does not
 establish training-time numeric parity or replace functional scenario tests.
+
+## Windows Debug / Release ABI compatibility
+
+The prebuilt Windows LibTorch 2.9.1 **Debug** and **Release** archives use
+different MSVC runtime-library variants. Do not compile or execute Release
+checkpoint inference against the Debug archive (or the reverse). Each VS2022
+configuration requires a separate CMake build directory:
+
+```sh
+cmake -S . -B build/debug -G "Visual Studio 17 2022" -A x64 -DCMAKE_CONFIGURATION_TYPES=Debug -DPPO_LIBTORCH_VARIANT=Debug
+cmake --build build/debug --config Debug
+ctest --test-dir build/debug -C Debug --output-on-failure
+
+cmake -S . -B build/release -G "Visual Studio 17 2022" -A x64 -DCMAKE_CONFIGURATION_TYPES=Release -DPPO_LIBTORCH_VARIANT=Release
+cmake --build build/release --config Release
+ctest --test-dir build/release -C Release --output-on-failure
+```
+
+The Debug binary remains the default, matching the existing project. When
+checkpoint tests are enabled, CMake rejects mixed multi-configuration builds
+because they can crash even when compilation succeeds. The CI now validates
+both configurations against the corresponding LibTorch archives. No model
+architecture, weights or checkpoint format is changed.

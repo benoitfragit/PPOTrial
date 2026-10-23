@@ -35,11 +35,37 @@ target_include_directories(implot PUBLIC ${implot_SOURCE_DIR})
 target_link_libraries(implot PUBLIC imgui)
 
 # --- LIBTORCH ---
-# ZIP LibTorch précompilé (CPU + MSVC)
-set (DEBUG_VERSION_LIBTORCH "libtorch-win-shared-with-deps-debug-2.9.1%2Bcpu.zip")
-set(LIBTORCH_URL
-    "https://download.pytorch.org/libtorch/cpu/libtorch-win-shared-with-deps-debug-2.9.1%2Bcpu.zip"
-)
+# Windows LibTorch binaries use different CRTs for Debug and Release.
+# Each build directory must use the archive matching its MSVC configuration.
+# Keep Debug as the default to preserve the historical desktop setup.
+set(PPO_LIBTORCH_VARIANT "Debug" CACHE STRING "LibTorch binary variant (Debug or Release)")
+set_property(CACHE PPO_LIBTORCH_VARIANT PROPERTY STRINGS Debug Release)
+
+if(PPO_LIBTORCH_VARIANT STREQUAL "Debug")
+    set(PPO_LIBTORCH_ARCHIVE "libtorch-win-shared-with-deps-debug-2.9.1%2Bcpu.zip")
+elseif(PPO_LIBTORCH_VARIANT STREQUAL "Release")
+    set(PPO_LIBTORCH_ARCHIVE "libtorch-win-shared-with-deps-2.9.1%2Bcpu.zip")
+else()
+    message(FATAL_ERROR "PPO_LIBTORCH_VARIANT must be Debug or Release")
+endif()
+
+# Visual Studio is multi-configuration; avoid silently testing a Release binary
+# against a Debug LibTorch distribution (or the reverse). Use separate build
+# directories with CMAKE_CONFIGURATION_TYPES set to the selected variant.
+if(MSVC AND CMAKE_CONFIGURATION_TYPES AND PPO_BUILD_CHECKPOINT_TESTS)
+    foreach(config IN LISTS CMAKE_CONFIGURATION_TYPES)
+        if(NOT config STREQUAL PPO_LIBTORCH_VARIANT)
+            message(FATAL_ERROR
+                "LibTorch ${PPO_LIBTORCH_VARIANT} cannot be used with ${config}. "
+                "Configure a separate build directory with "
+                "-DCMAKE_CONFIGURATION_TYPES=${PPO_LIBTORCH_VARIANT} "
+                "-DPPO_LIBTORCH_VARIANT=${PPO_LIBTORCH_VARIANT}, "
+                "or disable checkpoint tests for a legacy mixed-config build.")
+        endif()
+    endforeach()
+endif()
+
+set(LIBTORCH_URL "https://download.pytorch.org/libtorch/cpu/${PPO_LIBTORCH_ARCHIVE}")
 
 FetchContent_Declare(
     libtorch
