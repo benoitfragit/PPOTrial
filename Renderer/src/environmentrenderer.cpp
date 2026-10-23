@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <string>
 #include <vector>
@@ -1461,6 +1462,7 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
     ApplyTheme();
 
     ImGuiIO& io = ImGui::GetIO();
+    io.FontGlobalScale = 1.13F;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
@@ -1487,6 +1489,10 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
             m_showDomains = section.value("ShowDomains", m_showDomains);
             m_showDestroyed = section.value("ShowDestroyed", m_showDestroyed);
             m_showMetaCatalog = section.value("ShowMetaCatalog", m_showMetaCatalog);
+            m_showMinimap = section.value("ShowMinimap", m_showMinimap);
+            m_showEntities = section.value("ShowEntities", m_showEntities);
+            m_showInspection = section.value("ShowInspection", m_showInspection);
+            m_showSimulation = section.value("ShowSimulation", m_showSimulation);
             m_showPseudoLidar = section.value("ShowPseudoLidar", m_showPseudoLidar);
             m_focusSelectionInMinimap = section.value("FocusSelectionInMinimap", m_focusSelectionInMinimap);
             m_cameraDistance = std::clamp(section.value("CameraDistance", m_cameraDistance), 5.F, 60.F);
@@ -1538,6 +1544,10 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
             section["ShowDomains"] = m_showDomains;
             section["ShowDestroyed"] = m_showDestroyed;
             section["ShowMetaCatalog"] = m_showMetaCatalog;
+            section["ShowMinimap"] = m_showMinimap;
+            section["ShowEntities"] = m_showEntities;
+            section["ShowInspection"] = m_showInspection;
+            section["ShowSimulation"] = m_showSimulation;
             section["ShowPseudoLidar"] = m_showPseudoLidar;
             section["FocusSelectionInMinimap"] = m_focusSelectionInMinimap;
             section["CameraDistance"] = m_cameraDistance;
@@ -1747,12 +1757,29 @@ EnvironmentRenderer::BuildDockspace(void)
         ImGuiWindowFlags_NoMove |
         ImGuiWindowFlags_NoBringToFrontOnFocus |
         ImGuiWindowFlags_NoNavFocus |
+        ImGuiWindowFlags_MenuBar |
         ImGuiWindowFlags_NoBackground;
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.F);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.F);
     ImGui::Begin("##DockHost", nullptr, flags);
     ImGui::PopStyleVar(2);
+
+    if (ImGui::BeginMenuBar())
+    {
+        ImGui::TextDisabled("PPOTrial  /  LEARNING WORKSPACE");
+        ImGui::Separator();
+        if (ImGui::BeginMenu("Panels"))
+        {
+            ImGui::MenuItem("Simulation", nullptr, &m_showSimulation);
+            ImGui::MenuItem("Minimap", nullptr, &m_showMinimap);
+            ImGui::MenuItem("Entities", nullptr, &m_showEntities);
+            ImGui::MenuItem("Inspector", nullptr, &m_showInspection);
+            ImGui::MenuItem("Meta catalog", nullptr, &m_showMetaCatalog);
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
+    }
 
     ImGuiID const dockspaceId = ImGui::GetID("##MainDockspace");
     ImGui::DockSpace(dockspaceId, ImVec2(0.F, 0.F), ImGuiDockNodeFlags_PassthruCentralNode);
@@ -1778,21 +1805,18 @@ EnvironmentRenderer::BuildDefaultLayout(ImGuiID dockspaceId)
     ImVec2 const size = ImGui::GetMainViewport()->Size;
     ImGui::DockBuilderSetNodeSize(dockspaceId, size);
 
-    ImGuiID dockLeft = dockspaceId;
-    ImGuiID dockRight = ImGui::DockBuilderSplitNode(dockLeft, ImGuiDir_Right, 0.27F, nullptr, &dockLeft);
-    ImGuiID dockBottom = ImGui::DockBuilderSplitNode(dockLeft, ImGuiDir_Down, 0.34F, nullptr, &dockLeft);
-    ImGuiID dockTopLeft = ImGui::DockBuilderSplitNode(dockLeft, ImGuiDir_Left, 0.26F, nullptr, &dockLeft);
+    ImGuiID dockMain = dockspaceId;
+    ImGuiID dockSidebar = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Right, 0.37F, nullptr, &dockMain);
+    ImGuiID dockControls = ImGui::DockBuilderSplitNode(dockSidebar, ImGuiDir_Down, 0.25F, nullptr, &dockSidebar);
 
-    ImGuiID dockRightBottom = ImGui::DockBuilderSplitNode(dockRight, ImGuiDir_Down, 0.44F, nullptr, &dockRight);
-    ImGuiID dockBottomRight = ImGui::DockBuilderSplitNode(dockBottom, ImGuiDir_Right, 0.45F, nullptr, &dockBottom);
-
-    ImGui::DockBuilderDockWindow("Simulation", dockTopLeft);
-    ImGui::DockBuilderDockWindow("Entities", dockTopLeft);
-    ImGui::DockBuilderDockWindow("3D Tactical View", dockLeft);
-    ImGui::DockBuilderDockWindow("Minimap", dockBottom);
-    ImGui::DockBuilderDockWindow("Inspection", dockBottomRight);
-    ImGui::DockBuilderDockWindow("Agents", dockRight);
-    ImGui::DockBuilderDockWindow("Meta Catalog", dockRightBottom);
+    ImGui::DockBuilderDockWindow("3D Tactical View", dockMain);
+    ImGui::DockBuilderDockWindow("Learning", dockSidebar);
+    ImGui::DockBuilderDockWindow("Simulation", dockControls);
+    // Optional windows share a tabbed dock, never crowd the default view.
+    ImGui::DockBuilderDockWindow("Minimap", dockMain);
+    ImGui::DockBuilderDockWindow("Entities", dockControls);
+    ImGui::DockBuilderDockWindow("Inspection", dockControls);
+    ImGui::DockBuilderDockWindow("Meta Catalog", dockControls);
 
     ImGui::DockBuilderFinish(dockspaceId);
 }
@@ -2191,7 +2215,7 @@ EnvironmentRenderer::DrawSimulationControls(void)
     if (p_environment == nullptr)
         return;
 
-    ImVec2 const controlButtonSize{ 96.F, 74.F };
+    ImVec2 const controlButtonSize{ 92.F, 47.F };
     if (DrawSimulationControlButton("play", "PLAY", eSimulationControlGlyph::Play, controlButtonSize, ImVec4(0.17F, 0.58F, 0.33F, 1.F)))
     {
         for (auto const& [_, agent] : p_agents)
@@ -2221,9 +2245,10 @@ EnvironmentRenderer::DrawSimulationControls(void)
                 agent->m_started = false;
     }
 
-    ImGui::Dummy(ImVec2(0.F, 4.F));
-    ImGui::SeparatorText("World");
+    if (!ImGui::CollapsingHeader("World and display settings"))
+        return;
 
+    ImGui::SeparatorText("World");
     bool refreshRanges = false;
     if (ImGui::SliderFloat("Area width (km)", &m_areawidth, 1.F, 500.F))
         refreshRanges = true;
@@ -3087,7 +3112,7 @@ EnvironmentRenderer::DrawInspectorWindow(entt::registry const& snapshot)
 void
 EnvironmentRenderer::DrawAgentsWindow(entt::registry const& snapshot)
 {
-    ImGui::Begin("Agents");
+    ImGui::Begin("Learning");
 
     auto agentView = snapshot.view<ppo::model::sAgentStateSnaphot>();
     static bool first = true;
@@ -3249,18 +3274,26 @@ EnvironmentRenderer::Run(void)
         UpdateMissionTelemetry(snapshot);
         UpdateTrails(snapshot);
         UpdateExplosionEffects(snapshot);
+        UpdateLearningTelemetry(snapshot);
 
-        ImGui::Begin("Simulation");
-        DrawStatusBar(snapshot);
-        DrawSimulationControls();
-        if (p_pinnedPlot != nullptr)
-            DrawOneAgentPlot(*p_pinnedPlot);
-        ImGui::End();
+        if (m_showSimulation)
+        {
+            ImGui::Begin("Simulation", &m_showSimulation);
+            DrawSimulationControls();
+            if (ImGui::CollapsingHeader("Scene details"))
+                DrawStatusBar(snapshot);
+            if (p_pinnedPlot != nullptr && ImGui::CollapsingHeader("Pinned diagnostics"))
+                DrawOneAgentPlot(*p_pinnedPlot);
+            ImGui::End();
+        }
 
         DrawTacticalWindow(snapshot);
-        DrawMinimapWindow(snapshot);
-        DrawEntitiesWindow(snapshot);
-        DrawInspectorWindow(snapshot);
+        if (m_showMinimap)
+            DrawMinimapWindow(snapshot);
+        if (m_showEntities)
+            DrawEntitiesWindow(snapshot);
+        if (m_showInspection)
+            DrawInspectorWindow(snapshot);
         DrawAgentsWindow(snapshot);
         DrawMetaCatalogWindow();
     });
