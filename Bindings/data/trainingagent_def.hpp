@@ -232,6 +232,10 @@ TrainingAgent<Policy, Model>::SetNewState(void)
             m_internal.m_latestEvaluationSuccessRate = state.m_latestSuccessRate;
             m_internal.m_latestEvaluationSurvivalRate = state.m_latestSurvivalRate;
             m_internal.m_latestEvaluationTestCount = state.m_lastCompletedTestCount;
+            m_internal.m_evaluationTestsFinished = state.m_testsFinished;
+            m_internal.m_evaluationStepsExecuted = state.m_stepsExecuted;
+            m_internal.m_evaluationStepsPerSecond = state.m_stepsPerSecond;
+            m_internal.m_evaluationElapsedSeconds = state.m_elapsedSeconds;
             m_internal.m_evaluationprogress = state.m_progress;
             m_internal.m_evaluationinprogress = state.m_inprogress;
         }
@@ -381,6 +385,10 @@ TrainingAgent<Policy, Model>::GetSnapshot(void) const noexcept
         commonState.m_latestEvaluationSuccessRate = evaluatorState.m_latestSuccessRate;
         commonState.m_latestEvaluationSurvivalRate = evaluatorState.m_latestSurvivalRate;
         commonState.m_latestEvaluationTestCount = evaluatorState.m_lastCompletedTestCount;
+        commonState.m_evaluationTestsFinished = evaluatorState.m_testsFinished;
+        commonState.m_evaluationStepsExecuted = evaluatorState.m_stepsExecuted;
+        commonState.m_evaluationStepsPerSecond = evaluatorState.m_stepsPerSecond;
+        commonState.m_evaluationElapsedSeconds = evaluatorState.m_elapsedSeconds;
         commonState.m_evaluationprogress = evaluatorState.m_progress;
         commonState.m_evaluationinprogress = evaluatorState.m_inprogress;
     }
