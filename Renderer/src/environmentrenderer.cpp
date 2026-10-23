@@ -2541,6 +2541,12 @@ EnvironmentRenderer::DrawLearningProgress(std::shared_ptr<AgentController> const
     {
         ImGui::TextUnformatted("Evaluating model");
         ImGui::ProgressBar(std::clamp(common.m_evaluationprogress, 0.F, 1.F), ImVec2(-1.F, 0.F));
+        ImGui::Text("Tests completed: %u  |  Step-limit timeouts: %u",
+                    common.m_evaluationTestsFinished, common.m_evaluationTimeoutTests);
+        ImGui::Text("Simulation steps: %llu  |  %.0f steps/s",
+                    common.m_evaluationStepsExecuted, common.m_evaluationStepsPerSecond);
+        ImGui::Text("Elapsed: %.1f s", common.m_evaluationElapsedSeconds);
+        ImGui::TextDisabled("Timeout = configured step limit reached, not necessarily a failed task.");
     }
 
     auto const& scores = agent->m_evaluationScores.Samples();
@@ -2556,6 +2562,7 @@ EnvironmentRenderer::DrawLearningProgress(std::shared_ptr<AgentController> const
     ImGui::Text("BEST    %.2f", common.m_notation);
     ImGui::Text("SUCCESS %.1f%%", 100.F * common.m_latestEvaluationSuccessRate);
     ImGui::Text("SURVIVAL %.1f%%", 100.F * common.m_latestEvaluationSurvivalRate);
+    ImGui::Text("TIMEOUT  %.1f%%", 100.F * common.m_latestEvaluationTimeoutRate);
     ImGui::TextDisabled("Campaign #%llu  -  %u test cases",
         static_cast<unsigned long long>(common.m_completedEvaluations),
         common.m_latestEvaluationTestCount);
