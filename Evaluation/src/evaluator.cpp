@@ -625,7 +625,7 @@ Evaluator::Impl::Run(void)
     // scoring calculations below remain owned by this evaluation adapter.
     float testPrimaryPk{ 0.F };
     float testSecondaryDestroyed{ 0.F };
-    ppo::core::RunEvaluation(
+    auto const evaluationResult = ppo::core::RunEvaluation(
         static_cast<int>(state.m_nbtests),
         static_cast<int>(state.m_nbstep),
         [&]() { return m_running.load(std::memory_order_acquire); },
@@ -703,6 +703,19 @@ Evaluator::Impl::Run(void)
 
             std::this_thread::sleep_for(std::chrono::milliseconds(3));
         });
+
+    // Never compare/promote a checkpoint on an aborted or incomplete campaign.
+    // Cancellation and failed scenario resets are not evaluation results.
+    if (!evaluationResult.completed
+        || !m_running.load(std::memory_order_acquire))
+    {
+        LogEvaluatorEvent("evaluation stopped before all tests completed: " + m_evaluatedName);
+        state.m_inprogress = false;
+        state.m_progress = 0.F;
+        UpdateDoubleBuffer();
+        m_running.store(false, std::memory_order_release);
+        return;
+    }
 
     notation = 100.F * (
         targetDestroyed

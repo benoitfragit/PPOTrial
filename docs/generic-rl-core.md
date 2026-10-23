@@ -193,3 +193,13 @@ The full Windows checkpoint tests compare element-by-element the generic
 `IPolicy` result against the original production network for each of the
 existing `prod` and `eval` model archives, both architectures, in Debug and
 Release. No training or modification of model files is performed.
+
+## Reject incomplete evaluation campaigns
+
+`RunEvaluation` now returns an `EvaluationResult` indicating whether every
+configured test was processed without cancellation or reset failure. The
+legacy evaluator retains its unchanged score equation and evaluator-thread
+callback order, but **never copies `eval/model.pt` to `prod/model.pt`** if
+the campaign was interrupted or incomplete. A canceled test still receives
+the historical completion callback and progress accounting; no partial score
+may promote a candidate checkpoint.
