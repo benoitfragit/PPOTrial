@@ -130,17 +130,18 @@ private:
     void SaveToFile(ppo::serialization::json& ar);
 
     /**
-    * @brief Shared training policy network.
-    */
-    std::shared_ptr<Policy> p_policy{ nullptr };
-    /**
-    * @brief Current state buffer.
+    * @brief Current state buffer; must be initialized before the policy is
+    * constructed from its fixed state and action dimensions.
     */
     StateVector m_stateVector{};
     /**
     * @brief Current action buffer.
     */
     ActionVector m_actionVector{};
+    /**
+    * @brief Shared training policy network.
+    */
+    std::shared_ptr<Policy> p_policy{ nullptr };
     /**
     * @brief Reinforcement-learning backend.
     */
