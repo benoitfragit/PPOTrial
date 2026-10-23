@@ -86,6 +86,36 @@ void TestMultiAgentPhases() {
     Check(events == std::vector<int>({20, 30}));
 }
 
+void TestEvaluationMonitoring()
+{
+    using ppo::core::EvaluationProgress;
+    Check(EvaluationProgress(0, 0, 100, 1024) == 0.F);
+    Check(EvaluationProgress(100, 0, 100, 1024) == 1.F);
+    Check(EvaluationProgress(1, 0, 100, 1024) == 0.01F);
+    Check(EvaluationProgress(0, 512, 100, 1024) == 0.005F);
+    Check(EvaluationProgress(-5, -5, 100, 1024) == 0.F);
+    Check(EvaluationProgress(0, 9999, 100, 1024) == 0.01F);
+    Check(EvaluationProgress(10, 100, 0, 1024) == 0.F);
+    Check(EvaluationProgress(10, 100, 100, 0) == 0.F);
+
+    // The generic scheduler exposes the actual index at which a test stops.
+    // Exhausting the step budget is NOT synonymous with a task failure.
+    int stepLimitExhausted = 0;
+    int finished = 0;
+    auto const outcome = ppo::core::RunEvaluation(
+        2, 3,
+        [] { return true; },
+        [](int) { return true; },
+        [](int scenario, int step) { return scenario == 0 && step == 1; },
+        [&](int, int step)
+        {
+            ++finished;
+            if (step == 3)
+                ++stepLimitExhausted;
+        });
+    Check(outcome.completed && finished == 2 && stepLimitExhausted == 1);
+}
+
 void TestEvaluationScheduling() {
     std::vector<int> events{};
     // Early termination at step 1 of test 0, normal exhaustion for test 1.
@@ -168,6 +198,7 @@ int main() {
     Check(domainAction == std::array<float, 2>{0.5F, -0.75F});
     TestMultiAgentPhases();
     TestEvaluationScheduling();
+    TestEvaluationMonitoring();
     FakeEnvironment env;
     FakeLearner learner;
     ppo::core::EpisodeRunner runner(env, learner);
