@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <utility>
 
 namespace ppo::core {
@@ -11,6 +12,26 @@ struct EvaluationResult
     int finishedTests = 0;
     bool completed = false;
 };
+
+// Progress within one test is an upper-bound work fraction, not the
+// score nor a completion criterion. Short-circuited tests count as complete
+// only after finishTest has run.
+inline float EvaluationProgress(int completedTests,
+                                int stepsInCurrentTest,
+                                int totalTests,
+                                int maxSteps) noexcept
+{
+    if (totalTests <= 0 || maxSteps <= 0)
+        return 0.F;
+
+    double const finished = static_cast<double>(std::clamp(completedTests, 0, totalTests));
+    if (finished >= totalTests)
+        return 1.F;
+
+    double const partial = static_cast<double>(std::clamp(stepsInCurrentTest, 0, maxSteps))
+        / static_cast<double>(maxSteps);
+    return static_cast<float>((finished + partial) / static_cast<double>(totalTests));
+}
 
 // Execute tests in caller order. Synchronous, with no thread, model or scoring
 // dependencies. On mid-test cancellation, finishTest still receives the
