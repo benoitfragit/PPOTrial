@@ -1,5 +1,6 @@
 #include "ppo/core/runner.hpp"
 #include "ppo/core/buffers.hpp"
+#include "ppo/runtime/iagent.hpp"
 #include "ppo/core/multi_agent.hpp"
 #include "ppo/core/evaluation.hpp"
 #include "ppo/core/evaluator_state.hpp"
@@ -146,6 +147,12 @@ void TestEvaluationScheduling() {
 }
 
 int main() {
+    // The legacy agent ABI/telemetry contract is standalone C++17:
+    // no LibTorch or ECS header is required by the headless build.
+    ppo::model::sAgentStateSnaphot legacySnapshot{};
+    Check(legacySnapshot.m_common.m_gamma == 0.99F);
+    Check(legacySnapshot.m_common.m_batch_size == 64);
+    Check(legacySnapshot.m_id == 0ULL);
     // Existing fixed-size domain buffers can be bridged without exposing
     // their lifetime or changing their numerical ordering.
     std::array<float, 3> domainObservation{0.25F, -1.F, 2.F};
