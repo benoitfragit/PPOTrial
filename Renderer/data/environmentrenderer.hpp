@@ -144,6 +144,7 @@ public:
         ppo::core::LearningHistory m_evaluationSuccess{};
         unsigned int m_lastPlottedVersion{ 0U };
         bool m_seenVersion{ false };
+        std::string m_exportStatus{};
         /**
         * @brief True once the controller has received valid data.
         */
