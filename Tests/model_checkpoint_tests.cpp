@@ -6,6 +6,7 @@
 
 #include <torch/torch.h>
 #include <filesystem>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 
@@ -29,6 +30,7 @@ void CheckCheckpoint(std::filesystem::path const& path,
     if (!std::filesystem::is_regular_file(path))
         throw std::runtime_error("Missing checkpoint: " + path.string());
 
+    std::cout << "Checking existing checkpoint: " << path.string() << std::endl;
     policy.load(path);
     torch::NoGradGuard guard;
     auto input = torch::full({1, inputDim}, 0.1F, torch::kFloat);
@@ -39,6 +41,7 @@ void CheckCheckpoint(std::filesystem::path const& path,
     CheckActions(second, actionDim);
     if (!torch::equal(first, second))
         throw std::runtime_error("Production inference is not deterministic");
+    std::cout << "Checkpoint inference OK: " << path.string() << std::endl;
 }
 
 } // namespace
