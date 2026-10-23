@@ -84,6 +84,9 @@ struct sCommonAgentState :
     float m_latestEvaluationNotation{ 0.F };
     std::uint64_t m_completedEvaluations{ 0 };
     bool m_hasLatestEvaluation{ false };
+    float m_latestEvaluationSuccessRate{ 0.F };
+    float m_latestEvaluationSurvivalRate{ 0.F };
+    unsigned int m_latestEvaluationTestCount{ 0U };
     /**
     * @brief Latest evaluator progress ratio.
     */
