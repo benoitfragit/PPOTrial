@@ -449,6 +449,7 @@ Evaluator::Impl::LoadScenario(std::string const& name)
     evalState.m_hasLatestNotation = persistedState.m_hasLatestNotation;
     evalState.m_latestSuccessRate = persistedState.m_latestSuccessRate;
     evalState.m_latestSurvivalRate = persistedState.m_latestSurvivalRate;
+    evalState.m_latestTimeoutRate = persistedState.m_latestTimeoutRate;
     evalState.m_lastCompletedTestCount = persistedState.m_lastCompletedTestCount;
     evalState.m_nbtests = m_scenario.m_evaluation.m_nbTests > 0
         ? std::min<int>(m_scenario.m_evaluation.m_nbTests, static_cast<int>(m_buffer.m_tests.size()))
@@ -626,6 +627,7 @@ Evaluator::Impl::Run(void)
     state.m_inprogress = true;
     state.m_progress = 0.F;
     state.m_testsFinished = 0U;
+    state.m_timeoutTests = 0U;
     state.m_stepsExecuted = 0ULL;
     state.m_stepsPerSecond = 0.F;
     state.m_elapsedSeconds = 0.F;
@@ -734,6 +736,9 @@ Evaluator::Impl::Run(void)
             primaryPkill += testPrimaryPk;
             secondaryDestroyed += testSecondaryDestroyed;
             missionDuration += static_cast<float>(state.m_nbstep + 1) / static_cast<float>(stepIndex + 1);
+            // Generic step-limit exhaustion, independent of the scenario task.
+            if (stepIndex >= static_cast<int>(state.m_nbstep))
+                ++state.m_timeoutTests;
             // A finished scenario counts as a full scenario even if it
             // terminated before the maximum simulation steps.
             publishProgress(testIndex + 1, 0);
@@ -783,6 +788,7 @@ Evaluator::Impl::Run(void)
     float const completedTests = static_cast<float>(state.m_nbtests);
     state.m_latestSuccessRate = targetDestroyed / completedTests;
     state.m_latestSurvivalRate = 1.F - playerDestroyed / completedTests;
+    state.m_latestTimeoutRate = static_cast<float>(state.m_timeoutTests) / completedTests;
     state.m_lastCompletedTestCount = state.m_nbtests;
     ++state.m_completedCampaigns;
 
@@ -791,7 +797,8 @@ Evaluator::Impl::Run(void)
         + "' latest=" + std::to_string(state.m_latestNotation)
         + " best=" + std::to_string(state.m_notation)
         + " elapsed_s=" + std::to_string(state.m_elapsedSeconds)
-        + " steps_per_s=" + std::to_string(state.m_stepsPerSecond));
+        + " steps_per_s=" + std::to_string(state.m_stepsPerSecond)
+        + " timeouts=" + std::to_string(state.m_timeoutTests));
 
     state.m_inprogress = false;
     state.m_progress = 0.F;
