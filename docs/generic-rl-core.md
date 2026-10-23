@@ -238,3 +238,7 @@ GenericRLCore <- LegacyAgentAPI <- GenericEnv / Evaluation
 
 The agent-state snapshot fields are retained for backwards compatibility with
 the desktop UI. They do not make the generic simulation scheduler depend on PPO.
+
+The runtime compatibility contract itself is compiled and exercised in the
+headless C++17 core CI (Linux and Windows). This prevents reintroducing an
+accidental dependency on Torch, EnTT or the desktop graphics libraries.

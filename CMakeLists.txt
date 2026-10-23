@@ -15,6 +15,10 @@ if (PPO_BUILD_CORE_TESTS)
     enable_testing()
 endif()
 add_subdirectory(Core)
+add_subdirectory(Runtime)
+if (PPO_BUILD_CORE_TESTS)
+    target_link_libraries(GenericRLCoreTests PRIVATE LegacyAgentAPI)
+endif()
 
 # Core contracts deliberately compile independently of Torch, EnTT and graphics.
 if (NOT PPO_BUILD_DESKTOP)
@@ -27,7 +31,6 @@ set(CMAKE_GENERATOR_PLATFORM x64)
 include(${CMAKE_SOURCE_DIR}/dependencies.cmake)
 
 add_subdirectory(Serialization)
-add_subdirectory(Runtime)
 add_subdirectory(Entities)
 add_subdirectory(Initializer)
 add_subdirectory(PPO)
