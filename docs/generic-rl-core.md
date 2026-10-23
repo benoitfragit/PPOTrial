@@ -242,3 +242,15 @@ the desktop UI. They do not make the generic simulation scheduler depend on PPO.
 The runtime compatibility contract itself is compiled and exercised in the
 headless C++17 core CI (Linux and Windows). This prevents reintroducing an
 accidental dependency on Torch, EnTT or the desktop graphics libraries.
+
+## Pre-update PPO compatibility smoke test
+
+`PolicyCheckpointTests` also constructs a legacy `RLAgent` and a new
+`TorchLearner` with separate policy instances restored from each existing
+production archive. It compares the raw sampled actions after resetting
+PyTorch RNG to the same seed, feeds each the same next observation, reward and
+terminal flag, then compares rollout step progression. A deliberately short,
+incomplete rollout **never calls `UpdatePolicy()` or `Save()`** and cannot
+modify the existing checkpoint files. This detects regressions in the
+real training-path adapter (not just deterministic inference). It does
+not yet establish long-horizon numerical parity of a full PPO update.

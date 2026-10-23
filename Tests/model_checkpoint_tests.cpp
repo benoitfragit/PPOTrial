@@ -4,8 +4,12 @@
 #include "actorcriticmission.hpp"
 #include "missionlayout.hpp"
 #include "torchproductionpolicy.hpp"
+#include "torchlearner.hpp"
+#include "rlagent.hpp"
 
 #include <torch/torch.h>
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -59,6 +63,64 @@ void CheckCheckpoint(std::filesystem::path const& path,
     std::cout << "Checkpoint inference OK: " << path.string() << std::endl;
 }
 
+// Compare the actual pre-update PPO transition path, not merely neural
+// inference. This is read-only: a partial rollout never calls UpdatePolicy,
+// Save or any evaluator, so existing archives and weights remain unchanged.
+template<typename TrainingNet>
+void CheckTrainingTransitionParity(std::filesystem::path const& modelRoot,
+                                   int64_t inputDim,
+                                   int64_t actionDim)
+{
+    using namespace ppo::model;
+    if (!std::filesystem::is_regular_file(modelRoot / "prod" / "model.pt"))
+        throw std::runtime_error("Missing training checkpoint: " + modelRoot.string());
+
+    std::vector<float> legacyState(static_cast<std::size_t>(inputDim), 0.1F);
+    std::vector<float> legacyAction(static_cast<std::size_t>(actionDim), 0.F);
+    PPOParamters const parameters{};
+
+    auto oldNetwork = std::make_shared<TrainingNet>(inputDim, actionDim);
+    RLAgent legacy(oldNetwork, modelRoot.string(), inputDim, actionDim,
+                   8, parameters, legacyState.data(), legacyAction.data(), true);
+    legacy.Init();
+
+    auto newNetwork = std::make_shared<TrainingNet>(inputDim, actionDim);
+    TorchLearner learner(newNetwork, modelRoot.string(),
+                         static_cast<std::size_t>(inputDim),
+                         static_cast<std::size_t>(actionDim),
+                         8, parameters, true);
+
+    // Both restored policies receive identical inputs and Torch RNG state.
+    torch::manual_seed(20261023);
+    legacy.ChooseAction();
+    torch::manual_seed(20261023);
+    auto const newAction = learner.ChooseAction(
+        ppo::core::Observation(legacyState.begin(), legacyState.end()));
+
+    if (newAction.size() != legacyAction.size())
+        throw std::runtime_error("Training adapter changed action dimensions");
+    for (std::size_t i = 0; i < newAction.size(); ++i)
+    {
+        if (!std::isfinite(newAction[i]) || legacyAction[i] != newAction[i])
+            throw std::runtime_error("Training adapter changed PPO sampled action");
+    }
+
+    // The next observation is deliberately changed before transition feedback.
+    // RLAgent's original from_blob path and TorchLearner's owned copy must
+    // advance to the same rollout index without invoking any optimizer.
+    std::fill(legacyState.begin(), legacyState.end(), 0.2F);
+    legacy.SetNewState(0.25F, false);
+    learner.Observe(ppo::core::Transition{
+        ppo::core::Observation(legacyState.begin(), legacyState.end()),
+        0.25F, false
+    });
+    if (legacy.GetCurrentStep() != 1 || learner.RolloutStep() != 1 ||
+        !legacy.IsTraining() || learner.RolloutComplete())
+        throw std::runtime_error("Training adapter changed rollout progression");
+
+    std::cout << "Training transition parity OK: " << modelRoot.string() << std::endl;
+}
+
 } // namespace
 
 int main()
@@ -84,4 +146,13 @@ int main()
                         static_cast<int64_t>(missionDim),
                         static_cast<int64_t>(missionActions));
     }
+
+    // Both current PPO-compatible architectures: loaded weights, action
+    // sampling and transition ingestion, without retraining or saving.
+    CheckTrainingTransitionParity<rl::ActorCriticNet>(
+        root / "RLSNA", 6, 2);
+    CheckTrainingTransitionParity<rl::ActorCriticTrackAttention>(
+        root / "RLMission",
+        static_cast<int64_t>(missionDim),
+        static_cast<int64_t>(missionActions));
 }
