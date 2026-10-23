@@ -3294,6 +3294,7 @@ EnvironmentRenderer::DrawAgentsWindow(entt::registry const& snapshot)
             ImGui::TextDisabled("Model version %u  |  Step %lld / %lld",
                                 state.m_common.m_version,
                                 state.m_common.m_step, state.m_common.m_maxStep);
+            ImGui::Text("Instant reward: %.3f", state.m_common.m_reward);
             if (ImGui::BeginTabBar("##learning-tabs"))
             {
                 if (ImGui::BeginTabItem("Progress"))
