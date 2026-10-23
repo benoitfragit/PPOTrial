@@ -9,7 +9,8 @@
 #pragma once
 #include <array>
 #include <vector>
-#include "rlagent.hpp"
+#include "torchlearner.hpp"
+#include "ppo/core/buffers.hpp"
 #include <functional>
 #include <string>
 #include "serializer.hpp"
@@ -143,7 +144,7 @@ private:
     /**
     * @brief Reinforcement-learning backend.
     */
-    std::unique_ptr<RLAgent> p_rlagent{ nullptr };
+    std::unique_ptr<TorchLearner> p_rlagent{ nullptr };
     /**
     * @brief Shared internal training state.
     */

@@ -168,3 +168,14 @@ multi-configuration builds
 because they can crash even when compilation succeeds. The CI now validates
 both configurations against the corresponding LibTorch archives. No model
 architecture, weights or checkpoint format is changed.
+
+## Existing training agents use the generic learner
+
+The existing `TrainingAgent<Policy, Model>` now delegates action selection,
+rollout transitions, metrics and checkpoint saving to `TorchLearner`
+(`ppo::core::ILearner`). The domain-specific model still computes the
+observation, action interpretation, reward and episode termination exactly as
+before. Fixed-width state and action arrays are copied through the standard
+`ppo::core::Observation`/`Action` contract, keeping their element order and
+ownership explicit. RLAgent and PPO mathematics remain unchanged, and
+TorchLearner still uses the existing training policy and checkpoint format.
