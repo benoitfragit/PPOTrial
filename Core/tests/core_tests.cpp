@@ -128,10 +128,10 @@ void TestEvaluationScheduling() {
         [](int, int) { return false; }, [](int, int) {});
     Check(complete.completed && complete.finishedTests == 2);
 
-    bool running = true;
+    bool cancellationRunning = true;
     auto cancelled = ppo::core::RunEvaluation(
-        2, 3, [&] { return running; }, [](int) { return true; },
-        [&](int, int) { running = false; return false; }, [](int, int) {});
+        2, 3, [&] { return cancellationRunning; }, [](int) { return true; },
+        [&](int, int) { cancellationRunning = false; return false; }, [](int, int) {});
     Check(!cancelled.completed && cancelled.finishedTests == 1);
 
     auto failedReset = ppo::core::RunEvaluation(
