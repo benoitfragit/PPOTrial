@@ -214,3 +214,27 @@ callback order, but **never copies `eval/model.pt` to `prod/model.pt`** if
 the campaign was interrupted or incomplete. A canceled test still receives
 the historical completion callback and progress accounting; no partial score
 may promote a candidate checkpoint.
+
+## Runtime contract extracted from the PPO engine
+
+The existing C++17 agent interface, dashboard snapshot types, evaluator
+interface and PPO parameter POD layout live in `Runtime/include/ppo/runtime`.
+Legacy `PPO/data/iagent.hpp` and `ppoparameters.hpp` remain forwarding
+headers, so existing source includes and saved settings are unchanged.
+
+`GenericEnv` and `Evaluation` now depend on the header-only
+`LegacyAgentAPI` target rather than on the LibTorch-based `GenericPPO`
+target. The dependency direction is:
+
+```text
+GenericRLCore <- LegacyAgentAPI <- GenericEnv / Evaluation
+       ^                ^
+       |                |
+       +----------- GenericPPO (LibTorch)
+                         ^
+                         |
+                GenericRLBindings -> concrete agents
+```
+
+The agent-state snapshot fields are retained for backwards compatibility with
+the desktop UI. They do not make the generic simulation scheduler depend on PPO.

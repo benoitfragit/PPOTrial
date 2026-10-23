@@ -12,10 +12,10 @@ target_link_libraries(${PROJECT_NAME}
     PUBLIC
         GenericEntities
         GenericEnv
-        GenericPPO
+        LegacyAgentAPI
         EnTT::EnTT)
 
 add_dependencies(${PROJECT_NAME}
     GenericEntities
     GenericEnv
-    GenericPPO)
+    LegacyAgentAPI)

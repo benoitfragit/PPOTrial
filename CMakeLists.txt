@@ -27,6 +27,7 @@ set(CMAKE_GENERATOR_PLATFORM x64)
 include(${CMAKE_SOURCE_DIR}/dependencies.cmake)
 
 add_subdirectory(Serialization)
+add_subdirectory(Runtime)
 add_subdirectory(Entities)
 add_subdirectory(Initializer)
 add_subdirectory(PPO)
