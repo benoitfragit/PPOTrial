@@ -447,6 +447,9 @@ Evaluator::Impl::LoadScenario(std::string const& name)
     evalState.m_latestNotation = persistedState.m_latestNotation;
     evalState.m_completedCampaigns = persistedState.m_completedCampaigns;
     evalState.m_hasLatestNotation = persistedState.m_hasLatestNotation;
+    evalState.m_latestSuccessRate = persistedState.m_latestSuccessRate;
+    evalState.m_latestSurvivalRate = persistedState.m_latestSurvivalRate;
+    evalState.m_lastCompletedTestCount = persistedState.m_lastCompletedTestCount;
     evalState.m_nbtests = m_scenario.m_evaluation.m_nbTests > 0
         ? std::min<int>(m_scenario.m_evaluation.m_nbTests, static_cast<int>(m_buffer.m_tests.size()))
         : static_cast<int>(m_buffer.m_tests.size());
@@ -745,6 +748,10 @@ Evaluator::Impl::Run(void)
     // not beat the historical best. Incomplete campaigns never enter history.
     state.m_latestNotation = notation;
     state.m_hasLatestNotation = true;
+    float const completedTests = static_cast<float>(state.m_nbtests);
+    state.m_latestSuccessRate = targetDestroyed / completedTests;
+    state.m_latestSurvivalRate = 1.F - playerDestroyed / completedTests;
+    state.m_lastCompletedTestCount = state.m_nbtests;
     ++state.m_completedCampaigns;
 
     LogEvaluatorEvent(
