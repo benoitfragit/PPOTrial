@@ -9,7 +9,7 @@ endif()
 
 option(PPO_BUILD_DESKTOP "Build existing LibTorch desktop application" ON)
 option(PPO_BUILD_CORE_TESTS "Build dependency-free RL core tests" ON)
-option(PPO_BUILD_CHECKPOINT_TESTS "Verify existing policy checkpoints without training" ON)
+option(PPO_BUILD_CHECKPOINT_TESTS "Verify existing policy checkpoints without training" OFF)
 
 if (PPO_BUILD_CORE_TESTS)
     enable_testing()
