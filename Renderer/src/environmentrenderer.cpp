@@ -1814,7 +1814,7 @@ EnvironmentRenderer::BuildDefaultLayout(ImGuiID dockspaceId)
     ImGui::DockBuilderDockWindow("Learning", dockSidebar);
     ImGui::DockBuilderDockWindow("Simulation", dockControls);
     // Optional windows share a tabbed dock, never crowd the default view.
-    ImGui::DockBuilderDockWindow("Minimap", dockMain);
+    ImGui::DockBuilderDockWindow("Minimap", dockControls);
     ImGui::DockBuilderDockWindow("Entities", dockControls);
     ImGui::DockBuilderDockWindow("Inspection", dockControls);
     ImGui::DockBuilderDockWindow("Meta Catalog", dockControls);
