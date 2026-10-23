@@ -444,6 +444,9 @@ Evaluator::Impl::LoadScenario(std::string const& name)
 
     auto& evalState = m_world.ctx().emplace<ppo::model::sEvaluatorState>();
     evalState.m_notation = persistedState.m_notation;
+    evalState.m_latestNotation = persistedState.m_latestNotation;
+    evalState.m_completedCampaigns = persistedState.m_completedCampaigns;
+    evalState.m_hasLatestNotation = persistedState.m_hasLatestNotation;
     evalState.m_nbtests = m_scenario.m_evaluation.m_nbTests > 0
         ? std::min<int>(m_scenario.m_evaluation.m_nbTests, static_cast<int>(m_buffer.m_tests.size()))
         : static_cast<int>(m_buffer.m_tests.size());
@@ -738,9 +741,16 @@ Evaluator::Impl::Run(void)
         state.m_notation = notation;
     }
 
+    // Publish the actual score of this completed evaluation even if it did
+    // not beat the historical best. Incomplete campaigns never enter history.
+    state.m_latestNotation = notation;
+    state.m_hasLatestNotation = true;
+    ++state.m_completedCampaigns;
+
     LogEvaluatorEvent(
         "completed evaluation '" + m_evaluatedName
-        + "' notation=" + std::to_string(state.m_notation));
+        + "' latest=" + std::to_string(state.m_latestNotation)
+        + " best=" + std::to_string(state.m_notation));
 
     state.m_inprogress = false;
     state.m_progress = 0.F;
