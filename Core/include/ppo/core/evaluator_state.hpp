@@ -15,6 +15,10 @@ struct sEvaluatorState {
     float m_latestNotation{ 0.F };
     std::uint64_t m_completedCampaigns{ 0 };
     bool m_hasLatestNotation{ false };
+    // Raw task outcomes in the fixed evaluation suite. Values are in [0,1].
+    float m_latestSuccessRate{ 0.F };
+    float m_latestSurvivalRate{ 0.F };
+    unsigned int m_lastCompletedTestCount{ 0U };
 };
 
 } // namespace ppo::model
