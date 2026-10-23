@@ -18,6 +18,25 @@
 
 namespace {
 
+// Distinct values detect wrong feature order. For the mission model the last
+// feature of each track is a validity mask, so keep the mask binary and ensure
+// there are both occupied and empty track slots.
+std::vector<float> MakeObservation(std::size_t dimension)
+{
+    std::vector<float> observation(dimension);
+    for (std::size_t i = 0; i < dimension; ++i)
+        observation[i] = 0.1F + static_cast<float>(i) * 0.001F;
+
+    if (dimension == rl::MissionObservationLayout::kStateDimension)
+    {
+        constexpr auto stride = rl::MissionObservationLayout::kTrackFeatureCount;
+        for (std::size_t track = 0; track < rl::MissionObservationLayout::kMaxTracks; ++track)
+            observation[track * stride + stride - 1] =
+                track % 3 == 0 ? 1.F : 0.F;
+    }
+    return observation;
+}
+
 void CheckActions(torch::Tensor const& actions, int64_t expectedDim)
 {
     if (!actions.defined() || actions.dim() != 2 ||
@@ -41,9 +60,7 @@ void CheckCheckpoint(std::filesystem::path const& path,
     torch::NoGradGuard guard;
     // Distinct feature values catch accidental reordering of observation
     // slots, which a constant vector would not detect.
-    std::vector<float> features(static_cast<std::size_t>(inputDim));
-    for (std::size_t i = 0; i < features.size(); ++i)
-        features[i] = 0.1F + static_cast<float>(i) * 0.001F;
+    auto features = MakeObservation(static_cast<std::size_t>(inputDim));
     auto input = torch::from_blob(features.data(), {1, inputDim}, torch::kFloat);
     auto first = policy.forward(input);
     auto second = policy.forward(input);
@@ -81,9 +98,7 @@ void CheckTrainingTransitionParity(std::filesystem::path const& modelRoot,
     if (!std::filesystem::is_regular_file(modelRoot / "prod" / "model.pt"))
         throw std::runtime_error("Missing training checkpoint: " + modelRoot.string());
 
-    std::vector<float> legacyState(static_cast<std::size_t>(inputDim));
-    for (std::size_t i = 0; i < legacyState.size(); ++i)
-        legacyState[i] = 0.1F + static_cast<float>(i) * 0.001F;
+    std::vector<float> legacyState = MakeObservation(static_cast<std::size_t>(inputDim));
     std::vector<float> legacyAction(static_cast<std::size_t>(actionDim), 0.F);
     PPOParamters const parameters{};
 
