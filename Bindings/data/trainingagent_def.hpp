@@ -45,18 +45,13 @@ TrainingAgent<Policy, Model>::TrainingAgent(Model* model,
             if (p_rlagent == nullptr)
             {
                 bool const loadExistingModel = m_internal.m_version > 0;
-                p_rlagent = std::make_unique<RLAgent>(p_policy,
+                p_rlagent = std::make_unique<TorchLearner>(p_policy,
                     m_modelpath,
                     m_stateVector.size(),
                     m_actionVector.size(),
                     static_cast<int64_t>(m_internal.m_maxStep),
                     m_internal,
-                    m_stateVector.data(),
-                    m_actionVector.data(),
                     loadExistingModel);
-
-                if (p_rlagent != nullptr)
-                    p_rlagent->Init();
             }
         },
         [this](ppo::serialization::json& ar)
@@ -77,8 +72,8 @@ TrainingAgent<Policy, Model>::Init(void)
         return;
 
     if (p_rlagent != nullptr
-    &&  !p_rlagent->IsTraining())
-        p_rlagent->Init();
+    &&  p_rlagent->RolloutComplete())
+        p_rlagent->ResetRollout();
 
     m_internal.m_reward = 0.F;
     m_internal.m_done = false;
@@ -123,7 +118,7 @@ TrainingAgent<Policy, Model>::ProcessCommand(sAgentRealTimeCommand const& comman
     }
 
     if (p_rlagent != nullptr
-        && m_internal.m_maxStep != p_rlagent->GetMaxStep())
+        && m_internal.m_maxStep != p_rlagent->RolloutSize())
     {
         p_rlagent.reset();
     }
@@ -132,19 +127,14 @@ TrainingAgent<Policy, Model>::ProcessCommand(sAgentRealTimeCommand const& comman
     if (p_rlagent == nullptr)
     {
         bool const loadExistingModel = m_internal.m_version > 0;
-        p_rlagent = std::make_unique<RLAgent>(
+        p_rlagent = std::make_unique<TorchLearner>(
             p_policy,
             m_modelpath,
             m_stateVector.size(),
             m_actionVector.size(),
             static_cast<int64_t>(m_internal.m_maxStep),
             m_internal,
-            m_stateVector.data(),
-            m_actionVector.data(),
             loadExistingModel);
-           
-        if (p_rlagent != nullptr)
-            p_rlagent->Init();
     }
 }
 
@@ -163,7 +153,10 @@ TrainingAgent<Policy, Model>::ChooseAction(void)
 
     // Query the RL backend for one new action.
     if (p_rlagent != nullptr)
-        p_rlagent->ChooseAction();
+    {
+        auto const action = p_rlagent->ChooseAction(ppo::core::CopyObservation(m_stateVector));
+        ppo::core::CopyAction(m_actionVector, action);
+    }
 
     // Forward the chosen action to the domain model.
     p_model->SetNextAction(m_actionVector);
@@ -215,13 +208,15 @@ TrainingAgent<Policy, Model>::SetNewState(void)
 
     if (p_rlagent != nullptr)
     {
-        p_rlagent->SetNewState(clampedReward, m_internal.m_done);
+        p_rlagent->Observe(ppo::core::Transition{
+            ppo::core::CopyObservation(m_stateVector), clampedReward, m_internal.m_done
+        });
 
-        m_internal.m_step     = p_rlagent->GetCurrentStep();
-        m_internal.m_training = p_rlagent->IsTraining();
+        m_internal.m_step     = p_rlagent->RolloutStep();
+        m_internal.m_training = !p_rlagent->RolloutComplete();
         m_internal.m_reward = clampedReward;
 
-        PPOOutputs const& ppooutputs{ p_rlagent->GetOutputs() };
+        PPOOutputs const& ppooutputs{ p_rlagent->Outputs() };
         m_internal.m_loss        = ppooutputs.m_loss;
         m_internal.m_actorloss   = ppooutputs.m_actorloss;
         m_internal.m_valueloss   = ppooutputs.m_valueloss;
@@ -270,7 +265,7 @@ TrainingAgent<Policy, Model>::IsTraining(void)                  const noexcept
     if (p_rlagent == nullptr)
         return false;
 
-    return p_rlagent->IsTraining();
+    return !p_rlagent->RolloutComplete();
 }
 
 /**
@@ -357,7 +352,7 @@ TrainingAgent<Policy, Model>::IsLastStep(void)                  const noexcept
     if (p_rlagent == nullptr)
         return false;
 
-    return (p_rlagent->GetMaxStep() - p_rlagent->GetCurrentStep()) == 1;
+    return (p_rlagent->RolloutSize() - p_rlagent->RolloutStep()) == 1;
 }
 
 /**

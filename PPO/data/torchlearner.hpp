@@ -40,6 +40,7 @@ public:
     void ResetRollout();
     bool RolloutComplete() const noexcept;
     long long RolloutStep() const noexcept;
+    long long RolloutSize() const noexcept { return agent_.GetMaxStep(); }
     PPOOutputs const& Outputs() const noexcept;
     void Save(std::filesystem::path const& path);
 

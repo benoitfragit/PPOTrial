@@ -1,8 +1,10 @@
 #include "ppo/core/runner.hpp"
+#include "ppo/core/buffers.hpp"
 #include "ppo/core/multi_agent.hpp"
 #include "ppo/core/evaluation.hpp"
 #include "ppo/core/evaluator_state.hpp"
 
+#include <array>
 #include <stdexcept>
 #include <memory>
 #include <vector>
@@ -122,6 +124,19 @@ void TestEvaluationScheduling() {
 }
 
 int main() {
+    // Existing fixed-size domain buffers can be bridged without exposing
+    // their lifetime or changing their numerical ordering.
+    std::array<float, 3> domainObservation{0.25F, -1.F, 2.F};
+    Check(ppo::core::CopyObservation(domainObservation) ==
+          ppo::core::Observation({0.25F, -1.F, 2.F}));
+    std::array<float, 2> domainAction{};
+    ppo::core::CopyAction(domainAction, ppo::core::Action({0.5F, -0.75F}));
+    Check(domainAction == std::array<float, 2>{0.5F, -0.75F});
+    bool copyRejected = false;
+    try { ppo::core::CopyAction(domainAction, ppo::core::Action{1.F}); }
+    catch (std::invalid_argument const&) { copyRejected = true; }
+    Check(copyRejected);
+    Check(domainAction == std::array<float, 2>{0.5F, -0.75F});
     TestMultiAgentPhases();
     TestEvaluationScheduling();
     FakeEnvironment env;
