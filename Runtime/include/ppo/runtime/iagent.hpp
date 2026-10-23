@@ -11,6 +11,7 @@
 #include "ppo/core/evaluator_state.hpp"
 #include "ppo/runtime/ppoparameters.hpp"
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <atomic>
@@ -80,6 +81,9 @@ struct sCommonAgentState :
     * @brief Latest evaluator score.
     */
     float m_notation{ 0.F };
+    float m_latestEvaluationNotation{ 0.F };
+    std::uint64_t m_completedEvaluations{ 0 };
+    bool m_hasLatestEvaluation{ false };
     /**
     * @brief Latest evaluator progress ratio.
     */
