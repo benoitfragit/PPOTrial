@@ -121,6 +121,28 @@ void TestEvaluationScheduling() {
         [&](int, int) { return false; },
         [&](int, int) { events.push_back(99); });
     Check(events == std::vector<int>({0, 99, 1}));
+
+    // Promotion is only permitted when the entire campaign is valid.
+    auto complete = ppo::core::RunEvaluation(
+        2, 2, [] { return true; }, [](int) { return true; },
+        [](int, int) { return false; }, [](int, int) {});
+    Check(complete.completed && complete.finishedTests == 2);
+
+    bool running = true;
+    auto cancelled = ppo::core::RunEvaluation(
+        2, 3, [&] { return running; }, [](int) { return true; },
+        [&](int, int) { running = false; return false; }, [](int, int) {});
+    Check(!cancelled.completed && cancelled.finishedTests == 1);
+
+    auto failedReset = ppo::core::RunEvaluation(
+        2, 2, [] { return true; }, [](int index) { return index == 0; },
+        [](int, int) { return false; }, [](int, int) {});
+    Check(!failedReset.completed && failedReset.finishedTests == 1);
+
+    auto empty = ppo::core::RunEvaluation(
+        0, 2, [] { return true; }, [](int) { return true; },
+        [](int, int) { return false; }, [](int, int) {});
+    Check(!empty.completed && empty.finishedTests == 0);
 }
 
 int main() {
