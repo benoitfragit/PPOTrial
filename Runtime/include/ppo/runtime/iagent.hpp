@@ -87,6 +87,10 @@ struct sCommonAgentState :
     float m_latestEvaluationSuccessRate{ 0.F };
     float m_latestEvaluationSurvivalRate{ 0.F };
     unsigned int m_latestEvaluationTestCount{ 0U };
+    unsigned int m_evaluationTestsFinished{ 0U };
+    unsigned long long m_evaluationStepsExecuted{ 0ULL };
+    float m_evaluationStepsPerSecond{ 0.F };
+    float m_evaluationElapsedSeconds{ 0.F };
     /**
     * @brief Latest evaluator progress ratio.
     */
