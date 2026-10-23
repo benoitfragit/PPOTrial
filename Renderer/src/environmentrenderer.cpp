@@ -15,6 +15,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <fstream>
 #include <limits>
 #include <string>
 #include <vector>
@@ -2459,11 +2460,10 @@ EnvironmentRenderer::DrawAgentPlot(std::shared_ptr<AgentController> const& agent
     agent->m_plots[1].m_name = state.m_name + "-ActorLoss";
     agent->m_plots[2].m_name = state.m_name + "-ValueLoss";
     agent->m_plots[3].m_name = state.m_name + "-EntropyLoss";
-    agent->m_plots[4].m_name = state.m_name + "-MeanReward";
 
     if (ImGui::BeginTable("##agentplots", 2, ImGuiTableFlags_SizingStretchSame))
     {
-        for (int index = 0; index < 5; ++index)
+        for (int index = 0; index < 4; ++index)
         {
             if (index % 2 == 0)
                 ImGui::TableNextRow();
@@ -2478,6 +2478,170 @@ EnvironmentRenderer::DrawAgentPlot(std::shared_ptr<AgentController> const& agent
 
         ImGui::EndTable();
     }
+}
+
+/**
+* @brief Samples real training and evaluation events independently of visible tabs.
+*/
+void
+EnvironmentRenderer::UpdateLearningTelemetry(entt::registry const& snapshot)
+{
+    auto const view = snapshot.view<ppo::model::sAgentStateSnaphot>();
+    for (auto entity : view)
+    {
+        auto const& [state] = view.get(entity);
+        auto agent = GetAgentController(state.m_id);
+        if (agent == nullptr)
+            continue;
+
+        unsigned int const version = state.m_common.m_version;
+        if (!agent->m_seenVersion)
+        {
+            agent->m_lastPlottedVersion = version;
+            agent->m_seenVersion = true;
+        }
+        else if (version > agent->m_lastPlottedVersion)
+        {
+            // A version change means a PPO update occurred. A skipped
+            // version is never recreated from duplicated render samples.
+            agent->m_plots[0].push(state.m_common.m_loss);
+            agent->m_plots[1].push(state.m_common.m_actorloss);
+            agent->m_plots[2].push(state.m_common.m_valueloss);
+            agent->m_plots[3].push(state.m_common.m_entropyloss);
+            agent->m_lastPlottedVersion = version;
+        }
+        else if (version < agent->m_lastPlottedVersion)
+        {
+            agent->m_lastPlottedVersion = version;
+            for (auto& plot : agent->m_plots)
+                plot.clear();
+            agent->m_evaluationScores.Clear();
+            agent->m_evaluationSuccess.Clear();
+        }
+
+        auto const& common = state.m_common;
+        if (common.m_hasLatestEvaluation
+            && agent->m_evaluationScores.Record(common.m_completedEvaluations,
+                                                common.m_latestEvaluationNotation))
+        {
+            agent->m_evaluationSuccess.Record(common.m_completedEvaluations,
+                                              100.0 * common.m_latestEvaluationSuccessRate);
+        }
+    }
+}
+
+/**
+* @brief Draws evidence of task performance without changing the learned policy.
+*/
+void
+EnvironmentRenderer::DrawLearningProgress(std::shared_ptr<AgentController> const& agent,
+                                          ppo::model::sAgentStateSnaphot const& state)
+{
+    auto const& common = state.m_common;
+    if (common.m_evaluationinprogress)
+    {
+        ImGui::TextUnformatted("Evaluating model");
+        ImGui::ProgressBar(std::clamp(common.m_evaluationprogress, 0.F, 1.F), ImVec2(-1.F, 0.F));
+    }
+
+    auto const& scores = agent->m_evaluationScores.Samples();
+    if (!common.m_hasLatestEvaluation || scores.empty())
+    {
+        ImGui::TextDisabled("Awaiting first complete evaluation.");
+        ImGui::TextWrapped("The evaluation graph starts when a full test campaign completes.");
+        return;
+    }
+
+    ImGui::SeparatorText("Model evaluation");
+    ImGui::Text("LATEST  %.2f", common.m_latestEvaluationNotation);
+    ImGui::Text("BEST    %.2f", common.m_notation);
+    ImGui::Text("SUCCESS %.1f%%", 100.F * common.m_latestEvaluationSuccessRate);
+    ImGui::Text("SURVIVAL %.1f%%", 100.F * common.m_latestEvaluationSurvivalRate);
+    ImGui::TextDisabled("Campaign #%llu  -  %u test cases",
+        static_cast<unsigned long long>(common.m_completedEvaluations),
+        common.m_latestEvaluationTestCount);
+
+    if (scores.size() >= 2)
+        ImGui::Text("Delta vs first visible evaluation: %+.2f score units",
+            scores.back().score - scores.front().score);
+
+    char const* trend = "Not enough campaigns";
+    switch (agent->m_evaluationScores.RecentTrend())
+    {
+    case ppo::core::LearningHistory::Trend::Improving: trend = "Improving (indicative)"; break;
+    case ppo::core::LearningHistory::Trend::Declining: trend = "Declining (indicative)"; break;
+    case ppo::core::LearningHistory::Trend::Flat: trend = "Stable (indicative)"; break;
+    default: break;
+    }
+    ImGui::Text("Recent trend: %s", trend);
+
+    // The bounded history holds at most 256 entries. Stack storage avoids
+    // allocating temporary plots on every frame.
+    std::array<double, 256> xs{};
+    std::array<double, 256> ys{};
+    auto plot = [&](ppo::core::LearningHistory const& history,
+                    char const* title, char const* series, char const* unit)
+    {
+        auto const& samples = history.Samples();
+        auto const n = std::min(samples.size(), xs.size());
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            xs[i] = static_cast<double>(samples[i].campaign);
+            ys[i] = samples[i].score;
+        }
+        if (ImPlot::BeginPlot(title, ImVec2(-1.F, 205.F)))
+        {
+            ImPlot::SetupAxes("Evaluation #", unit, ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+            if (n != 0)
+                ImPlot::PlotLine(series, xs.data(), ys.data(), static_cast<int>(n));
+            ImPlot::EndPlot();
+        }
+    };
+
+    plot(agent->m_evaluationScores, "Evaluation score", "Score", "Score");
+    plot(agent->m_evaluationSuccess, "Success rate", "Success", "Percent");
+
+    ImGui::TextWrapped("A positive trend on a fixed evaluation suite is evidence of learning, not proof of generalization.");
+    if (ImGui::Button("Export CSV"))
+    {
+        std::string safeName = state.m_name;
+        for (char& character : safeName)
+            if (!std::isalnum(static_cast<unsigned char>(character))
+                && character != '_' && character != '-')
+                character = '_';
+
+        auto const stamp = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        std::filesystem::path const outputDir{ "learning_reports" };
+        std::error_code error;
+        std::filesystem::create_directories(outputDir, error);
+        if (error)
+            agent->m_exportStatus = "Failed to create learning_reports directory.";
+        else
+        {
+            auto const csvPath = outputDir / (safeName + "_" + std::to_string(stamp) + ".csv");
+            std::ofstream output{ csvPath };
+            if (!output)
+                agent->m_exportStatus = "Failed to open CSV file.";
+            else
+            {
+                output << "campaign,score,success_percent\n";
+                auto const& successes = agent->m_evaluationSuccess.Samples();
+                for (std::size_t i = 0; i < scores.size(); ++i)
+                {
+                    output << scores[i].campaign << ',' << scores[i].score << ',';
+                    if (i < successes.size() && successes[i].campaign == scores[i].campaign)
+                        output << successes[i].score;
+                    output << '\n';
+                }
+                output.close();
+                agent->m_exportStatus = output ? ("CSV: " + csvPath.string()) : "Failed to write CSV.";
+            }
+        }
+    }
+
+    if (!agent->m_exportStatus.empty())
+        ImGui::TextWrapped("%s", agent->m_exportStatus.c_str());
 }
 
 /**
@@ -3114,80 +3278,52 @@ EnvironmentRenderer::DrawAgentsWindow(entt::registry const& snapshot)
 {
     ImGui::Begin("Learning");
 
-    auto agentView = snapshot.view<ppo::model::sAgentStateSnaphot>();
-    static bool first = true;
+    auto const view = snapshot.view<ppo::model::sAgentStateSnaphot>();
+    if (view.begin() == view.end())
+        ImGui::TextDisabled("No training agent found.");
 
-    for (auto entity : agentView)
+    for (auto entity : view)
     {
-        auto const& [state] = agentView.get(entity);
+        auto const& [state] = view.get(entity);
         auto agent = GetAgentController(state.m_id);
         if (agent == nullptr)
             continue;
 
-        if (agent->m_started && !state.m_common.m_training && !first)
-        {
-            agent->m_plots[0].push(state.m_common.m_loss);
-            agent->m_plots[1].push(state.m_common.m_actorloss);
-            agent->m_plots[2].push(state.m_common.m_valueloss);
-            agent->m_plots[3].push(state.m_common.m_entropyloss);
-
-            if (state.m_common.m_step < agent->m_lastRewardStep)
-            {
-                agent->m_rewardMean = 0.F;
-                agent->m_rewardSampleCount = 0;
-                agent->m_plots[4].clear();
-            }
-
-            agent->m_lastRewardStep = state.m_common.m_step;
-            ++agent->m_rewardSampleCount;
-            float const sampleCount = static_cast<float>(agent->m_rewardSampleCount);
-            agent->m_rewardMean += (state.m_common.m_reward - agent->m_rewardMean) / sampleCount;
-            agent->m_plots[4].push(agent->m_rewardMean);
-        }
-
+        ImGui::PushID(static_cast<int>(state.m_id));
         if (ImGui::CollapsingHeader(state.m_name.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
         {
-            ImGui::Text("Id %llu", state.m_id);
-            ImGui::SameLine();
-            ImGui::Text("Step %lld / %lld", state.m_common.m_step, state.m_common.m_maxStep);
-            ImGui::SameLine();
-            ImGui::Text("Reward %.3f", state.m_common.m_reward);
-            ImGui::Text("Eval score %.3f", state.m_common.m_notation);
-            ImGui::SameLine();
-            if (state.m_common.m_evaluationinprogress)
-                ImGui::Text("Evaluation %.1f%%", 100.F * state.m_common.m_evaluationprogress);
-            else
-                ImGui::Text("Evaluation idle");
-            if (state.m_common.m_evaluationinprogress)
-                ImGui::ProgressBar(std::clamp(state.m_common.m_evaluationprogress, 0.F, 1.F), ImVec2(-1.F, 0.F));
-
-            if (ImGui::BeginTabBar((state.m_name + "##tabs").c_str()))
+            ImGui::TextDisabled("Model version %u  |  Step %lld / %lld",
+                                state.m_common.m_version,
+                                state.m_common.m_step, state.m_common.m_maxStep);
+            if (ImGui::BeginTabBar("##learning-tabs"))
             {
-                if (ImGui::BeginTabItem("Controls"))
+                if (ImGui::BeginTabItem("Progress"))
                 {
-                    DrawTrainingControls(agent, state);
+                    DrawLearningProgress(agent, state);
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("Rewards & Settings"))
+                {
+                    ImGui::TextWrapped("Changes apply to the active training agent.");
                     DrawRewardControls(agent, state);
+                    ImGui::SeparatorText("Rollout");
+                    DrawTrainingControls(agent, state);
                     ImGui::EndTabItem();
                 }
-
-                if (ImGui::BeginTabItem("Snapshot"))
+                if (ImGui::BeginTabItem("Diagnostics"))
                 {
-                    DrawMetaAnyRecursive(state.m_name.c_str(), entt::forward_as_meta(state));
-                    ImGui::EndTabItem();
-                }
-
-                if (ImGui::BeginTabItem("Plots"))
-                {
+                    ImGui::TextDisabled("Losses sampled per completed model update.");
                     DrawAgentPlot(agent, state);
+                    if (ImGui::CollapsingHeader("Agent snapshot"))
+                        DrawMetaAnyRecursive(state.m_name.c_str(), entt::forward_as_meta(state));
                     ImGui::EndTabItem();
                 }
-
                 ImGui::EndTabBar();
             }
         }
+        ImGui::PopID();
     }
 
-    first = false;
     ImGui::End();
 }
 
