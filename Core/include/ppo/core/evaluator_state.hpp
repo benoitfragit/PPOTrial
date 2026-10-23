@@ -21,6 +21,9 @@ struct sEvaluatorState {
     unsigned int m_lastCompletedTestCount{ 0U };
     // Live performance counters for the running (or most recent) campaign.
     unsigned int m_testsFinished{ 0U };
+    // Generic timeout: test exhausted its configured step limit.
+    unsigned int m_timeoutTests{ 0U };
+    float m_latestTimeoutRate{ 0.F };
     unsigned long long m_stepsExecuted{ 0ULL };
     float m_stepsPerSecond{ 0.F };
     float m_elapsedSeconds{ 0.F };
