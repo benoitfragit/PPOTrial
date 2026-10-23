@@ -14,6 +14,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -38,7 +39,12 @@ void CheckCheckpoint(std::filesystem::path const& path,
     std::cout << "Checking existing checkpoint: " << path.string() << std::endl;
     policy.load(path);
     torch::NoGradGuard guard;
-    auto input = torch::full({1, inputDim}, 0.1F, torch::kFloat);
+    // Distinct feature values catch accidental reordering of observation
+    // slots, which a constant vector would not detect.
+    std::vector<float> features(static_cast<std::size_t>(inputDim));
+    for (std::size_t i = 0; i < features.size(); ++i)
+        features[i] = 0.1F + static_cast<float>(i) * 0.001F;
+    auto input = torch::from_blob(features.data(), {1, inputDim}, torch::kFloat);
     auto first = policy.forward(input);
     auto second = policy.forward(input);
 
@@ -52,7 +58,7 @@ void CheckCheckpoint(std::filesystem::path const& path,
         static_cast<std::size_t>(inputDim), static_cast<std::size_t>(actionDim));
     generic.Load(path);
     auto const genericAction = generic.ChooseAction(
-        ppo::core::Observation(static_cast<std::size_t>(inputDim), 0.1F));
+        ppo::core::Observation(features.begin(), features.end()));
     if (genericAction.size() != static_cast<std::size_t>(actionDim))
         throw std::runtime_error("Generic production policy action dimension mismatch");
     auto const expected = first.contiguous();
@@ -75,7 +81,9 @@ void CheckTrainingTransitionParity(std::filesystem::path const& modelRoot,
     if (!std::filesystem::is_regular_file(modelRoot / "prod" / "model.pt"))
         throw std::runtime_error("Missing training checkpoint: " + modelRoot.string());
 
-    std::vector<float> legacyState(static_cast<std::size_t>(inputDim), 0.1F);
+    std::vector<float> legacyState(static_cast<std::size_t>(inputDim));
+    for (std::size_t i = 0; i < legacyState.size(); ++i)
+        legacyState[i] = 0.1F + static_cast<float>(i) * 0.001F;
     std::vector<float> legacyAction(static_cast<std::size_t>(actionDim), 0.F);
     PPOParamters const parameters{};
 
@@ -104,6 +112,13 @@ void CheckTrainingTransitionParity(std::filesystem::path const& modelRoot,
         if (!std::isfinite(newAction[i]) || legacyAction[i] != newAction[i])
             throw std::runtime_error("Training adapter changed PPO sampled action");
     }
+
+    // A second action is prohibited until the preceding transition arrives.
+    bool refused = false;
+    try { (void)learner.ChooseAction(ppo::core::Observation(legacyState.begin(), legacyState.end())); }
+    catch (std::logic_error const&) { refused = true; }
+    if (!refused)
+        throw std::runtime_error("Training adapter permitted an action without feedback");
 
     // The next observation is deliberately changed before transition feedback.
     // RLAgent's original from_blob path and TorchLearner's owned copy must
