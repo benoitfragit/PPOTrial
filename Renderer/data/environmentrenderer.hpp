@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "environment.hpp"
+#include "ppo/core/learning_monitor.hpp"
 
 namespace ppo::renderer {
 
@@ -138,6 +139,11 @@ public:
         * @brief Performance and reward plots.
         */
         Plots m_plots{};
+        // Observational only. A data point requires a completed evaluation.
+        ppo::core::LearningHistory m_evaluationScores{};
+        ppo::core::LearningHistory m_evaluationSuccess{};
+        unsigned int m_lastPlottedVersion{ 0U };
+        bool m_seenVersion{ false };
         /**
         * @brief True once the controller has received valid data.
         */
@@ -394,6 +400,11 @@ private:
     */
     void DrawAgentPlot(std::shared_ptr<AgentController> const& agent,
                        ppo::model::sAgentStateSnaphot const& state);
+    /** Draws evaluation progress (distinct from PPO training losses). */
+    void DrawLearningProgress(std::shared_ptr<AgentController> const& agent,
+                              ppo::model::sAgentStateSnaphot const& state);
+    /** Collects a new sample only when its source event advances. */
+    void UpdateLearningTelemetry(entt::registry const& snapshot);
     /**
     * @brief Draws one plot widget.
     * @param plot Plot descriptor to display.
@@ -540,6 +551,11 @@ private:
     * @brief True when the metadata catalog window is visible.
     */
     bool m_showMetaCatalog{ false };
+    bool m_showSimulation{ true };
+    bool m_showAgents{ true };
+    bool m_showMinimap{ false };
+    bool m_showEntities{ false };
+    bool m_showInspection{ false };
     /**
     * @brief True when the pseudo-lidar overlay is visible.
     */
