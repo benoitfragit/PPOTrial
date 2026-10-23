@@ -29,18 +29,16 @@ ProdAgent<Policy, Model>::ProdAgent(Model* model, std::string const& name, std::
     p_model{model},
     m_name{name},
     m_modelpath{modelpath},
-    p_policy{ std::make_shared<Policy>(m_stateVector.size(), m_actionVector.size()) }
+    p_policy{ nullptr }
 {
-    if (p_policy == nullptr)
-        return;
-
+    // Production policies are now accessed through the generic IPolicy
+    // contract, while retaining the unchanged model implementation.
+    auto policy = std::make_unique<TorchProductionPolicy<Policy>>(
+        m_stateVector.size(), m_actionVector.size());
     if (std::filesystem::exists(m_modelpath))
     {
-        p_policy->load(m_modelpath);
-    }
-    else
-    {
-        p_policy.reset();
+        policy->Load(m_modelpath);
+        p_policy = std::move(policy);
     }
 }
 
@@ -68,20 +66,8 @@ ProdAgent<Policy, Model>::ChooseAction(void)
     ||  p_policy == nullptr)
         return;
 
-    torch::Tensor actions_t = p_policy->forward(m_states_t);
-
-    // The production policy is replaceable: reject malformed tensors before
-    // copying them into the fixed-size action buffer owned by the model.
-    if (!actions_t.defined() || actions_t.dim() != 2 || actions_t.size(0) != 1
-        || actions_t.size(1) != static_cast<int64_t>(m_actionVector.size())
-        || actions_t.scalar_type() != torch::kFloat || !actions_t.is_contiguous())
-    {
-        throw std::runtime_error("ProdAgent: policy returned invalid action shape or dtype");
-    }
-
-    // Copy the torch output tensor back into the fixed-size action buffer.
-    float const* srcActionPtr = actions_t.data_ptr<float>();
-    std::memcpy(m_actionVector.data(), srcActionPtr, sizeof(float) * actions_t.size(1));
+    ppo::core::CopyAction(
+        m_actionVector, p_policy->ChooseAction(ppo::core::CopyObservation(m_stateVector)));
 
     p_model->SetNextAction(m_actionVector);
 }

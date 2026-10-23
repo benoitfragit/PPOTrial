@@ -3,6 +3,7 @@
 #include "actorcriticnet.hpp"
 #include "actorcriticmission.hpp"
 #include "missionlayout.hpp"
+#include "torchproductionpolicy.hpp"
 
 #include <torch/torch.h>
 #include <filesystem>
@@ -41,6 +42,20 @@ void CheckCheckpoint(std::filesystem::path const& path,
     CheckActions(second, actionDim);
     if (!torch::equal(first, second))
         throw std::runtime_error("Production inference is not deterministic");
+    // The generic IPolicy adapter must return the exact same output as the
+    // original production wrapper using the existing trained weights.
+    ppo::model::TorchProductionPolicy<Policy> generic(
+        static_cast<std::size_t>(inputDim), static_cast<std::size_t>(actionDim));
+    generic.Load(path);
+    auto const genericAction = generic.ChooseAction(
+        ppo::core::Observation(static_cast<std::size_t>(inputDim), 0.1F));
+    if (genericAction.size() != static_cast<std::size_t>(actionDim))
+        throw std::runtime_error("Generic production policy action dimension mismatch");
+    auto const expected = first.contiguous();
+    auto const* values = expected.data_ptr<float>();
+    for (std::size_t index = 0; index < genericAction.size(); ++index)
+        if (genericAction[index] != values[index])
+            throw std::runtime_error("Generic IPolicy adapter changed checkpoint inference");
     std::cout << "Checkpoint inference OK: " << path.string() << std::endl;
 }
 
