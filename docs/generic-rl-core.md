@@ -4,9 +4,11 @@
 
 This is a structural extraction. No neural network, PPO mathematics, simulation
 equation, reward, scenario schema, saved model, or existing desktop control has
-been changed. Existing training/evaluation keeps using the legacy runtime.
-The new contracts offer a separate entry point for new environments; this
-does **not** claim that the existing desktop has been migrated to EpisodeRunner.
+been changed. **Existing desktop training and production agents now use the
+generic ILearner/IPolicy interfaces**, while the multi-agent simulation and
+evaluator call generic step/campaign schedulers. EpisodeRunner remains the
+single-agent entry point for new IEnvironment implementations; using it
+directly for the existing shared multi-agent world would be incorrect.
 
 | Target | Responsibility | Dependencies |
 | --- | --- | --- |
@@ -18,12 +20,12 @@ does **not** claim that the existing desktop has been migrated to EpisodeRunner.
 | `Evaluation` | Existing evaluator thread, fixed evaluation scenarios/scorer and promotion | entities, env, PPO |
 | `Renderer`, `Main` | Existing desktop and orchestration | the above and graphics |
 
-The old `TrainingAgent<Policy, Model>` and `ProdAgent<Policy, Model>`
-templates retain their implementations in `Bindings/data` (only explicit standard-library includes were added). They are not part
-of the PPO engine library. Concrete networks remain in `Agents/` and are
-supplied through the existing `ITrainingNet` contract. The new `TorchLearner`
-accepts **any PPO-compatible `ITrainingNet`**, not an arbitrary neural
-module without action sampling / log-probability / value/entropy support.
+The `TrainingAgent<Policy, Model>` and `ProdAgent<Policy, Model>` templates
+remain in `Bindings/data` as domain-specific adapters, **but their backend
+invocations now use `ILearner` and `IPolicy` respectively**. Concrete
+networks remain in `Agents/`; training networks retain `ITrainingNet`.
+`TorchLearner` accepts any PPO-compatible `ITrainingNet`, not an arbitrary
+neural module without action sampling/log-probability/value/entropy support.
 
 ## New environment integration (C++17)
 
@@ -50,15 +52,16 @@ advancing again; if training, discard the inconsistent rollout explicitly.
 `torch::from_blob` view. It cannot be moved or copied. It forwards the raw
 network action and the next observation/reward/done unchanged to RLAgent,
 including legacy GAE bootstrap semantics and Torch random state consumption.
-Existing production/frozen policy wrappers remain unchanged.
+Existing production/frozen policy network implementations remain unchanged;
+`TorchProductionPolicy` adapts their existing load/forward interfaces.
 
 To add a different PPO-compatible network, implement `ITrainingNet` and
 pass its instance to `TorchLearner`. Do not edit the optimizer or environment.
 For a new environment, implement `IEnvironment`; no EnTT or renderer headers
-are required. The supplied EpisodeRunner is single-agent; the existing desktop
-continues to support N independently controlled entities. The templated
-`StepWorld` order primitive is used by both existing simulation and evaluator
-loops, but physics, destruction logic and scoring remain domain-owned.
+are required. The supplied EpisodeRunner is single-agent. For the existing N-agent desktop,
+`ResetAgents`/`StepAgents` handle the shared-world action/advance/resolve/
+feedback order, and production/training agents use the same generic policy
+interfaces. Physics, destruction logic and scoring remain domain-owned.
 
 ## Build and tests
 
@@ -76,33 +79,41 @@ change does not add a second application.
 
 ## Limitations and future independent work
 
-This PR is an **incremental** architectural extraction, not a completed
-replacement of the legacy application. Existing evaluation orchestration,
-serialization callbacks and UI remain domain-specific. The evaluator's public state snapshots are now published and read under a
+This PR integrates generic policy adapters and orchestration into the
+existing application rather than replacing that application. Scenario
+definitions, entity dynamics, score computation, serializer callbacks and UI
+remain domain-specific. The evaluator's public state snapshots are now published and read under a
 mutex, preventing concurrent readers from accessing a buffer being rewritten.
 The global Serializer callback lifetime still requires separate lifecycle
 validation. The legacy PPO tensor mathematics and
 checkpoint archive serialization are intentionally untouched.
 
 The core-only test exercises reset/advance/done, feedback and four-phase
-ordering; it does not demonstrate compiled Windows desktop compatibility or
-numerical policy parity. Such validation requires matching LibTorch and full
-simulation test fixtures, and must be recorded separately.
+ordering. Windows CI compiles the desktop with the matching Debug/Release
+LibTorch binary and checks saved-policy inference parity for the generic
+production adapter. End-to-end scenario parity and training-rollout numerical
+parity still require dedicated fixtures; unit tests alone cannot prove them.
 
 
 ## Runtime dependency direction
 
 ```text
-New environments                  Existing EnTT application
-  IEnvironment                     Env / Evaluation / Renderer
-       |                                  |
-  EpisodeRunner                       ECS adapter
-       |                                  |
-   ILearner                  Generic StepAgents / RunEvaluation
-       |                                  |
-  TorchLearner                   Legacy agents, evaluator score
-       |
-  RLAgent -> PPO -> injected ITrainingNet
+New single-agent environments         Existing shared multi-agent world
+       IEnvironment                         Env / Evaluation
+            |                                      |
+       EpisodeRunner                        StepAgents / RunEvaluation
+            |                                      |
+         ILearner                           Bindings: domain adapters
+            |                                      |
+       TorchLearner                     +----------+------------+
+            |                           |                       |
+       RLAgent -> PPO                 ILearner                 IPolicy
+            |                           |                       |
+       ITrainingNet                TorchLearner         TorchProductionPolicy
+                                        |                       |
+                                   RLAgent -> PPO       Existing Policy::forward
+                                        |                       |
+                                   ITrainingNet         Existing model.pt
 ```
 
 The generic contracts schedule operations and own no model-specific state,
