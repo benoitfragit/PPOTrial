@@ -133,7 +133,7 @@ public:
         /**
         * @brief Fixed plot collection used by the UI.
         */
-        using Plots = std::array<Plot, 5>;
+        using Plots = std::array<Plot, 4>;
 
         /**
         * @brief Performance and reward plots.
@@ -161,18 +161,6 @@ public:
         * @brief Reward clamp value configured for the agent.
         */
         float m_clamp{ 0.F };
-        /**
-        * @brief Mean reward over the last finished episode.
-        */
-        float m_rewardMean{ 0.F };
-        /**
-        * @brief Number of reward samples accumulated for the mean.
-        */
-        unsigned int m_rewardSampleCount{ 0 };
-        /**
-        * @brief Last step index included in the reward mean.
-        */
-        long long m_lastRewardStep{ -1 };
         /**
         * @brief Unique agent identifier.
         */
@@ -553,7 +541,6 @@ private:
     */
     bool m_showMetaCatalog{ false };
     bool m_showSimulation{ true };
-    bool m_showAgents{ true };
     bool m_showMinimap{ false };
     bool m_showEntities{ false };
     bool m_showInspection{ false };
