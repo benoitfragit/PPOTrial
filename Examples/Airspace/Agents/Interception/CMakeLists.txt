@@ -15,7 +15,7 @@ target_link_libraries(${PROJECT_NAME}
 						PUBLIC 	GenericEntities
                                 AirspaceEntities
 								GenericEnv
-								Evaluation
+								AirspaceEvaluation
 								EntityInitializer
 								GenericPPO GenericRLBindings)
 
@@ -24,7 +24,7 @@ target_compile_definitions(${PROJECT_NAME} PUBLIC RESOURCE_RLSNAMODEL_PATH="${RE
 
 add_dependencies(${PROJECT_NAME} GenericEntities 
 								 GenericEnv
-								 Evaluation
+								 AirspaceEvaluation
 								 EntityInitializer
 								 GenericSerializer 
 								 GenericPPO)
