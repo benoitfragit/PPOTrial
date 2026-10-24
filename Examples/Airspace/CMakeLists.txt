@@ -1,5 +1,6 @@
 add_subdirectory(Entities)
 add_subdirectory(Initializer)
+add_subdirectory(Evaluation)
 add_subdirectory(Agents/Interception)
 add_subdirectory(Agents/mission)
 
@@ -21,6 +22,7 @@ target_link_libraries(PPOAirspaceExample PUBLIC
     GenericEnv
     EntityInitializer
     MetaReflection
+    AirspaceEvaluation
     Interception
     Mission)
 
