@@ -3,11 +3,8 @@ on:
   push:
     branches:
       - refactor/master-generic-rl-core-20261023
+  # Run generic RL core tests even for example-only changes.
   pull_request:
-    paths:
-      - 'Core/**'
-      - 'CMakeLists.txt'
-      - '.github/workflows/core-tests.yml'
 jobs:
   core:
     strategy:
