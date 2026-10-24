@@ -3,6 +3,6 @@
     "environment": {
         "maxNorth": 44658.75,
         "maxEast": 71454,
-        "timeStep": 0.2
+        "timeStep": 0.20000000298023224
     }
 }
