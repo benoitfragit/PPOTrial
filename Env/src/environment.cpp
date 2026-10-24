@@ -83,6 +83,7 @@ struct Environment::Impl
     mutable std::mutex               m_snapshotMutex{};
     std::thread                     m_thread;
     std::unique_ptr<IWorldRules>     m_worldRules{};
+    Entity::InitializerSystem       m_entityInitializer{ nullptr };
 
     std::atomic<bool>               m_running           { false };  
     eEnvironmentState               m_state             { eEnvironmentState::INIT };
@@ -325,6 +326,22 @@ Environment::GetRegistry(void) noexcept
         return nullptr;
 
     return &p_impl->m_world;
+}
+
+Entity::InitializerSystem
+Environment::GetEntityInitializer(void) const noexcept
+{
+    return p_impl != nullptr ? p_impl->m_entityInitializer : nullptr;
+}
+
+bool
+Environment::SetEntityInitializer(Entity::InitializerSystem initializer) noexcept
+{
+    if (p_impl == nullptr || p_impl->m_running.load(std::memory_order_acquire))
+        return false;
+
+    p_impl->m_entityInitializer = initializer;
+    return true;
 }
 
 /**

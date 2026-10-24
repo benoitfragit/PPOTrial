@@ -1,5 +1,6 @@
 #include "existingexample.hpp"
 #include "existingworldrules.hpp"
+#include "randominitializersystem.hpp"
 
 #include "components.hpp"
 #include "entity.hpp"
@@ -40,7 +41,8 @@ RequiresPlatform(std::string const& entityType) noexcept
 bool
 LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment& environment)
 {
-    if (!environment.SetWorldRules(std::make_unique<ExistingWorldRules>()))
+    if (!environment.SetEntityInitializer(&ppo::model::RandomInitiliazerSystem::Init)
+        || !environment.SetWorldRules(std::make_unique<ExistingWorldRules>()))
         return false;
 
     auto const scenario = ppo::config::LoadScenarioDefinition(scenarioPath);

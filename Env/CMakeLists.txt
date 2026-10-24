@@ -12,13 +12,13 @@ add_library(${PROJECT_NAME}
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/data)
 
 target_link_libraries(${PROJECT_NAME} PUBLIC GenericEntities 
-											 EntityInitializer
+											 
                                              LegacyAgentAPI
                                              GenericSerializer 
 											 EnTT::EnTT)
 
 add_dependencies(${PROJECT_NAME} GenericEntities 
-								 EntityInitializer
+								 
                                  LegacyAgentAPI
                                  GenericSerializer)
 
