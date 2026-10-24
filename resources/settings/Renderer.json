@@ -1,36 +1,36 @@
 {
-    "Renderer": {
-        "AutoAttachCamera": true,
-        "Camera": {
-            "Fovy": 45,
-            "Position": [
+    "formatVersion": 2,
+    "renderer": {
+        "autoAttachCamera": true,
+        "camera": {
+            "fovy": 45,
+            "position": [
                 -54.98804,
                 19.833992,
                 22.869806
             ],
-            "Target": [
+            "target": [
                 -28.598179,
                 0.34999987,
                 -2.460511
             ],
-            "Up": [
+            "up": [
                 0,
                 1,
                 0
             ]
         },
-        "CameraDistance": 35.222,
-        "CameraHeight": 19.834,
-        "DomainHeight": 1.537,
-        "FocusSelectionInMinimap": false,
-        "MinimapZoom": 1,
-        "ScaleLevel": 1,
-        "ShowDestroyed": true,
-        "ShowDomains": true,
-        "ShowGrid": false,
-        "ShowMetaCatalog": false,
-        "ShowPseudoLidar": true,
-        "TrailDuration": 3.1
-    },
-    "formatVersion": 2
+        "cameraDistance": 35.222,
+        "cameraHeight": 19.834,
+        "domainHeight": 1.537,
+        "focusSelectionInMinimap": false,
+        "minimapZoom": 1,
+        "scaleLevel": 1,
+        "showDestroyed": true,
+        "showDomains": true,
+        "showGrid": false,
+        "showMetaCatalog": false,
+        "showPseudoLidar": true,
+        "trailDuration": 3.1
+    }
 }
