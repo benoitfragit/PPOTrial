@@ -1,5 +1,6 @@
 #include "airspaceexample.hpp"
 #include "airspaceworldrules.hpp"
+#include "airspacemeta.hpp"
 #include "randominitializersystem.hpp"
 
 #include "components.hpp"
@@ -119,7 +120,7 @@ ppo::app::ExampleDefinition Definition()
         "airspace",
         "PLAYGROUND",
         std::filesystem::path("Scenarios") / "Playground.json",
-        &ppo::reflection::RegisterAllMeta,
+        &RegisterAirspaceMeta,
         &LoadScenario
     };
 }
