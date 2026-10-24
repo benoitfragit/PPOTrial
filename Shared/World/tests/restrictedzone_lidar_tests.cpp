@@ -102,6 +102,7 @@ int main()
     RequireNear(SNASystem::EvaluateDestruction(own, victimHandle), 0.F,
                 "Same-team elimination must remain blocked");
     victim.m_side = eEntitySide::Hostile;
+    zoneState.m_side = eEntitySide::Friend;
 
     zoneSense.m_noescapezone = 10.F;
     zoneSense.m_escapezone = 20.F;
