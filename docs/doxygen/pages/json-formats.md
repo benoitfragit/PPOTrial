@@ -102,8 +102,10 @@ Each platform JSON contains **formatVersion** and a **parameters** object.
 Platform paths use Platforms/Aircraft/ or Platforms/Ground/ and file stems
 matching the platform names from scenarios.
 
-Environment.json and Renderer.json keep their normal Env and Renderer objects,
-with formatVersion = 2. The Serializer refuses invalid input and does not
+Environment.json uses a lowerCamelCase **environment** object (maxNorth,
+maxEast, timeStep). Renderer.json uses a lowerCamelCase **renderer** object
+(scaleLevel, autoAttachCamera, showGrid, camera and the other visual preferences).
+All settings are written in the same format that is read, with formatVersion = 2. The Serializer refuses invalid input and does not
 overwrite it with default values at shutdown.
 
 Units: North/East positions and limits are metres; speeds are metres/second;
