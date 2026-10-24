@@ -3,7 +3,7 @@
 * @brief Desktop application entry point for registered examples.
 */
 #include "example.hpp"
-#include "existingexample.hpp"
+#include "airspaceexample.hpp"
 #include "environment.hpp"
 #include "environmentrenderer.hpp"
 #include "serializer.hpp"
@@ -20,7 +20,7 @@ int main(int argc, char** argv)
     // The application composition root selects the compiled example.
     // No example-specific simulation, rendering or learning logic belongs here.
     std::array<ppo::app::ExampleDefinition, 1> const examples{
-        ppo::examples::existing::Definition()
+        ppo::examples::airspace::Definition()
     };
 
     bool checkExample = false;

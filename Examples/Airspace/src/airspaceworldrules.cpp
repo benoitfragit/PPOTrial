@@ -1,4 +1,4 @@
-#include "existingworldrules.hpp"
+#include "airspaceworldrules.hpp"
 
 #include "entity.hpp"
 #include "snasystem.hpp"
@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <chrono>
 
-namespace ppo::examples::existing {
+namespace ppo::examples::airspace {
 
 using ppo::model::Entity;
 using ppo::model::WorldEntities;
@@ -88,7 +88,7 @@ ExplosionHeightScaleForType(eEntityType type) noexcept
 * "alive" to "destroyed".
 */
 void
-ExistingWorldRules::BeforeStep(WorldEntities& m_entities)
+AirspaceWorldRules::BeforeStep(WorldEntities& m_entities)
 {
     for (auto& entity : m_entities)
     {
@@ -109,7 +109,7 @@ ExistingWorldRules::BeforeStep(WorldEntities& m_entities)
 * The original entity iteration order and threshold are preserved.
 */
 void
-ExistingWorldRules::ResolveDestructions(WorldEntities& m_entities)
+AirspaceWorldRules::ResolveDestructions(WorldEntities& m_entities)
 {
     // Resolve destruction outcomes only after every entity has advanced.
     for (auto& entity: m_entities)
@@ -152,7 +152,7 @@ ExistingWorldRules::ResolveDestructions(WorldEntities& m_entities)
 * reinitialized immediately afterwards.
 */
 void
-ExistingWorldRules::RecordExplosionEvents(WorldEntities& m_entities)
+AirspaceWorldRules::RecordExplosionEvents(WorldEntities& m_entities)
 {
     double const now = GetSteadyTimeSeconds();
 
@@ -185,7 +185,7 @@ ExistingWorldRules::RecordExplosionEvents(WorldEntities& m_entities)
 * @brief Removes expired explosion events from the persistent event buffer.
 */
 void
-ExistingWorldRules::AfterStep(void)
+AirspaceWorldRules::AfterStep(void)
 {
     double const now = GetSteadyTimeSeconds();
     auto const keepFrom = std::remove_if(
@@ -199,13 +199,13 @@ ExistingWorldRules::AfterStep(void)
 }
 
 
-void ExistingWorldRules::Resolve(WorldEntities& entities)
+void AirspaceWorldRules::Resolve(WorldEntities& entities)
 {
     ResolveDestructions(entities);
     RecordExplosionEvents(entities);
 }
 
-void ExistingWorldRules::CopySnapshot(entt::registry& source, entt::registry& destination) const
+void AirspaceWorldRules::CopySnapshot(entt::registry& source, entt::registry& destination) const
 {
     source.view<ppo::model::sSNAState>().each([&](auto entity, auto const& component)
     {
@@ -225,4 +225,4 @@ void ExistingWorldRules::CopySnapshot(entt::registry& source, entt::registry& de
     destination.ctx().emplace<sExplosionEventBuffer>(sExplosionEventBuffer{m_explosionEvents});
 }
 
-} // namespace ppo::examples::existing
+} // namespace ppo::examples::airspace

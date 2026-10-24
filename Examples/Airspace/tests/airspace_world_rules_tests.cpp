@@ -1,4 +1,4 @@
-#include "existingworldrules.hpp"
+#include "airspaceworldrules.hpp"
 
 #include "entity.hpp"
 #include "components.hpp"
@@ -16,7 +16,7 @@ void Require(bool condition, char const* message)
         throw std::runtime_error(message);
 }
 
-void TestExistingWorldRules()
+void TestAirspaceWorldRules()
 {
     using namespace ppo::model;
 
@@ -24,7 +24,7 @@ void TestExistingWorldRules()
     world.ctx().emplace<sEnvironmentState>();
     auto entity = std::make_shared<Entity>(&world, eEntitySide::Friend, eEntityType::Objective);
     WorldEntities entities{entity};
-    ppo::examples::existing::ExistingWorldRules rules;
+    ppo::examples::airspace::AirspaceWorldRules rules;
 
     auto [state] = entity->get<sEntityState>();
     state.m_x = 12.0F;
@@ -80,7 +80,7 @@ int main()
 {
     try
     {
-        TestExistingWorldRules();
+        TestAirspaceWorldRules();
         return 0;
     }
     catch (std::exception const& error)
