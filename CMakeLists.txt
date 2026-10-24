@@ -32,7 +32,6 @@ include(${CMAKE_SOURCE_DIR}/dependencies.cmake)
 
 add_subdirectory(Serialization)
 add_subdirectory(Entities)
-add_subdirectory(Initializer)
 add_subdirectory(PPO)
 add_subdirectory(Bindings)
 add_subdirectory(Env)
