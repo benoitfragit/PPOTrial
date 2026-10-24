@@ -40,5 +40,11 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_executable(AirspaceMetaTests tests/airspace_meta_tests.cpp)
     target_compile_features(AirspaceMetaTests PRIVATE cxx_std_17)
     target_link_libraries(AirspaceMetaTests PRIVATE PPOAirspaceExample)
+    # The test links legacy Torch-backed agent factories, so copy the same
+    # configuration-matched runtime DLLs as PPO.exe and PolicyCheckpointTests.
+    add_custom_command(TARGET AirspaceMetaTests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_BINARY_DIR}/libtorch/lib"
+            "$<TARGET_FILE_DIR:AirspaceMetaTests>")
     add_test(NAME AirspaceMetaTests COMMAND AirspaceMetaTests)
 endif()
