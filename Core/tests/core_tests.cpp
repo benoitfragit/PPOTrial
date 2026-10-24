@@ -177,6 +177,22 @@ void TestEvaluationScheduling() {
     Check(!empty.completed && empty.finishedTests == 0);
 }
 
+// The helper must also work in the dependency-free build, for a domain
+// that is entirely unrelated to either current neural policy.
+struct ExampleAgentModel
+{
+    using STATES = std::array<float, 4>;
+    using ACTIONS = std::array<float, 2>;
+    inline static constexpr ppo::core::AgentContract kAgentContract =
+        ppo::core::MakeAgentContract<STATES, ACTIONS>(
+            "Navigation2D", "navigation2d.observation.v1", "navigation2d.action.v1");
+};
+
+static_assert(ppo::core::SameContract(
+                  ppo::core::AgentContractOf<ExampleAgentModel>(),
+                  ExampleAgentModel::kAgentContract),
+              "Model and generic agent contract must agree");
+
 void TestAgentContracts()
 {
     using ppo::core::AgentContract;
@@ -207,6 +223,16 @@ void TestAgentContracts()
     constexpr AgentContract invalid = MakeAgentContract<
         std::array<float, 4>, std::array<float, 2>>(
             "", "navigation2d.observation.v1", "navigation2d.action.v1");
+    constexpr AgentContract noObservationLayout = { "Navigation2D", "", 4U,
+                                                     "navigation2d.action.v1", 2U };
+    constexpr AgentContract noActionLayout = { "Navigation2D", "navigation2d.observation.v1",
+                                                4U, "", 2U };
+    constexpr AgentContract zeroObservation = { "Navigation2D", "navigation2d.observation.v1",
+                                                 0U, "navigation2d.action.v1", 2U };
+    constexpr AgentContract zeroAction = { "Navigation2D", "navigation2d.observation.v1",
+                                            4U, "navigation2d.action.v1", 0U };
+
+
 
     static_assert(IsValid(example), "Example contract must be valid");
     static_assert(SameContract(example, same), "Identical layouts must match");
@@ -215,6 +241,11 @@ void TestAgentContracts()
     static_assert(!SameContract(example, differentSize), "Dimensions must match");
     static_assert(!SameContract(example, differentProfile), "Profile identity must match");
     static_assert(!IsValid(invalid), "Unnamed agent contracts are invalid");
+    static_assert(!IsValid(noObservationLayout), "Missing observation ID is invalid");
+    static_assert(!IsValid(noActionLayout), "Missing action ID is invalid");
+    static_assert(!IsValid(zeroObservation), "Zero-length observation is invalid");
+    static_assert(!IsValid(zeroAction), "Zero-length action is invalid");
+    static_assert(!SameContract(invalid, invalid), "Invalid contracts cannot match");
     Check(SameContract(example, same));
     Check(!SameContract(example, reordered));
 }

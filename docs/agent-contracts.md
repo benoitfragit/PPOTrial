@@ -31,10 +31,11 @@ struct AgentContract {
 ```
 
 `MakeAgentContract<ObservationVector, ActionVector>()` derives dimensions from
-C++ fixed-size observation and action vector types. `IsValid()` validates the
-descriptor and `SameContract()` requires profile, semantic layout IDs and
-dimensions to match exactly. Matching dimensions **alone** never establish
-checkpoint compatibility.
+C++ fixed-size observation and action vector types. `AgentContractOf<Model>()`
+centralizes compile-time validation for both `TrainingAgent` and `ProdAgent`.
+`IsValid()` validates the descriptor and `SameContract()` requires profile,
+semantic layout IDs and dimensions to match exactly. Matching dimensions
+**alone** never establish checkpoint compatibility.
 
 The types only depend on C++17. There is no EnTT, LibTorch or graphics
 dependency. Semantic layout IDs are application-owned; the core never
@@ -85,6 +86,10 @@ policy stays bound to its original layout.
   remain unchanged.
 - `Desktop VS2022 build`: Debug and Release CI runs CMake and CTest against
   matching LibTorch variants.
+
+Descriptors use `std::string_view`: declare them with string literals or other
+static-lifetime strings, never temporary configuration strings. They are not
+a replacement for versioned JSON serialization or checkpoint metadata.
 
 These tests do **not** prove Play-to-save end-to-end training equivalence.
 That remains a separate required manual/integration acceptance test before

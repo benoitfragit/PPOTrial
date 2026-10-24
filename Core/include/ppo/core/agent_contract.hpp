@@ -57,4 +57,18 @@ constexpr AgentContract MakeAgentContract(
     };
 }
 
+// Shared validation for both training and inference bindings. Future domain
+// adapters describe themselves without adding cases to the core.
+template<typename Model>
+constexpr AgentContract AgentContractOf() noexcept
+{
+    constexpr AgentContract contract = Model::kAgentContract;
+    static_assert(IsValid(contract), "Agent contract must have non-empty IDs and dimensions");
+    static_assert(contract.observationSize == std::tuple_size<typename Model::STATES>::value,
+                  "Agent observation dimension does not match its vector");
+    static_assert(contract.actionSize == std::tuple_size<typename Model::ACTIONS>::value,
+                  "Agent action dimension does not match its vector");
+    return contract;
+}
+
 } // namespace ppo::core
