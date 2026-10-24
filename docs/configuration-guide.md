@@ -193,10 +193,33 @@ Ces réglages ont le même schéma V2 et le même style de nommage que les autre
 }
 ~~~
 
-Renderer.json contient un objet **renderer** (scaleLevel, autoAttachCamera,
-showGrid, showPseudoLidar, camera avec position, target, up et fovy), sans les
-anciens noms de champs en majuscule. Le rendu et les valeurs enregistrées restent
-identiques : seule la représentation de configuration a changé.
+**Renderer.json** contient un objet **renderer**. L'ancien fichier V1 ne peut
+pas être copié tel quel : `schemaVersion: 1` devient `formatVersion: 2`,
+`Renderer` devient `renderer`, et les clés sont renommées en lowerCamelCase.
+
+| Ancienne clé V1 (dans `Renderer`) | Clé V2 (dans `renderer`) |
+| --- | --- |
+| `ScaleLevel`, `AutoAttachCamera` | `scaleLevel`, `autoAttachCamera` |
+| `ShowGrid`, `ShowDomains`, `ShowDestroyed`, `ShowMetaCatalog` | `showGrid`, `showDomains`, `showDestroyed`, `showMetaCatalog` |
+| `ShowPseudoLidar`, `FocusSelectionInMinimap` | `showPseudoLidar`, `focusSelectionInMinimap` |
+| `CameraDistance`, `CameraHeight`, `TrailDuration` | `cameraDistance`, `cameraHeight`, `trailDuration` |
+| `DomainHeight`, `MinimapZoom` | `domainHeight`, `minimapZoom` |
+| `Camera.Position`, `Camera.Target`, `Camera.Up`, `Camera.Fovy` | `camera.position`, `camera.target`, `camera.up`, `camera.fovy` |
+| `ShowMinimap`, `ShowEntities`, `ShowInspection`, `ShowSimulation` (si présents) | `showMinimap`, `showEntities`, `showInspection`, `showSimulation` |
+
+Les quatre derniers paramètres de panneaux ont été ajoutés avec l'interface
+d'apprentissage. Lorsqu'ils sont absents de l'ancien fichier, les valeurs par
+défaut du code sont `false`, `false`, `false` et `true`, respectivement.
+Le fichier V2 distribué les renseigne explicitement. Conserver les valeurs
+numériques (notamment celles de la caméra) lors de la conversion ; ne pas
+réinitialiser `renderer` aux valeurs d'exemple.
+
+**Migration ponctuelle manuelle :** arrêter l'application, sauvegarder une
+copie de l'ancien `Renderer.json`, convertir le document et ses noms de clés
+selon le tableau ci-dessus, puis démarrer l'application avec le fichier V2.
+Le runtime ne lit pas V1 ; une configuration invalide n'est pas écrasée à
+l'arrêt. Les propriétés inconnues ne sont pas prises en charge et doivent
+être examinées avant migration.
 
 ## Sauvegarde et erreurs
 
@@ -212,4 +235,4 @@ Les campagnes, les profils et les jeux de tests sont des données d'entrée. Les
 - Les tests de sûreté vérifient qu'une configuration mal formée n'est pas écrasée.
 - Les builds et CTest Windows VS2022 Debug/Release, ainsi que les tests de simulation/évaluation et la lecture des modèles existants, doivent être validés avant fusion.
 
-Il n'y a **ni outil de conversion externe, ni lecteur V1, ni second format en production**.
+Il n'y a **aucun lecteur V1 ni second format en production**. Une éventuelle conversion ponctuelle doit être exécutée hors application et ne fait pas partie du runtime.
