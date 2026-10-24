@@ -70,6 +70,9 @@ using AgentFactory = std::shared_ptr<ppo::model::IAgent>(*)(
     ppo::model::Environment&, ppo::model::BaseEntity&, std::string_view);
 
 // Concrete examples register their own entity and agent factories.
+// Optional scenario name aliases preserve older configurations without
+// changing a C++ class identity or its EnTT component type.
+void RegisterTypeAlias(std::string_view legacyName, std::string_view canonicalName);
 void RegisterEntityFactory(std::string_view name, EntityFactory factory);
 void RegisterAgentFactory(std::string_view name, AgentFactory factory);
 

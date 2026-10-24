@@ -10,6 +10,7 @@
 #include "airspacecomponents.hpp"
 #include "utils.hpp"
 #include "snasystem.hpp"
+#include "restrictedzonelidar.hpp"
 
 #include <algorithm>
 #include <array>
@@ -25,19 +26,16 @@ namespace {
 * @brief Number of bins used by the mission pseudo-lidar.
 */
 constexpr std::size_t kPseudoLidarBinCount = MissionObservationLayout::kPseudoLidarBinCount;
+static_assert(kPseudoLidarBinCount == ppo::model::kRestrictedZoneLidarBins,
+              "RLMission pseudo-LiDAR observation count must remain unchanged");
 constexpr float kPseudoLidarAngleSpan = static_cast<float>(ppo::model::TWOPI);
-constexpr float kPseudoLidarHalfAngleSpan = 0.5F * kPseudoLidarAngleSpan;
-constexpr float kPseudoLidarStepAngle =
-    kPseudoLidarAngleSpan / static_cast<float>(kPseudoLidarBinCount - 1U);
 
 constexpr float kTrackRangeReference = 12000.F;
 constexpr float kClosingSpeedReference = 900.F;
-constexpr float kSamDangerMultiplier = 1.10F;
+constexpr float kRestrictedZoneDangerMultiplier = 1.10F;
 constexpr float kSamCautionMultiplier = 1.75F;
-constexpr float kNoEscapeEpsilon = 1.0e-4F;
-constexpr float kRayEpsilon = 1.0e-5F;
 constexpr float kNormalizedCautionMargin =
-    (kSamCautionMultiplier - kSamDangerMultiplier) / kSamDangerMultiplier;
+    (kSamCautionMultiplier - kRestrictedZoneDangerMultiplier) / kRestrictedZoneDangerMultiplier;
 
 constexpr float kMainTargetDestructionReward = 40.F;
 constexpr float kSecondaryTargetDestructionReward = 6.F;
@@ -74,7 +72,7 @@ struct sTrackObservation
 /**
 * @brief Aggregated threat estimate built from hostile SAM entities.
 */
-struct sSamThreatAssessment
+struct sRestrictedZoneThreatAssessment
 {
     bool  m_hasThreat{ false };
     float m_maxThreatPk{ 0.F };
@@ -178,9 +176,9 @@ BuildTrackObservation(ppo::model::BaseEntity& ownEntity,
     float priority = -track.m_distance;
     priority += 6000.F * track.m_isPrimaryTarget;
     priority += 4000.F * track.m_threatToOwnship;
-    if (track.m_type == ppo::model::eEntityType::SAM)
+    if (track.m_type == ppo::model::eEntityType::RestrictedZone)
         priority += 1500.F;
-    else if (track.m_type == ppo::model::eEntityType::Aircraft)
+    else if (track.m_type == ppo::model::eEntityType::Mobile)
         priority += 500.F;
 
     track.m_priority = priority;
@@ -188,187 +186,14 @@ BuildTrackObservation(ppo::model::BaseEntity& ownEntity,
 }
 
 /**
-* @brief Updates one pseudo-lidar bin with a closer collision candidate.
-*/
-void
-UpdatePseudoLidarHit(float hitDistance,
-                     float dangerRadius,
-                     float& bestRange,
-                     float& bestDistance) noexcept
-{
-    if (hitDistance < 0.F)
-        return;
-
-    float const normalizedDistance = NormalizeRange(hitDistance, dangerRadius);
-    if (bestDistance <= 0.F || hitDistance < bestDistance)
-        bestDistance = hitDistance;
-
-    bestRange = std::min(bestRange, normalizedDistance);
-}
-
-/**
-* @brief Intersects one ray with the evaluation area boundary.
-*/
-float
-ComputeBoundaryIntersectionDistance(ppo::model::sEntityState const& ownState,
-                                    float worldAngle,
-                                    float northLimit,
-                                    float eastLimit) noexcept
-{
-    float const dirNorth = std::cos(worldAngle);
-    float const dirEast = std::sin(worldAngle);
-    float bestDistance = std::numeric_limits<float>::infinity();
-
-    auto const tryUpdate = [&](float distance, float north, float east) noexcept
-    {
-        if (distance < 0.F)
-            return;
-
-        if (std::fabs(north) <= northLimit + 1.0e-3F
-        &&  std::fabs(east) <= eastLimit + 1.0e-3F)
-        {
-            bestDistance = std::min(bestDistance, distance);
-        }
-    };
-
-    if (std::fabs(dirNorth) > kRayEpsilon)
-    {
-        float const dNorthPos = (northLimit - ownState.m_x) / dirNorth;
-        tryUpdate(dNorthPos,
-                  northLimit,
-                  ownState.m_y + dNorthPos * dirEast);
-
-        float const dNorthNeg = (-northLimit - ownState.m_x) / dirNorth;
-        tryUpdate(dNorthNeg,
-                  -northLimit,
-                  ownState.m_y + dNorthNeg * dirEast);
-    }
-
-    if (std::fabs(dirEast) > kRayEpsilon)
-    {
-        float const dEastPos = (eastLimit - ownState.m_y) / dirEast;
-        tryUpdate(dEastPos,
-                  ownState.m_x + dEastPos * dirNorth,
-                  eastLimit);
-
-        float const dEastNeg = (-eastLimit - ownState.m_y) / dirEast;
-        tryUpdate(dEastNeg,
-                  ownState.m_x + dEastNeg * dirNorth,
-                  -eastLimit);
-    }
-
-    return std::isfinite(bestDistance) ? bestDistance : -1.F;
-}
-
-/**
-* @brief Builds pseudo-lidar hits against hostile SAM danger zones.
-*/
-void
-BuildSamPseudoLidar(entt::registry& registry,
-                    ppo::model::BaseEntity& ownEntity,
-                    ppo::model::sEntityState const& ownState,
-                    std::array<float, kPseudoLidarBinCount>& nearestCollisionRanges,
-                    std::array<float, kPseudoLidarBinCount>& nearestCollisionDistances) noexcept
-{
-    nearestCollisionRanges.fill(1.F);
-    nearestCollisionDistances.fill(0.F);
-
-    auto view = registry.view<ppo::model::sEntityState, ppo::model::sSNAState>();
-    for (auto entity : view)
-    {
-        auto const [otherState, otherSnaState] = view.get(entity);
-
-        if (entity == ownEntity.uniqid()
-        ||  otherState.m_destroyed
-        ||  otherState.m_type != ppo::model::eEntityType::SAM
-        ||  otherState.m_side == ownState.m_side)
-        {
-            continue;
-        }
-
-        float const dangerRadius = kSamDangerMultiplier * otherSnaState.m_noescapezone;
-        float const mx = ownState.m_x - otherState.m_x;
-        float const my = ownState.m_y - otherState.m_y;
-        float const distanceToCenter = std::sqrt(mx * mx + my * my);
-
-        for (std::size_t iang = 0; iang < nearestCollisionRanges.size(); ++iang)
-        {
-            float const localAngle = -kPseudoLidarHalfAngleSpan + static_cast<float>(iang) * kPseudoLidarStepAngle;
-            float const worldAngle = ownState.m_rotation + localAngle;
-
-            if (distanceToCenter <= dangerRadius + kNoEscapeEpsilon)
-            {
-                nearestCollisionRanges[iang] = 0.F;
-                nearestCollisionDistances[iang] = 0.F;
-                continue;
-            }
-
-            float const b = mx * std::cos(worldAngle) + my * std::sin(worldAngle);
-            float const c = mx * mx + my * my - dangerRadius * dangerRadius;
-            float const delta = b * b - c;
-            if (delta < 0.F)
-                continue;
-
-            float const sqrtDelta = std::sqrt(delta);
-            float const d1 = -b - sqrtDelta;
-            float const d2 = -b + sqrtDelta;
-
-            UpdatePseudoLidarHit(
-                d1,
-                dangerRadius,
-                nearestCollisionRanges[iang],
-                nearestCollisionDistances[iang]);
-            UpdatePseudoLidarHit(
-                d2,
-                dangerRadius,
-                nearestCollisionRanges[iang],
-                nearestCollisionDistances[iang]);
-        }
-    }
-}
-
-/**
-* @brief Extends pseudo-lidar hits with map-boundary intersections.
-*/
-void
-BuildZoneBoundaryPseudoLidar(ppo::model::sEntityState const& ownState,
-                             ppo::model::sEnvironmentState const& envState,
-                             std::array<float, kPseudoLidarBinCount>& nearestCollisionRanges,
-                             std::array<float, kPseudoLidarBinCount>& nearestCollisionDistances) noexcept
-{
-    float const northLimit = 0.5F * envState.m_maxNorth;
-    float const eastLimit = 0.5F * envState.m_maxEast;
-    float const zoneRangeReference =
-        std::max(std::sqrt(northLimit * northLimit + eastLimit * eastLimit), 1.F);
-
-    for (std::size_t iang = 0; iang < nearestCollisionRanges.size(); ++iang)
-    {
-        float const localAngle =
-            -kPseudoLidarHalfAngleSpan + static_cast<float>(iang) * kPseudoLidarStepAngle;
-        float const worldAngle = ownState.m_rotation + localAngle;
-        float const hitDistance = ComputeBoundaryIntersectionDistance(
-            ownState,
-            worldAngle,
-            northLimit,
-            eastLimit);
-
-        UpdatePseudoLidarHit(
-            hitDistance,
-            zoneRangeReference,
-            nearestCollisionRanges[iang],
-            nearestCollisionDistances[iang]);
-    }
-}
-
-/**
 * @brief Aggregates nearest and strongest hostile SAM threats.
 */
-sSamThreatAssessment
-AssessSamThreats(entt::registry& registry,
+sRestrictedZoneThreatAssessment
+AssessRestrictedZoneThreats(entt::registry& registry,
                  ppo::model::BaseEntity& ownEntity,
                  ppo::model::sEntityState const& ownState) noexcept
 {
-    sSamThreatAssessment assessment{};
+    sRestrictedZoneThreatAssessment assessment{};
 
     auto view = registry.view<ppo::model::sEntityState, ppo::model::sSNAState>();
     for (auto entity : view)
@@ -377,7 +202,7 @@ AssessSamThreats(entt::registry& registry,
 
         if (entity == ownEntity.uniqid()
         ||  otherState.m_destroyed
-        ||  otherState.m_type != ppo::model::eEntityType::SAM
+        ||  otherState.m_type != ppo::model::eEntityType::RestrictedZone
         ||  otherState.m_side == ownState.m_side)
         {
             continue;
@@ -386,7 +211,7 @@ AssessSamThreats(entt::registry& registry,
         float const dx = otherState.m_x - ownState.m_x;
         float const dy = otherState.m_y - ownState.m_y;
         float const distance = std::sqrt(dx * dx + dy * dy);
-        float const dangerRadius = std::max(kSamDangerMultiplier * otherSnaState.m_noescapezone, 1.F);
+        float const dangerRadius = std::max(kRestrictedZoneDangerMultiplier * otherSnaState.m_noescapezone, 1.F);
         float const normalizedMargin = (distance - dangerRadius) / dangerRadius;
         float const relativeBearing = ComputeRelativeBearing(ownState, dx, dy);
         float const forwardAlignment = std::max(std::cos(relativeBearing), 0.F);
@@ -463,12 +288,12 @@ StatesAndActionsForMission::SetNewState(STATES& state) noexcept
 
     std::array<float, kPseudoLidarBinCount> nearestCollisionRanges{};
     std::array<float, kPseudoLidarBinCount> nearestCollisionDistances{};
-    BuildSamPseudoLidar(*registry,
+    ppo::model::BuildRestrictedZonePseudoLidar(*registry,
                         ownEntity,
                         aircraftState,
                         nearestCollisionRanges,
                         nearestCollisionDistances);
-    BuildZoneBoundaryPseudoLidar(aircraftState,
+    ppo::model::BuildZoneBoundaryPseudoLidar(aircraftState,
                                  envState,
                                  nearestCollisionRanges,
                                  nearestCollisionDistances);
@@ -678,7 +503,7 @@ TargetSelectorTrainingAgent::RewardFunction(void) noexcept
         auto [otherEntityState] = otherEntity.get<ppo::model::sEntityState>();
 
         if (!otherEntityState.m_destroyed
-        &&  otherEntityState.m_type != ppo::model::eEntityType::SAM
+        &&  otherEntityState.m_type != ppo::model::eEntityType::RestrictedZone
         &&  otherEntityState.m_side != ppo::model::eEntitySide::Unknown
         &&  otherEntityState.m_side != entityState.m_side)
         {
@@ -698,7 +523,7 @@ TargetSelectorTrainingAgent::RewardFunction(void) noexcept
                     kWingmanDestructionReward;
             }
             else if (otherEntityState.m_side != ppo::model::eEntitySide::Unknown
-                 &&  otherEntityState.m_type != ppo::model::eEntityType::SAM)
+                 &&  otherEntityState.m_type != ppo::model::eEntityType::RestrictedZone)
             {
                 rewards[static_cast<int>(StatesAndActionsForMission::RewardType::SecondaryTargetDestruction)] +=
                     kSecondaryTargetDestructionReward;
@@ -726,7 +551,7 @@ TargetSelectorTrainingAgent::RewardFunction(void) noexcept
     if (!entityState.m_destroyed && !targetDestroyed)
     {
         ppo::model::BaseEntity ownEntity{ registry, m_entity.uniqid() };
-        sSamThreatAssessment const samThreat = AssessSamThreats(*registry, ownEntity, entityState);
+        sRestrictedZoneThreatAssessment const samThreat = AssessRestrictedZoneThreats(*registry, ownEntity, entityState);
         if (samThreat.m_hasThreat)
         {
             float const currentThreatMargin = samThreat.m_nearestDangerMargin;

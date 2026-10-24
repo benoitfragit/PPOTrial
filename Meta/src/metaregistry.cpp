@@ -44,6 +44,13 @@ AgentFactories(void)
     return factories;
 }
 
+std::unordered_map<entt::id_type, entt::id_type>&
+TypeAliases(void)
+{
+    static std::unordered_map<entt::id_type, entt::id_type> aliases{};
+    return aliases;
+}
+
 std::mutex&
 FactoryMutex(void)
 {
@@ -268,6 +275,13 @@ void RegisterEntityFactory(std::string_view name, EntityFactory factory)
     EntityFactories()[ToTypeId(name)] = factory;
 }
 
+void RegisterTypeAlias(std::string_view legacyName, std::string_view canonicalName)
+{
+    RegisterAllMeta();
+    std::lock_guard<std::mutex> lock(FactoryMutex());
+    TypeAliases()[ToTypeId(legacyName)] = ToTypeId(canonicalName);
+}
+
 void RegisterAgentFactory(std::string_view name, AgentFactory factory)
 {
     RegisterAllMeta();
@@ -294,7 +308,14 @@ entt::meta_type
 ResolveType(std::string_view name) noexcept
 {
     RegisterAllMeta();
-    return entt::resolve(ToTypeId(name));
+    entt::id_type id = ToTypeId(name);
+    {
+        std::lock_guard<std::mutex> lock(FactoryMutex());
+        auto const it = TypeAliases().find(id);
+        if (it != TypeAliases().end())
+            id = it->second;
+    }
+    return entt::resolve(id);
 }
 
 /**
