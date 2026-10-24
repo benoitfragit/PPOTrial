@@ -124,10 +124,12 @@ void CheckAdditionalAssets(fs::path const& root)
         "agent profile bindings changed");
 
     for (auto const& file : {
-            "Platforms/Aircraft/aircraft.json",
-            "Platforms/Aircraft/evalaircraft.json",
-            "Platforms/Aircraft/trainingaircraft.json",
-            "Platforms/Ground/sam.json"})
+            "Platforms/Mobile/aircraft.json",
+            "Platforms/Mobile/evalaircraft.json",
+            "Platforms/Mobile/trainingaircraft.json",
+            "Platforms/RestrictedZone/sam.json",
+            "Platforms/Mobile/mobile.json",
+            "Platforms/RestrictedZone/restrictedzone.json"})
     {
         auto const profile = ppo::serialization::Serializer::Parse(root / file);
         Require(profile.at("formatVersion").get<int>() == 2
@@ -135,7 +137,8 @@ void CheckAdditionalAssets(fs::path const& root)
             std::string(file) + ": invalid platform format");
         auto const& parameters = profile.at("parameters");
         std::string const filename = fs::path(file).filename().string();
-        if (filename == "aircraft.json" || filename == "evalaircraft.json")
+        if (filename == "aircraft.json" || filename == "evalaircraft.json"
+            || filename == "mobile.json")
         {
             Require(parameters.at("FlightModel").at("MaxRotAcceleration").get<double>()
                     == 0.4000000059604645
@@ -151,7 +154,7 @@ void CheckAdditionalAssets(fs::path const& root)
                     == 3.1471980571746827,
                 filename + ": V2 training platform numerical precision changed");
         }
-        else if (filename == "sam.json")
+        else if (filename == "sam.json" || filename == "restrictedzone.json")
         {
             Require(parameters.at("SNA").at("MaxShootAngle").get<double>()
                     == 3.14159178,
