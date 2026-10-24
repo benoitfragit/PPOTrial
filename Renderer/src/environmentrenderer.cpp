@@ -9,6 +9,8 @@
 #include "environmentrenderer.hpp"
 
 #include <algorithm>
+#include <stdexcept>
+
 #include <array>
 #include <cctype>
 #include <chrono>
