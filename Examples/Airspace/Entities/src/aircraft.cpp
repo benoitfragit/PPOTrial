@@ -7,6 +7,7 @@
 * @license MIT
 */
 #include "aircraft.hpp"
+#include "airspacecomponents.hpp"
 
 #include "snasystem.hpp"
 #include "flightmodelsystem.hpp"

@@ -7,6 +7,7 @@
 * @license MIT
 */
 #include "Interception.hpp"
+#include "airspacecomponents.hpp"
 #include "entity.hpp"
 #include "utils.hpp"
 

@@ -7,6 +7,7 @@
 * @license MIT
 */
 #include "snacontrolsystem.hpp"
+#include "airspacecomponents.hpp"
 
 #include "utils.hpp"
 

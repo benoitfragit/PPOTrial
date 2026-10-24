@@ -7,6 +7,7 @@
 * @license MIT
 */
 #include "randominitializersystem.hpp"
+#include "airspacecomponents.hpp"
 
 #include "interface.hpp"
 #include "utils.hpp"

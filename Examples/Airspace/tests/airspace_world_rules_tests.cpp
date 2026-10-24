@@ -2,6 +2,7 @@
 
 #include "entity.hpp"
 #include "components.hpp"
+#include "airspacecomponents.hpp"
 
 #include <entt/entt.hpp>
 #include <iostream>

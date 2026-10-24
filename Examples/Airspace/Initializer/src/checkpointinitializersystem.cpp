@@ -7,6 +7,7 @@
 * @license MIT
 */
 #include "checkpointinitializersystem.hpp"
+#include "airspacecomponents.hpp"
 #include "randominitializersystem.hpp"
 #include "utils.hpp"
 #include "serializer.hpp"

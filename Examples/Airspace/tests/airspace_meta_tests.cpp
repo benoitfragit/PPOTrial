@@ -2,6 +2,7 @@
 #include "metaregistry.hpp"
 #include "environment.hpp"
 #include "components.hpp"
+#include "airspacecomponents.hpp"
 #include <stdexcept>
 #include <initializer_list>
 

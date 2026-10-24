@@ -20,5 +20,7 @@ target_link_libraries(${PROJECT_NAME}
         GenericEntities
         GenericEnv
         GenericPPO
-        MetaReflection)
+        MetaReflection
+    PRIVATE
+        AirspaceEntities)
 

@@ -7,6 +7,7 @@
 * @license MIT
 */
 #include "evaluator.hpp"
+#include "airspacecomponents.hpp"
 #include "ppo/core/multi_agent.hpp"
 #include "ppo/core/evaluation.hpp"
 #include "entityruntime.hpp"
