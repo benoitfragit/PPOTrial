@@ -14,6 +14,7 @@ target_include_directories(PPOExistingExample PUBLIC
 target_link_libraries(PPOExistingExample PUBLIC
     GenericEntities
     GenericEnv
+    EntityInitializer
     MetaReflection)
 
 # Validate that historical outcomes and published components remain unchanged.

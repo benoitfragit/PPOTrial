@@ -10,7 +10,6 @@
 #include "components.hpp"
 #include "entity.hpp"
 #include "iagent.hpp"
-#include "randominitializersystem.hpp"
 #include "worldrules.hpp"
 
 #include <string>
@@ -68,7 +67,8 @@ public:
 
         if (entity != nullptr)
         {
-            entity->SetInitializerSystem(&RandomInitiliazerSystem::Init);
+            if (auto initializer = GetEntityInitializer(); initializer != nullptr)
+                entity->SetInitializerSystem(initializer);
             AddEntity(entity);
         }
 
@@ -102,6 +102,9 @@ public:
     * @return False if the worker is active or the rules are invalid.
     */
     bool SetWorldRules(std::unique_ptr<IWorldRules> rules);
+
+    // Optional initializer supplied by the example before entities are created.
+    bool SetEntityInitializer(Entity::InitializerSystem initializer) noexcept;
 
     /**
     * @brief Reads a consistent snapshot of the internal registry.
@@ -150,6 +153,8 @@ private:
     * @return Registry pointer used for entity creation.
     */
     entt::registry* GetRegistry(void) noexcept;
+
+    Entity::InitializerSystem GetEntityInitializer(void) const noexcept;
 
     /**
     * @brief Appends one entity to the managed entity list.
