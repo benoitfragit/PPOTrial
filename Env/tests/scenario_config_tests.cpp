@@ -80,7 +80,7 @@ void CheckAdditionalAssets(fs::path const& root)
     auto const& environment = world.at("environment");
     Require(environment.at("maxNorth").get<float>() == 44658.75F
         && environment.at("maxEast").get<float>() == 71454.F
-        && environment.at("timeStep").get<float>() == 0.2F,
+        && environment.at("timeStep").get<double>() == 0.20000000298023224,
         "environment state changed during migration");
 
     auto const display = ppo::serialization::Serializer::Parse(root / "Renderer.json");
@@ -92,6 +92,27 @@ void CheckAdditionalAssets(fs::path const& root)
         && renderer.at("showPseudoLidar").get<bool>()
         && renderer.at("camera").at("fovy").get<float>() == 45.F,
         "renderer settings changed during migration");
+
+    // The V2 file must retain the original camera data and current workspace
+    // panel visibility, not just a small subset of renderer preferences.
+    auto const& camera = renderer.at("camera");
+    Require(camera.at("position").size() == 3
+        && camera.at("position").at(0).get<double>() == -54.988040924072266
+        && camera.at("position").at(1).get<double>() == 19.83399200439453
+        && camera.at("position").at(2).get<double>() == 22.86980628967285
+        && camera.at("target").at(0).get<double>() == -28.59817886352539
+        && camera.at("target").at(1).get<double>() == 0.34999987483024597
+        && camera.at("target").at(2).get<double>() == -2.4605109691619873
+        && renderer.at("cameraDistance").get<double>() == 35.22200012207031
+        && renderer.at("cameraHeight").get<double>() == 19.833999633789062
+        && renderer.at("domainHeight").get<double>() == 1.5369999408721924
+        && renderer.at("trailDuration").get<double>() == 3.0999999046325684,
+        "renderer V2 lost original camera precision");
+    Require(!renderer.at("showMinimap").get<bool>()
+        && !renderer.at("showEntities").get<bool>()
+        && !renderer.at("showInspection").get<bool>()
+        && renderer.at("showSimulation").get<bool>(),
+        "renderer V2 workspace panel defaults changed");
 
     auto const profiles = ppo::serialization::Serializer::Parse(root / "AgentProfiles.json");
     Require(profiles.at("formatVersion").get<int>() == 2, "wrong agent profile format");
@@ -112,6 +133,30 @@ void CheckAdditionalAssets(fs::path const& root)
         Require(profile.at("formatVersion").get<int>() == 2
             && profile.at("parameters").is_object(),
             std::string(file) + ": invalid platform format");
+        auto const& parameters = profile.at("parameters");
+        std::string const filename = fs::path(file).filename().string();
+        if (filename == "aircraft.json" || filename == "evalaircraft.json")
+        {
+            Require(parameters.at("FlightModel").at("MaxRotAcceleration").get<double>()
+                    == 0.4000000059604645
+                && parameters.at("SNA").at("MaxShootAngle").get<double>()
+                    == 1.0471980571746826,
+                filename + ": V2 platform numerical precision changed");
+        }
+        else if (filename == "trainingaircraft.json")
+        {
+            Require(parameters.at("FlightModel").at("MaxRotAcceleration").get<double>()
+                    == 0.70000059604645
+                && parameters.at("SNA").at("MaxShootAngle").get<double>()
+                    == 3.1471980571746827,
+                filename + ": V2 training platform numerical precision changed");
+        }
+        else if (filename == "sam.json")
+        {
+            Require(parameters.at("SNA").at("MaxShootAngle").get<double>()
+                    == 3.14159178,
+                filename + ": V2 ground platform numerical precision changed");
+        }
     }
 
     auto const presets = ppo::serialization::Serializer::Parse(
