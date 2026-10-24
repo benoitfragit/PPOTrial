@@ -53,11 +53,11 @@ RegisterAgentType(char const* scenarioName, AgentFactory factory)
 
 
 /**
-* @brief Creates one aircraft entity through the environment factory.
+* @brief Creates one Mobile entity through the environment factory.
 * @param environment Target environment.
 * @param platform Platform archetype name.
 * @param side Tactical side assigned to the entity.
-* @return Created aircraft entity.
+* @return Created Mobile entity.
 */
 std::shared_ptr<ppo::model::Entity>
 CreateMobile(ppo::model::Environment& environment,
@@ -68,11 +68,11 @@ CreateMobile(ppo::model::Environment& environment,
 }
 
 /**
-* @brief Creates one SAM entity through the environment factory.
+* @brief Creates one RestrictedZone entity through the environment factory.
 * @param environment Target environment.
 * @param platform Platform archetype name.
 * @param side Tactical side assigned to the entity.
-* @return Created SAM entity.
+* @return Created RestrictedZone entity.
 */
 std::shared_ptr<ppo::model::Entity>
 CreateRestrictedZone(ppo::model::Environment& environment,
