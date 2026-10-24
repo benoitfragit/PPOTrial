@@ -14,8 +14,7 @@ target_link_libraries(${PROJECT_NAME}
 		GenericPPO
         GenericEnv
 		GenericRenderer
-		Interception
-        Mission
+		PPOExistingExample
         MetaReflection)
 		
 add_dependencies(${PROJECT_NAME} GenericEntities 
@@ -23,8 +22,7 @@ add_dependencies(${PROJECT_NAME} GenericEntities
 								 GenericPPO
 								 GenericEnv
 								 GenericRenderer
-								 Interception
-                                 Mission
+								 PPOExistingExample
                                  MetaReflection)
 
 # Copier les DLL automatiquement
@@ -33,3 +31,15 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
             "${CMAKE_BINARY_DIR}/libtorch/lib"
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
 )
+
+# Headless desktop smoke tests: exercise the actual executable's example
+# selection on the server without creating a graphics window.
+if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
+    add_test(NAME ExistingExampleList
+        COMMAND $<TARGET_FILE:${PROJECT_NAME}> --list-examples)
+    set_tests_properties(ExistingExampleList PROPERTIES
+        PASS_REGULAR_EXPRESSION "existing")
+    add_test(NAME UnknownExampleRejected
+        COMMAND $<TARGET_FILE:${PROJECT_NAME}> --example unknown-example)
+    set_tests_properties(UnknownExampleRejected PROPERTIES WILL_FAIL TRUE)
+endif()
