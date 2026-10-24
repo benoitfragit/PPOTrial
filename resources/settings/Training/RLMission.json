@@ -1,0 +1,36 @@
+{
+    "formatVersion": 2,
+    "training": {
+        "rolloutSteps": 2021,
+        "checkpointEvery": 5,
+        "modelVersion": 125
+    },
+    "rewards": {
+        "clamp": 60,
+        "weights": {
+            "Main target destruction": 1,
+            "Secondary target destruction": 0.15,
+            "Ownship destruction": 1.1,
+            "Wingmen destruction": 0.8,
+            "Civilian destruction": 0.9,
+            "MissionFailure": 1,
+            "Intercept": 1,
+            "Danger": 0.7,
+            "Out Of Area": 0.25,
+            "Range": 0.9,
+            "Fuel": 0.02,
+            "NearDanger": 0.4
+        }
+    },
+    "ppo": {
+        "gamma": 0.99,
+        "gaeLambda": 0.95,
+        "clipEpsilon": 0.2,
+        "valueCoefficient": 0.5,
+        "entropyCoefficient": 0.02,
+        "learningRate": 0.0003,
+        "epochs": 4,
+        "batchSize": 64,
+        "targetKL": 0.025999999
+    }
+}

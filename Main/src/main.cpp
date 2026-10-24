@@ -119,9 +119,8 @@ main(int argc, char** argv)
 
     ppo::model::Environment environment{};
 
-    std::filesystem::path scenarioPath{
-        std::filesystem::path(RESOURCE_PATH) / "Scenarios" / "Scenario1.json"
-    };
+    std::filesystem::path const scenarioPath =
+        std::filesystem::path(RESOURCE_PATH) / "Scenarios" / "Playground.json";
     LoadScenario(scenarioPath, environment);
 
     serializer.Load();

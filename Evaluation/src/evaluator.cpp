@@ -82,11 +82,8 @@ CreateRegisteredAgent(std::string const& name,
 std::filesystem::path
 ResolveEvaluationScenarioPath(std::string const& name)
 {
-    std::filesystem::path path{ RESOURCE_PATH };
-    path /= "Scenarios";
-    path /= name + "Evaluation.json";
-    path.make_preferred();
-    return path;
+    return std::filesystem::path{ RESOURCE_PATH }
+        / "Scenarios" / "Evaluation" / (name + ".json");
 }
 
 /**
@@ -270,9 +267,9 @@ Evaluator::Impl::ValidateScenario(void) const
         return false;
     }
 
-    if (m_scenario.m_evaluation.m_checkpointFile.empty())
+    if (m_scenario.m_evaluation.m_casesFile.empty())
     {
-        LogEvaluatorEvent("Evaluation.checkpointFile is empty");
+        LogEvaluatorEvent("evaluation.casesFile is empty");
         return false;
     }
 
@@ -420,7 +417,7 @@ Evaluator::Impl::LoadScenario(std::string const& name)
     if (!ValidateScenario())
         return false;
 
-    m_buffer = ppo::config::LoadEvaluationBufferDefinition(m_scenario.m_evaluation.m_checkpointFile);
+    m_buffer = ppo::config::LoadEvaluationBufferDefinition(m_scenario.m_evaluation.m_casesFile);
     if (!ValidateBuffer())
         return false;
 

@@ -1,398 +1,121 @@
-\page json_formats JSON File Formats
+\page json_formats JSON Configuration v2
 
 [TOC]
 
-## Common Rules
+## Single configuration format
 
-### Units
+All active JSON resources under resources/settings use **formatVersion = 2**.
+No alternate runtime loaders or old-file path fallbacks exist.
 
-- Positions use meters on the north/east plane.
-- Speeds use meters per second.
-- Angles use radians.
-- Time-related values use seconds unless noted otherwise.
+| Purpose | Relative path under resources/settings |
+| --- | --- |
+| Logical agent profiles | AgentProfiles.json |
+| Main scenario | Scenarios/Playground.json |
+| Evaluation scenarios | Scenarios/Evaluation/RLMission.json, Scenarios/Evaluation/RLSNA.json |
+| PPO settings | Training/RLMission.json, Training/RLSNA.json |
+| Platform parameters | Platforms/Aircraft/*.json, Platforms/Ground/*.json |
+| Evaluation cases | Evaluation/Cases/RLMission.json, Evaluation/Cases/RLSNA.json |
+| Named initial-state presets | Evaluation/InitialStates.json |
+| Simulation state | Environment.json |
+| Display state | Renderer.json |
 
-### Path Resolution
+See docs/configuration-guide.md for explanations and examples.
 
-- Files loaded through `ppo::serialization::Serializer` are resolved relative
-  to the serializer root configured in `Main/src/main.cpp`, which is currently
-  `resources/settings`.
-- Scenario evaluation checkpoint paths are resolved first relative to the
-  scenario file, then relative to `RESOURCE_PATH`.
-- Aircraft platform names resolve to `resources/settings/Aircrafts/<name>.json`.
-- Ground platform names resolve to `resources/settings/Grounds/<name>.json`.
+## Scenario and agent profiles
 
-### schemaVersion
+A scenario contains **formatVersion**, **agentProfiles** (path to AgentProfiles.json),
+and **entities** keyed by logical identifier. Each entity contains **type**, **platform**,
+**side**, **target** and a list of agent descriptors.
 
-- `schemaVersion = 1` is validated for files loaded through
-  `ppo::serialization::Serializer`.
-- That currently applies to files such as `Environment.json`,
-  `Renderer.json`, `RLMission.json`, and `RLSNA.json`.
-- Scenario files, evaluation buffers, and platform files are currently parsed
-  directly and do not enforce `schemaVersion`.
-- When a serializer-managed file is missing `schemaVersion`, the runtime
-  currently normalizes it in memory to version `1` and writes it back on save.
-
-## Runtime Settings
-
-### `resources/settings/Environment.json`
-
-```json
+~~~json
 {
-  "schemaVersion": 1,
-  "Env": {
-    "MaxNorth": 44658.75,
-    "MaxEast": 71454.0,
-    "TimeStep": 0.2
-  }
-}
-```
-
-- `Env.MaxNorth`: north-axis world limit.
-- `Env.MaxEast`: east-axis world limit.
-- `Env.TimeStep`: simulation step used by the environment.
-
-### `resources/settings/Renderer.json`
-
-```json
-{
-  "schemaVersion": 1,
-  "Renderer": {
-    "ScaleLevel": 1,
-    "AutoAttachCamera": true,
-    "ShowGrid": false,
-    "ShowDomains": true,
-    "ShowDestroyed": true,
-    "ShowMetaCatalog": false,
-    "ShowPseudoLidar": true,
-    "FocusSelectionInMinimap": false,
-    "CameraDistance": 35.2,
-    "CameraHeight": 19.8,
-    "TrailDuration": 3.1,
-    "DomainHeight": 1.53,
-    "MinimapZoom": 1.0,
-    "Camera": {
-      "Position": [34.0, 19.8, -17.0],
-      "Target": [17.0, 0.35, 14.1],
-      "Up": [0.0, 1.0, 0.0],
-      "Fovy": 45.0
+  "formatVersion": 2,
+  "agentProfiles": "../AgentProfiles.json",
+  "entities": {
+    "blue": {
+      "type": "Aircraft",
+      "platform": "trainingaircraft",
+      "side": "Friend",
+      "target": "obj2",
+      "agents": [{"profile": "RLMission", "mode": "training"}]
     }
   }
 }
-```
+~~~
 
-- `Renderer.ScaleLevel`: renderer world-to-UI scaling preset.
-- `Renderer.AutoAttachCamera`: auto-follow selection behavior.
-- `Renderer.ShowGrid`: grid visibility.
-- `Renderer.ShowDomains`: threat domain visibility.
-- `Renderer.ShowDestroyed`: destroyed entities visibility.
-- `Renderer.ShowMetaCatalog`: metadata panel visibility.
-- `Renderer.ShowPseudoLidar`: pseudo-lidar overlay visibility.
-- `Renderer.FocusSelectionInMinimap`: minimap recentering behavior.
-- `Renderer.CameraDistance`: follow-camera distance, clamped to `[5, 60]`.
-- `Renderer.CameraHeight`: follow-camera height, clamped to `[2, 25]`.
-- `Renderer.TrailDuration`: trail duration in seconds, clamped to `[2, 30]`.
-- `Renderer.DomainHeight`: rendered domain height, clamped to `[0.3, 5]`.
-- `Renderer.MinimapZoom`: minimap zoom factor, clamped to `[0.3, 4]`.
-- `Renderer.Camera.Position`: 3D camera position vector.
-- `Renderer.Camera.Target`: 3D camera look-at vector.
-- `Renderer.Camera.Up`: 3D camera up vector.
-- `Renderer.Camera.Fovy`: field of view in degrees, clamped to `[20, 90]`.
+AgentProfiles.json maps each logical profile plus mode onto the application's
+existing registered C++ agent name. The PPO core does not depend on agent names.
 
-## Scenario Files
+## Training
 
-### `resources/settings/Scenarios/*.json`
+Training/PROFIL.json has root **formatVersion**, plus **training**, **rewards** and
+**ppo** objects. Rewards use a map keyed by the model's reward-channel names.
+The codec resolves these names in the model's declared order and rejects
+missing or unknown channels.
 
-```json
+- training.rolloutSteps: transitions in one PPO rollout.
+- training.checkpointEvery: PPO updates between evaluation requests.
+- training.modelVersion: saved/current policy version.
+- rewards.clamp: total reward clamp.
+- rewards.weights: per-channel coefficients by name.
+- ppo.gamma, gaeLambda, clipEpsilon, valueCoefficient, entropyCoefficient,
+  learningRate, epochs, batchSize, targetKL: PPO hyperparameters.
+
+The settings files are updated by the application on exit.
+
+## Evaluation
+
+An evaluation scenario has the same **entities** and **agentProfiles**
+structure, plus an **evaluation** block with:
+
+- **evaluatedEntity**: entity identifier.
+- **casesFile**: relative path to the input cases JSON.
+- **nbTests**: requested cases, bounded by available data.
+- **nbSteps**: maximum steps per case.
+- **timeStep**: simulated seconds per step.
+- **maxNorth**, **maxEast**: world boundaries in metres.
+
+Evaluation/Cases/PROFIL.json contains:
+
+~~~json
 {
-  "Scenario": {
-    "entities": {
-      "blue": {
-        "type": "Aircraft",
-        "platform": "trainingaircraft",
-        "side": "Friend",
-        "target": "obj2",
-        "agents": ["TargetSelectorTrainingAgent"]
-      }
-    }
-  },
-  "Evaluation": {
-    "evaluatedEntity": "blue",
-    "checkpointFile": "../EvaluationBuffers/RLMissionEvaluationBuffer.json",
-    "nbTests": 100,
-    "nbSteps": 1024,
-    "timeStep": 0.2,
-    "maxNorth": 45000.0,
-    "maxEast": 60000.0
-  }
+  "formatVersion": 2,
+  "tests": [
+    {"name": "example", "entities": {
+      "blue": {"north": 0, "east": 0, "heading": 0, "speed": 300}
+    }}
+  ]
 }
-```
+~~~
 
-`Scenario.entities.<name>` fields:
+The actual case files each contain 100 full tests. Case files are **not**
+neural-network checkpoints (model.pt).
 
-- `type`: logical entity type. The runtime currently expects `Aircraft`,
-  `SAM`, or `Objective`.
-- `platform`: platform file stem. Required in practice for `Aircraft` and
-  `SAM`, ignored for `Objective`.
-- `side`: team side. Parsed values are `Friend` and `Hostile`.
-- `target`: name of the primary target entity inside the same scenario.
-- `agents`: list of agent factory names attached to the entity.
+Evaluation/InitialStates.json is a separate source of named presets consumed
+by CheckpointInitializerSystem. Its **presets** object holds per-entity
+lists of objects with north, east, heading, speed, turnAcceleration and
+acceleration. It does not replace the evaluator's test suites.
 
-Optional `Evaluation` section:
+## Platforms and state settings
 
-- `evaluatedEntity`: scenario entity name whose policy is evaluated.
-- `checkpointFile`: relative or absolute path to an evaluation buffer JSON.
-- `nbTests`: maximum number of evaluation tests to run.
-- `nbSteps`: number of simulation steps per test.
-- `timeStep`: evaluation-only environment time step.
-- `maxNorth`: north-axis evaluation boundary.
-- `maxEast`: east-axis evaluation boundary.
+Each platform JSON contains **formatVersion** and a **parameters** object.
+Platform paths use Platforms/Aircraft/ or Platforms/Ground/ and file stems
+matching the platform names from scenarios.
 
-This format maps directly to \ref ppo::config::ScenarioDefinition.
+Environment.json and Renderer.json keep their normal Env and Renderer objects,
+with formatVersion = 2. The Serializer refuses invalid input and does not
+overwrite it with default values at shutdown.
 
-### `resources/settings/EvaluationBuffers/*.json`
+Units: North/East positions and limits are metres; speeds are metres/second;
+orientation is radians; simulation time is seconds; camera FOV is degrees.
 
-```json
-{
-  "schemaVersion": 1,
-  "EvaluationBuffer": {
-    "tests": [
-      {
-        "name": "mission_eval_001",
-        "entities": {
-          "blue": {
-            "north": -23800,
-            "east": -14400,
-            "heading": 0.255,
-            "speed": 310,
-            "accpsi": -0.01,
-            "acc": -3
-          }
-        }
-      }
-    ]
-  }
-}
-```
+## Extension and validation
 
-- `EvaluationBuffer.tests`: ordered array of evaluation cases.
-- `tests[].name`: human-readable test identifier.
-- `tests[].entities`: per-entity initial state map keyed by scenario entity
-  name.
-- `north`: optional north position.
-- `east`: optional east position.
-- `heading`: optional heading angle.
-- `speed`: optional scalar speed.
-- `accpsi`: optional turn acceleration.
-- `acc`: optional longitudinal acceleration.
+Register C++ application agent factories, add a logical profile/mode to
+AgentProfiles.json, and reference it from a scenario. Update tests for the
+agent's reward contract and evaluation cases. No changes are needed in
+GenericRLCore.
 
-Validation rules enforced by the evaluator:
-
-- Every scenario entity must exist in every test case.
-- Aircraft entities require at least `north`, `east`, `heading`, and `speed`.
-- Non-aircraft entities require at least `north` and `east`.
-
-This format maps directly to \ref ppo::config::EvaluationBufferDefinition.
-
-## Platform Files
-
-### `resources/settings/Aircrafts/*.json`
-
-The root object name must match the file stem.
-
-```json
-{
-  "trainingaircraft": {
-    "FlightModel": {
-      "MaxAcceleration": 600.0,
-      "MaxFuel": 2000000,
-      "MaxRotAcceleration": 0.7,
-      "MaxSpeed": 700.0,
-      "MinSpeed": 10.0
-    },
-    "SNA": {
-      "MaxMissile": 8,
-      "MaxNoEscapeZoneRange": 5000.0,
-      "MaxShootAngle": 3.1471980571746826
-    },
-    "SNAControl": {
-      "Available": true
-    }
-  }
-}
-```
-
-`FlightModel` fields:
-
-- `MaxAcceleration`: maximum longitudinal acceleration.
-- `MaxFuel`: maximum fuel quantity.
-- `MaxRotAcceleration`: maximum turn acceleration.
-- `MaxSpeed`: maximum speed.
-- `MinSpeed`: minimum sustainable speed.
-
-`SNA` fields:
-
-- `MaxMissile`: maximum missile count.
-- `MaxNoEscapeZoneRange`: no-escape-zone reference range.
-- `MaxShootAngle`: maximum shot angle.
-
-`SNAControl` fields:
-
-- `Available`: currently parsed but not yet used to gate controller creation.
-
-### `resources/settings/Grounds/*.json`
-
-The root object name must match the file stem.
-
-```json
-{
-  "sam": {
-    "SNA": {
-      "MaxMissile": 8,
-      "MaxNoEscapeZoneRange": 7000.0,
-      "MaxShootAngle": 3.14159178
-    }
-  }
-}
-```
-
-- Ground platform files currently expose only the `SNA` block.
-- The field meanings are the same as in aircraft platform files.
-
-## RL Agent Settings
-
-### `resources/settings/RLMission.json`
-
-```json
-{
-  "schemaVersion": 1,
-  "RLMission": {
-    "Rollout": 2021,
-    "Checkpoint": 5,
-    "Version": 112,
-    "Reward": {
-      "Clamping": 60.0,
-      "Scaling": [1.0, 0.15, 1.1, 0.8, 0.9, 1.0, 1.0, 0.7, 0.25, 0.9, 0.02, 0.4]
-    },
-    "PPO": {
-      "Gamma": 0.99,
-      "Lambda_GAE": 0.95,
-      "Clip_Epsilon": 0.2,
-      "Value_Coef": 0.5,
-      "Entropy_Coef": 0.02,
-      "Learning_Rate": 0.0003,
-      "K_epochs": 4,
-      "Batch_size": 64,
-      "Target_KL": 0.026
-    }
-  }
-}
-```
-
-Top-level fields:
-
-- `Rollout`: rollout length collected before PPO update.
-- `Checkpoint`: evaluation/checkpoint cadence used by the training flow.
-- `Version`: saved model version marker.
-
-`Reward` fields:
-
-- `Clamping`: absolute reward clamp applied before storing the transition.
-- `Scaling`: per-channel weight vector. The expected order follows
-  `rl::StatesAndActionsForMission`.
-
-Reward scaling order for `RLMission`:
-
-- `0`: `Main target destruction`
-- `1`: `Secondary target destruction`
-- `2`: `Ownship destruction`
-- `3`: `Wingmen destruction`
-- `4`: `Civilian destruction`
-- `5`: `MissionFailure`
-- `6`: `Intercept`
-- `7`: `Danger`
-- `8`: `Out Of Area`
-- `9`: `Range`
-- `10`: `Fuel`
-- `11`: `NearDanger`
-
-`PPO` fields:
-
-- `Gamma`: discount factor.
-- `Lambda_GAE`: generalized advantage estimation lambda.
-- `Clip_Epsilon`: PPO clipping parameter.
-- `Value_Coef`: value-loss coefficient.
-- `Entropy_Coef`: entropy regularization coefficient.
-- `Learning_Rate`: optimizer learning rate.
-- `K_epochs`: PPO epochs per rollout.
-- `Batch_size`: PPO mini-batch size.
-- `Target_KL`: early-stop KL target.
-
-### `resources/settings/RLSNA.json`
-
-```json
-{
-  "schemaVersion": 1,
-  "RLSNA": {
-    "Rollout": 800,
-    "Checkpoint": 5,
-    "Version": 888,
-    "Reward": {
-      "Clamping": 10.0,
-      "Scaling": [1.0, 0.216, 1.0, 0.08, 0.791, 0.553, 0.007, 1.0]
-    },
-    "PPO": {
-      "Gamma": 0.99,
-      "Lambda_GAE": 0.95,
-      "Clip_Epsilon": 0.2,
-      "Value_Coef": 0.5,
-      "Entropy_Coef": 0.02,
-      "Learning_Rate": 0.0003,
-      "K_epochs": 4,
-      "Batch_size": 64,
-      "Target_KL": 0.03
-    }
-  }
-}
-```
-
-- The structure is the same as `RLMission.json`.
-- The reward vector order follows `rl::StatesAndActions`.
-- The sample currently stored in the repository does not include
-  `schemaVersion`, but serializer-managed loads normalize it to `1` and save it
-  back on write.
-
-Reward scaling order for `RLSNA`:
-
-- `0`: `Target destruction`
-- `1`: `Target in EZ`
-- `2`: `Ownship destruction`
-- `3`: `Closing`
-- `4`: `NavPN`
-- `5`: `NavAPN`
-- `6`: `Fuel`
-- `7`: `MissionFailure`
-
-## Legacy Checkpoint File
-
-### `resources/settings/Evaluation.json`
-
-This is a legacy checkpoint store used by `CheckpointInitializerSystem` when an
-`sEvaluatorName` context is available. Its layout is different from the newer
-scenario-driven `EvaluationBuffer` format.
-
-```json
-{
-  "Data": {
-    "blueeval": [
-      [14905.04, -9068.54, 3.9094, 355.47, -0.0633, 47.8438]
-    ]
-  }
-}
-```
-
-- `Data`: map keyed by logical checkpoint buffer name.
-- `Data.<name>[]`: ordered list of six-scalar entries.
-- Entry layout: `[north, east, heading, speed, accpsi, acc]`.
-
-Prefer the newer `EvaluationBuffer` files for evaluator test suites. Keep this
-legacy format only where checkpoint-driven initialization is still required.
+Configuration tests assert numeric settings, resolved agent names, initial
+case counts and handling of malformed JSON. Run the Windows VS2022 Debug and
+Release CTest suites before release.

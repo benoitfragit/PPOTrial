@@ -8,6 +8,7 @@
 */
 #include "serializer.hpp"
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <sstream>
 
@@ -55,43 +56,20 @@ Serializer::Parse(std::filesystem::path file)
 }
 
 /**
-* @brief Validates and normalizes the schema version of one document.
+* @brief Rejects configurations outside the sole supported format.
 */
 bool
-Serializer::ValidateSchemaVersion(std::filesystem::path const& file, json& content)
+Serializer::ValidateFormatVersion(std::filesystem::path const& file, json const& content)
 {
-    if (!content.is_object())
+    if (!content.is_object()
+        || !content.contains("formatVersion")
+        || !content.at("formatVersion").is_number_integer()
+        || content.at("formatVersion").get<int>() != kConfigFormatVersion)
     {
-        LogConfigEvent("CFG_SCHEMA_INVALID_TYPE", file, "root document is not an object");
+        LogConfigEvent("CFG_FORMAT_MISMATCH", file,
+                       "configuration requires integer formatVersion = 2");
         return false;
     }
-
-    if (!content.contains("schemaVersion"))
-    {
-        std::ostringstream details;
-        details << "missing schemaVersion, fallback=" << kConfigSchemaVersion;
-        LogConfigEvent("CFG_SCHEMA_MISSING", file, details.str());
-        content["schemaVersion"] = kConfigSchemaVersion;
-        return true;
-    }
-
-    auto const& schemaVersion = content["schemaVersion"];
-
-    if (!schemaVersion.is_number_integer())
-    {
-        LogConfigEvent("CFG_SCHEMA_INVALID_TYPE", file, "schemaVersion must be an integer");
-        return false;
-    }
-
-    int const schemaVersionValue = schemaVersion.get<int>();
-    if (schemaVersionValue != kConfigSchemaVersion)
-    {
-        std::ostringstream details;
-        details << "expected=" << kConfigSchemaVersion << ", found=" << schemaVersionValue;
-        LogConfigEvent("CFG_SCHEMA_MISMATCH", file, details.str());
-        return false;
-    }
-
     return true;
 }
 
@@ -103,6 +81,8 @@ struct Serializer::Impl
     std::filesystem::path                                                    m_path{};
     std::unordered_map<std::filesystem::path, std::vector<JsonLoadFunction>> m_loadfunctions{};
     std::unordered_map<std::filesystem::path, std::vector<JsonSaveFunction>> m_savefunctions{};
+    // A malformed input must not be replaced with defaults at shutdown.
+    std::unordered_set<std::filesystem::path> m_failedLoads{};
 };
 
 /**
@@ -190,18 +170,24 @@ Serializer::Load(void)
     || !std::filesystem::exists(p_impl->m_path))
         return;
 
+    p_impl->m_failedLoads.clear();
+
     for (auto& [filepath, loads] : p_impl->m_loadfunctions)
     {
         if (!std::filesystem::exists(filepath))
         {
             LogConfigEvent("CFG_MISSING_FILE", filepath, "file not found");
+            p_impl->m_failedLoads.insert(filepath);
             continue;
         }
 
         auto content = Parse(filepath.string());
 
-        if (!ValidateSchemaVersion(filepath, content))
+        if (!ValidateFormatVersion(filepath, content))
+        {
+            p_impl->m_failedLoads.insert(filepath);
             continue;
+        }
 
         for (auto& load : loads)
         {
@@ -211,6 +197,7 @@ Serializer::Load(void)
             }
             catch (std::exception const& exception)
             {
+                p_impl->m_failedLoads.insert(filepath);
                 LogConfigEvent("CFG_LOAD_EXCEPTION", filepath, exception.what());
             }
         }
@@ -233,13 +220,19 @@ Serializer::Save(void)
     // Create one fresh document per registered save target.
     for (auto& [filepath, saves] : p_impl->m_savefunctions)
     {
+        if (p_impl->m_failedLoads.count(filepath) != 0U)
+        {
+            LogConfigEvent("CFG_SAVE_SKIPPED", filepath,
+                           "input configuration failed to load; original file preserved");
+            continue;
+        }
+
         json doc{};
 
         for (auto& save : saves)
             save(doc);
 
-        if (!doc.contains("schemaVersion"))
-            doc["schemaVersion"] = kConfigSchemaVersion;
+        doc["formatVersion"] = kConfigFormatVersion;
 
         std::ofstream(filepath) << doc.dump(4);
     }

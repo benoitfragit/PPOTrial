@@ -1,0 +1,34 @@
+{
+    "formatVersion": 2,
+    "agentProfiles": "../../AgentProfiles.json",
+    "entities": {
+        "blue": {
+            "type": "Aircraft",
+            "platform": "evalaircraft",
+            "side": "Friend",
+            "target": "red",
+            "agents": [
+                {
+                    "profile": "RLSNA",
+                    "mode": "production"
+                }
+            ]
+        },
+        "red": {
+            "type": "Aircraft",
+            "platform": "evalaircraft",
+            "side": "Hostile",
+            "target": "blue",
+            "agents": []
+        }
+    },
+    "evaluation": {
+        "evaluatedEntity": "blue",
+        "nbTests": 100,
+        "nbSteps": 512,
+        "timeStep": 0.2,
+        "maxNorth": 30000,
+        "maxEast": 40000,
+        "casesFile": "../../Evaluation/Cases/RLSNA.json"
+    }
+}

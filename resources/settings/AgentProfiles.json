@@ -1,0 +1,13 @@
+{
+    "formatVersion": 2,
+    "profiles": {
+        "RLSNA": {
+            "training": "SNATrainingAgent",
+            "production": "SNAProdAgent"
+        },
+        "RLMission": {
+            "training": "TargetSelectorTrainingAgent",
+            "production": "TargetSelectorProdAgent"
+        }
+    }
+}

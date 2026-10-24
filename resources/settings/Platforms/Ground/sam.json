@@ -1,0 +1,10 @@
+{
+    "formatVersion": 2,
+    "parameters": {
+        "SNA": {
+            "MaxMissile": 8,
+            "MaxNoEscapeZoneRange": 7000,
+            "MaxShootAngle": 3.1415918
+        }
+    }
+}

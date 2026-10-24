@@ -12,6 +12,8 @@
 
 #include "serializer.hpp"
 
+#include <stdexcept>
+
 namespace ppo::model {
 
 /**
@@ -23,9 +25,8 @@ namespace ppo::model {
 SAM::SAM(entt::registry* registry, std::string const& name, eEntitySide side):
     Entity(registry, side, eEntityType::SAM)
 {
-    std::filesystem::path filepath{ RESOURCE_PATH };
-    filepath = filepath / "Grounds";
-    filepath = filepath / name;
+    std::filesystem::path filepath =
+        std::filesystem::path{ RESOURCE_PATH } / "Platforms" / "Ground" / name;
     filepath.replace_extension(".json");
     filepath.make_preferred();
 
@@ -33,7 +34,13 @@ SAM::SAM(entt::registry* registry, std::string const& name, eEntitySide side):
     {
         auto content = ppo::serialization::Serializer::Parse(filepath);
 
-        auto section = content[name];
+        if (!content.is_object() || content.value("formatVersion", 0) != 2
+            || !content.contains("parameters") || !content["parameters"].is_object())
+            throw std::runtime_error("invalid platform configuration: " + filepath.string());
+
+        // Component factories currently accept a mutable JSON archive.
+        // Keep the original by-value extraction to preserve their API.
+        auto section = content["parameters"];
 
         SNASystem::Create(*this, section);
     }

@@ -1,0 +1,32 @@
+{
+    "formatVersion": 2,
+    "training": {
+        "rolloutSteps": 800,
+        "checkpointEvery": 5,
+        "modelVersion": 888
+    },
+    "rewards": {
+        "clamp": 10,
+        "weights": {
+            "Target destruction": 1,
+            "Target in EZ": 0.216,
+            "Ownship destruction": 1,
+            "Closing": 0.08,
+            "NavPN": 0.791,
+            "NavAPN": 0.553,
+            "Fuel": 0.007,
+            "MissionFailure": 1
+        }
+    },
+    "ppo": {
+        "gamma": 0.99,
+        "gaeLambda": 0.95,
+        "clipEpsilon": 0.2,
+        "valueCoefficient": 0.5,
+        "entropyCoefficient": 0.02,
+        "learningRate": 0.0003,
+        "epochs": 4,
+        "batchSize": 64,
+        "targetKL": 0.03
+    }
+}
