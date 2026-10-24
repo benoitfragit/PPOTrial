@@ -23,9 +23,9 @@ namespace ppo::serialization {
 using json = nlohmann::json;
 
 /**
- * @brief Global schema version expected for configuration files.
+ * @brief Single supported application configuration format.
  */
-constexpr int kConfigSchemaVersion = 1;
+constexpr int kConfigFormatVersion = 2;
 
 /**
  * @brief Singleton service used to load/save JSON configuration files.
@@ -94,12 +94,9 @@ private:
     Serializer(void);
 
     /**
-     * @brief Validate the `schemaVersion` field of a configuration payload.
-     * @param file Source file path.
-     * @param content JSON content to validate.
-     * @return true when the payload is accepted, false otherwise.
+     * @brief Require formatVersion 2 without mutating the input.
      */
-    static bool ValidateSchemaVersion(std::filesystem::path const& file, json& content);
+    static bool ValidateFormatVersion(std::filesystem::path const& file, json const& content);
 
     /**
     * @brief Hidden implementation holding callback maps and path state.

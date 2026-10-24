@@ -15,6 +15,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <limits>
 #include <string>
 #include <vector>
@@ -1478,88 +1479,88 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
         "Renderer.json",
         [this](ppo::serialization::json& ar)
         {
-            if (!ar.contains("Renderer") || !ar["Renderer"].is_object())
-                return;
+            if (!ar.contains("renderer") || !ar["renderer"].is_object())
+                throw std::invalid_argument("Renderer.json requires a renderer object");
 
-            auto const& section = ar["Renderer"];
+            auto const& section = ar["renderer"];
 
-            ApplyScaleLevel(section.value("ScaleLevel", m_currentScaleLevel));
-            m_autoAttachCamera = section.value("AutoAttachCamera", m_autoAttachCamera);
-            m_showGrid = section.value("ShowGrid", m_showGrid);
-            m_showDomains = section.value("ShowDomains", m_showDomains);
-            m_showDestroyed = section.value("ShowDestroyed", m_showDestroyed);
-            m_showMetaCatalog = section.value("ShowMetaCatalog", m_showMetaCatalog);
-            m_showMinimap = section.value("ShowMinimap", m_showMinimap);
-            m_showEntities = section.value("ShowEntities", m_showEntities);
-            m_showInspection = section.value("ShowInspection", m_showInspection);
-            m_showSimulation = section.value("ShowSimulation", m_showSimulation);
-            m_showPseudoLidar = section.value("ShowPseudoLidar", m_showPseudoLidar);
-            m_focusSelectionInMinimap = section.value("FocusSelectionInMinimap", m_focusSelectionInMinimap);
-            m_cameraDistance = std::clamp(section.value("CameraDistance", m_cameraDistance), 5.F, 60.F);
-            m_cameraHeight = std::clamp(section.value("CameraHeight", m_cameraHeight), 2.F, 25.F);
-            m_trailDuration = std::clamp(section.value("TrailDuration", m_trailDuration), 2.F, 30.F);
-            m_domainHeight = std::clamp(section.value("DomainHeight", m_domainHeight), 0.3F, 5.F);
-            m_mapZoom = std::clamp(section.value("MinimapZoom", m_mapZoom), 0.3F, 4.F);
+            ApplyScaleLevel(section.value("scaleLevel", m_currentScaleLevel));
+            m_autoAttachCamera = section.value("autoAttachCamera", m_autoAttachCamera);
+            m_showGrid = section.value("showGrid", m_showGrid);
+            m_showDomains = section.value("showDomains", m_showDomains);
+            m_showDestroyed = section.value("showDestroyed", m_showDestroyed);
+            m_showMetaCatalog = section.value("showMetaCatalog", m_showMetaCatalog);
+            m_showMinimap = section.value("showMinimap", m_showMinimap);
+            m_showEntities = section.value("showEntities", m_showEntities);
+            m_showInspection = section.value("showInspection", m_showInspection);
+            m_showSimulation = section.value("showSimulation", m_showSimulation);
+            m_showPseudoLidar = section.value("showPseudoLidar", m_showPseudoLidar);
+            m_focusSelectionInMinimap = section.value("focusSelectionInMinimap", m_focusSelectionInMinimap);
+            m_cameraDistance = std::clamp(section.value("cameraDistance", m_cameraDistance), 5.F, 60.F);
+            m_cameraHeight = std::clamp(section.value("cameraHeight", m_cameraHeight), 2.F, 25.F);
+            m_trailDuration = std::clamp(section.value("trailDuration", m_trailDuration), 2.F, 30.F);
+            m_domainHeight = std::clamp(section.value("domainHeight", m_domainHeight), 0.3F, 5.F);
+            m_mapZoom = std::clamp(section.value("minimapZoom", m_mapZoom), 0.3F, 4.F);
 
-            if (section.contains("Camera") && section["Camera"].is_object())
+            if (section.contains("camera") && section["camera"].is_object())
             {
-                auto const& camera = section["Camera"];
+                auto const& camera = section["camera"];
 
-                if (camera.contains("Position") && camera["Position"].is_array() && camera["Position"].size() == 3)
+                if (camera.contains("position") && camera["position"].is_array() && camera["position"].size() == 3)
                 {
                     m_camera.position = Vector3{
-                        camera["Position"][0].get<float>(),
-                        camera["Position"][1].get<float>(),
-                        camera["Position"][2].get<float>()
+                        camera["position"][0].get<float>(),
+                        camera["position"][1].get<float>(),
+                        camera["position"][2].get<float>()
                     };
                 }
 
-                if (camera.contains("Target") && camera["Target"].is_array() && camera["Target"].size() == 3)
+                if (camera.contains("target") && camera["target"].is_array() && camera["target"].size() == 3)
                 {
                     m_camera.target = Vector3{
-                        camera["Target"][0].get<float>(),
-                        camera["Target"][1].get<float>(),
-                        camera["Target"][2].get<float>()
+                        camera["target"][0].get<float>(),
+                        camera["target"][1].get<float>(),
+                        camera["target"][2].get<float>()
                     };
                 }
 
-                if (camera.contains("Up") && camera["Up"].is_array() && camera["Up"].size() == 3)
+                if (camera.contains("up") && camera["up"].is_array() && camera["up"].size() == 3)
                 {
                     m_camera.up = Vector3{
-                        camera["Up"][0].get<float>(),
-                        camera["Up"][1].get<float>(),
-                        camera["Up"][2].get<float>()
+                        camera["up"][0].get<float>(),
+                        camera["up"][1].get<float>(),
+                        camera["up"][2].get<float>()
                     };
                 }
 
-                m_camera.fovy = std::clamp(camera.value("Fovy", m_camera.fovy), 20.F, 90.F);
+                m_camera.fovy = std::clamp(camera.value("fovy", m_camera.fovy), 20.F, 90.F);
             }
         },
         [this](ppo::serialization::json& ar)
         {
-            auto& section = ar["Renderer"];
-            section["ScaleLevel"] = m_currentScaleLevel;
-            section["AutoAttachCamera"] = m_autoAttachCamera;
-            section["ShowGrid"] = m_showGrid;
-            section["ShowDomains"] = m_showDomains;
-            section["ShowDestroyed"] = m_showDestroyed;
-            section["ShowMetaCatalog"] = m_showMetaCatalog;
-            section["ShowMinimap"] = m_showMinimap;
-            section["ShowEntities"] = m_showEntities;
-            section["ShowInspection"] = m_showInspection;
-            section["ShowSimulation"] = m_showSimulation;
-            section["ShowPseudoLidar"] = m_showPseudoLidar;
-            section["FocusSelectionInMinimap"] = m_focusSelectionInMinimap;
-            section["CameraDistance"] = m_cameraDistance;
-            section["CameraHeight"] = m_cameraHeight;
-            section["TrailDuration"] = m_trailDuration;
-            section["DomainHeight"] = m_domainHeight;
-            section["MinimapZoom"] = m_mapZoom;
-            section["Camera"] = {
-                { "Position", { m_camera.position.x, m_camera.position.y, m_camera.position.z } },
-                { "Target",   { m_camera.target.x,   m_camera.target.y,   m_camera.target.z } },
-                { "Up",       { m_camera.up.x,       m_camera.up.y,       m_camera.up.z } },
-                { "Fovy",     m_camera.fovy }
+            auto& section = ar["renderer"];
+            section["scaleLevel"] = m_currentScaleLevel;
+            section["autoAttachCamera"] = m_autoAttachCamera;
+            section["showGrid"] = m_showGrid;
+            section["showDomains"] = m_showDomains;
+            section["showDestroyed"] = m_showDestroyed;
+            section["showMetaCatalog"] = m_showMetaCatalog;
+            section["showMinimap"] = m_showMinimap;
+            section["showEntities"] = m_showEntities;
+            section["showInspection"] = m_showInspection;
+            section["showSimulation"] = m_showSimulation;
+            section["showPseudoLidar"] = m_showPseudoLidar;
+            section["focusSelectionInMinimap"] = m_focusSelectionInMinimap;
+            section["cameraDistance"] = m_cameraDistance;
+            section["cameraHeight"] = m_cameraHeight;
+            section["trailDuration"] = m_trailDuration;
+            section["domainHeight"] = m_domainHeight;
+            section["minimapZoom"] = m_mapZoom;
+            section["camera"] = {
+                { "position", { m_camera.position.x, m_camera.position.y, m_camera.position.z } },
+                { "target",   { m_camera.target.x,   m_camera.target.y,   m_camera.target.z } },
+                { "up",       { m_camera.up.x,       m_camera.up.y,       m_camera.up.z } },
+                { "fovy",     m_camera.fovy }
             };
         });
 

@@ -10,6 +10,8 @@
 #include "randominitializersystem.hpp"
 #include "utils.hpp"
 #include "serializer.hpp"
+#include <utility>
+
 
 namespace ppo::model {
 
@@ -45,9 +47,13 @@ CheckpointInitializerSystem::Load(Entity& entity)
     // Load or generate the checkpoint buffer only once per entity.
     if (checkpoint.m_buffers.empty())
     {
-        std::filesystem::path filepath{ RESOURCE_PATH };
-
-        filepath = filepath / evalName.m_filename;
+        // Configurable collection of named initial-state presets.
+        // A missing selection uses the application's single v2 collection.
+        std::filesystem::path const presetName = evalName.m_filename.empty()
+            ? std::filesystem::path{"Evaluation/InitialStates.json"}
+            : std::filesystem::path{evalName.m_filename};
+        std::filesystem::path filepath =
+            std::filesystem::path{ RESOURCE_PATH } / presetName;
         filepath.make_preferred();
 
         if (!std::filesystem::exists(filepath))
@@ -57,13 +63,27 @@ CheckpointInitializerSystem::Load(Entity& entity)
 
         bool generation{ true };
 
-        if (tbl.contains("Data"))
+        if (tbl.is_object() && tbl.value("formatVersion", 0) == 2
+            && tbl.contains("presets") && tbl["presets"].is_object())
         {
-            auto checkpointsection = tbl["Data"];
-
-            if (checkpointsection.contains(checkpoint.m_name))
+            auto const& presets = tbl["presets"];
+            if (presets.contains(checkpoint.m_name) && presets[checkpoint.m_name].is_array())
             {
-                checkpoint.m_buffers = checkpointsection[checkpoint.m_name].get<std::vector<CheckPointBuffer>>();
+                auto const& samples = presets[checkpoint.m_name];
+                std::vector<CheckPointBuffer> loaded{};
+                loaded.reserve(samples.size());
+                for (auto const& sample : samples)
+                {
+                    CheckPointBuffer buffer{};
+                    buffer[0] = sample.at("north").get<float>();
+                    buffer[1] = sample.at("east").get<float>();
+                    buffer[2] = sample.at("heading").get<float>();
+                    buffer[3] = sample.at("speed").get<float>();
+                    buffer[4] = sample.at("turnAcceleration").get<float>();
+                    buffer[5] = sample.at("acceleration").get<float>();
+                    loaded.push_back(buffer);
+                }
+                checkpoint.m_buffers = std::move(loaded);
                 generation = false;
             }
         }

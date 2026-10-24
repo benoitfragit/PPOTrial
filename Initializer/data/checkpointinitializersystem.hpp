@@ -13,11 +13,11 @@
 namespace ppo::model {
 
 /**
-* @brief Number of scalar values stored in one legacy checkpoint entry.
+* @brief Number of scalar values stored per initial-state sample.
 */
 static constexpr int const CHECKPOINT_DIMENSION = 6;
 /**
-* @brief Legacy checkpoint entry storing one compact entity state.
+* @brief Compact internal representation of a named initial-state sample.
 */
 using CheckPointBuffer = std::array<float, CHECKPOINT_DIMENSION>;
 
@@ -52,7 +52,7 @@ struct sEvaluatorName
 };
 
 /**
-* @brief Legacy initializer loading entity state from checkpoint buffers.
+* @brief Initializer loading an entity state from named JSON presets.
 */
 class CheckpointInitializerSystem
 {

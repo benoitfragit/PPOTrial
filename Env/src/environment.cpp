@@ -169,11 +169,11 @@ Environment::Impl::Impl(void)
         {
             auto& state = m_world.ctx().get<sEnvironmentState>();
 
-            auto section = ar["Env"];
+            auto section = ar["environment"];
 
-            state.m_maxNorth = section["MaxNorth"];
-            state.m_maxEast  = section["MaxEast"];
-            state.m_dt       = section["TimeStep"];
+            state.m_maxNorth = section["maxNorth"];
+            state.m_maxEast  = section["maxEast"];
+            state.m_dt       = section["timeStep"];
 
             CreateSnapshot();
         },
@@ -181,11 +181,11 @@ Environment::Impl::Impl(void)
         {
             auto const& state = m_world.ctx().get<sEnvironmentState>();
 
-            auto& section = ar["Env"];
+            auto& section = ar["environment"];
 
-            section["MaxNorth"] = state.m_maxNorth ;
-            section["MaxEast"]  = state.m_maxEast  ;
-            section["TimeStep"] = state.m_dt       ;
+            section["maxNorth"] = state.m_maxNorth ;
+            section["maxEast"]  = state.m_maxEast  ;
+            section["timeStep"] = state.m_dt       ;
         }
     );
 }

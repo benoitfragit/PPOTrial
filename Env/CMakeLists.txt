@@ -20,3 +20,15 @@ add_dependencies(${PROJECT_NAME} GenericEntities
 								 EntityInitializer
                                  LegacyAgentAPI
                                  GenericSerializer)
+
+# Validate the current scenario, profile and evaluation contracts.
+if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
+    add_executable(ScenarioConfigurationTests
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/scenario_config_tests.cpp)
+    target_compile_features(ScenarioConfigurationTests PRIVATE cxx_std_17)
+    target_link_libraries(ScenarioConfigurationTests PRIVATE GenericEnv)
+    target_compile_definitions(ScenarioConfigurationTests PRIVATE
+        PPO_SETTINGS_ROOT="${CMAKE_SOURCE_DIR}/resources/settings")
+    add_test(NAME ScenarioConfigurationTests
+        COMMAND ScenarioConfigurationTests)
+endif()

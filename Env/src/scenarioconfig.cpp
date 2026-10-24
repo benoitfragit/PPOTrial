@@ -40,12 +40,8 @@ ResolveRelativePath(std::filesystem::path const& sourcePath, std::filesystem::pa
     if (candidate.is_absolute())
         return candidate;
 
-    std::filesystem::path const fromScenario = sourcePath.parent_path() / candidate;
-    if (std::filesystem::exists(fromScenario))
-        return fromScenario.lexically_normal();
-
-    std::filesystem::path const fromResources = std::filesystem::path{ RESOURCE_PATH } / candidate;
-    return fromResources.lexically_normal();
+    // All V2 references are resolved relative to their declaring file.
+    return (sourcePath.parent_path() / candidate).lexically_normal();
 }
 
 /**
@@ -82,17 +78,47 @@ LoadScenarioDefinition(std::filesystem::path const& scenarioPath)
 
     auto const resolvedPath = ResolveResourcePath(scenarioPath);
     auto content = ppo::serialization::Serializer::Parse(resolvedPath);
-    if (!content.is_object() || !content.contains("Scenario"))
+    if (!content.is_object())
     {
-        LogScenarioError("missing Scenario section", resolvedPath);
+        LogScenarioError("scenario must contain an object", resolvedPath);
         return definition;
     }
 
-    auto const& scenarioSection = content["Scenario"];
+    if (!content.contains("formatVersion")
+        || !content["formatVersion"].is_number_integer()
+        || content["formatVersion"].get<int>() != 2)
+    {
+        LogScenarioError("scenario requires formatVersion = 2", resolvedPath);
+        return definition;
+    }
+
+    auto const& scenarioSection = content;
     if (!scenarioSection.contains("entities") || !scenarioSection["entities"].is_object())
     {
         LogScenarioError("missing entities object", resolvedPath);
         return definition;
+    }
+
+    // V2 scenario files can use one logical agent profile in different modes.
+    // The catalog is owned by the application, not by GenericRLCore, and
+    // resolves to the same registered factories used by the runtime.
+    ppo::serialization::json agentProfiles{};
+    if (content.contains("agentProfiles") && content["agentProfiles"].is_string())
+    {
+        auto const catalogFile = ResolveRelativePath(
+            resolvedPath, content["agentProfiles"].get<std::string>());
+        auto const catalog = ppo::serialization::Serializer::Parse(catalogFile);
+        if (!catalog.is_object()
+        || !catalog.contains("formatVersion")
+        || !catalog["formatVersion"].is_number_integer()
+        || catalog["formatVersion"].get<int>() != 2
+        || !catalog.contains("profiles")
+        || !catalog["profiles"].is_object())
+        {
+            LogScenarioError("cannot load agent profile catalog", catalogFile);
+            return definition;
+        }
+        agentProfiles = catalog["profiles"];
     }
 
     for (auto const& [name, entitySection] : scenarioSection["entities"].items())
@@ -111,8 +137,29 @@ LoadScenarioDefinition(std::filesystem::path const& scenarioPath)
         {
             for (auto const& agent : entitySection["agents"])
             {
-                if (agent.is_string())
-                    entity.m_agents.push_back(agent.get<std::string>());
+                if (!agent.is_object()
+                || !agent.contains("profile") || !agent["profile"].is_string()
+                || !agent.contains("mode") || !agent["mode"].is_string())
+                {
+                    LogScenarioError("invalid agent declaration for entity '" + name + "'", resolvedPath);
+                    return ScenarioDefinition{};
+                }
+
+                auto const profileName = agent["profile"].get<std::string>();
+                auto const modeName = agent["mode"].get<std::string>();
+                if (!agentProfiles.is_object()
+                || !agentProfiles.contains(profileName)
+                || !agentProfiles[profileName].is_object()
+                || !agentProfiles[profileName].contains(modeName)
+                || !agentProfiles[profileName][modeName].is_string())
+                {
+                    LogScenarioError("unresolved agent profile '" + profileName
+                                     + "' mode '" + modeName + "' for entity '" + name + "'", resolvedPath);
+                    return ScenarioDefinition{};
+                }
+
+                entity.m_agents.push_back(
+                    agentProfiles[profileName][modeName].get<std::string>());
             }
         }
 
@@ -120,9 +167,9 @@ LoadScenarioDefinition(std::filesystem::path const& scenarioPath)
             definition.m_entities.push_back(std::move(entity));
     }
 
-    if (content.contains("Evaluation") && content["Evaluation"].is_object())
+    if (content.contains("evaluation") && content["evaluation"].is_object())
     {
-        auto const& evaluationSection = content["Evaluation"];
+        auto const& evaluationSection = content["evaluation"];
         definition.m_evaluation.m_enabled = true;
         definition.m_evaluation.m_evaluatedEntity = evaluationSection.value("evaluatedEntity", "");
         definition.m_evaluation.m_nbTests = evaluationSection.value("nbTests", 0);
@@ -131,11 +178,11 @@ LoadScenarioDefinition(std::filesystem::path const& scenarioPath)
         definition.m_evaluation.m_maxNorth = evaluationSection.value("maxNorth", definition.m_evaluation.m_maxNorth);
         definition.m_evaluation.m_maxEast = evaluationSection.value("maxEast", definition.m_evaluation.m_maxEast);
 
-        if (evaluationSection.contains("checkpointFile") && evaluationSection["checkpointFile"].is_string())
+        if (evaluationSection.contains("casesFile") && evaluationSection["casesFile"].is_string())
         {
-            definition.m_evaluation.m_checkpointFile = ResolveRelativePath(
+            definition.m_evaluation.m_casesFile = ResolveRelativePath(
                 resolvedPath,
-                std::filesystem::path{ evaluationSection["checkpointFile"].get<std::string>() });
+                std::filesystem::path{ evaluationSection["casesFile"].get<std::string>() });
         }
     }
 
@@ -155,21 +202,21 @@ LoadEvaluationBufferDefinition(std::filesystem::path const& bufferPath)
     auto const resolvedPath = ResolveResourcePath(bufferPath);
     auto content = ppo::serialization::Serializer::Parse(resolvedPath);
     if (!content.is_object()
-    || !content.contains("EvaluationBuffer")
-    || !content["EvaluationBuffer"].is_object())
+    || !content.contains("formatVersion")
+    || !content["formatVersion"].is_number_integer()
+    || content["formatVersion"].get<int>() != 2)
     {
-        LogScenarioError("missing EvaluationBuffer section", resolvedPath);
+        LogScenarioError("evaluation cases require formatVersion = 2", resolvedPath);
         return definition;
     }
 
-    auto const& bufferSection = content["EvaluationBuffer"];
-    if (!bufferSection.contains("tests") || !bufferSection["tests"].is_array())
+    if (!content.contains("tests") || !content["tests"].is_array())
     {
         LogScenarioError("missing tests array", resolvedPath);
         return definition;
     }
 
-    for (auto const& testSection : bufferSection["tests"])
+    for (auto const& testSection : content["tests"])
     {
         if (!testSection.is_object() || !testSection.contains("entities") || !testSection["entities"].is_object())
             continue;

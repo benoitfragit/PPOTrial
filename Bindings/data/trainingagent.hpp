@@ -172,6 +172,7 @@ private:
     * @brief Logical agent name.
     */
     std::string m_name{ "" };
+
     /**
     * @brief Root model directory used for serialization.
     */

@@ -8,6 +8,8 @@
 */
 #pragma once
 #include "serializer.hpp"
+#include "training_settings.hpp"
+#include <stdexcept>
 #include <algorithm>
 #include <array>
 
@@ -32,12 +34,13 @@ TrainingAgent<Policy, Model>::TrainingAgent(Model* model,
     m_modelpath{modelpath},
     p_evaluator{evaluator}
 {
-    std::filesystem::path mypath{ m_name };
-    mypath.replace_extension(".json");
+    // A single training configuration path for all policy families.
+    std::filesystem::path const settingsPath =
+        std::filesystem::path("Training") / (m_name + ".json");
 
     ppo::serialization::Serializer& serializer{ ppo::serialization::Serializer::GetInstance() };
     serializer.Register(
-        mypath,
+        settingsPath,
         [this](ppo::serialization::json& ar)
         {
             LoadFromFile(ar);
@@ -297,29 +300,31 @@ template<typename Policy, typename Model>
 void
 TrainingAgent<Policy, Model>::LoadFromFile(ppo::serialization::json& ar)
 {
-    auto agentSection         = ar[m_name];
+    std::vector<std::string> rewardNames{};
+    rewardNames.reserve(Model::REWARDS.size());
+    for (auto const& name : Model::REWARDS)
+        rewardNames.emplace_back(name);
 
-    m_internal.m_maxStep      = agentSection["Rollout"]   ;
-    m_internal.m_checkpoint   = agentSection["Checkpoint"];
-    m_internal.m_version      = agentSection["Version"]   ;
+    auto const settings = ppo::serialization::ReadTrainingSettings(ar, rewardNames);
+    if (settings.rewardWeights.size() != m_rewardScalings.size())
+        throw std::invalid_argument("Reward.Scaling count does not match the agent's reward contract");
 
-    auto rewardSection        = agentSection["Reward"];
+    m_internal.m_maxStep = settings.rolloutSteps;
+    m_internal.m_checkpoint = settings.checkpointEvery;
+    m_internal.m_version = settings.modelVersion;
+    m_internal.m_rewardClamp = settings.rewardClamp;
+    std::copy(settings.rewardWeights.begin(), settings.rewardWeights.end(),
+              m_rewardScalings.begin());
 
-    m_internal.m_rewardClamp   = rewardSection["Clamping"];
-
-    m_rewardScalings           = rewardSection["Scaling"];
-
-    auto ppoSection           = agentSection["PPO"];
-
-    m_internal.m_gamma         = ppoSection["Gamma"         ];
-    m_internal.m_lambda_gae    = ppoSection["Lambda_GAE"    ];
-    m_internal.m_clip_epsilon  = ppoSection["Clip_Epsilon"  ];
-    m_internal.m_value_coef    = ppoSection["Value_Coef"    ];
-    m_internal.m_entropy_coef  = ppoSection["Entropy_Coef"  ];
-    m_internal.m_learningReate = ppoSection["Learning_Rate" ];
-    m_internal.m_K_epochs      = ppoSection["K_epochs"      ];
-    m_internal.m_batch_size    = ppoSection["Batch_size"    ];
-    m_internal.m_target_kl     = ppoSection["Target_KL"     ]; 
+    m_internal.m_gamma         = settings.gamma;
+    m_internal.m_lambda_gae    = settings.gaeLambda;
+    m_internal.m_clip_epsilon  = settings.clipEpsilon;
+    m_internal.m_value_coef    = settings.valueCoefficient;
+    m_internal.m_entropy_coef  = settings.entropyCoefficient;
+    m_internal.m_learningReate = settings.learningRate;
+    m_internal.m_K_epochs      = settings.epochs;
+    m_internal.m_batch_size    = settings.batchSize;
+    m_internal.m_target_kl     = settings.targetKL;
 }
 
 /**
@@ -329,29 +334,28 @@ template<typename Policy, typename Model>
 void 
 TrainingAgent<Policy, Model>::SaveToFile(ppo::serialization::json& ar)
 {
-    auto& agentSection         = ar[m_name];
+    ppo::serialization::TrainingSettings settings{};
+    settings.rolloutSteps = m_internal.m_maxStep;
+    settings.checkpointEvery = m_internal.m_checkpoint;
+    settings.modelVersion = m_internal.m_version;
+    settings.rewardClamp = m_internal.m_rewardClamp;
+    settings.rewardWeights.assign(m_rewardScalings.begin(), m_rewardScalings.end());
 
-    agentSection["Rollout"]    = m_internal.m_maxStep;
-    agentSection["Checkpoint"] = m_internal.m_checkpoint;
-    agentSection["Version"]    = m_internal.m_version;
+    settings.gamma = m_internal.m_gamma;
+    settings.gaeLambda = m_internal.m_lambda_gae;
+    settings.clipEpsilon = m_internal.m_clip_epsilon;
+    settings.valueCoefficient = m_internal.m_value_coef;
+    settings.entropyCoefficient = m_internal.m_entropy_coef;
+    settings.learningRate = m_internal.m_learningReate;
+    settings.epochs = m_internal.m_K_epochs;
+    settings.batchSize = m_internal.m_batch_size;
+    settings.targetKL = m_internal.m_target_kl;
 
-    auto& rewardSection        = agentSection["Reward"];
-
-    rewardSection["Clamping"]  = m_internal.m_rewardClamp;
-
-    rewardSection["Scaling"]   = m_rewardScalings;
-
-    auto& ppoSection           = agentSection["PPO"];
-
-    ppoSection["Gamma"         ] = m_internal.m_gamma        ;
-    ppoSection["Lambda_GAE"    ] = m_internal.m_lambda_gae   ;
-    ppoSection["Clip_Epsilon"  ] = m_internal.m_clip_epsilon ;
-    ppoSection["Value_Coef"    ] = m_internal.m_value_coef   ;
-    ppoSection["Entropy_Coef"  ] = m_internal.m_entropy_coef ;
-    ppoSection["Learning_Rate" ] = m_internal.m_learningReate;
-    ppoSection["K_epochs"      ] = m_internal.m_K_epochs     ;
-    ppoSection["Batch_size"    ] = m_internal.m_batch_size   ;
-    ppoSection["Target_KL"     ] = m_internal.m_target_kl    ; 
+    std::vector<std::string> rewardNames{};
+    rewardNames.reserve(Model::REWARDS.size());
+    for (auto const& name : Model::REWARDS)
+        rewardNames.emplace_back(name);
+    ppo::serialization::WriteTrainingSettings(ar, settings, rewardNames);
 }
 
 /**

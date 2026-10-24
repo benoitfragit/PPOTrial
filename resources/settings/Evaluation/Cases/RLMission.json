@@ -1,0 +1,4105 @@
+{
+  "formatVersion": 2,
+  "tests": [
+    {
+      "name": "mission_eval_001",
+      "entities": {
+        "blue": {
+          "north": -16000,
+          "east": -28500,
+          "heading": 0.255,
+          "speed": 310,
+          "accpsi": -0.01,
+          "acc": -3
+        },
+        "red1": {
+          "north": -12000,
+          "east": 20000,
+          "heading": 3.336,
+          "speed": 285,
+          "accpsi": 0.005,
+          "acc": 1.5
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 20000
+        },
+        "sam1": {
+          "north": -10000,
+          "east": -9500
+        },
+        "sam2": {
+          "north": -9000,
+          "east": 2500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 3000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_002",
+      "entities": {
+        "blue": {
+          "north": -13000,
+          "east": -24000,
+          "heading": 0.605,
+          "speed": 330,
+          "accpsi": 0,
+          "acc": 2
+        },
+        "red1": {
+          "north": 9000,
+          "east": 27000,
+          "heading": 3.886,
+          "speed": 265,
+          "accpsi": -0.005,
+          "acc": 4
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 29000
+        },
+        "sam1": {
+          "north": -1000,
+          "east": -4500
+        },
+        "sam2": {
+          "north": 6000,
+          "east": 9500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 6000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_003",
+      "entities": {
+        "blue": {
+          "north": -10000,
+          "east": -20500,
+          "heading": 0.155,
+          "speed": 290,
+          "accpsi": -0.01,
+          "acc": -6
+        },
+        "red1": {
+          "north": 0,
+          "east": 20000,
+          "heading": 3.186,
+          "speed": 315,
+          "accpsi": 0.025,
+          "acc": 1.5
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 27200
+        },
+        "sam1": {
+          "north": 8000,
+          "east": -7500
+        },
+        "sam2": {
+          "north": 0,
+          "east": 8500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 9000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_004",
+      "entities": {
+        "blue": {
+          "north": -7000,
+          "east": -27500,
+          "heading": 0.905,
+          "speed": 350,
+          "accpsi": -0.03,
+          "acc": 5
+        },
+        "red1": {
+          "north": -9000,
+          "east": 27000,
+          "heading": 4.036,
+          "speed": 255,
+          "accpsi": 0.005,
+          "acc": -2.5
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 25400
+        },
+        "sam1": {
+          "north": -4000,
+          "east": -2500
+        },
+        "sam2": {
+          "north": -6000,
+          "east": 7500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 4000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_005",
+      "entities": {
+        "blue": {
+          "north": -4000,
+          "east": -25500,
+          "heading": 0.405,
+          "speed": 320,
+          "accpsi": -0.01,
+          "acc": -3
+        },
+        "red1": {
+          "north": 12000,
+          "east": 20000,
+          "heading": 3.586,
+          "speed": 300,
+          "accpsi": -0.015,
+          "acc": 7.5
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 23600
+        },
+        "sam1": {
+          "north": 5000,
+          "east": -5500
+        },
+        "sam2": {
+          "north": 9000,
+          "east": 6500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 7000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_006",
+      "entities": {
+        "blue": {
+          "north": -1000,
+          "east": -21000,
+          "heading": 0.285,
+          "speed": 315,
+          "accpsi": 0,
+          "acc": -1.5
+        },
+        "red1": {
+          "north": 3000,
+          "east": 27000,
+          "heading": 3.312,
+          "speed": 282.5,
+          "accpsi": 0,
+          "acc": 0.75
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 21800
+        },
+        "sam1": {
+          "north": -7000,
+          "east": -8500
+        },
+        "sam2": {
+          "north": 3000,
+          "east": 5500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 9500
+        }
+      }
+    },
+    {
+      "name": "mission_eval_007",
+      "entities": {
+        "blue": {
+          "north": 2000,
+          "east": -25000,
+          "heading": 0.635,
+          "speed": 335,
+          "accpsi": 0.01,
+          "acc": 3.5
+        },
+        "red1": {
+          "north": -6000,
+          "east": 20000,
+          "heading": 3.862,
+          "speed": 262.5,
+          "accpsi": -0.01,
+          "acc": 3.25
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 20000
+        },
+        "sam1": {
+          "north": 2000,
+          "east": -3500
+        },
+        "sam2": {
+          "north": -3000,
+          "east": 4500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 5000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_008",
+      "entities": {
+        "blue": {
+          "north": 5000,
+          "east": -27000,
+          "heading": 0.185,
+          "speed": 295,
+          "accpsi": 0,
+          "acc": -4.5
+        },
+        "red1": {
+          "north": 15000,
+          "east": 27000,
+          "heading": 3.162,
+          "speed": 312.5,
+          "accpsi": 0.02,
+          "acc": 0.75
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 29000
+        },
+        "sam1": {
+          "north": -10000,
+          "east": -6500
+        },
+        "sam2": {
+          "north": -9000,
+          "east": 3500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 8000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_009",
+      "entities": {
+        "blue": {
+          "north": 8000,
+          "east": -22500,
+          "heading": 0.935,
+          "speed": 355,
+          "accpsi": -0.02,
+          "acc": 6.5
+        },
+        "red1": {
+          "north": 6000,
+          "east": 20000,
+          "heading": 4.012,
+          "speed": 252.5,
+          "accpsi": 0,
+          "acc": -3.25
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 27200
+        },
+        "sam1": {
+          "north": -1000,
+          "east": -9500
+        },
+        "sam2": {
+          "north": 6000,
+          "east": 2500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 3000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_010",
+      "entities": {
+        "blue": {
+          "north": 11000,
+          "east": -23000,
+          "heading": 0.435,
+          "speed": 325,
+          "accpsi": 0,
+          "acc": -1.5
+        },
+        "red1": {
+          "north": -3000,
+          "east": 27000,
+          "heading": 3.562,
+          "speed": 297.5,
+          "accpsi": -0.02,
+          "acc": 6.75
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 25400
+        },
+        "sam1": {
+          "north": 8000,
+          "east": -4500
+        },
+        "sam2": {
+          "north": 0,
+          "east": 9500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 6000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_011",
+      "entities": {
+        "blue": {
+          "north": -16000,
+          "east": -28500,
+          "heading": 0.315,
+          "speed": 320,
+          "accpsi": 0.01,
+          "acc": 0
+        },
+        "red1": {
+          "north": -12000,
+          "east": 20000,
+          "heading": 3.288,
+          "speed": 280,
+          "accpsi": -0.005,
+          "acc": 0
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 23600
+        },
+        "sam1": {
+          "north": -4000,
+          "east": -7500
+        },
+        "sam2": {
+          "north": -6000,
+          "east": 8500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 9000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_012",
+      "entities": {
+        "blue": {
+          "north": -13000,
+          "east": -24000,
+          "heading": 0.665,
+          "speed": 340,
+          "accpsi": 0.02,
+          "acc": 5
+        },
+        "red1": {
+          "north": 9000,
+          "east": 27000,
+          "heading": 3.838,
+          "speed": 260,
+          "accpsi": -0.015,
+          "acc": 2.5
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 21800
+        },
+        "sam1": {
+          "north": 5000,
+          "east": -2500
+        },
+        "sam2": {
+          "north": 9000,
+          "east": 7500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 4000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_013",
+      "entities": {
+        "blue": {
+          "north": -10000,
+          "east": -20500,
+          "heading": 0.215,
+          "speed": 300,
+          "accpsi": 0.01,
+          "acc": -3
+        },
+        "red1": {
+          "north": 0,
+          "east": 20000,
+          "heading": 3.138,
+          "speed": 310,
+          "accpsi": 0.015,
+          "acc": 0
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 20000
+        },
+        "sam1": {
+          "north": -7000,
+          "east": -5500
+        },
+        "sam2": {
+          "north": 3000,
+          "east": 6500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 7000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_014",
+      "entities": {
+        "blue": {
+          "north": -7000,
+          "east": -27500,
+          "heading": 0.965,
+          "speed": 360,
+          "accpsi": -0.01,
+          "acc": 8
+        },
+        "red1": {
+          "north": -9000,
+          "east": 27000,
+          "heading": 3.988,
+          "speed": 250,
+          "accpsi": -0.005,
+          "acc": -4
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 29000
+        },
+        "sam1": {
+          "north": 2000,
+          "east": -8500
+        },
+        "sam2": {
+          "north": -3000,
+          "east": 5500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 9500
+        }
+      }
+    },
+    {
+      "name": "mission_eval_015",
+      "entities": {
+        "blue": {
+          "north": -4000,
+          "east": -25500,
+          "heading": 0.465,
+          "speed": 330,
+          "accpsi": 0.01,
+          "acc": 0
+        },
+        "red1": {
+          "north": 12000,
+          "east": 20000,
+          "heading": 3.538,
+          "speed": 295,
+          "accpsi": -0.025,
+          "acc": 6
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 27200
+        },
+        "sam1": {
+          "north": -10000,
+          "east": -3500
+        },
+        "sam2": {
+          "north": -9000,
+          "east": 4500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 5000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_016",
+      "entities": {
+        "blue": {
+          "north": -1000,
+          "east": -21000,
+          "heading": 0.345,
+          "speed": 325,
+          "accpsi": -0.01,
+          "acc": 1.5
+        },
+        "red1": {
+          "north": 3000,
+          "east": 27000,
+          "heading": 3.264,
+          "speed": 277.5,
+          "accpsi": 0.005,
+          "acc": -0.75
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 25400
+        },
+        "sam1": {
+          "north": -1000,
+          "east": -6500
+        },
+        "sam2": {
+          "north": 6000,
+          "east": 3500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 8000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_017",
+      "entities": {
+        "blue": {
+          "north": 2000,
+          "east": -25000,
+          "heading": 0.695,
+          "speed": 345,
+          "accpsi": 0,
+          "acc": 6.5
+        },
+        "red1": {
+          "north": -6000,
+          "east": 20000,
+          "heading": 3.814,
+          "speed": 257.5,
+          "accpsi": -0.005,
+          "acc": 1.75
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 23600
+        },
+        "sam1": {
+          "north": 8000,
+          "east": -9500
+        },
+        "sam2": {
+          "north": 0,
+          "east": 2500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 3000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_018",
+      "entities": {
+        "blue": {
+          "north": 5000,
+          "east": -27000,
+          "heading": 0.245,
+          "speed": 305,
+          "accpsi": -0.01,
+          "acc": -1.5
+        },
+        "red1": {
+          "north": 15000,
+          "east": 27000,
+          "heading": 3.114,
+          "speed": 307.5,
+          "accpsi": 0.025,
+          "acc": -0.75
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 21800
+        },
+        "sam1": {
+          "north": -4000,
+          "east": -4500
+        },
+        "sam2": {
+          "north": -6000,
+          "east": 9500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 6000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_019",
+      "entities": {
+        "blue": {
+          "north": 8000,
+          "east": -22500,
+          "heading": 0.995,
+          "speed": 365,
+          "accpsi": -0.03,
+          "acc": 9.5
+        },
+        "red1": {
+          "north": 6000,
+          "east": 20000,
+          "heading": 3.964,
+          "speed": 247.5,
+          "accpsi": 0.005,
+          "acc": -4.75
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 20000
+        },
+        "sam1": {
+          "north": 5000,
+          "east": -7500
+        },
+        "sam2": {
+          "north": 9000,
+          "east": 8500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 9000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_020",
+      "entities": {
+        "blue": {
+          "north": 11000,
+          "east": -23000,
+          "heading": 0.495,
+          "speed": 335,
+          "accpsi": -0.01,
+          "acc": 1.5
+        },
+        "red1": {
+          "north": -3000,
+          "east": 27000,
+          "heading": 3.514,
+          "speed": 292.5,
+          "accpsi": -0.015,
+          "acc": 5.25
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 29000
+        },
+        "sam1": {
+          "north": -7000,
+          "east": -2500
+        },
+        "sam2": {
+          "north": 3000,
+          "east": 7500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 4000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_021",
+      "entities": {
+        "blue": {
+          "north": -16000,
+          "east": -28500,
+          "heading": 0.255,
+          "speed": 330,
+          "accpsi": 0,
+          "acc": 3
+        },
+        "red1": {
+          "north": -12000,
+          "east": 20000,
+          "heading": 3.336,
+          "speed": 275,
+          "accpsi": 0,
+          "acc": -1.5
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 27200
+        },
+        "sam1": {
+          "north": 2000,
+          "east": -5500
+        },
+        "sam2": {
+          "north": -3000,
+          "east": 6500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 7000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_022",
+      "entities": {
+        "blue": {
+          "north": -13000,
+          "east": -24000,
+          "heading": 0.605,
+          "speed": 350,
+          "accpsi": 0.01,
+          "acc": 8
+        },
+        "red1": {
+          "north": 9000,
+          "east": 27000,
+          "heading": 3.886,
+          "speed": 255,
+          "accpsi": -0.01,
+          "acc": 1
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 25400
+        },
+        "sam1": {
+          "north": -10000,
+          "east": -8500
+        },
+        "sam2": {
+          "north": -9000,
+          "east": 5500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 9500
+        }
+      }
+    },
+    {
+      "name": "mission_eval_023",
+      "entities": {
+        "blue": {
+          "north": -10000,
+          "east": -20500,
+          "heading": 0.155,
+          "speed": 310,
+          "accpsi": 0,
+          "acc": 0
+        },
+        "red1": {
+          "north": 0,
+          "east": 20000,
+          "heading": 3.186,
+          "speed": 305,
+          "accpsi": 0.02,
+          "acc": -1.5
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 23600
+        },
+        "sam1": {
+          "north": -1000,
+          "east": -3500
+        },
+        "sam2": {
+          "north": 6000,
+          "east": 4500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 5000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_024",
+      "entities": {
+        "blue": {
+          "north": -7000,
+          "east": -27500,
+          "heading": 0.905,
+          "speed": 370,
+          "accpsi": -0.02,
+          "acc": 11
+        },
+        "red1": {
+          "north": -9000,
+          "east": 27000,
+          "heading": 4.036,
+          "speed": 245,
+          "accpsi": 0,
+          "acc": -5.5
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 21800
+        },
+        "sam1": {
+          "north": 8000,
+          "east": -6500
+        },
+        "sam2": {
+          "north": 0,
+          "east": 3500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 8000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_025",
+      "entities": {
+        "blue": {
+          "north": -4000,
+          "east": -25500,
+          "heading": 0.405,
+          "speed": 340,
+          "accpsi": 0,
+          "acc": 3
+        },
+        "red1": {
+          "north": 12000,
+          "east": 20000,
+          "heading": 3.586,
+          "speed": 290,
+          "accpsi": -0.02,
+          "acc": 4.5
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 20000
+        },
+        "sam1": {
+          "north": -4000,
+          "east": -9500
+        },
+        "sam2": {
+          "north": -6000,
+          "east": 2500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 3000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_026",
+      "entities": {
+        "blue": {
+          "north": -1000,
+          "east": -21000,
+          "heading": 0.285,
+          "speed": 310,
+          "accpsi": 0.01,
+          "acc": -3
+        },
+        "red1": {
+          "north": 3000,
+          "east": 27000,
+          "heading": 3.312,
+          "speed": 285,
+          "accpsi": -0.005,
+          "acc": 1.5
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 29000
+        },
+        "sam1": {
+          "north": 5000,
+          "east": -4500
+        },
+        "sam2": {
+          "north": 9000,
+          "east": 9500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 6000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_027",
+      "entities": {
+        "blue": {
+          "north": 2000,
+          "east": -25000,
+          "heading": 0.635,
+          "speed": 330,
+          "accpsi": 0.02,
+          "acc": 2
+        },
+        "red1": {
+          "north": -6000,
+          "east": 20000,
+          "heading": 3.862,
+          "speed": 265,
+          "accpsi": -0.015,
+          "acc": 4
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 27200
+        },
+        "sam1": {
+          "north": -7000,
+          "east": -7500
+        },
+        "sam2": {
+          "north": 3000,
+          "east": 8500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 9000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_028",
+      "entities": {
+        "blue": {
+          "north": 5000,
+          "east": -27000,
+          "heading": 0.185,
+          "speed": 290,
+          "accpsi": 0.01,
+          "acc": -6
+        },
+        "red1": {
+          "north": 15000,
+          "east": 27000,
+          "heading": 3.162,
+          "speed": 315,
+          "accpsi": 0.015,
+          "acc": 1.5
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 25400
+        },
+        "sam1": {
+          "north": 2000,
+          "east": -2500
+        },
+        "sam2": {
+          "north": -3000,
+          "east": 7500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 4000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_029",
+      "entities": {
+        "blue": {
+          "north": 8000,
+          "east": -22500,
+          "heading": 0.935,
+          "speed": 350,
+          "accpsi": -0.01,
+          "acc": 5
+        },
+        "red1": {
+          "north": 6000,
+          "east": 20000,
+          "heading": 4.012,
+          "speed": 255,
+          "accpsi": -0.005,
+          "acc": -2.5
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 23600
+        },
+        "sam1": {
+          "north": -10000,
+          "east": -5500
+        },
+        "sam2": {
+          "north": -9000,
+          "east": 6500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 7000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_030",
+      "entities": {
+        "blue": {
+          "north": 11000,
+          "east": -23000,
+          "heading": 0.435,
+          "speed": 320,
+          "accpsi": 0.01,
+          "acc": -3
+        },
+        "red1": {
+          "north": -3000,
+          "east": 27000,
+          "heading": 3.562,
+          "speed": 300,
+          "accpsi": -0.025,
+          "acc": 7.5
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 21800
+        },
+        "sam1": {
+          "north": -1000,
+          "east": -8500
+        },
+        "sam2": {
+          "north": 6000,
+          "east": 5500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 9500
+        }
+      }
+    },
+    {
+      "name": "mission_eval_031",
+      "entities": {
+        "blue": {
+          "north": -16000,
+          "east": -28500,
+          "heading": 0.315,
+          "speed": 315,
+          "accpsi": -0.01,
+          "acc": -1.5
+        },
+        "red1": {
+          "north": -12000,
+          "east": 20000,
+          "heading": 3.288,
+          "speed": 282.5,
+          "accpsi": 0.005,
+          "acc": 0.75
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 20000
+        },
+        "sam1": {
+          "north": 8000,
+          "east": -3500
+        },
+        "sam2": {
+          "north": 0,
+          "east": 4500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 5000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_032",
+      "entities": {
+        "blue": {
+          "north": -13000,
+          "east": -24000,
+          "heading": 0.665,
+          "speed": 335,
+          "accpsi": 0,
+          "acc": 3.5
+        },
+        "red1": {
+          "north": 9000,
+          "east": 27000,
+          "heading": 3.838,
+          "speed": 262.5,
+          "accpsi": -0.005,
+          "acc": 3.25
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 29000
+        },
+        "sam1": {
+          "north": -4000,
+          "east": -6500
+        },
+        "sam2": {
+          "north": -6000,
+          "east": 3500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 8000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_033",
+      "entities": {
+        "blue": {
+          "north": -10000,
+          "east": -20500,
+          "heading": 0.215,
+          "speed": 295,
+          "accpsi": -0.01,
+          "acc": -4.5
+        },
+        "red1": {
+          "north": 0,
+          "east": 20000,
+          "heading": 3.138,
+          "speed": 312.5,
+          "accpsi": 0.025,
+          "acc": 0.75
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 27200
+        },
+        "sam1": {
+          "north": 5000,
+          "east": -9500
+        },
+        "sam2": {
+          "north": 9000,
+          "east": 2500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 3000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_034",
+      "entities": {
+        "blue": {
+          "north": -7000,
+          "east": -27500,
+          "heading": 0.965,
+          "speed": 355,
+          "accpsi": -0.03,
+          "acc": 6.5
+        },
+        "red1": {
+          "north": -9000,
+          "east": 27000,
+          "heading": 3.988,
+          "speed": 252.5,
+          "accpsi": 0.005,
+          "acc": -3.25
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 25400
+        },
+        "sam1": {
+          "north": -7000,
+          "east": -4500
+        },
+        "sam2": {
+          "north": 3000,
+          "east": 9500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 6000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_035",
+      "entities": {
+        "blue": {
+          "north": -4000,
+          "east": -25500,
+          "heading": 0.465,
+          "speed": 325,
+          "accpsi": -0.01,
+          "acc": -1.5
+        },
+        "red1": {
+          "north": 12000,
+          "east": 20000,
+          "heading": 3.538,
+          "speed": 297.5,
+          "accpsi": -0.015,
+          "acc": 6.75
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 23600
+        },
+        "sam1": {
+          "north": 2000,
+          "east": -7500
+        },
+        "sam2": {
+          "north": -3000,
+          "east": 8500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 9000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_036",
+      "entities": {
+        "blue": {
+          "north": -1000,
+          "east": -21000,
+          "heading": 0.345,
+          "speed": 320,
+          "accpsi": 0,
+          "acc": 0
+        },
+        "red1": {
+          "north": 3000,
+          "east": 27000,
+          "heading": 3.264,
+          "speed": 280,
+          "accpsi": 0,
+          "acc": 0
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 21800
+        },
+        "sam1": {
+          "north": -10000,
+          "east": -2500
+        },
+        "sam2": {
+          "north": -9000,
+          "east": 7500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 4000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_037",
+      "entities": {
+        "blue": {
+          "north": 2000,
+          "east": -25000,
+          "heading": 0.695,
+          "speed": 340,
+          "accpsi": 0.01,
+          "acc": 5
+        },
+        "red1": {
+          "north": -6000,
+          "east": 20000,
+          "heading": 3.814,
+          "speed": 260,
+          "accpsi": -0.01,
+          "acc": 2.5
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 20000
+        },
+        "sam1": {
+          "north": -1000,
+          "east": -5500
+        },
+        "sam2": {
+          "north": 6000,
+          "east": 6500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 7000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_038",
+      "entities": {
+        "blue": {
+          "north": 5000,
+          "east": -27000,
+          "heading": 0.245,
+          "speed": 300,
+          "accpsi": 0,
+          "acc": -3
+        },
+        "red1": {
+          "north": 15000,
+          "east": 27000,
+          "heading": 3.114,
+          "speed": 310,
+          "accpsi": 0.02,
+          "acc": 0
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 29000
+        },
+        "sam1": {
+          "north": 8000,
+          "east": -8500
+        },
+        "sam2": {
+          "north": 0,
+          "east": 5500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 9500
+        }
+      }
+    },
+    {
+      "name": "mission_eval_039",
+      "entities": {
+        "blue": {
+          "north": 8000,
+          "east": -22500,
+          "heading": 0.995,
+          "speed": 360,
+          "accpsi": -0.02,
+          "acc": 8
+        },
+        "red1": {
+          "north": 6000,
+          "east": 20000,
+          "heading": 3.964,
+          "speed": 250,
+          "accpsi": 0,
+          "acc": -4
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 27200
+        },
+        "sam1": {
+          "north": -4000,
+          "east": -3500
+        },
+        "sam2": {
+          "north": -6000,
+          "east": 4500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 5000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_040",
+      "entities": {
+        "blue": {
+          "north": 11000,
+          "east": -23000,
+          "heading": 0.495,
+          "speed": 330,
+          "accpsi": 0,
+          "acc": 0
+        },
+        "red1": {
+          "north": -3000,
+          "east": 27000,
+          "heading": 3.514,
+          "speed": 295,
+          "accpsi": -0.02,
+          "acc": 6
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 25400
+        },
+        "sam1": {
+          "north": 5000,
+          "east": -6500
+        },
+        "sam2": {
+          "north": 9000,
+          "east": 3500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 8000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_041",
+      "entities": {
+        "blue": {
+          "north": -16000,
+          "east": -28500,
+          "heading": 0.255,
+          "speed": 325,
+          "accpsi": 0.01,
+          "acc": 1.5
+        },
+        "red1": {
+          "north": -12000,
+          "east": 20000,
+          "heading": 3.336,
+          "speed": 277.5,
+          "accpsi": -0.005,
+          "acc": -0.75
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 23600
+        },
+        "sam1": {
+          "north": -7000,
+          "east": -9500
+        },
+        "sam2": {
+          "north": 3000,
+          "east": 2500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 3000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_042",
+      "entities": {
+        "blue": {
+          "north": -13000,
+          "east": -24000,
+          "heading": 0.605,
+          "speed": 345,
+          "accpsi": 0.02,
+          "acc": 6.5
+        },
+        "red1": {
+          "north": 9000,
+          "east": 27000,
+          "heading": 3.886,
+          "speed": 257.5,
+          "accpsi": -0.015,
+          "acc": 1.75
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 21800
+        },
+        "sam1": {
+          "north": 2000,
+          "east": -4500
+        },
+        "sam2": {
+          "north": -3000,
+          "east": 9500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 6000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_043",
+      "entities": {
+        "blue": {
+          "north": -10000,
+          "east": -20500,
+          "heading": 0.155,
+          "speed": 305,
+          "accpsi": 0.01,
+          "acc": -1.5
+        },
+        "red1": {
+          "north": 0,
+          "east": 20000,
+          "heading": 3.186,
+          "speed": 307.5,
+          "accpsi": 0.015,
+          "acc": -0.75
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 20000
+        },
+        "sam1": {
+          "north": -10000,
+          "east": -7500
+        },
+        "sam2": {
+          "north": -9000,
+          "east": 8500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 9000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_044",
+      "entities": {
+        "blue": {
+          "north": -7000,
+          "east": -27500,
+          "heading": 0.905,
+          "speed": 365,
+          "accpsi": -0.01,
+          "acc": 9.5
+        },
+        "red1": {
+          "north": -9000,
+          "east": 27000,
+          "heading": 4.036,
+          "speed": 247.5,
+          "accpsi": -0.005,
+          "acc": -4.75
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 29000
+        },
+        "sam1": {
+          "north": -1000,
+          "east": -2500
+        },
+        "sam2": {
+          "north": 6000,
+          "east": 7500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 4000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_045",
+      "entities": {
+        "blue": {
+          "north": -4000,
+          "east": -25500,
+          "heading": 0.405,
+          "speed": 335,
+          "accpsi": 0.01,
+          "acc": 1.5
+        },
+        "red1": {
+          "north": 12000,
+          "east": 20000,
+          "heading": 3.586,
+          "speed": 292.5,
+          "accpsi": -0.025,
+          "acc": 5.25
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 27200
+        },
+        "sam1": {
+          "north": 8000,
+          "east": -5500
+        },
+        "sam2": {
+          "north": 0,
+          "east": 6500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 7000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_046",
+      "entities": {
+        "blue": {
+          "north": -1000,
+          "east": -21000,
+          "heading": 0.285,
+          "speed": 330,
+          "accpsi": -0.01,
+          "acc": 3
+        },
+        "red1": {
+          "north": 3000,
+          "east": 27000,
+          "heading": 3.312,
+          "speed": 275,
+          "accpsi": 0.005,
+          "acc": -1.5
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 25400
+        },
+        "sam1": {
+          "north": -4000,
+          "east": -8500
+        },
+        "sam2": {
+          "north": -6000,
+          "east": 5500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 9500
+        }
+      }
+    },
+    {
+      "name": "mission_eval_047",
+      "entities": {
+        "blue": {
+          "north": 2000,
+          "east": -25000,
+          "heading": 0.635,
+          "speed": 350,
+          "accpsi": 0,
+          "acc": 8
+        },
+        "red1": {
+          "north": -6000,
+          "east": 20000,
+          "heading": 3.862,
+          "speed": 255,
+          "accpsi": -0.005,
+          "acc": 1
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 23600
+        },
+        "sam1": {
+          "north": 5000,
+          "east": -3500
+        },
+        "sam2": {
+          "north": 9000,
+          "east": 4500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 5000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_048",
+      "entities": {
+        "blue": {
+          "north": 5000,
+          "east": -27000,
+          "heading": 0.185,
+          "speed": 310,
+          "accpsi": -0.01,
+          "acc": 0
+        },
+        "red1": {
+          "north": 15000,
+          "east": 27000,
+          "heading": 3.162,
+          "speed": 305,
+          "accpsi": 0.025,
+          "acc": -1.5
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 21800
+        },
+        "sam1": {
+          "north": -7000,
+          "east": -6500
+        },
+        "sam2": {
+          "north": 3000,
+          "east": 3500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 8000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_049",
+      "entities": {
+        "blue": {
+          "north": 8000,
+          "east": -22500,
+          "heading": 0.935,
+          "speed": 370,
+          "accpsi": -0.03,
+          "acc": 11
+        },
+        "red1": {
+          "north": 6000,
+          "east": 20000,
+          "heading": 4.012,
+          "speed": 245,
+          "accpsi": 0.005,
+          "acc": -5.5
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 20000
+        },
+        "sam1": {
+          "north": 2000,
+          "east": -9500
+        },
+        "sam2": {
+          "north": -3000,
+          "east": 2500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 3000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_050",
+      "entities": {
+        "blue": {
+          "north": 11000,
+          "east": -23000,
+          "heading": 0.435,
+          "speed": 340,
+          "accpsi": -0.01,
+          "acc": 3
+        },
+        "red1": {
+          "north": -3000,
+          "east": 27000,
+          "heading": 3.562,
+          "speed": 290,
+          "accpsi": -0.015,
+          "acc": 4.5
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 29000
+        },
+        "sam1": {
+          "north": -10000,
+          "east": -4500
+        },
+        "sam2": {
+          "north": -9000,
+          "east": 9500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 6000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_051",
+      "entities": {
+        "blue": {
+          "north": -16000,
+          "east": -28500,
+          "heading": 0.315,
+          "speed": 310,
+          "accpsi": 0,
+          "acc": -3
+        },
+        "red1": {
+          "north": -12000,
+          "east": 20000,
+          "heading": 3.288,
+          "speed": 285,
+          "accpsi": 0,
+          "acc": 1.5
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 27200
+        },
+        "sam1": {
+          "north": -1000,
+          "east": -7500
+        },
+        "sam2": {
+          "north": 6000,
+          "east": 8500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 9000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_052",
+      "entities": {
+        "blue": {
+          "north": -13000,
+          "east": -24000,
+          "heading": 0.665,
+          "speed": 330,
+          "accpsi": 0.01,
+          "acc": 2
+        },
+        "red1": {
+          "north": 9000,
+          "east": 27000,
+          "heading": 3.838,
+          "speed": 265,
+          "accpsi": -0.01,
+          "acc": 4
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 25400
+        },
+        "sam1": {
+          "north": 8000,
+          "east": -2500
+        },
+        "sam2": {
+          "north": 0,
+          "east": 7500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 4000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_053",
+      "entities": {
+        "blue": {
+          "north": -10000,
+          "east": -20500,
+          "heading": 0.215,
+          "speed": 290,
+          "accpsi": 0,
+          "acc": -6
+        },
+        "red1": {
+          "north": 0,
+          "east": 20000,
+          "heading": 3.138,
+          "speed": 315,
+          "accpsi": 0.02,
+          "acc": 1.5
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 23600
+        },
+        "sam1": {
+          "north": -4000,
+          "east": -5500
+        },
+        "sam2": {
+          "north": -6000,
+          "east": 6500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 7000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_054",
+      "entities": {
+        "blue": {
+          "north": -7000,
+          "east": -27500,
+          "heading": 0.965,
+          "speed": 350,
+          "accpsi": -0.02,
+          "acc": 5
+        },
+        "red1": {
+          "north": -9000,
+          "east": 27000,
+          "heading": 3.988,
+          "speed": 255,
+          "accpsi": 0,
+          "acc": -2.5
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 21800
+        },
+        "sam1": {
+          "north": 5000,
+          "east": -8500
+        },
+        "sam2": {
+          "north": 9000,
+          "east": 5500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 9500
+        }
+      }
+    },
+    {
+      "name": "mission_eval_055",
+      "entities": {
+        "blue": {
+          "north": -4000,
+          "east": -25500,
+          "heading": 0.465,
+          "speed": 320,
+          "accpsi": 0,
+          "acc": -3
+        },
+        "red1": {
+          "north": 12000,
+          "east": 20000,
+          "heading": 3.538,
+          "speed": 300,
+          "accpsi": -0.02,
+          "acc": 7.5
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 20000
+        },
+        "sam1": {
+          "north": -7000,
+          "east": -3500
+        },
+        "sam2": {
+          "north": 3000,
+          "east": 4500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 5000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_056",
+      "entities": {
+        "blue": {
+          "north": -1000,
+          "east": -21000,
+          "heading": 0.345,
+          "speed": 315,
+          "accpsi": 0.01,
+          "acc": -1.5
+        },
+        "red1": {
+          "north": 3000,
+          "east": 27000,
+          "heading": 3.264,
+          "speed": 282.5,
+          "accpsi": -0.005,
+          "acc": 0.75
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 29000
+        },
+        "sam1": {
+          "north": 2000,
+          "east": -6500
+        },
+        "sam2": {
+          "north": -3000,
+          "east": 3500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 8000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_057",
+      "entities": {
+        "blue": {
+          "north": 2000,
+          "east": -25000,
+          "heading": 0.695,
+          "speed": 335,
+          "accpsi": 0.02,
+          "acc": 3.5
+        },
+        "red1": {
+          "north": -6000,
+          "east": 20000,
+          "heading": 3.814,
+          "speed": 262.5,
+          "accpsi": -0.015,
+          "acc": 3.25
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 27200
+        },
+        "sam1": {
+          "north": -10000,
+          "east": -9500
+        },
+        "sam2": {
+          "north": -9000,
+          "east": 2500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 3000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_058",
+      "entities": {
+        "blue": {
+          "north": 5000,
+          "east": -27000,
+          "heading": 0.245,
+          "speed": 295,
+          "accpsi": 0.01,
+          "acc": -4.5
+        },
+        "red1": {
+          "north": 15000,
+          "east": 27000,
+          "heading": 3.114,
+          "speed": 312.5,
+          "accpsi": 0.015,
+          "acc": 0.75
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 25400
+        },
+        "sam1": {
+          "north": -1000,
+          "east": -4500
+        },
+        "sam2": {
+          "north": 6000,
+          "east": 9500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 6000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_059",
+      "entities": {
+        "blue": {
+          "north": 8000,
+          "east": -22500,
+          "heading": 0.995,
+          "speed": 355,
+          "accpsi": -0.01,
+          "acc": 6.5
+        },
+        "red1": {
+          "north": 6000,
+          "east": 20000,
+          "heading": 3.964,
+          "speed": 252.5,
+          "accpsi": -0.005,
+          "acc": -3.25
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 23600
+        },
+        "sam1": {
+          "north": 8000,
+          "east": -7500
+        },
+        "sam2": {
+          "north": 0,
+          "east": 8500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 9000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_060",
+      "entities": {
+        "blue": {
+          "north": 11000,
+          "east": -23000,
+          "heading": 0.495,
+          "speed": 325,
+          "accpsi": 0.01,
+          "acc": -1.5
+        },
+        "red1": {
+          "north": -3000,
+          "east": 27000,
+          "heading": 3.514,
+          "speed": 297.5,
+          "accpsi": -0.025,
+          "acc": 6.75
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 21800
+        },
+        "sam1": {
+          "north": -4000,
+          "east": -2500
+        },
+        "sam2": {
+          "north": -6000,
+          "east": 7500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 4000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_061",
+      "entities": {
+        "blue": {
+          "north": -16000,
+          "east": -28500,
+          "heading": 0.255,
+          "speed": 320,
+          "accpsi": -0.01,
+          "acc": 0
+        },
+        "red1": {
+          "north": -12000,
+          "east": 20000,
+          "heading": 3.336,
+          "speed": 280,
+          "accpsi": 0.005,
+          "acc": 0
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 20000
+        },
+        "sam1": {
+          "north": 5000,
+          "east": -5500
+        },
+        "sam2": {
+          "north": 9000,
+          "east": 6500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 7000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_062",
+      "entities": {
+        "blue": {
+          "north": -13000,
+          "east": -24000,
+          "heading": 0.605,
+          "speed": 340,
+          "accpsi": 0,
+          "acc": 5
+        },
+        "red1": {
+          "north": 9000,
+          "east": 27000,
+          "heading": 3.886,
+          "speed": 260,
+          "accpsi": -0.005,
+          "acc": 2.5
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 29000
+        },
+        "sam1": {
+          "north": -7000,
+          "east": -8500
+        },
+        "sam2": {
+          "north": 3000,
+          "east": 5500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 9500
+        }
+      }
+    },
+    {
+      "name": "mission_eval_063",
+      "entities": {
+        "blue": {
+          "north": -10000,
+          "east": -20500,
+          "heading": 0.155,
+          "speed": 300,
+          "accpsi": -0.01,
+          "acc": -3
+        },
+        "red1": {
+          "north": 0,
+          "east": 20000,
+          "heading": 3.186,
+          "speed": 310,
+          "accpsi": 0.025,
+          "acc": 0
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 27200
+        },
+        "sam1": {
+          "north": 2000,
+          "east": -3500
+        },
+        "sam2": {
+          "north": -3000,
+          "east": 4500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 5000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_064",
+      "entities": {
+        "blue": {
+          "north": -7000,
+          "east": -27500,
+          "heading": 0.905,
+          "speed": 360,
+          "accpsi": -0.03,
+          "acc": 8
+        },
+        "red1": {
+          "north": -9000,
+          "east": 27000,
+          "heading": 4.036,
+          "speed": 250,
+          "accpsi": 0.005,
+          "acc": -4
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 25400
+        },
+        "sam1": {
+          "north": -10000,
+          "east": -6500
+        },
+        "sam2": {
+          "north": -9000,
+          "east": 3500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 8000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_065",
+      "entities": {
+        "blue": {
+          "north": -4000,
+          "east": -25500,
+          "heading": 0.405,
+          "speed": 330,
+          "accpsi": -0.01,
+          "acc": 0
+        },
+        "red1": {
+          "north": 12000,
+          "east": 20000,
+          "heading": 3.586,
+          "speed": 295,
+          "accpsi": -0.015,
+          "acc": 6
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 23600
+        },
+        "sam1": {
+          "north": -1000,
+          "east": -9500
+        },
+        "sam2": {
+          "north": 6000,
+          "east": 2500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 3000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_066",
+      "entities": {
+        "blue": {
+          "north": -1000,
+          "east": -21000,
+          "heading": 0.285,
+          "speed": 325,
+          "accpsi": 0,
+          "acc": 1.5
+        },
+        "red1": {
+          "north": 3000,
+          "east": 27000,
+          "heading": 3.312,
+          "speed": 277.5,
+          "accpsi": 0,
+          "acc": -0.75
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 21800
+        },
+        "sam1": {
+          "north": 8000,
+          "east": -4500
+        },
+        "sam2": {
+          "north": 0,
+          "east": 9500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 6000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_067",
+      "entities": {
+        "blue": {
+          "north": 2000,
+          "east": -25000,
+          "heading": 0.635,
+          "speed": 345,
+          "accpsi": 0.01,
+          "acc": 6.5
+        },
+        "red1": {
+          "north": -6000,
+          "east": 20000,
+          "heading": 3.862,
+          "speed": 257.5,
+          "accpsi": -0.01,
+          "acc": 1.75
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 20000
+        },
+        "sam1": {
+          "north": -4000,
+          "east": -7500
+        },
+        "sam2": {
+          "north": -6000,
+          "east": 8500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 9000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_068",
+      "entities": {
+        "blue": {
+          "north": 5000,
+          "east": -27000,
+          "heading": 0.185,
+          "speed": 305,
+          "accpsi": 0,
+          "acc": -1.5
+        },
+        "red1": {
+          "north": 15000,
+          "east": 27000,
+          "heading": 3.162,
+          "speed": 307.5,
+          "accpsi": 0.02,
+          "acc": -0.75
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 29000
+        },
+        "sam1": {
+          "north": 5000,
+          "east": -2500
+        },
+        "sam2": {
+          "north": 9000,
+          "east": 7500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 4000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_069",
+      "entities": {
+        "blue": {
+          "north": 8000,
+          "east": -22500,
+          "heading": 0.935,
+          "speed": 365,
+          "accpsi": -0.02,
+          "acc": 9.5
+        },
+        "red1": {
+          "north": 6000,
+          "east": 20000,
+          "heading": 4.012,
+          "speed": 247.5,
+          "accpsi": 0,
+          "acc": -4.75
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 27200
+        },
+        "sam1": {
+          "north": -7000,
+          "east": -5500
+        },
+        "sam2": {
+          "north": 3000,
+          "east": 6500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 7000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_070",
+      "entities": {
+        "blue": {
+          "north": 11000,
+          "east": -23000,
+          "heading": 0.435,
+          "speed": 335,
+          "accpsi": 0,
+          "acc": 1.5
+        },
+        "red1": {
+          "north": -3000,
+          "east": 27000,
+          "heading": 3.562,
+          "speed": 292.5,
+          "accpsi": -0.02,
+          "acc": 5.25
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 25400
+        },
+        "sam1": {
+          "north": 2000,
+          "east": -8500
+        },
+        "sam2": {
+          "north": -3000,
+          "east": 5500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 9500
+        }
+      }
+    },
+    {
+      "name": "mission_eval_071",
+      "entities": {
+        "blue": {
+          "north": -16000,
+          "east": -28500,
+          "heading": 0.315,
+          "speed": 330,
+          "accpsi": 0.01,
+          "acc": 3
+        },
+        "red1": {
+          "north": -12000,
+          "east": 20000,
+          "heading": 3.288,
+          "speed": 275,
+          "accpsi": -0.005,
+          "acc": -1.5
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 23600
+        },
+        "sam1": {
+          "north": -10000,
+          "east": -3500
+        },
+        "sam2": {
+          "north": -9000,
+          "east": 4500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 5000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_072",
+      "entities": {
+        "blue": {
+          "north": -13000,
+          "east": -24000,
+          "heading": 0.665,
+          "speed": 350,
+          "accpsi": 0.02,
+          "acc": 8
+        },
+        "red1": {
+          "north": 9000,
+          "east": 27000,
+          "heading": 3.838,
+          "speed": 255,
+          "accpsi": -0.015,
+          "acc": 1
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 21800
+        },
+        "sam1": {
+          "north": -1000,
+          "east": -6500
+        },
+        "sam2": {
+          "north": 6000,
+          "east": 3500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 8000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_073",
+      "entities": {
+        "blue": {
+          "north": -10000,
+          "east": -20500,
+          "heading": 0.215,
+          "speed": 310,
+          "accpsi": 0.01,
+          "acc": 0
+        },
+        "red1": {
+          "north": 0,
+          "east": 20000,
+          "heading": 3.138,
+          "speed": 305,
+          "accpsi": 0.015,
+          "acc": -1.5
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 20000
+        },
+        "sam1": {
+          "north": 8000,
+          "east": -9500
+        },
+        "sam2": {
+          "north": 0,
+          "east": 2500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 3000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_074",
+      "entities": {
+        "blue": {
+          "north": -7000,
+          "east": -27500,
+          "heading": 0.965,
+          "speed": 370,
+          "accpsi": -0.01,
+          "acc": 11
+        },
+        "red1": {
+          "north": -9000,
+          "east": 27000,
+          "heading": 3.988,
+          "speed": 245,
+          "accpsi": -0.005,
+          "acc": -5.5
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 29000
+        },
+        "sam1": {
+          "north": -4000,
+          "east": -4500
+        },
+        "sam2": {
+          "north": -6000,
+          "east": 9500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 6000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_075",
+      "entities": {
+        "blue": {
+          "north": -4000,
+          "east": -25500,
+          "heading": 0.465,
+          "speed": 340,
+          "accpsi": 0.01,
+          "acc": 3
+        },
+        "red1": {
+          "north": 12000,
+          "east": 20000,
+          "heading": 3.538,
+          "speed": 290,
+          "accpsi": -0.025,
+          "acc": 4.5
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 27200
+        },
+        "sam1": {
+          "north": 5000,
+          "east": -7500
+        },
+        "sam2": {
+          "north": 9000,
+          "east": 8500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 9000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_076",
+      "entities": {
+        "blue": {
+          "north": -1000,
+          "east": -21000,
+          "heading": 0.345,
+          "speed": 310,
+          "accpsi": -0.01,
+          "acc": -3
+        },
+        "red1": {
+          "north": 3000,
+          "east": 27000,
+          "heading": 3.264,
+          "speed": 285,
+          "accpsi": 0.005,
+          "acc": 1.5
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 25400
+        },
+        "sam1": {
+          "north": -7000,
+          "east": -2500
+        },
+        "sam2": {
+          "north": 3000,
+          "east": 7500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 4000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_077",
+      "entities": {
+        "blue": {
+          "north": 2000,
+          "east": -25000,
+          "heading": 0.695,
+          "speed": 330,
+          "accpsi": 0,
+          "acc": 2
+        },
+        "red1": {
+          "north": -6000,
+          "east": 20000,
+          "heading": 3.814,
+          "speed": 265,
+          "accpsi": -0.005,
+          "acc": 4
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 23600
+        },
+        "sam1": {
+          "north": 2000,
+          "east": -5500
+        },
+        "sam2": {
+          "north": -3000,
+          "east": 6500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 7000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_078",
+      "entities": {
+        "blue": {
+          "north": 5000,
+          "east": -27000,
+          "heading": 0.245,
+          "speed": 290,
+          "accpsi": -0.01,
+          "acc": -6
+        },
+        "red1": {
+          "north": 15000,
+          "east": 27000,
+          "heading": 3.114,
+          "speed": 315,
+          "accpsi": 0.025,
+          "acc": 1.5
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 21800
+        },
+        "sam1": {
+          "north": -10000,
+          "east": -8500
+        },
+        "sam2": {
+          "north": -9000,
+          "east": 5500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 9500
+        }
+      }
+    },
+    {
+      "name": "mission_eval_079",
+      "entities": {
+        "blue": {
+          "north": 8000,
+          "east": -22500,
+          "heading": 0.995,
+          "speed": 350,
+          "accpsi": -0.03,
+          "acc": 5
+        },
+        "red1": {
+          "north": 6000,
+          "east": 20000,
+          "heading": 3.964,
+          "speed": 255,
+          "accpsi": 0.005,
+          "acc": -2.5
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 20000
+        },
+        "sam1": {
+          "north": -1000,
+          "east": -3500
+        },
+        "sam2": {
+          "north": 6000,
+          "east": 4500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 5000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_080",
+      "entities": {
+        "blue": {
+          "north": 11000,
+          "east": -23000,
+          "heading": 0.495,
+          "speed": 320,
+          "accpsi": -0.01,
+          "acc": -3
+        },
+        "red1": {
+          "north": -3000,
+          "east": 27000,
+          "heading": 3.514,
+          "speed": 300,
+          "accpsi": -0.015,
+          "acc": 7.5
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 29000
+        },
+        "sam1": {
+          "north": 8000,
+          "east": -6500
+        },
+        "sam2": {
+          "north": 0,
+          "east": 3500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 8000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_081",
+      "entities": {
+        "blue": {
+          "north": -16000,
+          "east": -28500,
+          "heading": 0.255,
+          "speed": 315,
+          "accpsi": 0,
+          "acc": -1.5
+        },
+        "red1": {
+          "north": -12000,
+          "east": 20000,
+          "heading": 3.336,
+          "speed": 282.5,
+          "accpsi": 0,
+          "acc": 0.75
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 27200
+        },
+        "sam1": {
+          "north": -4000,
+          "east": -9500
+        },
+        "sam2": {
+          "north": -6000,
+          "east": 2500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 3000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_082",
+      "entities": {
+        "blue": {
+          "north": -13000,
+          "east": -24000,
+          "heading": 0.605,
+          "speed": 335,
+          "accpsi": 0.01,
+          "acc": 3.5
+        },
+        "red1": {
+          "north": 9000,
+          "east": 27000,
+          "heading": 3.886,
+          "speed": 262.5,
+          "accpsi": -0.01,
+          "acc": 3.25
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 25400
+        },
+        "sam1": {
+          "north": 5000,
+          "east": -4500
+        },
+        "sam2": {
+          "north": 9000,
+          "east": 9500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 6000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_083",
+      "entities": {
+        "blue": {
+          "north": -10000,
+          "east": -20500,
+          "heading": 0.155,
+          "speed": 295,
+          "accpsi": 0,
+          "acc": -4.5
+        },
+        "red1": {
+          "north": 0,
+          "east": 20000,
+          "heading": 3.186,
+          "speed": 312.5,
+          "accpsi": 0.02,
+          "acc": 0.75
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 23600
+        },
+        "sam1": {
+          "north": -7000,
+          "east": -7500
+        },
+        "sam2": {
+          "north": 3000,
+          "east": 8500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 9000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_084",
+      "entities": {
+        "blue": {
+          "north": -7000,
+          "east": -27500,
+          "heading": 0.905,
+          "speed": 355,
+          "accpsi": -0.02,
+          "acc": 6.5
+        },
+        "red1": {
+          "north": -9000,
+          "east": 27000,
+          "heading": 4.036,
+          "speed": 252.5,
+          "accpsi": 0,
+          "acc": -3.25
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 21800
+        },
+        "sam1": {
+          "north": 2000,
+          "east": -2500
+        },
+        "sam2": {
+          "north": -3000,
+          "east": 7500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 4000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_085",
+      "entities": {
+        "blue": {
+          "north": -4000,
+          "east": -25500,
+          "heading": 0.405,
+          "speed": 325,
+          "accpsi": 0,
+          "acc": -1.5
+        },
+        "red1": {
+          "north": 12000,
+          "east": 20000,
+          "heading": 3.586,
+          "speed": 297.5,
+          "accpsi": -0.02,
+          "acc": 6.75
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 20000
+        },
+        "sam1": {
+          "north": -10000,
+          "east": -5500
+        },
+        "sam2": {
+          "north": -9000,
+          "east": 6500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 7000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_086",
+      "entities": {
+        "blue": {
+          "north": -1000,
+          "east": -21000,
+          "heading": 0.285,
+          "speed": 320,
+          "accpsi": 0.01,
+          "acc": 0
+        },
+        "red1": {
+          "north": 3000,
+          "east": 27000,
+          "heading": 3.312,
+          "speed": 280,
+          "accpsi": -0.005,
+          "acc": 0
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 29000
+        },
+        "sam1": {
+          "north": -1000,
+          "east": -8500
+        },
+        "sam2": {
+          "north": 6000,
+          "east": 5500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 9500
+        }
+      }
+    },
+    {
+      "name": "mission_eval_087",
+      "entities": {
+        "blue": {
+          "north": 2000,
+          "east": -25000,
+          "heading": 0.635,
+          "speed": 340,
+          "accpsi": 0.02,
+          "acc": 5
+        },
+        "red1": {
+          "north": -6000,
+          "east": 20000,
+          "heading": 3.862,
+          "speed": 260,
+          "accpsi": -0.015,
+          "acc": 2.5
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 27200
+        },
+        "sam1": {
+          "north": 8000,
+          "east": -3500
+        },
+        "sam2": {
+          "north": 0,
+          "east": 4500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 5000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_088",
+      "entities": {
+        "blue": {
+          "north": 5000,
+          "east": -27000,
+          "heading": 0.185,
+          "speed": 300,
+          "accpsi": 0.01,
+          "acc": -3
+        },
+        "red1": {
+          "north": 15000,
+          "east": 27000,
+          "heading": 3.162,
+          "speed": 310,
+          "accpsi": 0.015,
+          "acc": 0
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 25400
+        },
+        "sam1": {
+          "north": -4000,
+          "east": -6500
+        },
+        "sam2": {
+          "north": -6000,
+          "east": 3500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 8000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_089",
+      "entities": {
+        "blue": {
+          "north": 8000,
+          "east": -22500,
+          "heading": 0.935,
+          "speed": 360,
+          "accpsi": -0.01,
+          "acc": 8
+        },
+        "red1": {
+          "north": 6000,
+          "east": 20000,
+          "heading": 4.012,
+          "speed": 250,
+          "accpsi": -0.005,
+          "acc": -4
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 23600
+        },
+        "sam1": {
+          "north": 5000,
+          "east": -9500
+        },
+        "sam2": {
+          "north": 9000,
+          "east": 2500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 3000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_090",
+      "entities": {
+        "blue": {
+          "north": 11000,
+          "east": -23000,
+          "heading": 0.435,
+          "speed": 330,
+          "accpsi": 0.01,
+          "acc": 0
+        },
+        "red1": {
+          "north": -3000,
+          "east": 27000,
+          "heading": 3.562,
+          "speed": 295,
+          "accpsi": -0.025,
+          "acc": 6
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 21800
+        },
+        "sam1": {
+          "north": -7000,
+          "east": -4500
+        },
+        "sam2": {
+          "north": 3000,
+          "east": 9500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 6000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_091",
+      "entities": {
+        "blue": {
+          "north": -16000,
+          "east": -28500,
+          "heading": 0.315,
+          "speed": 325,
+          "accpsi": -0.01,
+          "acc": 1.5
+        },
+        "red1": {
+          "north": -12000,
+          "east": 20000,
+          "heading": 3.288,
+          "speed": 277.5,
+          "accpsi": 0.005,
+          "acc": -0.75
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 20000
+        },
+        "sam1": {
+          "north": 2000,
+          "east": -7500
+        },
+        "sam2": {
+          "north": -3000,
+          "east": 8500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 9000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_092",
+      "entities": {
+        "blue": {
+          "north": -13000,
+          "east": -24000,
+          "heading": 0.665,
+          "speed": 345,
+          "accpsi": 0,
+          "acc": 6.5
+        },
+        "red1": {
+          "north": 9000,
+          "east": 27000,
+          "heading": 3.838,
+          "speed": 257.5,
+          "accpsi": -0.005,
+          "acc": 1.75
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 29000
+        },
+        "sam1": {
+          "north": -10000,
+          "east": -2500
+        },
+        "sam2": {
+          "north": -9000,
+          "east": 7500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 4000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_093",
+      "entities": {
+        "blue": {
+          "north": -10000,
+          "east": -20500,
+          "heading": 0.215,
+          "speed": 305,
+          "accpsi": -0.01,
+          "acc": -1.5
+        },
+        "red1": {
+          "north": 0,
+          "east": 20000,
+          "heading": 3.138,
+          "speed": 307.5,
+          "accpsi": 0.025,
+          "acc": -0.75
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 27200
+        },
+        "sam1": {
+          "north": -1000,
+          "east": -5500
+        },
+        "sam2": {
+          "north": 6000,
+          "east": 6500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 7000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_094",
+      "entities": {
+        "blue": {
+          "north": -7000,
+          "east": -27500,
+          "heading": 0.965,
+          "speed": 365,
+          "accpsi": -0.03,
+          "acc": 9.5
+        },
+        "red1": {
+          "north": -9000,
+          "east": 27000,
+          "heading": 3.988,
+          "speed": 247.5,
+          "accpsi": 0.005,
+          "acc": -4.75
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 25400
+        },
+        "sam1": {
+          "north": 8000,
+          "east": -8500
+        },
+        "sam2": {
+          "north": 0,
+          "east": 5500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 9500
+        }
+      }
+    },
+    {
+      "name": "mission_eval_095",
+      "entities": {
+        "blue": {
+          "north": -4000,
+          "east": -25500,
+          "heading": 0.465,
+          "speed": 335,
+          "accpsi": -0.01,
+          "acc": 1.5
+        },
+        "red1": {
+          "north": 12000,
+          "east": 20000,
+          "heading": 3.538,
+          "speed": 292.5,
+          "accpsi": -0.015,
+          "acc": 5.25
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 23600
+        },
+        "sam1": {
+          "north": -4000,
+          "east": -3500
+        },
+        "sam2": {
+          "north": -6000,
+          "east": 4500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 5000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_096",
+      "entities": {
+        "blue": {
+          "north": -1000,
+          "east": -21000,
+          "heading": 0.345,
+          "speed": 330,
+          "accpsi": 0,
+          "acc": 3
+        },
+        "red1": {
+          "north": 3000,
+          "east": 27000,
+          "heading": 3.264,
+          "speed": 275,
+          "accpsi": 0,
+          "acc": -1.5
+        },
+        "obj1": {
+          "north": -18000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 6000,
+          "east": 21800
+        },
+        "sam1": {
+          "north": 5000,
+          "east": -6500
+        },
+        "sam2": {
+          "north": 9000,
+          "east": 3500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 8000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_097",
+      "entities": {
+        "blue": {
+          "north": 2000,
+          "east": -25000,
+          "heading": 0.695,
+          "speed": 350,
+          "accpsi": 0.01,
+          "acc": 8
+        },
+        "red1": {
+          "north": -6000,
+          "east": 20000,
+          "heading": 3.814,
+          "speed": 255,
+          "accpsi": -0.01,
+          "acc": 1
+        },
+        "obj1": {
+          "north": -12000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 18000,
+          "east": 20000
+        },
+        "sam1": {
+          "north": -7000,
+          "east": -9500
+        },
+        "sam2": {
+          "north": 3000,
+          "east": 2500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 3000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_098",
+      "entities": {
+        "blue": {
+          "north": 5000,
+          "east": -27000,
+          "heading": 0.245,
+          "speed": 310,
+          "accpsi": 0,
+          "acc": 0
+        },
+        "red1": {
+          "north": 15000,
+          "east": 27000,
+          "heading": 3.114,
+          "speed": 305,
+          "accpsi": 0.02,
+          "acc": -1.5
+        },
+        "obj1": {
+          "north": -6000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 15000,
+          "east": 29000
+        },
+        "sam1": {
+          "north": 2000,
+          "east": -4500
+        },
+        "sam2": {
+          "north": -3000,
+          "east": 9500
+        },
+        "sam4": {
+          "north": 15000,
+          "east": 6000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_099",
+      "entities": {
+        "blue": {
+          "north": 8000,
+          "east": -22500,
+          "heading": 0.995,
+          "speed": 370,
+          "accpsi": -0.02,
+          "acc": 11
+        },
+        "red1": {
+          "north": 6000,
+          "east": 20000,
+          "heading": 3.964,
+          "speed": 245,
+          "accpsi": 0,
+          "acc": -5.5
+        },
+        "obj1": {
+          "north": -15000,
+          "east": -28000
+        },
+        "obj2": {
+          "north": 12000,
+          "east": 27200
+        },
+        "sam1": {
+          "north": -10000,
+          "east": -7500
+        },
+        "sam2": {
+          "north": -9000,
+          "east": 8500
+        },
+        "sam4": {
+          "north": 9000,
+          "east": 9000
+        }
+      }
+    },
+    {
+      "name": "mission_eval_100",
+      "entities": {
+        "blue": {
+          "north": 11000,
+          "east": -23000,
+          "heading": 0.495,
+          "speed": 340,
+          "accpsi": 0,
+          "acc": 3
+        },
+        "red1": {
+          "north": -3000,
+          "east": 27000,
+          "heading": 3.514,
+          "speed": 290,
+          "accpsi": -0.02,
+          "acc": 4.5
+        },
+        "obj1": {
+          "north": -9000,
+          "east": -22000
+        },
+        "obj2": {
+          "north": 9000,
+          "east": 25400
+        },
+        "sam1": {
+          "north": -1000,
+          "east": -2500
+        },
+        "sam2": {
+          "north": 6000,
+          "east": 7500
+        },
+        "sam4": {
+          "north": 3000,
+          "east": 4000
+        }
+      }
+    }
+  ]
+}

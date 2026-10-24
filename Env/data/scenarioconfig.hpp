@@ -63,9 +63,9 @@ struct EvaluationDefinition
     */
     std::string m_evaluatedEntity{};
     /**
-    * @brief Path to the evaluation buffer file.
+    * @brief Path to the evaluation cases file.
     */
-    std::filesystem::path m_checkpointFile{};
+    std::filesystem::path m_casesFile{};
     /**
     * @brief Number of evaluation tests to execute.
     */
