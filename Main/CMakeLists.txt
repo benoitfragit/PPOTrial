@@ -39,6 +39,11 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         COMMAND $<TARGET_FILE:${PROJECT_NAME}> --list-examples)
     set_tests_properties(ExistingExampleList PROPERTIES
         PASS_REGULAR_EXPRESSION "existing")
+    add_test(NAME ExistingExampleBootstrap
+        COMMAND $<TARGET_FILE:${PROJECT_NAME}> --check-example)
+    set_tests_properties(ExistingExampleBootstrap PROPERTIES
+        PASS_REGULAR_EXPRESSION "Bootstrapped example: existing")
+
     add_test(NAME UnknownExampleRejected
         COMMAND $<TARGET_FILE:${PROJECT_NAME}> --example unknown-example)
     set_tests_properties(UnknownExampleRejected PROPERTIES WILL_FAIL TRUE)

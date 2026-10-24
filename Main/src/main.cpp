@@ -23,6 +23,7 @@ int main(int argc, char** argv)
         ppo::examples::existing::Definition()
     };
 
+    bool checkExample = false;
     std::string_view requested = examples.front().id;
     for (int i = 1; i < argc; ++i)
     {
@@ -32,6 +33,11 @@ int main(int argc, char** argv)
             for (auto const& example : examples)
                 std::cout << example.id << '\n';
             return 0;
+        }
+        if (option == "--check-example")
+        {
+            checkExample = true;
+            continue;
         }
         if (option == "--example")
         {
@@ -64,15 +70,25 @@ int main(int argc, char** argv)
     std::filesystem::path const resourcePath{RESOURCE_PATH};
     serializer.SetPath(resourcePath);
 
-    auto& renderer = ppo::renderer::EnvironmentRenderer::GetInstance(
-        std::string(selected->windowTitle));
+    // Headless CI startup exercises the exact same example factories and
+    // config/model loading without allocating graphics resources.
+    ppo::renderer::EnvironmentRenderer* renderer = nullptr;
+    if (!checkExample)
+        renderer = &ppo::renderer::EnvironmentRenderer::GetInstance(
+            std::string(selected->windowTitle));
 
     ppo::model::Environment environment{};
     selected->loadScenario(resourcePath / selected->defaultScenario, environment);
 
     serializer.Load();
-    renderer.SetEnvironment(environment);
-    while (renderer.Run())
+    if (checkExample)
+    {
+        std::cout << "Bootstrapped example: " << selected->id << '\n';
+        return 0;
+    }
+
+    renderer->SetEnvironment(environment);
+    while (renderer->Run())
     {
     }
     serializer.Save();
