@@ -1,3 +1,4 @@
+add_subdirectory(Entities)
 add_subdirectory(Initializer)
 add_subdirectory(Agents/Interception)
 add_subdirectory(Agents/mission)
@@ -14,6 +15,7 @@ target_include_directories(PPOAirspaceExample PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/data")
 target_link_libraries(PPOAirspaceExample PUBLIC
     GenericEntities
+    AirspaceEntities
     GenericEnv
     EntityInitializer
     MetaReflection)

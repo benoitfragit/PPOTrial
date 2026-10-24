@@ -10,17 +10,6 @@ add_library(${PROJECT_NAME}
     ${CMAKE_CURRENT_SOURCE_DIR}/data/entitytypes.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/components.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/data/utils.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/objective.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/snasystem.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/flightmodelsystem.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/aircraft.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/snacontrolsystem.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/sam.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/sam.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/snacontrolsystem.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/aircraft.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/flightmodelsystem.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/snasystem.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/entity.cpp)
 
