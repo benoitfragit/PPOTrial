@@ -1,3 +1,6 @@
+add_subdirectory(Agents/Interception)
+add_subdirectory(Agents/mission)
+
 add_library(PPOExistingExample STATIC
     data/existingexample.hpp
     src/existingexample.cpp
