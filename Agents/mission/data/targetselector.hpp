@@ -10,6 +10,7 @@
 #include "aircraft.hpp"
 #include "trainingagent.hpp"
 #include "prodagent.hpp"
+#include "ppo/core/agent_contract.hpp"
 #include "missionlayout.hpp"
 #include "actorcriticmission.hpp"
 #include "evaluator.hpp"
@@ -117,6 +118,12 @@ struct StatesAndActionsForMission
     * @brief Mission action vector type.
     */
     using ACTIONS = std::array<float, MissionObservationLayout::kActionCount>;
+
+    // The current 10-track + pseudo-LiDAR layout and action interpretation
+    // must not be changed when adding new policy families.
+    inline static constexpr ppo::core::AgentContract kAgentContract =
+        ppo::core::MakeAgentContract<STATES, ACTIONS>(
+            "RLMission", "rlmission.observation.v1", "rlmission.action.v1");
 
     /**
     * @brief Applies the chosen action to the controlled entity.

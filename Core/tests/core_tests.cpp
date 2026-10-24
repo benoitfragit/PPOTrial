@@ -1,4 +1,5 @@
 #include "ppo/core/runner.hpp"
+#include "ppo/core/agent_contract.hpp"
 #include "ppo/core/buffers.hpp"
 #include "ppo/runtime/iagent.hpp"
 #include "ppo/core/multi_agent.hpp"
@@ -176,6 +177,48 @@ void TestEvaluationScheduling() {
     Check(!empty.completed && empty.finishedTests == 0);
 }
 
+void TestAgentContracts()
+{
+    using ppo::core::AgentContract;
+    using ppo::core::MakeAgentContract;
+    using ppo::core::IsValid;
+    using ppo::core::SameContract;
+
+    // An unrelated new agent type can declare its own contract without
+    // modifying the generic core or existing agent implementations.
+    constexpr AgentContract example = MakeAgentContract<
+        std::array<float, 4>, std::array<float, 2>>(
+            "Navigation2D", "navigation2d.observation.v1", "navigation2d.action.v1");
+    constexpr AgentContract same = MakeAgentContract<
+        std::array<float, 4>, std::array<float, 2>>(
+            "Navigation2D", "navigation2d.observation.v1", "navigation2d.action.v1");
+    constexpr AgentContract reordered = MakeAgentContract<
+        std::array<float, 4>, std::array<float, 2>>(
+            "Navigation2D", "navigation2d.observation.v2", "navigation2d.action.v1");
+    constexpr AgentContract differentAction = MakeAgentContract<
+        std::array<float, 4>, std::array<float, 2>>(
+            "Navigation2D", "navigation2d.observation.v1", "navigation2d.action.v2");
+    constexpr AgentContract differentSize = MakeAgentContract<
+        std::array<float, 5>, std::array<float, 2>>(
+            "Navigation2D", "navigation2d.observation.v1", "navigation2d.action.v1");
+    constexpr AgentContract differentProfile = MakeAgentContract<
+        std::array<float, 4>, std::array<float, 2>>(
+            "DifferentAgent", "navigation2d.observation.v1", "navigation2d.action.v1");
+    constexpr AgentContract invalid = MakeAgentContract<
+        std::array<float, 4>, std::array<float, 2>>(
+            "", "navigation2d.observation.v1", "navigation2d.action.v1");
+
+    static_assert(IsValid(example), "Example contract must be valid");
+    static_assert(SameContract(example, same), "Identical layouts must match");
+    static_assert(!SameContract(example, reordered), "Ordering is part of compatibility");
+    static_assert(!SameContract(example, differentAction), "Action semantics must match");
+    static_assert(!SameContract(example, differentSize), "Dimensions must match");
+    static_assert(!SameContract(example, differentProfile), "Profile identity must match");
+    static_assert(!IsValid(invalid), "Unnamed agent contracts are invalid");
+    Check(SameContract(example, same));
+    Check(!SameContract(example, reordered));
+}
+
 int main() {
     // The legacy agent ABI/telemetry contract is standalone C++17:
     // no LibTorch or ECS header is required by the headless build.
@@ -196,6 +239,7 @@ int main() {
     catch (std::invalid_argument const&) { copyRejected = true; }
     Check(copyRejected);
     Check(domainAction == std::array<float, 2>{0.5F, -0.75F});
+    TestAgentContracts();
     TestMultiAgentPhases();
     TestEvaluationScheduling();
     TestEvaluationMonitoring();

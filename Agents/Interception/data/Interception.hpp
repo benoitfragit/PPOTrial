@@ -11,6 +11,7 @@
 #include "actorcriticnet.hpp"
 #include "trainingagent.hpp"
 #include "prodagent.hpp"
+#include "ppo/core/agent_contract.hpp"
 #include "evaluator.hpp"
 
 #include <map>
@@ -48,6 +49,12 @@ struct StatesAndActions
     * @brief Interception action vector type.
     */
     using ACTIONS = std::array<float, 2>;
+
+    // Frozen semantic layouts for the existing PPO model.pt archives.
+    // Changing either layout ID requires a new trained policy family.
+    inline static constexpr ppo::core::AgentContract kAgentContract =
+        ppo::core::MakeAgentContract<STATES, ACTIONS>(
+            "RLSNA", "rlsna.observation.v1", "rlsna.action.v1");
 
     /**
     * @brief Current state buffer.

@@ -1,5 +1,6 @@
 add_library(GenericRLCore INTERFACE)
 target_sources(GenericRLCore INTERFACE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/ppo/core/agent_contract.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/ppo/core/buffers.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/ppo/core/multi_agent.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/ppo/core/evaluation.hpp"
