@@ -19,3 +19,12 @@ add_dependencies(${PROJECT_NAME}
     GenericEntities
     GenericEnv
     LegacyAgentAPI)
+
+# Guard the abstraction boundary: generic reflection must compile and work
+# without linking any Airspace agent, platform or trained model.
+if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
+    add_executable(GenericMetaContractTests tests/meta_contract_tests.cpp)
+    target_compile_features(GenericMetaContractTests PRIVATE cxx_std_17)
+    target_link_libraries(GenericMetaContractTests PRIVATE MetaReflection)
+    add_test(NAME GenericMetaContractTests COMMAND GenericMetaContractTests)
+endif()
