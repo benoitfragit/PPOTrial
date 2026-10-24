@@ -30,6 +30,10 @@
         "showDomains": true,
         "showGrid": false,
         "showMetaCatalog": false,
+        "showMinimap": false,
+        "showEntities": false,
+        "showInspection": false,
+        "showSimulation": true,
         "showPseudoLidar": true,
         "trailDuration": 3.1
     }
