@@ -47,9 +47,9 @@ ExplosionRadiusForType(eEntityType type) noexcept
     {
     case eEntityType::Objective:
         return 2.40F;
-    case eEntityType::SAM:
+    case eEntityType::RestrictedZone:
         return 1.35F;
-    case eEntityType::Aircraft:
+    case eEntityType::Mobile:
         return 1.10F;
     default:
         return 1.00F;
@@ -68,9 +68,9 @@ ExplosionHeightScaleForType(eEntityType type) noexcept
     {
     case eEntityType::Objective:
         return 2.35F;
-    case eEntityType::SAM:
+    case eEntityType::RestrictedZone:
         return 1.45F;
-    case eEntityType::Aircraft:
+    case eEntityType::Mobile:
         return 1.20F;
     default:
         return 1.00F;

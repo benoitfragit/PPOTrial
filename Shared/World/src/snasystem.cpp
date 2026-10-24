@@ -181,7 +181,7 @@ SNASystem::EvaluateDestruction(BaseEntity& entity, BaseEntity& otherEntity)
     auto [otherEntityState] = otherEntity.get<sEntityState>();
 
     if (otherEntityState.m_side == entityState.m_side
-    ||  (entityState.m_type == eEntityType::SAM && otherEntityState.m_type != eEntityType::Aircraft))
+    ||  (entityState.m_type == eEntityType::RestrictedZone && otherEntityState.m_type != eEntityType::Mobile))
         return 0.F;
 
     float pkrange{ 0.F };
@@ -202,7 +202,7 @@ SNASystem::EvaluateDestruction(BaseEntity& entity, BaseEntity& otherEntity)
     float const deltad{ snaState.m_escapezone - snaState.m_noescapezone + 1e-6F };
     pkrange = std::clamp((snaState.m_escapezone - d) / deltad, 0.F, 1.F);
 
-    if (entityState.m_type != eEntityType::SAM)
+    if (entityState.m_type != eEntityType::RestrictedZone)
     {
         if (d <= snaState.m_noescapezone && std::fabs(az) < HALFPI)
             return 1.F;
