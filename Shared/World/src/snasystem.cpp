@@ -9,7 +9,7 @@
 #include "snasystem.hpp"
 #include "sharedworldcomponents.hpp"
 #include "utils.hpp"
-#include "aircraft.hpp"
+#include "mobile.hpp"
 
 namespace ppo::model { 
 

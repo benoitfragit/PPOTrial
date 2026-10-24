@@ -15,7 +15,7 @@
 namespace ppo::model {
 
 /**
-* @brief Surface-to-air missile battery entity.
+* @brief Stationary restricted zone with the historical range-only elimination behavior.
 */
 class RestrictedZone: public Entity {
 public:

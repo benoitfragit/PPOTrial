@@ -1,7 +1,7 @@
 #include "airspacemeta.hpp"
 #include "metaregistry.hpp"
-#include "aircraft.hpp"
-#include "sam.hpp"
+#include "mobile.hpp"
+#include "restrictedzone.hpp"
 #include "objective.hpp"
 #include "components.hpp"
 #include "airspacecomponents.hpp"
@@ -60,11 +60,11 @@ RegisterAgentType(char const* scenarioName, AgentFactory factory)
 * @return Created aircraft entity.
 */
 std::shared_ptr<ppo::model::Entity>
-CreateAircraft(ppo::model::Environment& environment,
+CreateMobile(ppo::model::Environment& environment,
                std::string_view platform,
                ppo::model::eEntitySide side)
 {
-    return environment.CreateEntity<ppo::model::Aircraft>(std::string(platform), side);
+    return environment.CreateEntity<ppo::model::Mobile>(std::string(platform), side);
 }
 
 /**
@@ -75,11 +75,11 @@ CreateAircraft(ppo::model::Environment& environment,
 * @return Created SAM entity.
 */
 std::shared_ptr<ppo::model::Entity>
-CreateSAM(ppo::model::Environment& environment,
+CreateRestrictedZone(ppo::model::Environment& environment,
           std::string_view platform,
           ppo::model::eEntitySide side)
 {
-    return environment.CreateEntity<ppo::model::SAM>(std::string(platform), side);
+    return environment.CreateEntity<ppo::model::RestrictedZone>(std::string(platform), side);
 }
 
 /**
@@ -160,7 +160,9 @@ void RegisterAirspaceEnums()
     entt::meta_factory<ppo::model::eEntityType>{}
         .data<ppo::model::eEntityType::Objective>("Objective"_hs)
         .data<ppo::model::eEntityType::Missile>("Missile"_hs)
+        .data<ppo::model::eEntityType::Mobile>("Mobile"_hs)
         .data<ppo::model::eEntityType::Aircraft>("Aircraft"_hs)
+        .data<ppo::model::eEntityType::RestrictedZone>("RestrictedZone"_hs)
         .data<ppo::model::eEntityType::SAM>("SAM"_hs);
 }
 
@@ -225,11 +227,16 @@ void RegisterAirspaceComponents()
 
 void RegisterAirspaceEntities()
 {
-    RegisterEntityType<ppo::model::Aircraft>("Aircraft", &CreateAircraft);
-    entt::meta_factory<ppo::model::Aircraft>{}.base<ppo::model::Entity>();
+    RegisterEntityType<ppo::model::Mobile>("Mobile", &CreateMobile);
+    // Keep historical scenario and reflection names as aliases.
+    ppo::reflection::RegisterEntityFactory("Aircraft", &CreateMobile);
+    ppo::reflection::RegisterTypeAlias("Aircraft", "Mobile");
+    entt::meta_factory<ppo::model::Mobile>{}.base<ppo::model::Entity>();
 
-    RegisterEntityType<ppo::model::SAM>("SAM", &CreateSAM);
-    entt::meta_factory<ppo::model::SAM>{}.base<ppo::model::Entity>();
+    RegisterEntityType<ppo::model::RestrictedZone>("RestrictedZone", &CreateRestrictedZone);
+    ppo::reflection::RegisterEntityFactory("SAM", &CreateRestrictedZone);
+    ppo::reflection::RegisterTypeAlias("SAM", "RestrictedZone");
+    entt::meta_factory<ppo::model::RestrictedZone>{}.base<ppo::model::Entity>();
 
     RegisterEntityType<ppo::model::Objective>("Objective", &CreateObjective);
     entt::meta_factory<ppo::model::Objective>{}.base<ppo::model::Entity>();

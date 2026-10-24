@@ -15,12 +15,12 @@
 namespace ppo::model {
 
 /**
-* @brief Mobile entity combining flight, guidance, and control systems.
+* @brief Mobile entity retaining the historical motion, guidance and control systems.
 */
 class Mobile: public Entity {
 public:
     /**
-    * @brief Creates an mobile entity from one mobile platform file.
+    * @brief Creates a mobile entity from one mobile platform file.
     * @param registry ECS registry owning the entity.
     * @param name Platform configuration file name.
     * @param side Team side assigned to the mobile.

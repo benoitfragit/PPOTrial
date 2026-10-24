@@ -195,8 +195,8 @@ EntityTypeLabel(ppo::model::eEntityType type)
 {
     switch (type)
     {
-    case ppo::model::eEntityType::Aircraft:  return "Aircraft";
-    case ppo::model::eEntityType::SAM:       return "SAM";
+    case ppo::model::eEntityType::Mobile:  return "Mobile";
+    case ppo::model::eEntityType::RestrictedZone:       return "RestrictedZone";
     case ppo::model::eEntityType::Objective: return "Objective";
     case ppo::model::eEntityType::Missile:   return "Missile";
     default:                                 return "Unknown";
@@ -1013,11 +1013,11 @@ DrawDestroyedWreck3D(ppo::model::sEntityState const& state, float scale)
         baseRadius = 0.95F;
         smokeHeight = 1.75F;
         break;
-    case ppo::model::eEntityType::SAM:
+    case ppo::model::eEntityType::RestrictedZone:
         baseRadius = 0.58F;
         smokeHeight = 1.00F;
         break;
-    case ppo::model::eEntityType::Aircraft:
+    case ppo::model::eEntityType::Mobile:
         baseRadius = 0.50F;
         smokeHeight = 0.92F;
         break;
@@ -2007,7 +2007,7 @@ EnvironmentRenderer::UpdateTrackedEntity(entt::registry const& snapshot)
     for (auto entity : entityView)
     {
         auto const& [state] = entityView.get(entity);
-        if (state.m_type != ppo::model::eEntityType::Aircraft || state.m_destroyed)
+        if (state.m_type != ppo::model::eEntityType::Mobile || state.m_destroyed)
             continue;
 
         if (!hasTrainingAgent || state.m_side == ppo::model::eEntitySide::Friend)
@@ -2277,7 +2277,7 @@ EnvironmentRenderer::DrawSimulationControls(void)
     ImGui::SliderFloat("Camera distance", &m_cameraDistance, 5.F, 60.F);
     ImGui::SliderFloat("Camera height", &m_cameraHeight, 2.F, 25.F);
     ImGui::SliderFloat("Trail duration", &m_trailDuration, 2.F, 30.F, "%.1f s");
-    ImGui::SliderFloat("Aircraft domain height", &m_domainHeight, 0.3F, 5.F);
+    ImGui::SliderFloat("Mobile domain height", &m_domainHeight, 0.3F, 5.F);
     ImGui::SliderFloat("Minimap zoom", &m_mapZoom, 0.3F, 4.F);
 
     if (refreshRanges)
@@ -2709,14 +2709,14 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
         Color const baseColor = ColorForSide(state.m_side);
         bool const useDestroyedLook =
             state.m_destroyed
-            && (state.m_type == ppo::model::eEntityType::Aircraft
+            && (state.m_type == ppo::model::eEntityType::Mobile
                 || state.m_type == ppo::model::eEntityType::Objective);
         Color const renderColor = useDestroyedLook ? DestroyedTint(baseColor) : baseColor;
         Vector3 const center = ToWorld3D(state.m_x, state.m_y, 0.F, m_worldScale);
         bool const isSelected = (entity == m_selectedEntity);
         bool const isTracked = (entity == m_trackedEntity);
 
-        if (state.m_type == ppo::model::eEntityType::Aircraft)
+        if (state.m_type == ppo::model::eEntityType::Mobile)
         {
             if (auto const* aircraftModel = ResolveAircraftModelAsset(
                     m_blueAircraftModel,
@@ -2739,7 +2739,7 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
             else
                 DrawObjectiveGlyph3D(state, m_worldScale, renderColor);
         }
-        else if (state.m_type == ppo::model::eEntityType::SAM)
+        else if (state.m_type == ppo::model::eEntityType::RestrictedZone)
             DrawSamGlyph3D(state, m_worldScale, baseColor);
 
         if (!state.m_destroyed
@@ -2747,7 +2747,7 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
         &&  snapshot.any_of<ppo::model::sSNAState>(entity))
         {
             auto const& snaState = snapshot.get<ppo::model::sSNAState>(entity);
-            if (state.m_type == ppo::model::eEntityType::SAM)
+            if (state.m_type == ppo::model::eEntityType::RestrictedZone)
             {
                 float const radius = snaState.m_noescapezone / m_worldScale;
                 Color const dangerFill{ 248, 86, 76, 42 };
@@ -2767,7 +2767,7 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
             }
 
             if (m_showPseudoLidar
-            &&  state.m_type == ppo::model::eEntityType::Aircraft)
+            &&  state.m_type == ppo::model::eEntityType::Mobile)
             {
                 if (entity == pseudoLidarEntity)
                     DrawPseudoLidar3D(snapshot, entity, state, snaState, m_worldScale);
@@ -2779,7 +2779,7 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
 
         if (state.m_destroyed && m_showDestroyed)
         {
-            if (state.m_type == ppo::model::eEntityType::Aircraft
+            if (state.m_type == ppo::model::eEntityType::Mobile
             ||  state.m_type == ppo::model::eEntityType::Objective)
             {
                 DrawDestroyedWreck3D(state, m_worldScale);
@@ -2965,7 +2965,7 @@ EnvironmentRenderer::DrawMinimapWindow(entt::registry const& snapshot)
         if (center.x < mapMin.x - 12.F || center.x > mapMax.x + 12.F || center.y < mapMin.y - 12.F || center.y > mapMax.y + 12.F)
             continue;
 
-        if (state.m_type == ppo::model::eEntityType::Aircraft)
+        if (state.m_type == ppo::model::eEntityType::Mobile)
         {
             float const angle = state.m_rotation;
             float const len = 12.F;
@@ -2984,7 +2984,7 @@ EnvironmentRenderer::DrawMinimapWindow(entt::registry const& snapshot)
             draw->AddCircleFilled(center, 6.F, color);
             draw->AddCircle(center, 9.F, IM_COL32(255, 255, 255, 160), 24, 1.2F);
         }
-        else if (state.m_type == ppo::model::eEntityType::SAM)
+        else if (state.m_type == ppo::model::eEntityType::RestrictedZone)
         {
             draw->AddCircleFilled(center, 5.F, color);
         }
@@ -2994,7 +2994,7 @@ EnvironmentRenderer::DrawMinimapWindow(entt::registry const& snapshot)
             auto const& snaState = snapshot.get<ppo::model::sSNAState>(entity);
             float const radiusPx = (snaState.m_noescapezone * scale);
 
-            if (state.m_type == ppo::model::eEntityType::SAM)
+            if (state.m_type == ppo::model::eEntityType::RestrictedZone)
             {
                 draw->AddCircle(center, radiusPx, IM_COL32(colorSide.r, colorSide.g, colorSide.b, 110), 48, 1.2F);
             }

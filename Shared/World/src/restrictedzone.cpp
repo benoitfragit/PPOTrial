@@ -1,5 +1,5 @@
 /**
-* @file Entities/src/sam.cpp
+* @file Shared/World/src/restrictedzone.cpp
 * @brief Implementation for sam.
 * @author PPOTrial
 * @date 2026-03-29

@@ -27,7 +27,8 @@ bool
 RequiresPlatform(std::string const& entityType) noexcept
 {
     // Preserve the historical platform-loading behavior.
-    return entityType == "Aircraft" || entityType == "SAM";
+    return entityType == "Mobile" || entityType == "RestrictedZone"
+        || entityType == "Aircraft" || entityType == "SAM";
 }
 
 /**
