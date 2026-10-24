@@ -13,7 +13,7 @@
 #include "serializer.hpp"
 #include "baseentity.hpp"
 #include "components.hpp"
-#include "airspacecomponents.hpp"
+#include "sharedworldcomponents.hpp"
 
 namespace ppo::model {
 
