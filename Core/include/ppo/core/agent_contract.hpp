@@ -9,6 +9,8 @@ namespace ppo::core {
 // Read-only identity of an agent's neural input/output contract. The IDs
 // describe meaning and ordering, not merely vector width. This type is
 // independent of neural backends, simulation entities and serialization.
+// Identifiers must have static lifetime (normally string literals):
+// the descriptor does not own string_view storage.
 struct AgentContract
 {
     std::string_view profile;
