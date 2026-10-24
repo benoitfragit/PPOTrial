@@ -1,6 +1,6 @@
 # PPOTrial — Configuration unique V2
 
-La configuration de l'application utilise **un seul contrat** : chaque JSON commence par **"formatVersion": 2**. Le code C++17 de production ne contient aucun lecteur ni chemin de repli pour les anciennes configurations. Les valeurs physiques, les paramètres PPO, les poids des récompenses et les modèles de réseau sont conservés.
+La configuration de l'application utilise **un seul contrat** : chaque JSON commence par **"formatVersion": 2**. Le code C++17 de production conserve exclusivement le format JSON V2 ; il accepte cependant les anciens noms de types d'entités et les dossiers historiques de plateformes personnalisées. Les valeurs physiques, les paramètres PPO, les poids des récompenses et les modèles de réseau sont conservés.
 
 ## Organisation
 
@@ -18,8 +18,8 @@ resources/settings/
 │       ├── RLMission.json        composition et limites des tests
 │       └── RLSNA.json
 ├── Platforms/
-│   ├── Aircraft/                 paramètres des mobiles
-│   └── Ground/                   paramètres des plateformes fixes
+│   ├── Mobile/                   paramètres des mobiles
+│   └── RestrictedZone/           paramètres des zones fixes
 └── Evaluation/
     ├── Cases/
     │   ├── RLMission.json        100 cas d'évaluation
@@ -36,6 +36,13 @@ Aucun doublon d'ancienne configuration n'est conservé, y compris parmi les fixt
 3. **Training/RLMission.json**, ou **Training/RLSNA.json** : réglages PPO et pondération des récompenses.
 
 L'évaluation est indépendante : sa composition se trouve dans **Scenarios/Evaluation/**, ses scénarios de référence dans **Evaluation/Cases/**.
+
+Les types canoniques sont `Mobile`, `RestrictedZone` et `Objective`.
+`"Aircraft"` instancie toujours un `Mobile`, et `"SAM"` une
+`RestrictedZone`. Les archétypes `aircraft`, `trainingaircraft`,
+`evalaircraft`, `sam` conservent leur nom afin de préserver les références
+des scénarios existants. Les nouveaux dossiers sont `Platforms/Mobile/`
+et `Platforms/RestrictedZone/`.
 
 ## Déclarer les agents sans exposer leurs classes dans les scénarios
 

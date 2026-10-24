@@ -1,4 +1,5 @@
 #include "restrictedzonelidar.hpp"
+#include "snasystem.hpp"
 #include "entitytypes.hpp"
 
 #include <cmath>
@@ -74,5 +75,47 @@ int main()
     auto const halfDiagonal = std::sqrt(200.F * 200.F + 200.F * 200.F);
     RequireNear(ranges[30], 200.F / (200.F + halfDiagonal),
                 "World boundary normalization changed");
+    // Preserve angle-sensitive mobile elimination and angle-free stationary
+    // restricted zone elimination, including historical side/type gates.
+    auto const victimId = registry.create();
+    auto& victim = registry.emplace<sEntityState>(victimId);
+    victim.m_entityId = victimId;
+    victim.m_side = eEntitySide::Hostile;
+    victim.m_type = eEntityType::Mobile;
+    victim.m_x = 5.F;
+    victim.m_y = 0.F;
+    ownState.m_x = 0.F;
+    ownState.m_y = 0.F;
+    ownState.m_rotation = 0.F;
+    ownState.m_type = eEntityType::Mobile;
+    auto& ownSense = registry.emplace<sSNAState>(ownId);
+    ownSense.m_noescapezone = 10.F;
+    ownSense.m_escapezone = 20.F;
+    ownSense.m_maxShootAngle = 1.F;
+    BaseEntity victimHandle{&registry, victimId};
+    RequireNear(SNASystem::EvaluateDestruction(own, victimHandle), 1.F,
+                "Mobile frontal elimination changed");
+    victim.m_x = -5.F;
+    RequireNear(SNASystem::EvaluateDestruction(own, victimHandle), 0.F,
+                "Mobile rear elimination must remain blocked by angle");
+    victim.m_side = eEntitySide::Friend;
+    RequireNear(SNASystem::EvaluateDestruction(own, victimHandle), 0.F,
+                "Same-team elimination must remain blocked");
+    victim.m_side = eEntitySide::Hostile;
+
+    zoneSense.m_noescapezone = 10.F;
+    zoneSense.m_escapezone = 20.F;
+    zoneSense.m_maxShootAngle = 1.F;
+    zoneState.m_type = eEntityType::RestrictedZone;
+    zoneState.m_x = 0.F;
+    zoneState.m_y = 0.F;
+    zoneState.m_rotation = 3.F;
+    BaseEntity zoneHandle{&registry, zoneId};
+    RequireNear(SNASystem::EvaluateDestruction(zoneHandle, victimHandle), 1.F,
+                "Stationary restricted zone must remain independent of angle");
+    victim.m_type = eEntityType::RestrictedZone;
+    RequireNear(SNASystem::EvaluateDestruction(zoneHandle, victimHandle), 0.F,
+                "Restricted zones must not eliminate other restricted zones");
+
     return 0;
 }

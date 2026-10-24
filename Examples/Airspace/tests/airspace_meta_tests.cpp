@@ -3,6 +3,8 @@
 #include "environment.hpp"
 #include "components.hpp"
 #include "airspacecomponents.hpp"
+#include "mobile.hpp"
+#include "restrictedzone.hpp"
 #include <stdexcept>
 #include <initializer_list>
 
@@ -36,7 +38,8 @@ int main()
     for (auto const* name : {"Aircraft", "Mobile"})
     {
         auto entity = CreateEntity(name, env, "aircraft", ppo::model::eEntitySide::Friend);
-        if (!entity || !entity->has<ppo::model::sEntityState>())
+        if (!entity || dynamic_cast<ppo::model::Mobile*>(entity.get()) == nullptr
+            || !entity->has<ppo::model::sEntityState>())
             throw std::runtime_error("Mobile factory failed");
         auto [state] = entity->get<ppo::model::sEntityState>();
         if (state.m_type != ppo::model::eEntityType::Mobile
@@ -46,7 +49,7 @@ int main()
     for (auto const* name : {"SAM", "RestrictedZone"})
     {
         auto entity = CreateEntity(name, env, "sam", ppo::model::eEntitySide::Hostile);
-        if (!entity)
+        if (!entity || dynamic_cast<ppo::model::RestrictedZone*>(entity.get()) == nullptr)
             throw std::runtime_error("RestrictedZone factory failed");
         auto [state] = entity->get<ppo::model::sEntityState>();
         if (state.m_type != ppo::model::eEntityType::RestrictedZone
