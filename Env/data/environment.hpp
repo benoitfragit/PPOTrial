@@ -11,6 +11,7 @@
 #include "entity.hpp"
 #include "iagent.hpp"
 #include "randominitializersystem.hpp"
+#include "worldrules.hpp"
 
 #include <string>
 #include <memory>
@@ -95,6 +96,12 @@ public:
 
         return agent;
     };
+
+    /**
+    * @brief Installs scenario-owned outcome and snapshot rules before starting.
+    * @return False if the worker is active or the rules are invalid.
+    */
+    bool SetWorldRules(std::unique_ptr<IWorldRules> rules);
 
     /**
     * @brief Reads a consistent snapshot of the internal registry.

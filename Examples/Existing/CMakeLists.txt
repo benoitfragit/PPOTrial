@@ -1,6 +1,8 @@
 add_library(PPOExistingExample STATIC
     data/existingexample.hpp
-    src/existingexample.cpp)
+    src/existingexample.cpp
+    data/existingworldrules.hpp
+    src/existingworldrules.cpp)
 
 target_compile_features(PPOExistingExample PUBLIC cxx_std_17)
 target_include_directories(PPOExistingExample PUBLIC
