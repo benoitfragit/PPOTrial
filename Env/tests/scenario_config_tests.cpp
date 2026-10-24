@@ -75,6 +75,24 @@ void WriteJson(fs::path const& path, Json const& doc)
 
 void CheckAdditionalAssets(fs::path const& root)
 {
+    auto const world = ppo::serialization::Serializer::Parse(root / "Environment.json");
+    Require(world.at("formatVersion") == 2, "world formatVersion changed");
+    auto const& environment = world.at("environment");
+    Require(environment.at("maxNorth").get<float>() == 44658.75F
+        && environment.at("maxEast").get<float>() == 71454.F
+        && environment.at("timeStep").get<float>() == 0.2F,
+        "environment state changed during migration");
+
+    auto const display = ppo::serialization::Serializer::Parse(root / "Renderer.json");
+    Require(display.at("formatVersion") == 2, "renderer formatVersion changed");
+    auto const& renderer = display.at("renderer");
+    Require(renderer.at("scaleLevel").get<int>() == 1
+        && renderer.at("autoAttachCamera").get<bool>()
+        && !renderer.at("showGrid").get<bool>()
+        && renderer.at("showPseudoLidar").get<bool>()
+        && renderer.at("camera").at("fovy").get<float>() == 45.F,
+        "renderer settings changed during migration");
+
     auto const profiles = ppo::serialization::Serializer::Parse(root / "AgentProfiles.json");
     Require(profiles.at("formatVersion").get<int>() == 2, "wrong agent profile format");
     auto const& mapping = profiles.at("profiles");
