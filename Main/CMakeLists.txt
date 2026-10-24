@@ -14,7 +14,7 @@ target_link_libraries(${PROJECT_NAME}
 		GenericPPO
         GenericEnv
 		AirspaceRenderer
-		PPOAirspaceExample
+		PPOExampleCatalog
         MetaReflection)
 		
 add_dependencies(${PROJECT_NAME} GenericEntities 
@@ -22,7 +22,7 @@ add_dependencies(${PROJECT_NAME} GenericEntities
 								 GenericPPO
 								 GenericEnv
 								 AirspaceRenderer
-								 PPOAirspaceExample
+								 PPOExampleCatalog
                                  MetaReflection)
 
 # Copier les DLL automatiquement
@@ -47,4 +47,15 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_test(NAME UnknownExampleRejected
         COMMAND $<TARGET_FILE:${PROJECT_NAME}> --example unknown-example)
     set_tests_properties(UnknownExampleRejected PROPERTIES WILL_FAIL TRUE)
+
+    # Missing --example argument must remain an error (exit status 2).
+    add_test(NAME MissingExampleIdRejected
+        COMMAND $<TARGET_FILE:${PROJECT_NAME}> --example)
+    set_tests_properties(MissingExampleIdRejected PROPERTIES WILL_FAIL TRUE)
+
+    # Preserve CLI handling for an explicitly selected compiled example.
+    add_test(NAME ExplicitAirspaceExampleBootstrap
+        COMMAND $<TARGET_FILE:${PROJECT_NAME}> --example airspace --check-example)
+    set_tests_properties(ExplicitAirspaceExampleBootstrap PROPERTIES
+        PASS_REGULAR_EXPRESSION "Bootstrapped example: airspace")
 endif()
