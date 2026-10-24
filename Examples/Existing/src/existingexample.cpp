@@ -1,4 +1,5 @@
 #include "existingexample.hpp"
+#include "existingworldrules.hpp"
 
 #include "components.hpp"
 #include "entity.hpp"
@@ -39,6 +40,9 @@ RequiresPlatform(std::string const& entityType) noexcept
 bool
 LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment& environment)
 {
+    if (!environment.SetWorldRules(std::make_unique<ExistingWorldRules>()))
+        return false;
+
     auto const scenario = ppo::config::LoadScenarioDefinition(scenarioPath);
     bool complete = !scenario.m_entities.empty();
     std::map<ppo::model::Entity*, std::string> targetMapping{};

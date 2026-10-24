@@ -11,7 +11,6 @@
 #include "entityruntime.hpp"
 #include "utils.hpp"
 #include "serializer.hpp"
-#include "snasystem.hpp"
 
 #include <map>
 #include <thread>
@@ -32,65 +31,6 @@ using Entities = std::vector<std::shared_ptr<Entity>>;
 * @brief Convenience alias for managed agent instances.
 */
 using Agents = std::vector<std::shared_ptr<IAgent>>;
-
-/**
-* @brief Lifetime of one explosion event in steady-clock seconds.
-*/
-constexpr double kExplosionDurationSeconds = 2.0;
-
-/**
-* @brief Returns the current steady-clock time in seconds.
-* @return Current steady-clock time in seconds.
-*/
-double
-GetSteadyTimeSeconds(void)
-{
-    using Clock = std::chrono::steady_clock;
-    using Seconds = std::chrono::duration<double>;
-    return std::chrono::duration_cast<Seconds>(Clock::now().time_since_epoch()).count();
-}
-
-/**
-* @brief Computes the base explosion radius associated with one entity type.
-* @param type Destroyed entity type.
-* @return Base explosion radius.
-*/
-float
-ExplosionRadiusForType(eEntityType type) noexcept
-{
-    switch (type)
-    {
-    case eEntityType::Objective:
-        return 2.40F;
-    case eEntityType::SAM:
-        return 1.35F;
-    case eEntityType::Aircraft:
-        return 1.10F;
-    default:
-        return 1.00F;
-    }
-}
-
-/**
-* @brief Computes the explosion plume height scaling for one entity type.
-* @param type Destroyed entity type.
-* @return Height scaling factor.
-*/
-float
-ExplosionHeightScaleForType(eEntityType type) noexcept
-{
-    switch (type)
-    {
-    case eEntityType::Objective:
-        return 2.35F;
-    case eEntityType::SAM:
-        return 1.45F;
-    case eEntityType::Aircraft:
-        return 1.20F;
-    default:
-        return 1.00F;
-    }
-}
 
 /**
 * @brief Internal execution states of the environment thread.
@@ -127,10 +67,6 @@ struct Environment::Impl
     void                    Stop          (void);
     void                    Start         (void);
     void                    CreateSnapshot(void);
-    void                    SyncDestroyedStateHistory(void);
-    void                    ResolveDestructions(void);
-    void                    RecordExplosionEvents(void);
-    void                    PruneExplosionEvents(void);
 
     void                    ProcessCommand(sRealTimeCommand const& command);
 
@@ -146,8 +82,7 @@ struct Environment::Impl
     std::atomic<uint32_t>            m_index{ 0 };
     mutable std::mutex               m_snapshotMutex{};
     std::thread                     m_thread;
-    std::vector<sExplosionEvent>    m_explosionEvents{};
-    unsigned long long              m_nextExplosionEventId{ 1 };
+    std::unique_ptr<IWorldRules>     m_worldRules{};
 
     std::atomic<bool>               m_running           { false };  
     eEnvironmentState               m_state             { eEnvironmentState::INIT };
@@ -236,28 +171,14 @@ Environment::Impl::CreateSnapshot(void)
         m_buffers[next].emplace<sEntityState>(entity, comp);
     });
 
-    m_world.view<sSNAState>().each([&](auto entity, const auto& comp)
-    {
-        m_buffers[next].emplace<sSNAState>(entity, comp);
-    });
-
-    m_world.view<sFlightModelState>().each([&](auto entity, const auto& comp)
-    {
-        m_buffers[next].emplace<sFlightModelState>(entity, comp);
-    });
-
-    m_world.view<sPseudoLidarState>().each([&](auto entity, const auto& comp)
-    {
-        m_buffers[next].emplace<sPseudoLidarState>(entity, comp);
-    });
-
     m_world.view<sEntityMetadata>().each([&](auto entity, const auto& comp)
     {
         m_buffers[next].emplace<sEntityMetadata>(entity, comp);
     });
 
     m_buffers[next].ctx().emplace<sEnvironmentState>(m_world.ctx().get<sEnvironmentState>());
-    m_buffers[next].ctx().emplace<sExplosionEventBuffer>(sExplosionEventBuffer{ m_explosionEvents });
+    if (m_worldRules != nullptr)
+        m_worldRules->CopySnapshot(m_world, m_buffers[next]);
 
     for (auto agent : m_agents)
     {
@@ -306,124 +227,6 @@ Environment::Impl::Start(void)
 }
 
 /**
-* @brief Copies the current destroyed state into the previous-step history.
-*
-* This is executed once at the start of every simulation step so that any
-* destruction detected later during the step keeps a clean transition from
-* "alive" to "destroyed".
-*/
-void
-Environment::Impl::SyncDestroyedStateHistory(void)
-{
-    for (auto& entity : m_entities)
-    {
-        if (entity == nullptr
-            || !entity->has<sEntityState>())
-        {
-            continue;
-        }
-
-        auto [entityState] = entity->get<sEntityState>();
-        entityState.m_prevDestroyed = entityState.m_destroyed;
-    }
-}
-
-/**
-* @brief Resolves all destruction events after the world has advanced.
-*
-* The original entity iteration order and threshold are preserved.
-*/
-void
-Environment::Impl::ResolveDestructions(void)
-{
-    // Resolve destruction outcomes only after every entity has advanced.
-    for (auto& entity: m_entities)
-    {
-        if (entity == nullptr
-        ||  !entity->has<sEntityState, sSNAState>())
-            continue;
-    
-        auto const [entityState, snaState] = entity->get<sEntityState, sSNAState>();
-    
-        if (entityState.m_destroyed)
-            continue;
-    
-        for (auto& otherEntity : m_entities)
-        {
-            if (otherEntity == entity
-            || !otherEntity->has<sEntityState>())
-                continue;
-    
-            auto [otherEntityState] = otherEntity->get<sEntityState>();
-    
-            if (otherEntityState.m_destroyed) 
-                continue;
-    
-            if (float pk{ SNASystem::EvaluateDestruction(*entity.get(), *otherEntity.get()) };
-                0.95F < pk)
-            {
-                otherEntityState.m_destroyed = true;
-                otherEntityState.m_destroyedById = entity->uniqid();
-            } 
-        }
-    }
-}
-
-/**
-* @brief Records one explosion event for every fresh destruction.
-*
-* The resulting event buffer is independent from entity lifetime so that the
-* renderer can keep displaying the explosion even when the environment is
-* reinitialized immediately afterwards.
-*/
-void
-Environment::Impl::RecordExplosionEvents(void)
-{
-    double const now = GetSteadyTimeSeconds();
-
-    for (auto& entity : m_entities)
-    {
-        if (entity == nullptr
-            || !entity->has<sEntityState>())
-        {
-            continue;
-        }
-
-        auto [entityState] = entity->get<sEntityState>();
-        if (!entityState.m_destroyed || entityState.m_prevDestroyed)
-            continue;
-
-        m_explosionEvents.push_back(sExplosionEvent{
-            m_nextExplosionEventId++,
-            entityState.m_x,
-            entityState.m_y,
-            0.F,
-            entityState.m_type,
-            now,
-            ExplosionRadiusForType(entityState.m_type),
-            ExplosionHeightScaleForType(entityState.m_type)
-        });
-    }
-}
-
-/**
-* @brief Removes expired explosion events from the persistent event buffer.
-*/
-void
-Environment::Impl::PruneExplosionEvents(void)
-{
-    double const now = GetSteadyTimeSeconds();
-    auto const keepFrom = std::remove_if(
-        m_explosionEvents.begin(),
-        m_explosionEvents.end(),
-        [now](sExplosionEvent const& event)
-        {
-            return (now - event.m_startTime) > kExplosionDurationSeconds;
-        });
-    m_explosionEvents.erase(keepFrom, m_explosionEvents.end());
-}
-
-/**
 * @brief Runs the main simulation loop.
 */
 void
@@ -438,7 +241,8 @@ Environment::Impl::Run(void)
 
         if (m_state == eEnvironmentState::RUNNING)
         {
-            SyncDestroyedStateHistory();
+            if (m_worldRules != nullptr)
+                m_worldRules->BeforeStep(m_entities);
 
             // Reinitialize entities and agents after a stop or a completed rollout.
             if (m_prevState == eEnvironmentState::STOPPED
@@ -469,15 +273,16 @@ Environment::Impl::Run(void)
                 },
                 [&]()
                 {
-                    ResolveDestructions();
-                    RecordExplosionEvents();
+                    if (m_worldRules != nullptr)
+                        m_worldRules->Resolve(m_entities);
                 },
                 [](IAgent& agent) { return agent.SetNewState(); });
 
         }
 
         m_prevState = m_state;
-        PruneExplosionEvents();
+        if (m_worldRules != nullptr)
+            m_worldRules->AfterStep();
 
         CreateSnapshot();
 
@@ -500,6 +305,15 @@ Environment::Environment(void):
 * @brief Destroys the public environment wrapper.
 */
 Environment::~Environment(void) = default;
+
+bool Environment::SetWorldRules(std::unique_ptr<IWorldRules> rules)
+{
+    if (p_impl == nullptr || p_impl->m_running.load(std::memory_order_acquire) || rules == nullptr)
+        return false;
+
+    p_impl->m_worldRules = std::move(rules);
+    return true;
+}
 
 /**
 * @brief Returns the live registry pointer used for creation.
