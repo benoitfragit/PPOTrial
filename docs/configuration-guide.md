@@ -178,6 +178,26 @@ Le profil réel contient l'intégralité des sections nécessaires à la platefo
 
 **Evaluation/InitialStates.json** contient des collections de points initiaux nommés, au format **presets.blueeval[]** et **presets.redeval[]**, avec les coordonnées et commandes dans des champs explicites **north**, **east**, **heading**, **speed**, **turnAcceleration**, **acceleration**. L'initialiseur C++ peut les utiliser comme auparavant, sans liste opaque de six nombres ni ancien chemin. Le champ **evaluationSettings** conserve les paramètres numériques associés à ces jeux d'initialisation.
 
+## Environnement et affichage
+
+Ces réglages ont le même schéma V2 et le même style de nommage que les autres configurations :
+
+~~~json
+{
+  "formatVersion": 2,
+  "environment": {
+    "maxNorth": 44658.75,
+    "maxEast": 71454,
+    "timeStep": 0.2
+  }
+}
+~~~
+
+Renderer.json contient un objet **renderer** (scaleLevel, autoAttachCamera,
+showGrid, showPseudoLidar, camera avec position, target, up et fovy), sans les
+anciens noms de champs en majuscule. Le rendu et les valeurs enregistrées restent
+identiques : seule la représentation de configuration a changé.
+
 ## Sauvegarde et erreurs
 
 **Environment.json**, **Renderer.json** et **Training/*.json** sont chargés et sauvés par le Serializer. Chaque fichier doit porter **formatVersion = 2** : un document incorrect, manquant ou impossible à charger est **préservé sans écrasement** par des valeurs par défaut à l'arrêt de l'application. Éviter les modifications manuelles pendant l'exécution.
