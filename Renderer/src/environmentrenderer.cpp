@@ -9,13 +9,13 @@
 #include "environmentrenderer.hpp"
 
 #include <algorithm>
-#include <stdexcept>
-
 #include <array>
 #include <cctype>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <stdexcept>
 #include <limits>
 #include <string>
 #include <vector>
@@ -1463,6 +1463,7 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
     ApplyTheme();
 
     ImGuiIO& io = ImGui::GetIO();
+    io.FontGlobalScale = 1.13F;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
@@ -1489,6 +1490,10 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
             m_showDomains = section.value("showDomains", m_showDomains);
             m_showDestroyed = section.value("showDestroyed", m_showDestroyed);
             m_showMetaCatalog = section.value("showMetaCatalog", m_showMetaCatalog);
+            m_showMinimap = section.value("showMinimap", m_showMinimap);
+            m_showEntities = section.value("showEntities", m_showEntities);
+            m_showInspection = section.value("showInspection", m_showInspection);
+            m_showSimulation = section.value("showSimulation", m_showSimulation);
             m_showPseudoLidar = section.value("showPseudoLidar", m_showPseudoLidar);
             m_focusSelectionInMinimap = section.value("focusSelectionInMinimap", m_focusSelectionInMinimap);
             m_cameraDistance = std::clamp(section.value("cameraDistance", m_cameraDistance), 5.F, 60.F);
@@ -1540,6 +1545,10 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
             section["showDomains"] = m_showDomains;
             section["showDestroyed"] = m_showDestroyed;
             section["showMetaCatalog"] = m_showMetaCatalog;
+            section["showMinimap"] = m_showMinimap;
+            section["showEntities"] = m_showEntities;
+            section["showInspection"] = m_showInspection;
+            section["showSimulation"] = m_showSimulation;
             section["showPseudoLidar"] = m_showPseudoLidar;
             section["focusSelectionInMinimap"] = m_focusSelectionInMinimap;
             section["cameraDistance"] = m_cameraDistance;
@@ -1749,12 +1758,29 @@ EnvironmentRenderer::BuildDockspace(void)
         ImGuiWindowFlags_NoMove |
         ImGuiWindowFlags_NoBringToFrontOnFocus |
         ImGuiWindowFlags_NoNavFocus |
+        ImGuiWindowFlags_MenuBar |
         ImGuiWindowFlags_NoBackground;
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.F);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.F);
     ImGui::Begin("##DockHost", nullptr, flags);
     ImGui::PopStyleVar(2);
+
+    if (ImGui::BeginMenuBar())
+    {
+        ImGui::TextDisabled("PPOTrial  /  LEARNING WORKSPACE");
+        ImGui::Separator();
+        if (ImGui::BeginMenu("Panels"))
+        {
+            ImGui::MenuItem("Simulation", nullptr, &m_showSimulation);
+            ImGui::MenuItem("Minimap", nullptr, &m_showMinimap);
+            ImGui::MenuItem("Entities", nullptr, &m_showEntities);
+            ImGui::MenuItem("Inspector", nullptr, &m_showInspection);
+            ImGui::MenuItem("Meta catalog", nullptr, &m_showMetaCatalog);
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
+    }
 
     ImGuiID const dockspaceId = ImGui::GetID("##MainDockspace");
     ImGui::DockSpace(dockspaceId, ImVec2(0.F, 0.F), ImGuiDockNodeFlags_PassthruCentralNode);
@@ -1780,21 +1806,18 @@ EnvironmentRenderer::BuildDefaultLayout(ImGuiID dockspaceId)
     ImVec2 const size = ImGui::GetMainViewport()->Size;
     ImGui::DockBuilderSetNodeSize(dockspaceId, size);
 
-    ImGuiID dockLeft = dockspaceId;
-    ImGuiID dockRight = ImGui::DockBuilderSplitNode(dockLeft, ImGuiDir_Right, 0.27F, nullptr, &dockLeft);
-    ImGuiID dockBottom = ImGui::DockBuilderSplitNode(dockLeft, ImGuiDir_Down, 0.34F, nullptr, &dockLeft);
-    ImGuiID dockTopLeft = ImGui::DockBuilderSplitNode(dockLeft, ImGuiDir_Left, 0.26F, nullptr, &dockLeft);
+    ImGuiID dockMain = dockspaceId;
+    ImGuiID dockSidebar = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Right, 0.37F, nullptr, &dockMain);
+    ImGuiID dockControls = ImGui::DockBuilderSplitNode(dockSidebar, ImGuiDir_Down, 0.25F, nullptr, &dockSidebar);
 
-    ImGuiID dockRightBottom = ImGui::DockBuilderSplitNode(dockRight, ImGuiDir_Down, 0.44F, nullptr, &dockRight);
-    ImGuiID dockBottomRight = ImGui::DockBuilderSplitNode(dockBottom, ImGuiDir_Right, 0.45F, nullptr, &dockBottom);
-
-    ImGui::DockBuilderDockWindow("Simulation", dockTopLeft);
-    ImGui::DockBuilderDockWindow("Entities", dockTopLeft);
-    ImGui::DockBuilderDockWindow("3D Tactical View", dockLeft);
-    ImGui::DockBuilderDockWindow("Minimap", dockBottom);
-    ImGui::DockBuilderDockWindow("Inspection", dockBottomRight);
-    ImGui::DockBuilderDockWindow("Agents", dockRight);
-    ImGui::DockBuilderDockWindow("Meta Catalog", dockRightBottom);
+    ImGui::DockBuilderDockWindow("3D Tactical View", dockMain);
+    ImGui::DockBuilderDockWindow("Learning", dockSidebar);
+    ImGui::DockBuilderDockWindow("Simulation", dockControls);
+    // Optional windows share a tabbed dock, never crowd the default view.
+    ImGui::DockBuilderDockWindow("Minimap", dockControls);
+    ImGui::DockBuilderDockWindow("Entities", dockControls);
+    ImGui::DockBuilderDockWindow("Inspection", dockControls);
+    ImGui::DockBuilderDockWindow("Meta Catalog", dockControls);
 
     ImGui::DockBuilderFinish(dockspaceId);
 }
@@ -2193,7 +2216,7 @@ EnvironmentRenderer::DrawSimulationControls(void)
     if (p_environment == nullptr)
         return;
 
-    ImVec2 const controlButtonSize{ 96.F, 74.F };
+    ImVec2 const controlButtonSize{ 92.F, 47.F };
     if (DrawSimulationControlButton("play", "PLAY", eSimulationControlGlyph::Play, controlButtonSize, ImVec4(0.17F, 0.58F, 0.33F, 1.F)))
     {
         for (auto const& [_, agent] : p_agents)
@@ -2223,9 +2246,10 @@ EnvironmentRenderer::DrawSimulationControls(void)
                 agent->m_started = false;
     }
 
-    ImGui::Dummy(ImVec2(0.F, 4.F));
-    ImGui::SeparatorText("World");
+    if (!ImGui::CollapsingHeader("World and display settings"))
+        return;
 
+    ImGui::SeparatorText("World");
     bool refreshRanges = false;
     if (ImGui::SliderFloat("Area width (km)", &m_areawidth, 1.F, 500.F))
         refreshRanges = true;
@@ -2436,11 +2460,10 @@ EnvironmentRenderer::DrawAgentPlot(std::shared_ptr<AgentController> const& agent
     agent->m_plots[1].m_name = state.m_name + "-ActorLoss";
     agent->m_plots[2].m_name = state.m_name + "-ValueLoss";
     agent->m_plots[3].m_name = state.m_name + "-EntropyLoss";
-    agent->m_plots[4].m_name = state.m_name + "-MeanReward";
 
     if (ImGui::BeginTable("##agentplots", 2, ImGuiTableFlags_SizingStretchSame))
     {
-        for (int index = 0; index < 5; ++index)
+        for (int index = 0; index < 4; ++index)
         {
             if (index % 2 == 0)
                 ImGui::TableNextRow();
@@ -2455,6 +2478,177 @@ EnvironmentRenderer::DrawAgentPlot(std::shared_ptr<AgentController> const& agent
 
         ImGui::EndTable();
     }
+}
+
+/**
+* @brief Samples real training and evaluation events independently of visible tabs.
+*/
+void
+EnvironmentRenderer::UpdateLearningTelemetry(entt::registry const& snapshot)
+{
+    auto const view = snapshot.view<ppo::model::sAgentStateSnaphot>();
+    for (auto entity : view)
+    {
+        auto const& [state] = view.get(entity);
+        auto agent = GetAgentController(state.m_id);
+        if (agent == nullptr)
+            continue;
+
+        unsigned int const version = state.m_common.m_version;
+        if (!agent->m_seenVersion)
+        {
+            agent->m_lastPlottedVersion = version;
+            agent->m_seenVersion = true;
+        }
+        else if (version > agent->m_lastPlottedVersion)
+        {
+            // A version change means a PPO update occurred. A skipped
+            // version is never recreated from duplicated render samples.
+            agent->m_plots[0].push(state.m_common.m_loss);
+            agent->m_plots[1].push(state.m_common.m_actorloss);
+            agent->m_plots[2].push(state.m_common.m_valueloss);
+            agent->m_plots[3].push(state.m_common.m_entropyloss);
+            agent->m_lastPlottedVersion = version;
+        }
+        else if (version < agent->m_lastPlottedVersion)
+        {
+            agent->m_lastPlottedVersion = version;
+            for (auto& plot : agent->m_plots)
+                plot.clear();
+            agent->m_evaluationScores.Clear();
+            agent->m_evaluationSuccess.Clear();
+        }
+
+        auto const& common = state.m_common;
+        if (common.m_hasLatestEvaluation
+            && agent->m_evaluationScores.Record(common.m_completedEvaluations,
+                                                common.m_latestEvaluationNotation))
+        {
+            agent->m_evaluationSuccess.Record(common.m_completedEvaluations,
+                                              100.0 * common.m_latestEvaluationSuccessRate);
+        }
+    }
+}
+
+/**
+* @brief Draws evidence of task performance without changing the learned policy.
+*/
+void
+EnvironmentRenderer::DrawLearningProgress(std::shared_ptr<AgentController> const& agent,
+                                          ppo::model::sAgentStateSnaphot const& state)
+{
+    auto const& common = state.m_common;
+    if (common.m_evaluationinprogress)
+    {
+        ImGui::TextUnformatted("Evaluating model");
+        ImGui::ProgressBar(std::clamp(common.m_evaluationprogress, 0.F, 1.F), ImVec2(-1.F, 0.F));
+        ImGui::Text("Tests completed: %u  |  Step-limit timeouts: %u",
+                    common.m_evaluationTestsFinished, common.m_evaluationTimeoutTests);
+        ImGui::Text("Simulation steps: %llu  |  %.0f steps/s",
+                    common.m_evaluationStepsExecuted, common.m_evaluationStepsPerSecond);
+        ImGui::Text("Elapsed: %.1f s", common.m_evaluationElapsedSeconds);
+        ImGui::TextDisabled("Timeout = configured step limit reached, not necessarily a failed task.");
+    }
+
+    auto const& scores = agent->m_evaluationScores.Samples();
+    if (!common.m_hasLatestEvaluation || scores.empty())
+    {
+        ImGui::TextDisabled("Awaiting first complete evaluation.");
+        ImGui::TextWrapped("The evaluation graph starts when a full test campaign completes.");
+        return;
+    }
+
+    ImGui::SeparatorText("Model evaluation");
+    ImGui::Text("LATEST  %.2f", common.m_latestEvaluationNotation);
+    ImGui::Text("BEST    %.2f", common.m_notation);
+    ImGui::Text("SUCCESS %.1f%%", 100.F * common.m_latestEvaluationSuccessRate);
+    ImGui::Text("SURVIVAL %.1f%%", 100.F * common.m_latestEvaluationSurvivalRate);
+    ImGui::Text("TIMEOUT  %.1f%%", 100.F * common.m_latestEvaluationTimeoutRate);
+    ImGui::TextDisabled("Campaign #%llu  -  %u test cases",
+        static_cast<unsigned long long>(common.m_completedEvaluations),
+        common.m_latestEvaluationTestCount);
+
+    if (scores.size() >= 2)
+        ImGui::Text("Delta vs first visible evaluation: %+.2f score units",
+            scores.back().score - scores.front().score);
+
+    char const* trend = "Not enough campaigns";
+    switch (agent->m_evaluationScores.RecentTrend())
+    {
+    case ppo::core::LearningHistory::Trend::Improving: trend = "Improving (indicative)"; break;
+    case ppo::core::LearningHistory::Trend::Declining: trend = "Declining (indicative)"; break;
+    case ppo::core::LearningHistory::Trend::Flat: trend = "Stable (indicative)"; break;
+    default: break;
+    }
+    ImGui::Text("Recent trend: %s", trend);
+
+    // The bounded history holds at most 256 entries. Stack storage avoids
+    // allocating temporary plots on every frame.
+    std::array<double, 256> xs{};
+    std::array<double, 256> ys{};
+    auto plot = [&](ppo::core::LearningHistory const& history,
+                    char const* title, char const* series, char const* unit)
+    {
+        auto const& samples = history.Samples();
+        auto const n = std::min(samples.size(), xs.size());
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            xs[i] = static_cast<double>(samples[i].campaign);
+            ys[i] = samples[i].score;
+        }
+        if (ImPlot::BeginPlot(title, ImVec2(-1.F, 205.F)))
+        {
+            ImPlot::SetupAxes("Evaluation #", unit, ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+            if (n != 0)
+                ImPlot::PlotLine(series, xs.data(), ys.data(), static_cast<int>(n));
+            ImPlot::EndPlot();
+        }
+    };
+
+    plot(agent->m_evaluationScores, "Evaluation score", "Score", "Score");
+    plot(agent->m_evaluationSuccess, "Success rate", "Success", "Percent");
+
+    ImGui::TextWrapped("A positive trend on a fixed evaluation suite is evidence of learning, not proof of generalization.");
+    if (ImGui::Button("Export CSV"))
+    {
+        std::string safeName = state.m_name;
+        for (char& character : safeName)
+            if (!std::isalnum(static_cast<unsigned char>(character))
+                && character != '_' && character != '-')
+                character = '_';
+
+        auto const stamp = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        std::filesystem::path const outputDir{ "learning_reports" };
+        std::error_code error;
+        std::filesystem::create_directories(outputDir, error);
+        if (error)
+            agent->m_exportStatus = "Failed to create learning_reports directory.";
+        else
+        {
+            auto const csvPath = outputDir / (safeName + "_" + std::to_string(stamp) + ".csv");
+            std::ofstream output{ csvPath };
+            if (!output)
+                agent->m_exportStatus = "Failed to open CSV file.";
+            else
+            {
+                output << "campaign,score,success_percent\n";
+                auto const& successes = agent->m_evaluationSuccess.Samples();
+                for (std::size_t i = 0; i < scores.size(); ++i)
+                {
+                    output << scores[i].campaign << ',' << scores[i].score << ',';
+                    if (i < successes.size() && successes[i].campaign == scores[i].campaign)
+                        output << successes[i].score;
+                    output << '\n';
+                }
+                output.close();
+                agent->m_exportStatus = output ? ("CSV: " + csvPath.string()) : "Failed to write CSV.";
+            }
+        }
+    }
+
+    if (!agent->m_exportStatus.empty())
+        ImGui::TextWrapped("%s", agent->m_exportStatus.c_str());
 }
 
 /**
@@ -3089,82 +3283,55 @@ EnvironmentRenderer::DrawInspectorWindow(entt::registry const& snapshot)
 void
 EnvironmentRenderer::DrawAgentsWindow(entt::registry const& snapshot)
 {
-    ImGui::Begin("Agents");
+    ImGui::Begin("Learning");
 
-    auto agentView = snapshot.view<ppo::model::sAgentStateSnaphot>();
-    static bool first = true;
+    auto const view = snapshot.view<ppo::model::sAgentStateSnaphot>();
+    if (view.begin() == view.end())
+        ImGui::TextDisabled("No training agent found.");
 
-    for (auto entity : agentView)
+    for (auto entity : view)
     {
-        auto const& [state] = agentView.get(entity);
+        auto const& [state] = view.get(entity);
         auto agent = GetAgentController(state.m_id);
         if (agent == nullptr)
             continue;
 
-        if (agent->m_started && !state.m_common.m_training && !first)
-        {
-            agent->m_plots[0].push(state.m_common.m_loss);
-            agent->m_plots[1].push(state.m_common.m_actorloss);
-            agent->m_plots[2].push(state.m_common.m_valueloss);
-            agent->m_plots[3].push(state.m_common.m_entropyloss);
-
-            if (state.m_common.m_step < agent->m_lastRewardStep)
-            {
-                agent->m_rewardMean = 0.F;
-                agent->m_rewardSampleCount = 0;
-                agent->m_plots[4].clear();
-            }
-
-            agent->m_lastRewardStep = state.m_common.m_step;
-            ++agent->m_rewardSampleCount;
-            float const sampleCount = static_cast<float>(agent->m_rewardSampleCount);
-            agent->m_rewardMean += (state.m_common.m_reward - agent->m_rewardMean) / sampleCount;
-            agent->m_plots[4].push(agent->m_rewardMean);
-        }
-
+        ImGui::PushID(static_cast<int>(state.m_id));
         if (ImGui::CollapsingHeader(state.m_name.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
         {
-            ImGui::Text("Id %llu", state.m_id);
-            ImGui::SameLine();
-            ImGui::Text("Step %lld / %lld", state.m_common.m_step, state.m_common.m_maxStep);
-            ImGui::SameLine();
-            ImGui::Text("Reward %.3f", state.m_common.m_reward);
-            ImGui::Text("Eval score %.3f", state.m_common.m_notation);
-            ImGui::SameLine();
-            if (state.m_common.m_evaluationinprogress)
-                ImGui::Text("Evaluation %.1f%%", 100.F * state.m_common.m_evaluationprogress);
-            else
-                ImGui::Text("Evaluation idle");
-            if (state.m_common.m_evaluationinprogress)
-                ImGui::ProgressBar(std::clamp(state.m_common.m_evaluationprogress, 0.F, 1.F), ImVec2(-1.F, 0.F));
-
-            if (ImGui::BeginTabBar((state.m_name + "##tabs").c_str()))
+            ImGui::TextDisabled("Model version %u  |  Step %lld / %lld",
+                                state.m_common.m_version,
+                                state.m_common.m_step, state.m_common.m_maxStep);
+            ImGui::Text("Instant reward: %.3f", state.m_common.m_reward);
+            if (ImGui::BeginTabBar("##learning-tabs"))
             {
-                if (ImGui::BeginTabItem("Controls"))
+                if (ImGui::BeginTabItem("Progress"))
                 {
-                    DrawTrainingControls(agent, state);
+                    DrawLearningProgress(agent, state);
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("Rewards & Settings"))
+                {
+                    ImGui::TextWrapped("Changes apply to the active training agent.");
                     DrawRewardControls(agent, state);
+                    ImGui::SeparatorText("Rollout");
+                    DrawTrainingControls(agent, state);
                     ImGui::EndTabItem();
                 }
-
-                if (ImGui::BeginTabItem("Snapshot"))
+                if (ImGui::BeginTabItem("Diagnostics"))
                 {
-                    DrawMetaAnyRecursive(state.m_name.c_str(), entt::forward_as_meta(state));
-                    ImGui::EndTabItem();
-                }
-
-                if (ImGui::BeginTabItem("Plots"))
-                {
+                    ImGui::TextDisabled("Losses sampled per completed model update.");
                     DrawAgentPlot(agent, state);
+                    if (ImGui::CollapsingHeader("Agent snapshot"))
+                        DrawMetaAnyRecursive(state.m_name.c_str(), entt::forward_as_meta(state));
                     ImGui::EndTabItem();
                 }
-
                 ImGui::EndTabBar();
             }
         }
+        ImGui::PopID();
     }
 
-    first = false;
     ImGui::End();
 }
 
@@ -3251,18 +3418,28 @@ EnvironmentRenderer::Run(void)
         UpdateMissionTelemetry(snapshot);
         UpdateTrails(snapshot);
         UpdateExplosionEffects(snapshot);
+        UpdateLearningTelemetry(snapshot);
 
-        ImGui::Begin("Simulation");
-        DrawStatusBar(snapshot);
-        DrawSimulationControls();
-        if (p_pinnedPlot != nullptr)
-            DrawOneAgentPlot(*p_pinnedPlot);
-        ImGui::End();
+        if (m_showSimulation)
+        {
+            if (ImGui::Begin("Simulation", &m_showSimulation))
+            {
+                DrawSimulationControls();
+                if (ImGui::CollapsingHeader("Scene details"))
+                    DrawStatusBar(snapshot);
+                if (p_pinnedPlot != nullptr && ImGui::CollapsingHeader("Pinned diagnostics"))
+                    DrawOneAgentPlot(*p_pinnedPlot);
+            }
+            ImGui::End();
+        }
 
         DrawTacticalWindow(snapshot);
-        DrawMinimapWindow(snapshot);
-        DrawEntitiesWindow(snapshot);
-        DrawInspectorWindow(snapshot);
+        if (m_showMinimap)
+            DrawMinimapWindow(snapshot);
+        if (m_showEntities)
+            DrawEntitiesWindow(snapshot);
+        if (m_showInspection)
+            DrawInspectorWindow(snapshot);
         DrawAgentsWindow(snapshot);
         DrawMetaCatalogWindow();
     });

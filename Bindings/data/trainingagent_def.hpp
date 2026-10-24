@@ -229,6 +229,18 @@ TrainingAgent<Policy, Model>::SetNewState(void)
         {
             sEvaluatorState state = p_evaluator->GetSnapshot();
             m_internal.m_notation = state.m_notation;
+            m_internal.m_latestEvaluationNotation = state.m_latestNotation;
+            m_internal.m_completedEvaluations = state.m_completedCampaigns;
+            m_internal.m_hasLatestEvaluation = state.m_hasLatestNotation;
+            m_internal.m_latestEvaluationSuccessRate = state.m_latestSuccessRate;
+            m_internal.m_latestEvaluationSurvivalRate = state.m_latestSurvivalRate;
+            m_internal.m_latestEvaluationTestCount = state.m_lastCompletedTestCount;
+            m_internal.m_evaluationTestsFinished = state.m_testsFinished;
+            m_internal.m_evaluationTimeoutTests = state.m_timeoutTests;
+            m_internal.m_latestEvaluationTimeoutRate = state.m_latestTimeoutRate;
+            m_internal.m_evaluationStepsExecuted = state.m_stepsExecuted;
+            m_internal.m_evaluationStepsPerSecond = state.m_stepsPerSecond;
+            m_internal.m_evaluationElapsedSeconds = state.m_elapsedSeconds;
             m_internal.m_evaluationprogress = state.m_progress;
             m_internal.m_evaluationinprogress = state.m_inprogress;
         }
@@ -373,6 +385,18 @@ TrainingAgent<Policy, Model>::GetSnapshot(void) const noexcept
     {
         sEvaluatorState const evaluatorState = p_evaluator->GetSnapshot();
         commonState.m_notation = evaluatorState.m_notation;
+        commonState.m_latestEvaluationNotation = evaluatorState.m_latestNotation;
+        commonState.m_completedEvaluations = evaluatorState.m_completedCampaigns;
+        commonState.m_hasLatestEvaluation = evaluatorState.m_hasLatestNotation;
+        commonState.m_latestEvaluationSuccessRate = evaluatorState.m_latestSuccessRate;
+        commonState.m_latestEvaluationSurvivalRate = evaluatorState.m_latestSurvivalRate;
+        commonState.m_latestEvaluationTestCount = evaluatorState.m_lastCompletedTestCount;
+        commonState.m_evaluationTestsFinished = evaluatorState.m_testsFinished;
+        commonState.m_evaluationTimeoutTests = evaluatorState.m_timeoutTests;
+        commonState.m_latestEvaluationTimeoutRate = evaluatorState.m_latestTimeoutRate;
+        commonState.m_evaluationStepsExecuted = evaluatorState.m_stepsExecuted;
+        commonState.m_evaluationStepsPerSecond = evaluatorState.m_stepsPerSecond;
+        commonState.m_evaluationElapsedSeconds = evaluatorState.m_elapsedSeconds;
         commonState.m_evaluationprogress = evaluatorState.m_progress;
         commonState.m_evaluationinprogress = evaluatorState.m_inprogress;
     }

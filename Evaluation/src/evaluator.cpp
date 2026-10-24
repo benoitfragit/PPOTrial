@@ -441,6 +441,13 @@ Evaluator::Impl::LoadScenario(std::string const& name)
 
     auto& evalState = m_world.ctx().emplace<ppo::model::sEvaluatorState>();
     evalState.m_notation = persistedState.m_notation;
+    evalState.m_latestNotation = persistedState.m_latestNotation;
+    evalState.m_completedCampaigns = persistedState.m_completedCampaigns;
+    evalState.m_hasLatestNotation = persistedState.m_hasLatestNotation;
+    evalState.m_latestSuccessRate = persistedState.m_latestSuccessRate;
+    evalState.m_latestSurvivalRate = persistedState.m_latestSurvivalRate;
+    evalState.m_latestTimeoutRate = persistedState.m_latestTimeoutRate;
+    evalState.m_lastCompletedTestCount = persistedState.m_lastCompletedTestCount;
     evalState.m_nbtests = m_scenario.m_evaluation.m_nbTests > 0
         ? std::min<int>(m_scenario.m_evaluation.m_nbTests, static_cast<int>(m_buffer.m_tests.size()))
         : static_cast<int>(m_buffer.m_tests.size());
@@ -616,7 +623,35 @@ Evaluator::Impl::Run(void)
 
     state.m_inprogress = true;
     state.m_progress = 0.F;
+    state.m_testsFinished = 0U;
+    state.m_timeoutTests = 0U;
+    state.m_stepsExecuted = 0ULL;
+    state.m_stepsPerSecond = 0.F;
+    state.m_elapsedSeconds = 0.F;
     UpdateDoubleBuffer();
+
+    using EvaluationClock = std::chrono::steady_clock;
+    auto const startTime = EvaluationClock::now();
+    unsigned long long executedSteps = 0ULL;
+    constexpr unsigned long long publicationInterval = 64ULL;
+
+    // UI telemetry is sampled, never used to determine simulation results.
+    auto publishProgress = [&](int completedTests, int currentSteps)
+    {
+        double const elapsed = std::chrono::duration<double>(
+            EvaluationClock::now() - startTime).count();
+        state.m_elapsedSeconds = static_cast<float>(elapsed);
+        state.m_stepsExecuted = executedSteps;
+        state.m_stepsPerSecond = elapsed > 0.0
+            ? static_cast<float>(static_cast<double>(executedSteps) / elapsed)
+            : 0.F;
+        state.m_testsFinished = static_cast<unsigned int>(completedTests);
+        state.m_progress = ppo::core::EvaluationProgress(
+            completedTests, currentSteps,
+            static_cast<int>(state.m_nbtests),
+            static_cast<int>(state.m_nbstep));
+        UpdateDoubleBuffer();
+    };
 
     // Scheduling is generic. Scenario resets, entity dynamics and the exact
     // scoring calculations below remain owned by this evaluation adapter.
@@ -632,7 +667,7 @@ Evaluator::Impl::Run(void)
             testSecondaryDestroyed = 0.F;
             return ResetEntitiesForTest(static_cast<std::size_t>(testIndex));
         },
-        [&](int, int)
+        [&](int testIndex, int stepIndex)
         {
             // All agents act before any entity advances, then all observe.
             (void)ppo::core::StepAgents(
@@ -645,6 +680,10 @@ Evaluator::Impl::Run(void)
                 },
                 [&]() { ResolveDestructions(); },
                 [](ppo::model::IAgent& agent) { return agent.SetNewState(); });
+
+            ++executedSteps;
+            if ((executedSteps % publicationInterval) == 0ULL)
+                publishProgress(testIndex, stepIndex + 1);
 
             if (p_evaluated->has<ppo::model::sSNAState>())
             {
@@ -694,12 +733,16 @@ Evaluator::Impl::Run(void)
             primaryPkill += testPrimaryPk;
             secondaryDestroyed += testSecondaryDestroyed;
             missionDuration += static_cast<float>(state.m_nbstep + 1) / static_cast<float>(stepIndex + 1);
-            state.m_inprogress = true;
-            state.m_progress = static_cast<float>(testIndex + 1) / static_cast<float>(std::max(state.m_nbtests, 1U));
-            UpdateDoubleBuffer();
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(3));
+            // Generic step-limit exhaustion, independent of the scenario task.
+            if (stepIndex >= static_cast<int>(state.m_nbstep))
+                ++state.m_timeoutTests;
+            // A finished scenario counts as a full scenario even if it
+            // terminated before the maximum simulation steps.
+            publishProgress(testIndex + 1, 0);
         });
+
+    // Capture final wall time even for cancellation; this is diagnostics only.
+    publishProgress(evaluationResult.finishedTests, 0);
 
     // Never compare/promote a checkpoint on an aborted or incomplete campaign.
     // Cancellation and failed scenario resets are not evaluation results.
@@ -735,9 +778,24 @@ Evaluator::Impl::Run(void)
         state.m_notation = notation;
     }
 
+    // Publish the actual score of this completed evaluation even if it did
+    // not beat the historical best. Incomplete campaigns never enter history.
+    state.m_latestNotation = notation;
+    state.m_hasLatestNotation = true;
+    float const completedTests = static_cast<float>(state.m_nbtests);
+    state.m_latestSuccessRate = targetDestroyed / completedTests;
+    state.m_latestSurvivalRate = 1.F - playerDestroyed / completedTests;
+    state.m_latestTimeoutRate = static_cast<float>(state.m_timeoutTests) / completedTests;
+    state.m_lastCompletedTestCount = state.m_nbtests;
+    ++state.m_completedCampaigns;
+
     LogEvaluatorEvent(
         "completed evaluation '" + m_evaluatedName
-        + "' notation=" + std::to_string(state.m_notation));
+        + "' latest=" + std::to_string(state.m_latestNotation)
+        + " best=" + std::to_string(state.m_notation)
+        + " elapsed_s=" + std::to_string(state.m_elapsedSeconds)
+        + " steps_per_s=" + std::to_string(state.m_stepsPerSecond)
+        + " timeouts=" + std::to_string(state.m_timeoutTests));
 
     state.m_inprogress = false;
     state.m_progress = 0.F;

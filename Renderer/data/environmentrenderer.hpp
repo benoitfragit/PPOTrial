@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "environment.hpp"
+#include "ppo/core/learning_monitor.hpp"
 
 namespace ppo::renderer {
 
@@ -132,12 +133,18 @@ public:
         /**
         * @brief Fixed plot collection used by the UI.
         */
-        using Plots = std::array<Plot, 5>;
+        using Plots = std::array<Plot, 4>;
 
         /**
         * @brief Performance and reward plots.
         */
         Plots m_plots{};
+        // Observational only. A data point requires a completed evaluation.
+        ppo::core::LearningHistory m_evaluationScores{};
+        ppo::core::LearningHistory m_evaluationSuccess{};
+        unsigned int m_lastPlottedVersion{ 0U };
+        bool m_seenVersion{ false };
+        std::string m_exportStatus{};
         /**
         * @brief True once the controller has received valid data.
         */
@@ -154,18 +161,6 @@ public:
         * @brief Reward clamp value configured for the agent.
         */
         float m_clamp{ 0.F };
-        /**
-        * @brief Mean reward over the last finished episode.
-        */
-        float m_rewardMean{ 0.F };
-        /**
-        * @brief Number of reward samples accumulated for the mean.
-        */
-        unsigned int m_rewardSampleCount{ 0 };
-        /**
-        * @brief Last step index included in the reward mean.
-        */
-        long long m_lastRewardStep{ -1 };
         /**
         * @brief Unique agent identifier.
         */
@@ -394,6 +389,11 @@ private:
     */
     void DrawAgentPlot(std::shared_ptr<AgentController> const& agent,
                        ppo::model::sAgentStateSnaphot const& state);
+    /** Draws evaluation progress (distinct from PPO training losses). */
+    void DrawLearningProgress(std::shared_ptr<AgentController> const& agent,
+                              ppo::model::sAgentStateSnaphot const& state);
+    /** Collects a new sample only when its source event advances. */
+    void UpdateLearningTelemetry(entt::registry const& snapshot);
     /**
     * @brief Draws one plot widget.
     * @param plot Plot descriptor to display.
@@ -540,6 +540,10 @@ private:
     * @brief True when the metadata catalog window is visible.
     */
     bool m_showMetaCatalog{ false };
+    bool m_showSimulation{ true };
+    bool m_showMinimap{ false };
+    bool m_showEntities{ false };
+    bool m_showInspection{ false };
     /**
     * @brief True when the pseudo-lidar overlay is visible.
     */
