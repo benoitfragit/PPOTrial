@@ -1,5 +1,5 @@
-#include "existingexample.hpp"
-#include "existingworldrules.hpp"
+#include "airspaceexample.hpp"
+#include "airspaceworldrules.hpp"
 #include "randominitializersystem.hpp"
 
 #include "components.hpp"
@@ -12,7 +12,7 @@
 #include <map>
 #include <string>
 
-namespace ppo::examples::existing {
+namespace ppo::examples::airspace {
 namespace {
 
 
@@ -42,7 +42,7 @@ bool
 LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment& environment)
 {
     if (!environment.SetEntityInitializer(&ppo::model::RandomInitiliazerSystem::Init)
-        || !environment.SetWorldRules(std::make_unique<ExistingWorldRules>()))
+        || !environment.SetWorldRules(std::make_unique<AirspaceWorldRules>()))
         return false;
 
     auto const scenario = ppo::config::LoadScenarioDefinition(scenarioPath);
@@ -116,7 +116,7 @@ LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment&
 ppo::app::ExampleDefinition Definition()
 {
     return {
-        "existing",
+        "airspace",
         "PLAYGROUND",
         std::filesystem::path("Scenarios") / "Playground.json",
         &ppo::reflection::RegisterAllMeta,
@@ -124,4 +124,4 @@ ppo::app::ExampleDefinition Definition()
     };
 }
 
-} // namespace ppo::examples::existing
+} // namespace ppo::examples::airspace

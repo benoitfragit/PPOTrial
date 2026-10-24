@@ -5,11 +5,11 @@
 
 #include <vector>
 
-namespace ppo::examples::existing {
+namespace ppo::examples::airspace {
 
 // All historical world-specific outcome rules and visual events live here.
 // The environment invokes these hooks but never interprets the task.
-class ExistingWorldRules final : public ppo::model::IWorldRules
+class AirspaceWorldRules final : public ppo::model::IWorldRules
 {
 public:
     void BeforeStep(ppo::model::WorldEntities& entities) override;
@@ -25,4 +25,4 @@ private:
     unsigned long long m_nextExplosionEventId{1};
 };
 
-} // namespace ppo::examples::existing
+} // namespace ppo::examples::airspace

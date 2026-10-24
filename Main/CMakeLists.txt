@@ -14,7 +14,7 @@ target_link_libraries(${PROJECT_NAME}
 		GenericPPO
         GenericEnv
 		GenericRenderer
-		PPOExistingExample
+		PPOAirspaceExample
         MetaReflection)
 		
 add_dependencies(${PROJECT_NAME} GenericEntities 
@@ -22,7 +22,7 @@ add_dependencies(${PROJECT_NAME} GenericEntities
 								 GenericPPO
 								 GenericEnv
 								 GenericRenderer
-								 PPOExistingExample
+								 PPOAirspaceExample
                                  MetaReflection)
 
 # Copier les DLL automatiquement
@@ -35,14 +35,14 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 # Headless desktop smoke tests: exercise the actual executable's example
 # selection on the server without creating a graphics window.
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
-    add_test(NAME ExistingExampleList
+    add_test(NAME AirspaceExampleList
         COMMAND $<TARGET_FILE:${PROJECT_NAME}> --list-examples)
-    set_tests_properties(ExistingExampleList PROPERTIES
-        PASS_REGULAR_EXPRESSION "existing")
-    add_test(NAME ExistingExampleBootstrap
+    set_tests_properties(AirspaceExampleList PROPERTIES
+        PASS_REGULAR_EXPRESSION "airspace")
+    add_test(NAME AirspaceExampleBootstrap
         COMMAND $<TARGET_FILE:${PROJECT_NAME}> --check-example)
-    set_tests_properties(ExistingExampleBootstrap PROPERTIES
-        PASS_REGULAR_EXPRESSION "Bootstrapped example: existing")
+    set_tests_properties(AirspaceExampleBootstrap PROPERTIES
+        PASS_REGULAR_EXPRESSION "Bootstrapped example: airspace")
 
     add_test(NAME UnknownExampleRejected
         COMMAND $<TARGET_FILE:${PROJECT_NAME}> --example unknown-example)
