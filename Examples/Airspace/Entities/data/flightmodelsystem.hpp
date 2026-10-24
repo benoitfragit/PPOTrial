@@ -10,6 +10,7 @@
 
 #include "serializer.hpp"
 #include "components.hpp"
+#include "airspacecomponents.hpp"
 
 #include "baseentity.hpp"
 

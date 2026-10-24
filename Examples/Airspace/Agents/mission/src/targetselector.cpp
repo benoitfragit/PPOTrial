@@ -7,6 +7,7 @@
 * @license MIT
 */
 #include "targetselector.hpp"
+#include "airspacecomponents.hpp"
 #include "utils.hpp"
 #include "snasystem.hpp"
 

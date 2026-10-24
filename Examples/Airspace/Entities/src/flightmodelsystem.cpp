@@ -7,6 +7,7 @@
 * @license MIT
 */
 #include "flightmodelsystem.hpp"
+#include "airspacecomponents.hpp"
 
 #include "utils.hpp"
 

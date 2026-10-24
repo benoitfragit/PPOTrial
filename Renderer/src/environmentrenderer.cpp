@@ -7,6 +7,7 @@
 * @license MIT
 */
 #include "environmentrenderer.hpp"
+#include "airspacecomponents.hpp"
 
 #include <algorithm>
 #include <array>

@@ -7,6 +7,7 @@
 * @license MIT
 */
 #include "sam.hpp"
+#include "airspacecomponents.hpp"
 
 #include "snasystem.hpp"
 

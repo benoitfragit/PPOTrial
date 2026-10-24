@@ -4,6 +4,7 @@
 #include "randominitializersystem.hpp"
 
 #include "components.hpp"
+#include "airspacecomponents.hpp"
 #include "entity.hpp"
 #include "environment.hpp"
 #include "metaregistry.hpp"

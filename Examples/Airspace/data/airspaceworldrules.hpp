@@ -2,6 +2,7 @@
 
 #include "worldrules.hpp"
 #include "components.hpp"
+#include "airspacecomponents.hpp"
 
 #include <vector>
 

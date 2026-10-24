@@ -4,6 +4,7 @@
 #include "sam.hpp"
 #include "objective.hpp"
 #include "components.hpp"
+#include "airspacecomponents.hpp"
 #include "interception.hpp"
 #include "targetselector.hpp"
 
