@@ -1477,7 +1477,7 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
         [this](ppo::serialization::json& ar)
         {
             if (!ar.contains("renderer") || !ar["renderer"].is_object())
-                return;
+                throw std::invalid_argument("Renderer.json requires a renderer object");
 
             auto const& section = ar["renderer"];
 
