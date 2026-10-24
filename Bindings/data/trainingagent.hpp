@@ -11,6 +11,7 @@
 #include <vector>
 #include "torchlearner.hpp"
 #include "ppo/core/buffers.hpp"
+#include "ppo/core/agent_contract.hpp"
 #include <functional>
 #include <string>
 #include "serializer.hpp"
@@ -35,6 +36,22 @@ public:
     * @brief Alias to the model-defined action vector type.
     */
     using ActionVector = typename Model::ACTIONS;
+
+    // Optional compile-time description. No virtual method, state, tensor or
+    // runtime validation is inserted into the existing training/inference path.
+    // Only instantiated when a caller explicitly requests the contract.
+    static constexpr ppo::core::AgentContract Contract() noexcept
+    {
+        static_assert(Model::kAgentContract.observationSize ==
+                          std::tuple_size<StateVector>::value,
+                      "Observation width differs from declared contract");
+        static_assert(Model::kAgentContract.actionSize ==
+                          std::tuple_size<ActionVector>::value,
+                      "Action width differs from declared contract");
+        static_assert(ppo::core::IsValid(Model::kAgentContract),
+                      "Agent must declare a valid neural contract");
+        return Model::kAgentContract;
+    }
 
     /**
     * @brief Creates a training agent bound to one model and one PPO workspace.

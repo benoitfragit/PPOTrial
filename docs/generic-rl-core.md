@@ -254,3 +254,11 @@ incomplete rollout **never calls `UpdatePolicy()` or `Save()`** and cannot
 modify the existing checkpoint files. This detects regressions in the
 real training-path adapter (not just deterministic inference). It does
 not yet establish long-horizon numerical parity of a full PPO update.
+
+
+## Agent descriptors (non-breaking C++17 extension)
+
+`ppo/core/agent_contract.hpp` describes the semantic identity and widths of
+neural observation/action contracts. The existing RLSNA and RLMission models
+demonstrate the API while continuing to use their original PPO training,
+checkpoint and evaluation paths. See [agent-contracts.md](agent-contracts.md).

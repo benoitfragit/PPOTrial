@@ -1,6 +1,9 @@
 // Smoke test of the two *existing* production checkpoints. This test must
 // never train or serialize a model; it only restores and evaluates its policy.
 #include "actorcriticnet.hpp"
+#include "Interception.hpp"
+#include "targetselector.hpp"
+#include "ppo/core/agent_contract.hpp"
 #include "actorcriticmission.hpp"
 #include "missionlayout.hpp"
 #include "torchproductionpolicy.hpp"
@@ -153,8 +156,34 @@ void CheckTrainingTransitionParity(std::filesystem::path const& modelRoot,
 
 } // namespace
 
+void CheckExistingAgentContracts()
+{
+    constexpr auto snaTraining = rl::SNATrainingAgent::Contract();
+    constexpr auto snaProduction = rl::SNAProdAgent::Contract();
+    constexpr auto missionTraining = rl::TargetSelectorTrainingAgent::Contract();
+    constexpr auto missionProduction = rl::TargetSelectorProdAgent::Contract();
+
+    static_assert(ppo::core::SameContract(snaTraining, snaProduction),
+                  "RLSNA training and inference contracts differ");
+    static_assert(ppo::core::SameContract(missionTraining, missionProduction),
+                  "RLMission training and inference contracts differ");
+    static_assert(snaTraining.observationSize == 6U && snaTraining.actionSize == 2U,
+                  "RLSNA historical neural dimensions changed");
+    static_assert(missionTraining.observationSize == 152U && missionTraining.actionSize == 3U,
+                  "RLMission historical neural dimensions changed");
+    static_assert(snaTraining.observationLayout == "rlsna.observation.v1",
+                  "RLSNA observation layout changed");
+    static_assert(snaTraining.actionLayout == "rlsna.action.v1",
+                  "RLSNA action layout changed");
+    static_assert(missionTraining.observationLayout == "rlmission.observation.v1",
+                  "RLMission observation layout changed");
+    static_assert(missionTraining.actionLayout == "rlmission.action.v1",
+                  "RLMission action layout changed");
+}
+
 int main()
 {
+    CheckExistingAgentContracts();
     const std::filesystem::path root{PPO_MODEL_RESOURCE_DIR};
     // Verify both production and candidate-evaluation archives. Loading either
     // must not modify weights or run an optimizer.
