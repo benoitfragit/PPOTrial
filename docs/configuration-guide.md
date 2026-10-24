@@ -214,12 +214,17 @@ Le fichier V2 distribué les renseigne explicitement. Conserver les valeurs
 numériques (notamment celles de la caméra) lors de la conversion ; ne pas
 réinitialiser `renderer` aux valeurs d'exemple.
 
-**Migration ponctuelle manuelle :** arrêter l'application, sauvegarder une
-copie de l'ancien `Renderer.json`, convertir le document et ses noms de clés
-selon le tableau ci-dessus, puis démarrer l'application avec le fichier V2.
-Le runtime ne lit pas V1 ; une configuration invalide n'est pas écrasée à
-l'arrêt. Les propriétés inconnues ne sont pas prises en charge et doivent
-être examinées avant migration.
+**Fichiers versionnés :** `resources/settings/Renderer.json` est déjà au format V2
+dans le dépôt. Les valeurs du fichier historique (dont les coordonnées de caméra
+avec leur précision complète) y sont reprises et les quatre paramètres
+de panneaux ajoutés sur `master` sont explicitement renseignés. Aucune
+conversion ni action supplémentaire n'est nécessaire pour utiliser les
+configurations fournies sur cette branche.
+
+Les configurations personnelles qui ne sont pas présentes dans le dépôt ne
+peuvent pas être migrées automatiquement. Le runtime lit uniquement V2 ;
+les champs inconnus ne sont pas reconnus et doivent être examinés avant tout
+remplacement.
 
 ## Sauvegarde et erreurs
 
