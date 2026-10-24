@@ -3,6 +3,7 @@
 #include "environment.hpp"
 #include "components.hpp"
 #include <stdexcept>
+#include <initializer_list>
 
 int main()
 {
