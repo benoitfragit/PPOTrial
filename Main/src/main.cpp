@@ -78,11 +78,17 @@ int main(int argc, char** argv)
             std::string(selected->windowTitle));
 
     ppo::model::Environment environment{};
-    selected->loadScenario(resourcePath / selected->defaultScenario, environment);
+    bool const scenarioLoaded = selected->loadScenario(
+        resourcePath / selected->defaultScenario, environment);
 
     serializer.Load();
     if (checkExample)
     {
+        if (!scenarioLoaded)
+        {
+            std::cerr << "Failed to bootstrap example: " << selected->id << '\n';
+            return 3;
+        }
         std::cout << "Bootstrapped example: " << selected->id << '\n';
         return 0;
     }

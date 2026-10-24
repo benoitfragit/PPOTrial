@@ -34,18 +34,23 @@ RequiresPlatform(std::string const& entityType) noexcept
 *
 * @param scenarioPath Path to the scenario JSON file.
 * @param environment Environment that receives the instantiated content.
+* @return True when all declared entities and agents were created.
 */
-void
+bool
 LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment& environment)
 {
     auto const scenario = ppo::config::LoadScenarioDefinition(scenarioPath);
+    bool complete = !scenario.m_entities.empty();
     std::map<ppo::model::Entity*, std::string> targetMapping{};
     std::map<std::string, ppo::model::Entity*> entityMapping{};
 
     for (auto const& entityDef : scenario.m_entities)
     {
         if (RequiresPlatform(entityDef.m_type) && entityDef.m_platform.empty())
+        {
+            complete = false;
             continue;
+        }
 
         auto entity = ppo::reflection::CreateEntity(
             entityDef.m_type,
@@ -54,7 +59,10 @@ LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment&
             entityDef.m_side);
 
         if (entity == nullptr)
+        {
+            complete = false;
             continue;
+        }
 
         entity->add<ppo::model::sEntityMetadata>(ppo::model::sEntityMetadata{
             entityDef.m_name,
@@ -63,7 +71,8 @@ LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment&
 
         for (auto const& agentName : entityDef.m_agents)
         {
-            (void)ppo::reflection::CreateAgent(agentName, environment, *entity.get());
+            if (ppo::reflection::CreateAgent(agentName, environment, *entity.get()) == nullptr)
+                complete = false;
         }
 
         if (!entityDef.m_target.empty())
@@ -87,9 +96,14 @@ LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment&
             auto [snaState] = entity->get<ppo::model::sSNAState>();
             snaState.m_target = iter->second->uniqid();
         }
+        else
+        {
+            complete = false;
+        }
     }
-}
 
+    return complete;
+}
 
 } // namespace
 

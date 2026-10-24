@@ -17,7 +17,9 @@ struct ExampleDefinition
     std::string_view windowTitle;
     std::filesystem::path defaultScenario;
     void (*registerTypes)() = nullptr;
-    void (*loadScenario)(std::filesystem::path const&, ppo::model::Environment&) = nullptr;
+    // Reports whether every declared entity and agent was instantiated.
+    // The desktop retains its historical permissive startup behavior.
+    bool (*loadScenario)(std::filesystem::path const&, ppo::model::Environment&) = nullptr;
 };
 
 inline bool IsValid(ExampleDefinition const& example) noexcept
