@@ -57,7 +57,7 @@ RandomInitiliazerSystem::Init(Entity& entity)
         float minRightEast{ (maxEast - minEast) / 4.F };
         float maxRightEast{ maxEast };
         
-        if (state.m_type == eEntityType::SAM)
+        if (state.m_type == eEntityType::RestrictedZone)
         {                          
             if (onTheRIght)
             {
@@ -89,11 +89,11 @@ RandomInitiliazerSystem::Init(Entity& entity)
     }
 
     if (state.m_side == eEntitySide::Hostile
-    &&  state.m_type == eEntityType::SAM)
+    &&  state.m_type == eEntityType::RestrictedZone)
         generator.registerAttr(state.m_destroyed, 0.1F);
 
     // Random selection of a target
-    if (state.m_type == eEntityType::Aircraft
+    if (state.m_type == eEntityType::Mobile
     &&  entity.has<sSNAState>())
     {
         auto [snaState] = entity.get<sSNAState>();
@@ -111,7 +111,7 @@ RandomInitiliazerSystem::Init(Entity& entity)
 
             if ((targetState.m_entityId != state.m_entityId)
              && (targetState.m_side != state.m_side)
-             && (   (targetState.m_type == eEntityType::Aircraft) 
+             && (   (targetState.m_type == eEntityType::Mobile) 
                  || (targetState.m_type == eEntityType::Objective))
              && !targetState.m_destroyed)
             {
@@ -125,7 +125,7 @@ RandomInitiliazerSystem::Init(Entity& entity)
             }
         }
 
-        if (state.m_type == eEntityType::SAM
+        if (state.m_type == eEntityType::RestrictedZone
             && entity.has<sSNAState>())
         {
             // Slightly vary the SAM no-escape zone to break symmetry.

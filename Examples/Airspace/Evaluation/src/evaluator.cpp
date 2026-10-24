@@ -12,10 +12,10 @@
 #include "ppo/core/evaluation.hpp"
 #include "entityruntime.hpp"
 
-#include "aircraft.hpp"
+#include "mobile.hpp"
 #include "entity.hpp"
 #include "objective.hpp"
-#include "sam.hpp"
+#include "restrictedzone.hpp"
 #include "scenarioconfig.hpp"
 #include "snasystem.hpp"
 
@@ -102,11 +102,11 @@ LogEvaluatorEvent(std::string const& message)
 std::shared_ptr<ppo::model::Entity>
 CreateEntityFromDefinition(entt::registry& world, ppo::config::ScenarioEntityDefinition const& definition)
 {
-    if (definition.m_type == "Aircraft")
-        return std::make_shared<ppo::model::Aircraft>(&world, definition.m_platform, definition.m_side);
+    if (definition.m_type == "Mobile" || definition.m_type == "Aircraft")
+        return std::make_shared<ppo::model::Mobile>(&world, definition.m_platform, definition.m_side);
 
-    if (definition.m_type == "SAM")
-        return std::make_shared<ppo::model::SAM>(&world, definition.m_platform, definition.m_side);
+    if (definition.m_type == "RestrictedZone" || definition.m_type == "SAM")
+        return std::make_shared<ppo::model::RestrictedZone>(&world, definition.m_platform, definition.m_side);
 
     if (definition.m_type == "Objective")
         return std::make_shared<ppo::model::Objective>(&world, definition.m_side);
@@ -127,7 +127,7 @@ RequiresNorthEast(ppo::config::EvaluationEntityState const& state)
 * @brief Returns true when a test state defines the minimum aircraft kinematics.
 */
 bool
-RequiresAircraftState(ppo::config::EvaluationEntityState const& state)
+RequiresMobileState(ppo::config::EvaluationEntityState const& state)
 {
     return RequiresNorthEast(state)
         && state.m_heading.has_value()
@@ -318,9 +318,9 @@ Evaluator::Impl::ValidateBuffer(void) const
                 return false;
             }
 
-            bool const isAircraft = entity.m_type == "Aircraft";
-            bool const hasMandatoryState = isAircraft
-                ? RequiresAircraftState(iter->second)
+            bool const isMobile = entity.m_type == "Aircraft" || entity.m_type == "Mobile";
+            bool const hasMandatoryState = isMobile
+                ? RequiresMobileState(iter->second)
                 : RequiresNorthEast(iter->second);
             if (!hasMandatoryState)
             {
