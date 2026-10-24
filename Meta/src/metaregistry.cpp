@@ -8,36 +8,15 @@
 */
 #include "metaregistry.hpp"
 
-#include "aircraft.hpp"
-#include "sam.hpp"
-#include "objective.hpp"
 #include "components.hpp"
 #include "entitytypes.hpp"
 
-#include "interception.hpp"
-#include "targetselector.hpp"
 
 #include <mutex>
 #include <string>
 #include <unordered_map>
 
 namespace ppo::reflection {
-
-/**
-* @brief Factory signature used to instantiate reflected entities.
-*/
-using EntityFactory = std::shared_ptr<ppo::model::Entity>(*)(
-    ppo::model::Environment&,
-    std::string_view,
-    ppo::model::eEntitySide);
-
-/**
-* @brief Factory signature used to instantiate reflected agents.
-*/
-using AgentFactory = std::shared_ptr<ppo::model::IAgent>(*)(
-    ppo::model::Environment&,
-    ppo::model::BaseEntity&,
-    std::string_view);
 
 namespace {
 
@@ -63,6 +42,13 @@ AgentFactories(void)
 {
     static std::unordered_map<entt::id_type, AgentFactory> factories{};
     return factories;
+}
+
+std::mutex&
+FactoryMutex(void)
+{
+    static std::mutex mutex{};
+    return mutex;
 }
 
 /**
@@ -98,38 +84,6 @@ MetaRegistrationFlag(void)
     return once;
 }
 
-template<typename Type>
-/**
-* @brief Registers one reflected entity type and its scenario factory.
-* @param scenarioName Scenario-visible type name.
-* @param factory Factory used to instantiate the entity.
-*/
-void
-RegisterEntityType(char const* scenarioName, EntityFactory factory)
-{
-    entt::meta_factory<Type>{}
-        .type(scenarioName)
-        .custom<sMetaDescriptor>(eMetaCategory::Entity, scenarioName);
-
-    EntityFactories()[entt::hashed_string{ scenarioName }.value()] = factory;
-}
-
-template<typename Type>
-/**
-* @brief Registers one reflected agent type and its scenario factory.
-* @param scenarioName Scenario-visible type name.
-* @param factory Factory used to instantiate the agent.
-*/
-void
-RegisterAgentType(char const* scenarioName, AgentFactory factory)
-{
-    entt::meta_factory<Type>{}
-        .type(scenarioName)
-        .custom<sMetaDescriptor>(eMetaCategory::Agent, scenarioName);
-
-    AgentFactories()[entt::hashed_string{ scenarioName }.value()] = factory;
-}
-
 template<typename Enum>
 /**
 * @brief Registers one reflected enumeration type.
@@ -141,108 +95,6 @@ RegisterEnumType(char const* name)
     entt::meta_factory<Enum>{}
         .type(name)
         .custom<sMetaDescriptor>(eMetaCategory::Enum, name);
-}
-
-/**
-* @brief Creates one aircraft entity through the environment factory.
-* @param environment Target environment.
-* @param platform Platform archetype name.
-* @param side Tactical side assigned to the entity.
-* @return Created aircraft entity.
-*/
-std::shared_ptr<ppo::model::Entity>
-CreateAircraft(ppo::model::Environment& environment,
-               std::string_view platform,
-               ppo::model::eEntitySide side)
-{
-    return environment.CreateEntity<ppo::model::Aircraft>(std::string(platform), side);
-}
-
-/**
-* @brief Creates one SAM entity through the environment factory.
-* @param environment Target environment.
-* @param platform Platform archetype name.
-* @param side Tactical side assigned to the entity.
-* @return Created SAM entity.
-*/
-std::shared_ptr<ppo::model::Entity>
-CreateSAM(ppo::model::Environment& environment,
-          std::string_view platform,
-          ppo::model::eEntitySide side)
-{
-    return environment.CreateEntity<ppo::model::SAM>(std::string(platform), side);
-}
-
-/**
-* @brief Creates one objective entity through the environment factory.
-* @param environment Target environment.
-* @param side Tactical side assigned to the entity.
-* @return Created objective entity.
-*/
-std::shared_ptr<ppo::model::Entity>
-CreateObjective(ppo::model::Environment& environment,
-                std::string_view,
-                ppo::model::eEntitySide side)
-{
-    return environment.CreateEntity<ppo::model::Objective>(side);
-}
-
-/**
-* @brief Creates the interception training agent.
-* @param environment Target environment.
-* @param entity Controlled entity.
-* @return Created training agent.
-*/
-std::shared_ptr<ppo::model::IAgent>
-CreateSNATrainingAgent(ppo::model::Environment& environment,
-                       ppo::model::BaseEntity& entity,
-                       std::string_view)
-{
-    return environment.CreateAgent<rl::SNATrainingAgent>(entity);
-}
-
-/**
-* @brief Creates the interception production agent.
-* @param environment Target environment.
-* @param entity Controlled entity.
-* @param version Requested model version tag.
-* @return Created production agent.
-*/
-std::shared_ptr<ppo::model::IAgent>
-CreateSNAProdAgent(ppo::model::Environment& environment,
-                   ppo::model::BaseEntity& entity,
-                   std::string_view version)
-{
-    return environment.CreateAgent<rl::SNAProdAgent>(entity, std::string(version));
-}
-
-/**
-* @brief Creates the mission training agent.
-* @param environment Target environment.
-* @param entity Controlled entity.
-* @return Created training agent.
-*/
-std::shared_ptr<ppo::model::IAgent>
-CreateTargetSelectorTrainingAgent(ppo::model::Environment& environment,
-                                  ppo::model::BaseEntity& entity,
-                                  std::string_view)
-{
-    return environment.CreateAgent<rl::TargetSelectorTrainingAgent>(entity);
-}
-
-/**
-* @brief Creates the mission production agent.
-* @param environment Target environment.
-* @param entity Controlled entity.
-* @param version Requested model version tag.
-* @return Created production agent.
-*/
-std::shared_ptr<ppo::model::IAgent>
-CreateTargetSelectorProdAgent(ppo::model::Environment& environment,
-                              ppo::model::BaseEntity& entity,
-                              std::string_view version)
-{
-    return environment.CreateAgent<rl::TargetSelectorProdAgent>(entity, std::string(version));
 }
 
 /**
@@ -267,11 +119,7 @@ RegisterEnums(void)
 
     RegisterEnumType<ppo::model::eEntityType>("EntityType");
     entt::meta_factory<ppo::model::eEntityType>{}
-        .data<ppo::model::eEntityType::None>("None"_hs)
-        .data<ppo::model::eEntityType::Objective>("Objective"_hs)
-        .data<ppo::model::eEntityType::Missile>("Missile"_hs)
-        .data<ppo::model::eEntityType::Aircraft>("Aircraft"_hs)
-        .data<ppo::model::eEntityType::SAM>("SAM"_hs);
+        .data<ppo::model::eEntityType::None>("None"_hs);
 }
 
 /**
@@ -308,51 +156,6 @@ RegisterComponents(void)
         .custom<sMetaDescriptor>(eMetaCategory::Component, "EntityMetadata")
         .data<&ppo::model::sEntityMetadata::m_name>("m_name"_hs)
         .data<&ppo::model::sEntityMetadata::m_archetype>("m_archetype"_hs);
-
-    entt::meta_factory<ppo::model::sSNAState>{}
-        .type("SNAState"_hs)
-        .custom<sMetaDescriptor>(eMetaCategory::Component, "SNAState")
-        .data<&ppo::model::sSNAState::m_target>("m_target"_hs)
-        .data<&ppo::model::sSNAState::m_pk>("m_pk"_hs)
-        .data<&ppo::model::sSNAState::m_target_x>("m_target_x"_hs)
-        .data<&ppo::model::sSNAState::m_target_y>("m_target_y"_hs)
-        .data<&ppo::model::sSNAState::m_target_dx>("m_target_dx"_hs)
-        .data<&ppo::model::sSNAState::m_target_dy>("m_target_dy"_hs)
-        .data<&ppo::model::sSNAState::m_closingspeed>("m_closingspeed"_hs)
-        .data<&ppo::model::sSNAState::m_target_los>("m_target_los"_hs)
-        .data<&ppo::model::sSNAState::m_target_los_rate>("m_target_los_rate"_hs)
-        .data<&ppo::model::sSNAState::m_maxNoescapeZone>("m_maxNoescapeZone"_hs)
-        .data<&ppo::model::sSNAState::m_escapezone>("m_escapezone"_hs)
-        .data<&ppo::model::sSNAState::m_noescapezone>("m_noescapezone"_hs)
-        .data<&ppo::model::sSNAState::m_maxShootAngle>("m_maxShootAngle"_hs)
-        .data<&ppo::model::sSNAState::m_nbmissiles>("m_nbmissiles"_hs)
-        .data<&ppo::model::sSNAState::m_maxnbmissiles>("m_maxnbmissiles"_hs);
-
-    entt::meta_factory<ppo::model::sSNAControlState>{}
-        .type("SNAControlState"_hs)
-        .custom<sMetaDescriptor>(eMetaCategory::Component, "SNAControlState")
-        .data<&ppo::model::sSNAControlState::m_accCmd>("m_accCmd"_hs)
-        .data<&ppo::model::sSNAControlState::m_rotSpeedCmd>("m_rotSpeedCmd"_hs);
-
-    entt::meta_factory<ppo::model::sPseudoLidarState>{}
-        .type("PseudoLidarState"_hs)
-        .custom<sMetaDescriptor>(eMetaCategory::Component, "PseudoLidarState")
-        .data<&ppo::model::sPseudoLidarState::m_nearestCollisionRanges>("m_nearestCollisionRanges"_hs)
-        .data<&ppo::model::sPseudoLidarState::m_nearestCollisionDistances>("m_nearestCollisionDistances"_hs)
-        .data<&ppo::model::sPseudoLidarState::m_angleSpanRadians>("m_angleSpanRadians"_hs);
-
-    entt::meta_factory<ppo::model::sFlightModelState>{}
-        .type("FlightModelState"_hs)
-        .custom<sMetaDescriptor>(eMetaCategory::Component, "FlightModelState")
-        .data<&ppo::model::sFlightModelState::m_acc>("m_acc"_hs)
-        .data<&ppo::model::sFlightModelState::m_accpsi>("m_accpsi"_hs)
-        .data<&ppo::model::sFlightModelState::m_maxAcc>("m_maxAcc"_hs)
-        .data<&ppo::model::sFlightModelState::m_maxAccRot>("m_maxAccRot"_hs)
-        .data<&ppo::model::sFlightModelState::m_maxSpeed>("m_maxSpeed"_hs)
-        .data<&ppo::model::sFlightModelState::m_minSpeed>("m_minSpeed"_hs)
-        .data<&ppo::model::sFlightModelState::m_fuel>("m_fuel"_hs)
-        .data<&ppo::model::sFlightModelState::m_fuelconsumption>("m_fuelconsumption"_hs)
-        .data<&ppo::model::sFlightModelState::m_maxfuel>("m_maxfuel"_hs);
 
     entt::meta_factory<ppo::model::sEvaluatorState>{}
         .type("EvaluatorState"_hs)
@@ -406,15 +209,7 @@ RegisterComponents(void)
         .data<&ppo::model::sAgentStateSnaphot::m_name>("m_name"_hs)
         .data<&ppo::model::sAgentStateSnaphot::m_id>("m_id"_hs);
 
-    entt::meta_factory<rl::StatesAndActions>{}
-        .type("InterceptionStateModel"_hs)
-        .custom<sMetaDescriptor>(eMetaCategory::Component, "InterceptionStateModel")
-        .data<&rl::StatesAndActions::m_states>("m_states"_hs)
-        .data<&rl::StatesAndActions::m_actions>("m_actions"_hs);
 
-    entt::meta_factory<rl::StatesAndActionsForMission>{}
-        .type("MissionStateModel"_hs)
-        .custom<sMetaDescriptor>(eMetaCategory::Component, "MissionStateModel");
 }
 
 /**
@@ -432,14 +227,6 @@ RegisterEntities(void)
         .custom<sMetaDescriptor>(eMetaCategory::Entity, "Entity")
         .base<ppo::model::BaseEntity>();
 
-    RegisterEntityType<ppo::model::Aircraft>("Aircraft", &CreateAircraft);
-    entt::meta_factory<ppo::model::Aircraft>{}.base<ppo::model::Entity>();
-
-    RegisterEntityType<ppo::model::SAM>("SAM", &CreateSAM);
-    entt::meta_factory<ppo::model::SAM>{}.base<ppo::model::Entity>();
-
-    RegisterEntityType<ppo::model::Objective>("Objective", &CreateObjective);
-    entt::meta_factory<ppo::model::Objective>{}.base<ppo::model::Entity>();
 }
 
 /**
@@ -452,17 +239,6 @@ RegisterAgents(void)
         .type("IAgent"_hs)
         .custom<sMetaDescriptor>(eMetaCategory::Agent, "IAgent");
 
-    RegisterAgentType<rl::SNATrainingAgent>("SNATrainingAgent", &CreateSNATrainingAgent);
-    entt::meta_factory<rl::SNATrainingAgent>{}.base<ppo::model::IAgent>();
-
-    RegisterAgentType<rl::SNAProdAgent>("SNAProdAgent", &CreateSNAProdAgent);
-    entt::meta_factory<rl::SNAProdAgent>{}.base<ppo::model::IAgent>();
-
-    RegisterAgentType<rl::TargetSelectorTrainingAgent>("TargetSelectorTrainingAgent", &CreateTargetSelectorTrainingAgent);
-    entt::meta_factory<rl::TargetSelectorTrainingAgent>{}.base<ppo::model::IAgent>();
-
-    RegisterAgentType<rl::TargetSelectorProdAgent>("TargetSelectorProdAgent", &CreateTargetSelectorProdAgent);
-    entt::meta_factory<rl::TargetSelectorProdAgent>{}.base<ppo::model::IAgent>();
 }
 
 } // namespace
@@ -481,6 +257,22 @@ RegisterAllMeta(void)
         RegisterAgents();
         MetaRegisteredFlag() = true;
     });
+}
+
+
+// Concrete examples register their factories before any simulation worker starts.
+void RegisterEntityFactory(std::string_view name, EntityFactory factory)
+{
+    RegisterAllMeta();
+    std::lock_guard<std::mutex> lock(FactoryMutex());
+    EntityFactories()[ToTypeId(name)] = factory;
+}
+
+void RegisterAgentFactory(std::string_view name, AgentFactory factory)
+{
+    RegisterAllMeta();
+    std::lock_guard<std::mutex> lock(FactoryMutex());
+    AgentFactories()[ToTypeId(name)] = factory;
 }
 
 /**
@@ -521,11 +313,15 @@ CreateEntity(std::string_view name,
 {
     RegisterAllMeta();
 
-    auto const iter = EntityFactories().find(ToTypeId(name));
-    if (iter == EntityFactories().end() || iter->second == nullptr)
-        return nullptr;
-
-    return iter->second(environment, platform, side);
+    EntityFactory factory = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(FactoryMutex());
+        auto const iter = EntityFactories().find(ToTypeId(name));
+        if (iter == EntityFactories().end())
+            return nullptr;
+        factory = iter->second;
+    }
+    return factory != nullptr ? factory(environment, platform, side) : nullptr;
 }
 
 /**
@@ -544,11 +340,15 @@ CreateAgent(std::string_view name,
 {
     RegisterAllMeta();
 
-    auto const iter = AgentFactories().find(ToTypeId(name));
-    if (iter == AgentFactories().end() || iter->second == nullptr)
-        return nullptr;
-
-    return iter->second(environment, entity, version);
+    AgentFactory factory = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(FactoryMutex());
+        auto const iter = AgentFactories().find(ToTypeId(name));
+        if (iter == AgentFactories().end())
+            return nullptr;
+        factory = iter->second;
+    }
+    return factory != nullptr ? factory(environment, entity, version) : nullptr;
 }
 
 } /* ppo::reflection */

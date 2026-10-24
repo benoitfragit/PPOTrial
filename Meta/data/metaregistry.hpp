@@ -64,8 +64,17 @@ struct sMetaDescriptor
     char const* scenario_name{ "" };
 };
 
+using EntityFactory = std::shared_ptr<ppo::model::Entity>(*)(
+    ppo::model::Environment&, std::string_view, ppo::model::eEntitySide);
+using AgentFactory = std::shared_ptr<ppo::model::IAgent>(*)(
+    ppo::model::Environment&, ppo::model::BaseEntity&, std::string_view);
+
+// Concrete examples register their own entity and agent factories.
+void RegisterEntityFactory(std::string_view name, EntityFactory factory);
+void RegisterAgentFactory(std::string_view name, AgentFactory factory);
+
 /**
-* @brief Registers all reflected enums, components, entities, and agents.
+* @brief Registers all shared reflected enums, components, entities, and agents.
 */
 void RegisterAllMeta(void);
 

@@ -7,7 +7,9 @@ add_library(PPOAirspaceExample STATIC
     data/airspaceexample.hpp
     src/airspaceexample.cpp
     data/airspaceworldrules.hpp
-    src/airspaceworldrules.cpp)
+    src/airspaceworldrules.cpp
+    data/airspacemeta.hpp
+    src/airspacemeta.cpp)
 
 target_compile_features(PPOAirspaceExample PUBLIC cxx_std_17)
 target_include_directories(PPOAirspaceExample PUBLIC
@@ -18,7 +20,9 @@ target_link_libraries(PPOAirspaceExample PUBLIC
     AirspaceEntities
     GenericEnv
     EntityInitializer
-    MetaReflection)
+    MetaReflection
+    Interception
+    Mission)
 
 # Validate that historical outcomes and published components remain unchanged.
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
@@ -27,4 +31,12 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     target_compile_features(AirspaceWorldRulesTests PRIVATE cxx_std_17)
     target_link_libraries(AirspaceWorldRulesTests PRIVATE PPOAirspaceExample)
     add_test(NAME AirspaceWorldRulesTests COMMAND AirspaceWorldRulesTests)
+endif()
+
+# Registration must preserve the same concrete factory and reflection names.
+if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
+    add_executable(AirspaceMetaTests tests/airspace_meta_tests.cpp)
+    target_compile_features(AirspaceMetaTests PRIVATE cxx_std_17)
+    target_link_libraries(AirspaceMetaTests PRIVATE PPOAirspaceExample)
+    add_test(NAME AirspaceMetaTests COMMAND AirspaceMetaTests)
 endif()
