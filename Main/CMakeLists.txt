@@ -13,7 +13,7 @@ target_link_libraries(${PROJECT_NAME}
 		GenericSerializer
 		GenericPPO
         GenericEnv
-		GenericRenderer
+		AirspaceRenderer
 		PPOAirspaceExample
         MetaReflection)
 		
@@ -21,7 +21,7 @@ add_dependencies(${PROJECT_NAME} GenericEntities
 								 GenericSerializer 
 								 GenericPPO
 								 GenericEnv
-								 GenericRenderer
+								 AirspaceRenderer
 								 PPOAirspaceExample
                                  MetaReflection)
 

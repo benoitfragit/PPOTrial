@@ -1,5 +1,5 @@
 /**
-* @file Renderer/data/environmentrenderer.hpp
+* @file Examples/Airspace/Renderer/data/environmentrenderer.hpp
 * @brief Declarations for environmentrenderer.
 * @author PPOTrial
 * @date 2026-03-29

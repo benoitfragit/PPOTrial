@@ -1,5 +1,5 @@
 /**
-* @file Renderer/src/environmentrenderer.cpp
+* @file Examples/Airspace/Renderer/src/environmentrenderer.cpp
 * @brief Implementation for environmentrenderer.
 * @author PPOTrial
 * @date 2026-03-29

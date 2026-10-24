@@ -3,6 +3,7 @@ add_subdirectory(Initializer)
 add_subdirectory(Evaluation)
 add_subdirectory(Agents/Interception)
 add_subdirectory(Agents/mission)
+add_subdirectory(Renderer)
 
 add_library(PPOAirspaceExample STATIC
     data/airspaceexample.hpp
