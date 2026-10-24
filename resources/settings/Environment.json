@@ -1,8 +1,8 @@
 {
-    "Env": {
-        "MaxEast": 71454,
-        "MaxNorth": 44658.75,
-        "TimeStep": 0.2
-    },
-    "formatVersion": 2
+    "formatVersion": 2,
+    "environment": {
+        "maxNorth": 44658.75,
+        "maxEast": 71454,
+        "timeStep": 0.2
+    }
 }
