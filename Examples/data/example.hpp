@@ -16,6 +16,7 @@ struct ExampleDefinition
     std::string_view id;
     std::string_view windowTitle;
     std::filesystem::path defaultScenario;
+    // Registers this example's entity and agent factories and reflected types.
     void (*registerTypes)() = nullptr;
     // Reports whether every declared entity and agent was instantiated.
     // The desktop retains its historical permissive startup behavior.

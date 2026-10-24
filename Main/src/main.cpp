@@ -3,13 +3,11 @@
 * @brief Desktop application entry point for registered examples.
 */
 #include "example.hpp"
-#include "airspaceexample.hpp"
+#include "examplecatalog.hpp"
 #include "environment.hpp"
 #include "environmentrenderer.hpp"
 #include "serializer.hpp"
 
-#include <algorithm>
-#include <array>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -19,18 +17,16 @@ int main(int argc, char** argv)
 {
     // The application composition root selects the compiled example.
     // No example-specific simulation, rendering or learning logic belongs here.
-    std::array<ppo::app::ExampleDefinition, 1> const examples{
-        ppo::examples::airspace::Definition()
-    };
+    ppo::app::ExampleCatalog const examples = ppo::app::CreateExampleCatalog();
 
     bool checkExample = false;
-    std::string_view requested = examples.front().id;
+    std::string_view requested = examples.Default().id;
     for (int i = 1; i < argc; ++i)
     {
         std::string_view const option{argv[i]};
         if (option == "--list-examples")
         {
-            for (auto const& example : examples)
+            for (auto const& example : examples.Entries())
                 std::cout << example.id << '\n';
             return 0;
         }
@@ -50,14 +46,9 @@ int main(int argc, char** argv)
         }
     }
 
-    auto const selected = std::find_if(
-        examples.begin(), examples.end(),
-        [requested](ppo::app::ExampleDefinition const& example)
-        {
-            return example.id == requested;
-        });
+    auto const* selected = examples.Find(requested);
 
-    if (selected == examples.end() || !ppo::app::IsValid(*selected))
+    if (selected == nullptr || !ppo::app::IsValid(*selected))
     {
         std::cerr << "Unknown or invalid example: " << requested << '\n';
         return 2;
