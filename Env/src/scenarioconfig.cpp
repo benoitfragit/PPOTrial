@@ -40,12 +40,8 @@ ResolveRelativePath(std::filesystem::path const& sourcePath, std::filesystem::pa
     if (candidate.is_absolute())
         return candidate;
 
-    std::filesystem::path const fromScenario = sourcePath.parent_path() / candidate;
-    if (std::filesystem::exists(fromScenario))
-        return fromScenario.lexically_normal();
-
-    std::filesystem::path const fromResources = std::filesystem::path{ RESOURCE_PATH } / candidate;
-    return fromResources.lexically_normal();
+    // All V2 references are resolved relative to their declaring file.
+    return (sourcePath.parent_path() / candidate).lexically_normal();
 }
 
 /**
