@@ -6,8 +6,8 @@
 * @copyright Copyright (c) 2026 PPOTrial
 * @license MIT
 */
-#include "sam.hpp"
-#include "airspacecomponents.hpp"
+#include "restrictedzone.hpp"
+#include "sharedworldcomponents.hpp"
 
 #include "snasystem.hpp"
 
@@ -18,18 +18,23 @@
 namespace ppo::model {
 
 /**
-* @brief Builds one SAM entity from its platform description file.
+* @brief Builds one RestrictedZone entity from its platform description file.
 * @param registry Registry that owns the entity.
 * @param name Platform file name without extension.
-* @param side Tactical side assigned to the SAM.
+* @param side Tactical side assigned to the RestrictedZone.
 */
-SAM::SAM(entt::registry* registry, std::string const& name, eEntitySide side):
-    Entity(registry, side, eEntityType::SAM)
+RestrictedZone::RestrictedZone(entt::registry* registry, std::string const& name, eEntitySide side):
+    Entity(registry, side, eEntityType::RestrictedZone)
 {
     std::filesystem::path filepath =
-        std::filesystem::path{ RESOURCE_PATH } / "Platforms" / "Ground" / name;
+        std::filesystem::path{ RESOURCE_PATH } / "Platforms" / "RestrictedZone" / name;
     filepath.replace_extension(".json");
     filepath.make_preferred();
+
+    // Existing user-defined platform files under the historical directory remain valid.
+    if (!std::filesystem::exists(filepath))
+        filepath = std::filesystem::path{ RESOURCE_PATH } / "Platforms" / "Ground" / name;
+    filepath.replace_extension(".json");
 
     if (std::filesystem::exists(filepath))
     {
@@ -48,20 +53,20 @@ SAM::SAM(entt::registry* registry, std::string const& name, eEntitySide side):
 }
 
 /**
-* @brief Initializes the SAM weapon state after base entity initialization.
+* @brief Initializes the RestrictedZone weapon state after base entity initialization.
 */
 void
-SAM::OnInit(void) noexcept
+RestrictedZone::OnInit(void) noexcept
 {
     if (has<sSNAState>())
         SNASystem::Init(*this);
 }
 
 /**
-* @brief Advances the SAM simulation for one environment step.
+* @brief Advances the RestrictedZone simulation for one environment step.
 */
 void
-SAM::Run(void) noexcept
+RestrictedZone::Run(void) noexcept
 {
     Entity::Run();
 

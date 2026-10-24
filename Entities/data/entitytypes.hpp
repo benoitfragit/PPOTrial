@@ -56,13 +56,17 @@ enum class eEntityType :
     */
     Missile = 2,
     /**
-    * @brief Aircraft platform.
+    * @brief Movable platform.
     */
-    Aircraft = 3,
+    Mobile = 3,
+    // Legacy alias: preserved binary category and persisted values.
+    Aircraft = Mobile,
     /**
-    * @brief Surface-to-air missile battery.
+    * @brief Stationary restricted area.
     */
-    SAM = 4
+    RestrictedZone = 4,
+    // Legacy alias: preserved binary category and persisted values.
+    SAM = RestrictedZone
 };
 
 } /* ppo::model */

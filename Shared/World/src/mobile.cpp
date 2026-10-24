@@ -6,8 +6,8 @@
 * @copyright Copyright (c) 2026 PPOTrial
 * @license MIT
 */
-#include "aircraft.hpp"
-#include "airspacecomponents.hpp"
+#include "mobile.hpp"
+#include "sharedworldcomponents.hpp"
 
 #include "snasystem.hpp"
 #include "flightmodelsystem.hpp"
@@ -25,13 +25,18 @@ namespace ppo::model {
 * @param name Platform file name without extension.
 * @param side Tactical side assigned to the aircraft.
 */
-Aircraft::Aircraft(entt::registry* registry, std::string const& name, eEntitySide side):
-    Entity(registry, side, eEntityType::Aircraft)
+Mobile::Mobile(entt::registry* registry, std::string const& name, eEntitySide side):
+    Entity(registry, side, eEntityType::Mobile)
 {
     std::filesystem::path filepath =
-        std::filesystem::path{ RESOURCE_PATH } / "Platforms" / "Aircraft" / name;
+        std::filesystem::path{ RESOURCE_PATH } / "Platforms" / "Mobile" / name;
     filepath.replace_extension(".json");
     filepath.make_preferred();
+
+    // Existing user-defined platform files under the historical directory remain valid.
+    if (!std::filesystem::exists(filepath))
+        filepath = std::filesystem::path{ RESOURCE_PATH } / "Platforms" / "Aircraft" / name;
+    filepath.replace_extension(".json");
 
     if (std::filesystem::exists(filepath))
     {
@@ -55,7 +60,7 @@ Aircraft::Aircraft(entt::registry* registry, std::string const& name, eEntitySid
 * @brief Initializes control, flight, and weapon subsystems in dependency order.
 */
 void
-Aircraft::OnInit(void) noexcept
+Mobile::OnInit(void) noexcept
 {
     if (has<sSNAControlState>())
         SNAControlSystem::Init(*this);
@@ -71,7 +76,7 @@ Aircraft::OnInit(void) noexcept
 * @brief Runs control, flight, kinematics, and weapon systems for one step.
 */
 void
-Aircraft::Run(void) noexcept
+Mobile::Run(void) noexcept
 {
     if (has<sSNAControlState>())
         SNAControlSystem::Run(*this);
