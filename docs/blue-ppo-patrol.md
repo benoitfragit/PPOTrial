@@ -42,9 +42,10 @@ Après apprentissage, la politique est enregistrée par défaut sous
 Les deux bleus chargent une **seule instance du même Actor** RLtools et
 choisissent chacun leur action avant le pas physique du monde ECS.
 
-Lancer `PPO.exe --example blue-patrol`. Sans modèle, le scénario se charge
-mais les bleus restent sans agent ; un fichier invalide fait échouer le
-bootstrap plutôt que d'exécuter une politique incompatible.
+Lancer `PPO.exe --example blue-patrol`. Sans modèle, les deux gardes
+sont pilotés par des contrôleurs de référence explicitement identifiés.
+Un checkpoint PPO incompatible est signalé et provoque le même fallback
+de référence, jamais une exécution de poids incompatibles.
 
 ## Réseau avec attention (v2)
 
@@ -101,8 +102,9 @@ de convergence PPO.
 `twoVsTwo.patrolControllers` (deux chaînes `"ppo"` ou `"reference"`).
 Par défaut dans l'exemple : garde 1 PPO, garde 2 référence ; faute de
 checkpoint valide, les demandes PPO basculent en référence avec indication
-explicite en console. Un checkpoint incompatible provoque un échec de
-chargement, sans bascule silencieuse. Quand le mode patrouille est actif,
+explicite en console. Un checkpoint incompatible déclenche également
+une bascule explicite et journalisée vers la référence ; les poids
+incompatibles ne sont pas exécutés. Quand le mode patrouille est actif,
 les deux gardes sont initialisés sur leur trajectoire à la vitesse de
 croisière même sans checkpoint. Les JSON des attaquants et les agents rouges
 restent inchangés.
