@@ -42,8 +42,7 @@ add_library(TwoVsTwoPatrolRuntime STATIC
     data/patrol_reference_agent.hpp data/patrol_reference_controller.hpp
     data/patrol_training_ecs_agent.hpp data/patrol_learner.hpp
     data/patrol_checkpoint.hpp
-    src/patrol_agent.cpp src/patrol_reference_agent.cpp
-    src/patrol_training_ecs_agent.cpp)
+    src/patrol_agent.cpp src/patrol_reference_agent.cpp)
 target_compile_features(TwoVsTwoPatrolRuntime PUBLIC cxx_std_17)
 target_include_directories(TwoVsTwoPatrolRuntime PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../data")
