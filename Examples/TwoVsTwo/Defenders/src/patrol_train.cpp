@@ -1,0 +1,130 @@
+#include "patrol_rltools.hpp"
+
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <stdexcept>
+#include <string>
+
+namespace blue = ppo::examples::twovstwo::defenders;
+namespace rlt = rl_tools;
+
+namespace {
+template<typename Matrix>
+void WriteMatrix(std::ostream& out, Matrix const& matrix)
+{
+    for (typename Matrix::SPEC::TI i = 0; i < Matrix::SPEC::ROWS; ++i)
+        for (typename Matrix::SPEC::TI j = 0; j < Matrix::SPEC::COLS; ++j)
+            out << rlt::get(matrix, i, j) << ' ';
+    out << '\n';
+}
+
+template<typename Layer>
+void WriteLayer(std::ostream& out, Layer const& layer)
+{
+    WriteMatrix(out, layer.weights.parameters);
+    WriteMatrix(out, layer.biases.parameters);
+}
+
+template<typename Actor>
+void SavePolicy(std::filesystem::path const& path, Actor const& actor)
+{
+    if (path.has_parent_path())
+        std::filesystem::create_directories(path.parent_path());
+    auto const temp = path.string() + ".tmp";
+    std::ofstream out{temp, std::ios::trunc};
+    if (!out)
+        throw std::runtime_error("Cannot open temporary policy file");
+    out << "BLUE_PATROL_PPO_V1 " << blue::ObservationLayout::Version << ' '
+        << blue::ObservationLayout::Size << ' '
+        << blue::ObservationLayout::ActionSize << ' '
+        << blue::TrainingParameters::ACTOR_HIDDEN_DIM << ' '
+        << blue::TrainingParameters::ACTOR_NUM_LAYERS << '\n'
+        << std::setprecision(std::numeric_limits<float>::max_digits10);
+    WriteLayer(out, actor.input_layer);
+    for (auto const& layer : actor.hidden_layers)
+        WriteLayer(out, layer);
+    WriteLayer(out, actor.output_layer);
+    WriteMatrix(out, actor.log_std.parameters);
+    out.flush();
+    if (!out)
+        throw std::runtime_error("Failed to serialize blue PPO policy");
+    out.close();
+    // Rename is atomic on the same filesystem when the destination is absent.
+    // Avoid removing an older checkpoint unless the new data was written.
+    std::filesystem::remove(path);
+    std::filesystem::rename(temp, path);
+}
+
+unsigned ParseUnsigned(char const* input)
+{
+    std::string const text{input};
+    std::size_t consumed = 0;
+    unsigned long const number = std::stoul(text, &consumed, 10);
+    if (consumed != text.size() || number > std::numeric_limits<unsigned>::max())
+        throw std::invalid_argument("Expected unsigned integer argument");
+    return static_cast<unsigned>(number);
+}
+} // namespace
+
+int main(int argc, char** argv)
+{
+    try
+    {
+        // Optional seed and output path. No dependency on LibTorch or GPU.
+        if (argc > 3)
+        {
+            std::cerr << "Usage: PPOBlueTrain [seed] [checkpoint.txt]\n";
+            return 2;
+        }
+        unsigned const seed = argc >= 2 ? ParseUnsigned(argv[1]) : 1U;
+        std::filesystem::path const output = argc >= 3
+            ? std::filesystem::path{argv[2]}
+            : std::filesystem::path{"blue_patrol_v1.txt"};
+
+        blue::Parameters const params{};
+        if (!blue::Valid(params))
+            throw std::invalid_argument("Invalid patrol environment parameters");
+
+        blue::Device device;
+        blue::TrainingState training{};
+        for (auto& env : training.envs)
+            env.parameters = params;
+        rlt::malloc(device, training);
+        rlt::init(device, training, seed);
+        training.actor_optimizer.parameters.alpha = 3.e-4F;
+        training.critic_optimizer.parameters.alpha = 3.e-4F;
+        while (!rlt::step(device, training))
+        {
+            if (training.step % 10U == 0U)
+                std::cout << "PPO update " << training.step
+                          << " / " << blue::TrainingParameters::STEP_LIMIT << '\n';
+        }
+        SavePolicy(output, training.ppo.actor);
+        std::cout << "Saved actor: " << output.string() << '\n';
+        // RLtools' pinned core release has a typo in its aggregate free(State)
+        // overload. Free exactly the allocations made by malloc(State).
+        rlt::free(device, training.ppo);
+        rlt::free(device, training.ppo_buffers);
+        rlt::free(device, training.on_policy_runner_dataset);
+        rlt::free(device, training.on_policy_runner);
+        rlt::free(device, training.actor_eval_buffers);
+        rlt::free(device, training.actor_buffers);
+        rlt::free(device, training.critic_buffers);
+        rlt::free(device, training.critic_buffers_gae);
+        rlt::free(device, training.observation_normalizer);
+        rlt::free(device, training.observations_mean);
+        rlt::free(device, training.observations_std);
+        for (auto& env : training.envs)
+            rlt::free(device, env);
+        return 0;
+    }
+    catch (std::exception const& e)
+    {
+        std::cerr << "Blue PPO training failed: " << e.what() << '\n';
+        return 1;
+    }
+}
