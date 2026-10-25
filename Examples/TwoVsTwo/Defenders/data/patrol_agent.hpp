@@ -36,6 +36,8 @@ private:
     ppo::model::BaseEntity teammate_;
     std::size_t role_{};
     std::shared_ptr<PatrolPolicy> actor_;
+    State beforeStep_{};
+    bool hasBeforeStep_ = false;
     std::size_t step_ = 0U;
     unsigned long long id_ = ppo::model::GetNewUniqId();
     bool done_ = false;

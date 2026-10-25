@@ -51,6 +51,7 @@ void PatrolProdAgent::Init()
 {
     step_ = 0U;
     done_ = false;
+    hasBeforeStep_ = false;
 }
 
 Parameters PatrolProdAgent::ReadParameters()
@@ -96,7 +97,9 @@ void PatrolProdAgent::ChooseAction()
     Parameters const p = ReadParameters();
     if (!Valid(p))
         return;
-    auto const observation = Observe(p, ReadState(p));
+    beforeStep_ = ReadState(p);
+    hasBeforeStep_ = true;
+    auto const observation = Observe(p, beforeStep_);
     auto const action = actor_->Predict(observation);
     auto [control] = own_.get<ppo::model::sSNAControlState>();
     control.m_rotSpeedCmd = action[0];
@@ -112,7 +115,8 @@ bool PatrolProdAgent::SetNewState()
     if (!Valid(p))
         return done_ = true;
     State const after = ReadState(p);
-    done_ = step_ >= p.episodeSteps;
+    done_ = step_ >= p.episodeSteps
+        || (hasBeforeStep_ && GuardsCollided(p, beforeStep_, after));
     for (auto const& car : after.guards)
         done_ |= !car.available || !std::isfinite(car.north) || !std::isfinite(car.east)
             || std::abs(car.north) >= p.halfNorth || std::abs(car.east) >= p.halfEast;
