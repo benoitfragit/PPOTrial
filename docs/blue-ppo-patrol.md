@@ -17,37 +17,45 @@ restent inchangés. Un scénario sans aucun rôle `ppo` est refusé.
 
 ## Cycle de vie et architecture
 
-`ppo::core::StepAgents` (appelé par `Environment`) exécute :
+`ppo::core::StepAgents` (appelé par `Environment`) conserve l'ordre
+`ChooseAction -> ECS/SNA + règles -> SetNewState`. Aucune modification
+des interfaces génériques, de `ALMission`/`RLMission`, ni du runtime
+de leurs modèles. Pas de thread RLtools supplémentaire.
 
-1. `ChooseAction()` des deux agents.
-2. Dynamique ECS/SNA et règles de collision.
-3. `SetNewState()` des deux agents.
+`PatrolTrainingAgent : IAgent` est le seul adaptateur d'apprentissage
+de la patrouille. Il utilise `PatrolLearner` (RLtools CPU) :
+- `ChooseAction` échantillonne la politique **du learner** et enregistre
+  l'observation, l'action brute gaussienne, la moyenne et la log-probabilité
+  sous la politique courante. Les commandes SNA reçoivent l'action bornée ;
+  l'action brute reste celle du calcul PPO.
+- `SetNewState` lit les deux mobiles **après** la physique et les règles ECS,
+  calcule `TeamReward` sur leurs états réels, distingue `terminated` et
+  `truncated`, et fournit l'observation suivante au collecteur.
+- Le buffer on-policy contient 128 pas ECS avec 1 environnement
+  (`N_ENVIRONMENTS=1`, `ON_POLICY_RUNNER_STEPS_PER_ENV=128`). Dès qu'il
+  est plein, le même moteur RLtools calcule GAE et PPO (4 époques).
+  **Aucun rollout headless supplémentaire n'est généré par l'agent ECS.**
+- Une fois la mise à jour effectuée, l'Actor entraîné est publié
+  séquentiellement dans `PatrolPolicy`, puis éventuellement sauvegardé.
 
-`PatrolTrainingAgent` dérive de `PatrolProdAgent` et délègue
-l'optimisation PPO au composant réutilisable `PatrolLearner` (RLtools).
-Il conserve son état d'optimisation lors des resets d'épisode ECS.
-Toutes les 128 transitions ECS, `SetNewState()` exécute une mise
-à jour PPO ; les poids sont publiés dans `PatrolPolicy` de façon
-séquentielle avant la prochaine action. Le snapshot de **l'agent PPO
-lui-même** porte le nombre d'updates et `m_training`.
+Le retour est on-policy : aucun gradient n'utilise un couple observation /
+action différent de celui effectivement envoyé à l'ECS. Pendant un
+rollout, les poids restent constants. Les frontières d'épisode à
+l'intérieur d'un rollout conservent leurs marqueurs de terminaison.
+`Init()` réinitialise le contrôleur physique mais ne supprime pas le
+buffer d'apprentissage en cours ni l'optimiseur.
 
-**Limitation à connaître** : les trajectoires utilisées pour calculer
-les gradients proviennent pour l'instant de l'environnement de rollouts
-RLtools (`patrol_core.hpp`), non des transitions ECS visibles dans
-la fenêtre. La fenêtre présente la politique effectivement mise à jour.
-Ce curriculum entraîne un rôle PPO par épisode RLtools ; l'équipier
-suit la référence, en alternant les rôles avec Actor partagé.
-Ce n'est pas encore MAPPO et ce n'est pas un apprentissage directement
-fondé sur les trajectoires ECS. Une mise à jour PPO est synchrone et peut
-provoquer une pause perceptible dans la fenêtre : ne pas introduire
-un thread implicite pour masquer ce coût.
+Limite connue : le PPO est toujours **synchrone** avec le thread ECS ;
+un update de 128 transitions peut provoquer une pause d'affichage
+ponctuelle. Le CPU doit être profilé sous VS2022 Debug et Release.
+Le smoke test vérifie le chemin de données et l'update, pas le temps réel.
 
-Le modèle est sauvegardé atomiquement tous les 10 updates et en fin
-de session sous
-`resources/model/BluePatrol/prod/blue_patrol_v2.txt`.
-La signature `BLUE_PATROL_PPO_V2` est conservée pour la compatibilité
-des checkpoints existants. Si aucun checkpoint compatible n'existe,
-l'Actor est initialisé de façon déterministe puis entraîné.
+Le checkpoint v2 demeure sous
+`resources/model/BluePatrol/prod/blue_patrol_v2.txt`. Le premier
+curriculum entraîne le seul rôle PPO du scénario, accompagné du
+contrôleur de référence ; il ne s'agit pas encore de MAPPO. Le
+programme CLI facultatif `PPOBlueTrain` conserve une méthode headless
+indépendante, qui n'est **pas** appelée par l'agent ECS.
 
 ## Observation et contrôle
 
