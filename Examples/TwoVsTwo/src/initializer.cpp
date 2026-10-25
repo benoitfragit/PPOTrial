@@ -19,8 +19,10 @@ void InitializeEntity(ppo::model::Entity& entity)
         config.side = std::bernoulli_distribution{0.5}(config.rng) ? 1 : -1;
 
     auto const& [metadata] = entity.get<ppo::model::sEntityMetadata>();
+    auto const& world = registry->ctx().get<ppo::model::sEnvironmentState>();
+    auto const bounds = WorldBounds{0.5F * world.m_maxNorth, 0.5F * world.m_maxEast};
     auto const pose = MakeSpawn(metadata.m_name, config.side,
-                                config.red2DestroyedProbability, config.rng);
+                                config.red2DestroyedProbability, bounds, config.rng);
     if (pose)
     {
         auto [state] = entity.get<ppo::model::sEntityState>();
