@@ -4,6 +4,7 @@
 */
 #include "example.hpp"
 #include "examplecatalog.hpp"
+#include "exampleselector.hpp"
 #include "environment.hpp"
 #include "environmentrenderer.hpp"
 #include "serializer.hpp"
@@ -15,12 +16,13 @@
 
 int main(int argc, char** argv)
 {
-    // The application composition root selects the compiled example.
-    // No example-specific simulation, rendering or learning logic belongs here.
+    // Main only selects a compiled example; each example owns its startup.
     ppo::app::ExampleCatalog const examples = ppo::app::CreateExampleCatalog();
 
     bool checkExample = false;
-    std::string_view requested = examples.Default().id;
+    bool explicitExample = false;
+    std::string requested{examples.Default().id};
+
     for (int i = 1; i < argc; ++i)
     {
         std::string_view const option{argv[i]};
@@ -43,26 +45,34 @@ int main(int argc, char** argv)
                 return 2;
             }
             requested = argv[i];
+            explicitExample = true;
         }
     }
 
-    auto const* selected = examples.Find(requested);
+    // No model, scenario or simulation window is created before the choice.
+    // Explicit --example and headless CI checks retain direct startup.
+    if (ppo::app::ShouldShowExampleSelector(explicitExample, checkExample))
+    {
+        auto const chosen = ppo::app::SelectExample(examples);
+        if (!chosen)
+            return 0; // User closed the selector.
+        requested = *chosen;
+    }
 
+    auto const* selected = examples.Find(requested);
     if (selected == nullptr || !ppo::app::IsValid(*selected))
     {
         std::cerr << "Unknown or invalid example: " << requested << '\n';
         return 2;
     }
 
-    // Preserve the original initialization sequence and the default scenario.
     selected->registerTypes();
 
     auto& serializer = ppo::serialization::Serializer::GetInstance();
     std::filesystem::path const resourcePath{RESOURCE_PATH};
     serializer.SetPath(resourcePath);
 
-    // Headless CI startup exercises the exact same example factories and
-    // config/model loading without allocating graphics resources.
+    // Headless CI must not allocate graphics resources.
     ppo::renderer::EnvironmentRenderer* renderer = nullptr;
     if (!checkExample)
         renderer = &ppo::renderer::EnvironmentRenderer::GetInstance(

@@ -123,7 +123,8 @@ ppo::app::ExampleDefinition Definition()
         "PLAYGROUND",
         std::filesystem::path("Scenarios") / "Playground.json",
         &RegisterAirspaceMeta,
-        &LoadScenario
+        &LoadScenario,
+        "Original navigation playground and PPO training environment."
     };
 }
 

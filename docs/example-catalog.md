@@ -4,7 +4,7 @@
 
 The desktop's example list now belongs to `Examples`, not `Main`. This is a
 small composition boundary, **not** a plugin loader and **not** a renderer
-abstraction. Airspace remains the default startup. The TwoVsTwo example also uses the
+abstraction. Airspace remains the default CLI example; interactive startup now shows an example selector. The TwoVsTwo example also uses the
 existing renderer, the existing production RLMission agent and the canonical
 shared 2D world under `Examples/Shared/World`.
 
@@ -34,19 +34,18 @@ compiled list. To register another example in the future:
    `Examples/CMakeLists.txt`.
 3. Add tests for that example's initialization and specific agent contracts.
 
-Do not add concrete examples to `Main/src/main.cpp` or `GenericRLCore`.
+Do not add concrete examples to `Main/src/main.cpp` or `GenericRLCore`. The selector (`Main/src/exampleselector.cpp`) reads the same catalog and does not hardcode example names. Optional descriptions live in `ExampleDefinition`.
 
 The application still calls, in the original order:
 
-1. Choose the requested example (`--example <id>` or the first entry).
+1. Choose the requested example (`--example <id>` directly, or an interactive selection screen when launched without arguments). Headless `--check-example` without an ID retains Airspace as the default.
 2. Register the example's concrete entity/agent types.
 3. Initialize the serializer path and (unless headless) the existing
    Airspace renderer.
 4. Build the environment and load the example scenario.
 5. Load serializer settings; run or validate startup with `--check-example`.
 
-`--list-examples`, `--example airspace`, `--check-example` and the no-argument
-Airspace launch retain their previous behavior. A missing example name or an
+`--list-examples`, `--example airspace` and `--check-example` retain their previous behavior. Launching `PPO.exe` without arguments now opens a resizable, high-contrast example selector before loading any scenario. The GUI lists all entries from `ExampleCatalog`, supports mouse and arrow keys / Enter, and exits cleanly if cancelled. Closing the selector does not launch or initialize an example. A missing example name or an
 unknown name is still rejected.
 
 ## Validation and compatibility

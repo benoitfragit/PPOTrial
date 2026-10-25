@@ -175,7 +175,8 @@ ppo::app::ExampleDefinition Definition()
         "TWO VS TWO",
         std::filesystem::path("Scenarios") / "TwoVsTwo.json",
         &ppo::examples::airspace::RegisterAirspaceMeta,
-        &LoadScenario
+        &LoadScenario,
+        "Two blue defenders protect a fixed objective against RL-controlled red cars."
     };
 }
 
