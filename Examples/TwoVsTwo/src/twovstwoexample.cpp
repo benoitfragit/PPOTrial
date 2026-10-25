@@ -1,6 +1,7 @@
 #include "twovstwoexample.hpp"
 #include "initializer.hpp"
 #include "twovstworules.hpp"
+#include "blue_agent.hpp"
 
 #include "airspacecomponents.hpp"
 #include "airspacemeta.hpp"
@@ -38,6 +39,9 @@ bool LoadScenario(std::filesystem::path const& path,
         return false;
 
     auto const& settings = document["twoVsTwo"];
+    if (settings.contains("patrolOnly") && !settings["patrolOnly"].is_boolean())
+        return false;
+    bool const patrolOnly = settings.value("patrolOnly", false);
     if (!settings.contains("red2InitiallyDestroyedProbability")
         || !settings["red2InitiallyDestroyedProbability"].is_number())
         return false;
@@ -96,7 +100,8 @@ bool LoadScenario(std::filesystem::path const& path,
             || item.m_name == "blue_restricted_zone";
         auto const red = item.m_name == "red_1" || item.m_name == "red_2";
 
-        if ((!blue && !red) || (blue && item.m_side != ppo::model::eEntitySide::Friend)
+        if ((!blue && !red) || (patrolOnly && red)
+            || (blue && item.m_side != ppo::model::eEntitySide::Friend)
             || (red && item.m_side != ppo::model::eEntitySide::Hostile)
             || (blue && (!item.m_agents.empty() || !item.m_target.empty()))
             || (red && (item.m_target != "blue_objective"
@@ -134,8 +139,9 @@ bool LoadScenario(std::filesystem::path const& path,
 
     if (!entities.count("blue_guard_1") || !entities.count("blue_guard_2")
         || !entities.count("blue_objective") || !entities.count("blue_restricted_zone")
-        || !entities.count("red_1")
-        || entities.size() != 5U + static_cast<std::size_t>(entities.count("red_2") != 0))
+        || (!patrolOnly && !entities.count("red_1"))
+        || entities.size() != (patrolOnly ? 4U :
+            5U + static_cast<std::size_t>(entities.count("red_2") != 0)))
         return false;
 
     for (auto const& item : scenario.m_entities)
@@ -156,6 +162,25 @@ bool LoadScenario(std::filesystem::path const& path,
     auto& context = registry->ctx().emplace<InitializerContext>();
     context.count = entities.size();
     context.red2DestroyedProbability = probability;
+    context.patrolOnly = patrolOnly;
+    std::shared_ptr<defenders::BluePolicy> bluePolicy;
+    if (patrolOnly)
+    {
+        auto const checkpoint = std::filesystem::path{RESOURCE_PATH}.parent_path()
+            / "model" / "BluePatrol" / "prod" / "blue_patrol_v1.txt";
+        if (std::filesystem::exists(checkpoint))
+        {
+            try
+            {
+                bluePolicy = std::make_shared<defenders::BluePolicy>(checkpoint);
+            }
+            catch (std::exception const&)
+            {
+                return false; // Do not silently fly with incompatible weights.
+            }
+        }
+    }
+    context.policyReady = bluePolicy != nullptr;
     auto& world = registry->ctx().get<ppo::model::sEnvironmentState>();
     world.m_maxNorth = worldNorth;
     world.m_maxEast = worldEast;
@@ -169,6 +194,17 @@ bool LoadScenario(std::filesystem::path const& path,
         auto it = entities.find(item.m_name);
         if (it != entities.end())
             it->second->Init();
+    }
+    if (bluePolicy)
+    {
+        auto guard1 = environment.CreateAgent<defenders::BlueProdAgent>(
+            *entities.at("blue_guard_1"), *entities.at("blue_guard_2"), 0U, bluePolicy);
+        auto guard2 = environment.CreateAgent<defenders::BlueProdAgent>(
+            *entities.at("blue_guard_2"), *entities.at("blue_guard_1"), 1U, bluePolicy);
+        if (!guard1 || !guard2)
+            return false;
+        agents.push_back(std::move(guard1));
+        agents.push_back(std::move(guard2));
     }
     for (auto const& agent : agents)
         agent->Init();
@@ -191,3 +227,15 @@ ppo::app::ExampleDefinition Definition()
 }
 
 } // namespace ppo::examples::twovstwo
+
+ppo::app::ExampleDefinition BluePatrolDefinition()
+{
+    return {
+        "blue-patrol",
+        "BLUE PATROL PPO",
+        std::filesystem::path("Scenarios") / "BluePatrol.json",
+        &ppo::examples::airspace::RegisterAirspaceMeta,
+        &LoadScenario,
+        "Two blue defenders patrol without red attackers; RLtools policy used when trained."
+    };
+}

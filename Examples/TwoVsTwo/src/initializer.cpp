@@ -2,6 +2,7 @@
 #include "spawn.hpp"
 #include "components.hpp"
 #include "sharedworldcomponents.hpp"
+#include "patrol_core.hpp"
 #include <random>
 
 namespace ppo::examples::twovstwo {
@@ -16,13 +17,39 @@ void InitializeEntity(ppo::model::Entity& entity)
     if (config.count == 0)
         return;
     if (config.next == 0)
+    {
         config.side = std::bernoulli_distribution{0.5}(config.rng) ? 1 : -1;
+        if (config.patrolOnly)
+        {
+            auto const& world = registry->ctx().get<ppo::model::sEnvironmentState>();
+            defenders::Parameters p{};
+            p.halfNorth = 0.5F * world.m_maxNorth;
+            p.halfEast = 0.5F * world.m_maxEast;
+            config.arclength = std::uniform_real_distribution<float>{
+                0.F, defenders::CircuitLength(p)}(config.rng);
+        }
+    }
 
     auto const& [metadata] = entity.get<ppo::model::sEntityMetadata>();
     auto const& world = registry->ctx().get<ppo::model::sEnvironmentState>();
     auto const bounds = WorldBounds{0.5F * world.m_maxNorth, 0.5F * world.m_maxEast};
-    auto const pose = MakeSpawn(metadata.m_name, config.side,
+    auto pose = MakeSpawn(metadata.m_name, config.side,
                                 config.red2DestroyedProbability, bounds, config.rng);
+    if (pose && config.patrolOnly && config.policyReady
+        && (metadata.m_name == "blue_guard_1" || metadata.m_name == "blue_guard_2"))
+    {
+        defenders::Parameters p{};
+        p.halfNorth = bounds.halfNorth;
+        p.halfEast = bounds.halfEast;
+        auto const role = metadata.m_name == "blue_guard_1" ? 0U : 1U;
+        auto const reference = defenders::PatrolReference(p, config.side,
+                                                         role, config.arclength);
+        auto const mobile = defenders::OnReference(p, reference);
+        pose->north = mobile.north;
+        pose->east = mobile.east;
+        pose->heading = mobile.heading;
+        pose->speed = mobile.speed;
+    }
     if (pose)
     {
         auto [state] = entity.get<ppo::model::sEntityState>();

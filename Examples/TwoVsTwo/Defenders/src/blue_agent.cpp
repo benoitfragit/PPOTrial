@@ -15,7 +15,10 @@ Mobile FromEcs(ppo::model::BaseEntity& entity)
     auto [state] = entity.get<ppo::model::sEntityState>();
     float turnRate = 0.F;
     if (entity.has<ppo::model::sFlightModelState>())
-        turnRate = entity.get<ppo::model::sFlightModelState>().m_accpsi;
+        {
+        auto [flight] = entity.get<ppo::model::sFlightModelState>();
+        turnRate = flight.m_accpsi;
+    }
     return {state.m_x, state.m_y, state.m_rotation, state.m_speed,
             turnRate, !state.m_destroyed};
 }
@@ -39,7 +42,7 @@ void BlueProdAgent::Init()
     done_ = false;
 }
 
-Parameters BlueProdAgent::ReadParameters() const
+Parameters BlueProdAgent::ReadParameters()
 {
     Parameters p{};
     auto* registry = own_.registry();
@@ -60,7 +63,7 @@ Parameters BlueProdAgent::ReadParameters() const
     return p;
 }
 
-State BlueProdAgent::ReadState(Parameters const& p) const
+State BlueProdAgent::ReadState(Parameters const& p)
 {
     auto* registry = own_.registry();
     auto const& context = registry->ctx().get<InitializerContext>();
@@ -69,8 +72,8 @@ State BlueProdAgent::ReadState(Parameters const& p) const
     result.arclength = context.arclength + static_cast<float>(step_) * p.dt * p.cruiseSpeed;
     result.controlledRole = role_;
     result.step = step_;
-    result.guards[role_] = FromEcs(const_cast<ppo::model::BaseEntity&>(own_));
-    result.guards[1U - role_] = FromEcs(const_cast<ppo::model::BaseEntity&>(teammate_));
+    result.guards[role_] = FromEcs(own_);
+    result.guards[1U - role_] = FromEcs(teammate_);
     result.failed = false;
     return result;
 }

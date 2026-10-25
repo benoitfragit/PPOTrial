@@ -365,3 +365,8 @@ FodyWeavers.xsd
 out/*
 /progress/ppoprogress.pt
 docs/generated/
+
+# Locally trained Blue PPO policies (never commit generated weights)
+resources/model/BluePatrol/prod/*.txt
+resources/model/BluePatrol/prod/*.txt.tmp
+resources/model/BluePatrol/prod/*.txt.bak

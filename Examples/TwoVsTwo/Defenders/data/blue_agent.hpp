@@ -23,8 +23,8 @@ public:
     ppo::model::sAgentStateSnaphot GetSnapshot() const noexcept override;
 
 private:
-    State ReadState(Parameters const& parameters) const;
-    Parameters ReadParameters() const;
+    State ReadState(Parameters const& parameters);
+    Parameters ReadParameters();
 
     ppo::model::BaseEntity own_;
     ppo::model::BaseEntity teammate_;

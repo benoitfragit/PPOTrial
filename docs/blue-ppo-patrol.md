@@ -33,3 +33,15 @@ Configurer normalement le desktop avec `PPO_BUILD_DESKTOP=ON`, puis construire l
 
 
 Le test `TwoVsTwoPPOTrainingSmoke` effectue une mise à jour RLtools PPO puis vérifie la sortie du processus ; aucune métrique de convergence n'est revendiquée par ce smoke test.
+
+## Inference dans le scénario GUI sans rouges
+
+Le scénario additionnel `blue-patrol` charge `Scenarios/BluePatrol.json` sans aucun rouge.
+Après apprentissage, la politique est enregistrée par défaut sous
+`resources/model/BluePatrol/prod/blue_patrol_v1.txt` (non versionné).
+Les deux bleus chargent une **seule instance du même Actor** RLtools et
+choisissent chacun leur action avant le pas physique du monde ECS.
+
+Lancer `PPO.exe --example blue-patrol`. Sans modèle, le scénario se charge
+mais les bleus restent sans agent ; un fichier invalide fait échouer le
+bootstrap plutôt que d'exécuter une politique incompatible.
