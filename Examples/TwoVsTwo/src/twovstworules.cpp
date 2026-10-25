@@ -46,8 +46,14 @@ void TwoVsTwoWorldRules::AfterStep()
 void TwoVsTwoWorldRules::CopySnapshot(entt::registry& source, entt::registry& target) const
 {
     original_.CopySnapshot(source, target);
-    if (source.ctx().contains<ppo::model::sDefendedArea>())
+    // The defended area and the shared LiDAR use exactly the same world bounds.
+    if (target.ctx().contains<ppo::model::sEnvironmentState>())
+    {
+        auto const& world = target.ctx().get<ppo::model::sEnvironmentState>();
         target.ctx().emplace<ppo::model::sDefendedArea>(
-            source.ctx().get<ppo::model::sDefendedArea>());
+            ppo::model::sDefendedArea{0.F, 0.F,
+                                      0.5F * world.m_maxNorth,
+                                      0.5F * world.m_maxEast});
+    }
 }
 }

@@ -2,10 +2,6 @@
     "formatVersion": 2,
     "agentProfiles": "../AgentProfiles.json",
     "twoVsTwo": {
-        "defendedArea": {
-            "halfNorth": 18000,
-            "halfEast": 20000
-        },
         "red2InitiallyDestroyedProbability": 0.15
     },
     "entities": {

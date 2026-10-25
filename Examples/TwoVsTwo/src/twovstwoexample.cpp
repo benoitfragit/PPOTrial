@@ -38,25 +38,33 @@ bool LoadScenario(std::filesystem::path const& path,
         return false;
 
     auto const& settings = document["twoVsTwo"];
-    if (!settings.contains("defendedArea")
-        || !settings["defendedArea"].is_object()
-        || !settings["defendedArea"].contains("halfNorth")
-        || !settings["defendedArea"].contains("halfEast")
-        || !settings["defendedArea"]["halfNorth"].is_number()
-        || !settings["defendedArea"]["halfEast"].is_number()
-        || !settings.contains("red2InitiallyDestroyedProbability")
+    if (!settings.contains("red2InitiallyDestroyedProbability")
         || !settings["red2InitiallyDestroyedProbability"].is_number())
         return false;
-
-    float const halfNorth = settings["defendedArea"]["halfNorth"].get<float>();
-    float const halfEast = settings["defendedArea"]["halfEast"].get<float>();
     float const probability = settings["red2InitiallyDestroyedProbability"].get<float>();
-
-    if (!std::isfinite(halfNorth) || !std::isfinite(halfEast)
-        || halfNorth <= 0.F || halfEast <= 0.F
-        || halfNorth > 22329.F || halfEast > 35727.F
-        || !std::isfinite(probability) || probability < 0.F || probability > 1.F
+    if (!std::isfinite(probability) || probability < 0.F || probability > 1.F
         || !document.contains("entities") || !document["entities"].is_object())
+        return false;
+
+    // Initial entity spawns precede Serializer::Load. Read its exact file
+    // so the first episode and later resets use the same LiDAR/world limits.
+    auto const environmentConfig =
+        ppo::serialization::Serializer::Parse(path.parent_path().parent_path() / "Environment.json");
+    if (!environmentConfig.is_object()
+        || !environmentConfig.contains("formatVersion")
+        || !environmentConfig["formatVersion"].is_number_integer()
+        || environmentConfig["formatVersion"].get<int>() != 2
+        || !environmentConfig.contains("environment")
+        || !environmentConfig["environment"].is_object())
+        return false;
+    auto const& worldConfig = environmentConfig["environment"];
+    if (!worldConfig.contains("maxNorth") || !worldConfig["maxNorth"].is_number()
+        || !worldConfig.contains("maxEast") || !worldConfig["maxEast"].is_number())
+        return false;
+    float const worldNorth = worldConfig["maxNorth"].get<float>();
+    float const worldEast = worldConfig["maxEast"].get<float>();
+    if (!std::isfinite(worldNorth) || !std::isfinite(worldEast)
+        || worldNorth <= 0.F || worldEast <= 0.F)
         return false;
 
     std::map<std::string, std::shared_ptr<ppo::model::Entity>> entities;
@@ -148,8 +156,10 @@ bool LoadScenario(std::filesystem::path const& path,
     auto& context = registry->ctx().emplace<InitializerContext>();
     context.count = entities.size();
     context.red2DestroyedProbability = probability;
-    registry->ctx().emplace<ppo::model::sDefendedArea>(
-        ppo::model::sDefendedArea{0.F, 0.F, halfNorth, halfEast});
+    auto& world = registry->ctx().get<ppo::model::sEnvironmentState>();
+    world.m_maxNorth = worldNorth;
+    world.m_maxEast = worldEast;
+    // Rendering metadata is derived from these same limits on each snapshot.
 
     // The legacy desktop does not initialize the very first episode in Run.
     // Initialize this standalone scenario once; subsequent resets use the

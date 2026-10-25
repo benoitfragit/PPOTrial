@@ -155,8 +155,8 @@ struct sFlightModelState
     float m_maxfuel{ 0.F };
 };
 
-// Scenario-defined defended area, distinct from the world boundaries.
-// Shared only as snapshot metadata; no collision behavior is imposed.
+// Rendering metadata derived from the current world bounds (sEnvironmentState).
+// Snapshot-only: no independent geometry or collision behavior is imposed.
 struct sDefendedArea
 {
     float m_north{0.F};
