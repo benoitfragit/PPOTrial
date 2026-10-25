@@ -86,3 +86,26 @@ d'évaluation avec le signal de retour de PPO.
 `PPOPatrolEvaluate [checkpoint.txt] [episodes] [steps]` renvoie 0
 uniquement lorsque tous les scénarios ont un résultat succès. Tests
 `TwoVsTwoPatrolEvaluationTests`.
+
+## Patrouille graphique sans modèle entraîné (correction de démarrage)
+
+La scène `blue-patrol` pilote toujours ses deux gardes dès le premier Play,
+même quand `resources/model/BluePatrol/prod/blue_patrol_v2.txt` est absent.
+Dans ce cas, le programme annonce explicitement que la politique PPO est
+indisponible et utilise deux `PatrolReferenceAgent` déterministes. Chaque
+contrôleur transmet des commandes SNA au moteur ECS, sans positionnement forcé
+à chaque pas. Il s'agit d'une démonstration cinématique, pas d'une preuve
+de convergence PPO.
+
+`Scenarios/BluePatrol.json` choisit le comportement de chaque garde avec
+`twoVsTwo.patrolControllers` (deux chaînes `"ppo"` ou `"reference"`).
+Par défaut dans l'exemple : garde 1 PPO, garde 2 référence ; faute de
+checkpoint valide, les demandes PPO basculent en référence avec indication
+explicite en console. Un checkpoint incompatible provoque un échec de
+chargement, sans bascule silencieuse. Quand le mode patrouille est actif,
+les deux gardes sont initialisés sur leur trajectoire à la vitesse de
+croisière même sans checkpoint. Les JSON des attaquants et les agents rouges
+restent inchangés.
+
+Test `TwoVsTwoPatrolTests` : progression simulée des deux contrôleurs,
+demi-tours effectifs, bornes de la zone, et erreur maximale de suivi.

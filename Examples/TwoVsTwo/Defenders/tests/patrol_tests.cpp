@@ -1,4 +1,5 @@
 #include "patrol_core.hpp"
+#include "patrol_reference_controller.hpp"
 #include "ppo/core/team_episode.hpp"
 
 #include <array>
@@ -77,5 +78,40 @@ int main()
         !(blue::TeamReward(p, state, {0.F, 0.F}, timeout)
           < blue::TeamReward(p, state, {0.F, 0.F}, next) - 14.F))
         return 11;
+    // Reference controllers use the same normalized SNA actions/physics as
+    // the production ECS; both guards must move and turn without PPO weights.
+    for (int side : {-1, 1})
+    {
+        auto patrol = blue::InitialState(p, side, 0U, 0.F);
+        float maxError = 0.F;
+        float accumulatedTurn = 0.F;
+        for (std::size_t i = 0; i < 3000U; ++i)
+        {
+            std::array<blue::Action, 2> commands{};
+            for (std::size_t role = 0; role < commands.size(); ++role)
+                commands[role] = blue::PatrolReferenceAction(
+                    p, patrol.guards[role], side, role, patrol.arclength);
+            auto const previous = patrol;
+            patrol = blue::AdvanceBoth(p, patrol, commands);
+            if (patrol.failed || patrol.step != i + 1U)
+                return 12;
+            for (std::size_t role = 0; role < patrol.guards.size(); ++role)
+            {
+                auto const reference = blue::PatrolReference(
+                    p, side, role, patrol.arclength);
+                auto const& car = patrol.guards[role];
+                maxError = std::max(maxError,
+                    std::hypot(car.north - reference.north,
+                               car.east - reference.east));
+                accumulatedTurn += std::abs(car.turnRate * p.dt);
+            }
+            if (i == 0U
+                && (std::abs(patrol.guards[0].north - previous.guards[0].north)
+                    + std::abs(patrol.guards[0].east - previous.guards[0].east)) < 1.F)
+                return 13;
+        }
+        if (maxError > 300.F || accumulatedTurn < blue::kTwoPi)
+            return 14;
+    }
     return 0;
 }
