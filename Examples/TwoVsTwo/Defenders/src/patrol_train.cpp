@@ -164,8 +164,7 @@ int main(int argc, char** argv)
         rlt::free(device, training.observation_normalizer);
         rlt::free(device, training.observations_mean);
         rlt::free(device, training.observations_std);
-        for (auto& env : training.envs)
-            rlt::free(device, env);
+        // BluePatrol has no dynamically allocated resources.
         return 0;
     }
     catch (std::exception const& e)
