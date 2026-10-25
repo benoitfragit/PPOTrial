@@ -2811,20 +2811,33 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
             if (state.m_type == ppo::model::eEntityType::RestrictedZone)
             {
                 float const radius = snaState.m_noescapezone / m_worldScale;
-                Color const dangerFill{ 248, 86, 76, 42 };
-                DrawHemisphere(center, radius, dangerFill);
-                DrawSphereWires(center, radius, 18, 10, Color{ 255, 156, 120, 165 });
+                // Color the protected area blue in TwoVsTwo, while preserving
+                // Airspace's historical red danger-area appearance.
+                bool const isBlueArea = snapshot.ctx().contains<ppo::model::sDefendedArea>()
+                    && state.m_side == ppo::model::eEntitySide::Friend;
+                Color const fill = isBlueArea ? Color{ 75, 137, 255, 42 }
+                                               : Color{ 248, 86, 76, 42 };
+                Color const outline = isBlueArea ? Color{ 139, 188, 255, 165 }
+                                                  : Color{ 255, 156, 120, 165 };
+                DrawHemisphere(center, radius, fill);
+                DrawSphereWires(center, radius, 18, 10, outline);
             }
             else
             {
                 float const radius = snaState.m_noescapezone / m_worldScale;
+                bool const isBlueCar = IsCarVisual(snapshot, entity)
+                    && state.m_side == ppo::model::eEntitySide::Friend;
+                Color const fill = isBlueCar ? Color{ 55, 120, 255, 74 }
+                                              : Color{ 255, 72, 72, 74 };
+                Color const outline = isBlueCar ? Color{ 146, 198, 255, 210 }
+                                                 : Color{ 255, 188, 168, 210 };
                 DrawEngagementCone3D(center,
                                      state.m_rotation,
                                      snaState.m_maxShootAngle,
                                      radius,
                                      m_domainHeight,
-                                     Color{ 255, 72, 72, 74 },
-                                     Color{ 255, 188, 168, 210 });
+                                     fill,
+                                     outline);
             }
 
             if (m_showPseudoLidar
