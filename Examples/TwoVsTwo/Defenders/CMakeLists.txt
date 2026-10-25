@@ -8,7 +8,7 @@ target_link_libraries(TwoVsTwoDefenderBackend INTERFACE RLtools::Core GenericRLC
 add_executable(PPOBlueTrain src/patrol_train.cpp data/patrol_core.hpp data/patrol_rltools.hpp)
 target_link_libraries(PPOBlueTrain PRIVATE TwoVsTwoDefenderBackend nlohmann_json::nlohmann_json)
 target_compile_definitions(PPOBlueTrain PRIVATE
-    PPO_BLUE_SETTINGS_DIR=\\\"${CMAKE_SOURCE_DIR}/resources/settings\\\")
+    PPO_BLUE_SETTINGS_DIR=\"${CMAKE_SOURCE_DIR}/resources/settings\")
 target_compile_features(PPOBlueTrain PRIVATE cxx_std_17)
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
