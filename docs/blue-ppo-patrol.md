@@ -21,7 +21,7 @@ Les acteurs entraînés sont exportés en format texte versionné `BLUE_PATROL_P
 
 ## Compilation et exécution
 
-Configurer normalement le desktop avec `PPO_BUILD_DESKTOP=ON`, puis construire la cible `PPOBlueTrain`. Exécuter `PPOBlueTrain [seed] [checkpoint.txt]`. Cible de test `TwoVsTwoPatrolTests` via CTest. Le binaire `PPO.exe` historique est inchangé.
+Configurer normalement le desktop avec `PPO_BUILD_DESKTOP=ON`, puis construire la cible `PPOBlueTrain`. Exécuter `PPOBlueTrain [seed] [checkpoint.txt] [updates]` (nombre de mises à jour facultatif, 300 par défaut). Cible de test `TwoVsTwoPatrolTests` via CTest. Le binaire `PPO.exe` historique est inchangé.
 
 ## Points à compléter
 
@@ -30,3 +30,6 @@ Configurer normalement le desktop avec `PPO_BUILD_DESKTOP=ON`, puis construire l
 3. Ajouter chargement/inférence RLtools et représentation dans le GUI, puis évaluer avec le même moteur ECS.
 4. Ajouter attention masquée rouge/ami, les adversaires lointains puis l'interception, tout en préservant le contrat `RLMission`.
 5. Évoluer vers MAPPO avec Critic centralisé séparé, sans changer l'Actor ou les classes d'entités.
+
+
+Le test `TwoVsTwoPPOTrainingSmoke` effectue une mise à jour RLtools PPO puis vérifie la sortie du processus ; aucune métrique de convergence n'est revendiquée par ce smoke test.
