@@ -177,6 +177,7 @@ int main(int argc, char** argv)
         rlt::free(device, training->on_policy_runner_dataset);
         rlt::free(device, training->on_policy_runner);
         rlt::free(device, training->actor_eval_buffers);
+        rlt::free(device, training->actor_deterministic_evaluation_buffers);
         rlt::free(device, training->actor_buffers);
         rlt::free(device, training->critic_buffers);
         rlt::free(device, training->critic_buffers_gae);
