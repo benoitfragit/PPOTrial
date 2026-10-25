@@ -28,7 +28,9 @@ endif()
 
 # The desktop uses this inference-only actor, independently of the trainer.
 add_library(TwoVsTwoPatrolRuntime STATIC
-    data/patrol_agent.hpp data/patrol_policy.hpp data/attention_actor.hpp src/patrol_agent.cpp)
+    data/patrol_agent.hpp data/patrol_policy.hpp data/attention_actor.hpp
+    data/patrol_reference_agent.hpp data/patrol_reference_controller.hpp
+    src/patrol_agent.cpp src/patrol_reference_agent.cpp)
 target_compile_features(TwoVsTwoPatrolRuntime PUBLIC cxx_std_17)
 target_include_directories(TwoVsTwoPatrolRuntime PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../data")

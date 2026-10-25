@@ -35,7 +35,7 @@ void InitializeEntity(ppo::model::Entity& entity)
     auto const bounds = WorldBounds{0.5F * world.m_maxNorth, 0.5F * world.m_maxEast};
     auto pose = MakeSpawn(metadata.m_name, config.side,
                                 config.red2DestroyedProbability, bounds, config.rng);
-    if (pose && config.patrolOnly && config.policyReady
+    if (pose && config.patrolOnly
         && (metadata.m_name == "blue_guard_1" || metadata.m_name == "blue_guard_2"))
     {
         defenders::Parameters p{};

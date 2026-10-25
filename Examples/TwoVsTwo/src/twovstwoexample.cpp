@@ -2,6 +2,7 @@
 #include "initializer.hpp"
 #include "twovstworules.hpp"
 #include "patrol_agent.hpp"
+#include "patrol_reference_agent.hpp"
 
 #include "airspacecomponents.hpp"
 #include "airspacemeta.hpp"
@@ -12,7 +13,9 @@
 #include "serializer.hpp"
 #include "sharedworldcomponents.hpp"
 
+#include <array>
 #include <cmath>
+#include <iostream>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -42,6 +45,25 @@ bool LoadScenario(std::filesystem::path const& path,
     if (settings.contains("patrolOnly") && !settings["patrolOnly"].is_boolean())
         return false;
     bool const patrolOnly = settings.value("patrolOnly", false);
+
+    // Explicit per-guard controllers. Missing PPO weights are never silently
+    // treated as a trained policy: the visual scenario uses reference guidance.
+    std::array<bool, 2> wantsPpo{true, true};
+    if (settings.contains("patrolControllers"))
+    {
+        auto const& controllers = settings["patrolControllers"];
+        if (!patrolOnly || !controllers.is_array() || controllers.size() != 2U)
+            return false;
+        for (std::size_t role = 0U; role < wantsPpo.size(); ++role)
+        {
+            if (!controllers[role].is_string())
+                return false;
+            auto const mode = controllers[role].get<std::string>();
+            if (mode != "ppo" && mode != "reference")
+                return false;
+            wantsPpo[role] = mode == "ppo";
+        }
+    }
     if (!settings.contains("red2InitiallyDestroyedProbability")
         || !settings["red2InitiallyDestroyedProbability"].is_number())
         return false;
@@ -174,13 +196,17 @@ bool LoadScenario(std::filesystem::path const& path,
             {
                 bluePolicy = defenders::LoadPatrolPolicy(checkpoint);
             }
-            catch (std::exception const&)
+            catch (std::exception const& error)
             {
+                std::cerr << "[PATROL] Invalid PPO checkpoint: "
+                          << error.what() << '\n';
                 return false; // Do not silently fly with incompatible weights.
             }
         }
     }
-    context.policyReady = bluePolicy != nullptr;
+    if (patrolOnly && !bluePolicy)
+        std::cout << "[PATROL] No trained PPO checkpoint; "
+                     "using reference controllers.\n";
     auto& world = registry->ctx().get<ppo::model::sEnvironmentState>();
     world.m_maxNorth = worldNorth;
     world.m_maxEast = worldEast;
@@ -195,16 +221,28 @@ bool LoadScenario(std::filesystem::path const& path,
         if (it != entities.end())
             it->second->Init();
     }
-    if (bluePolicy)
+    if (patrolOnly)
     {
-        auto guard1 = environment.CreateAgent<defenders::PatrolProdAgent>(
-            *entities.at("blue_guard_1"), *entities.at("blue_guard_2"), 0U, bluePolicy);
-        auto guard2 = environment.CreateAgent<defenders::PatrolProdAgent>(
-            *entities.at("blue_guard_2"), *entities.at("blue_guard_1"), 1U, bluePolicy);
-        if (!guard1 || !guard2)
-            return false;
-        agents.push_back(std::move(guard1));
-        agents.push_back(std::move(guard2));
+        auto& first = *entities.at("blue_guard_1");
+        auto& second = *entities.at("blue_guard_2");
+        std::array<ppo::model::BaseEntity*, 2> guards{&first, &second};
+        for (std::size_t role = 0; role < guards.size(); ++role)
+        {
+            std::shared_ptr<ppo::model::IAgent> controller;
+            if (wantsPpo[role] && bluePolicy)
+            {
+                controller = environment.CreateAgent<defenders::PatrolProdAgent>(
+                    *guards[role], *guards[1U - role], role, bluePolicy);
+            }
+            else
+            {
+                controller = environment.CreateAgent<defenders::PatrolReferenceAgent>(
+                    *guards[role], role);
+            }
+            if (!controller)
+                return false;
+            agents.push_back(std::move(controller));
+        }
     }
     for (auto const& agent : agents)
         agent->Init();

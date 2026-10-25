@@ -3,7 +3,11 @@
   "agentProfiles": "../AgentProfiles.json",
   "twoVsTwo": {
     "patrolOnly": true,
-    "red2InitiallyDestroyedProbability": 0
+    "red2InitiallyDestroyedProbability": 0,
+    "patrolControllers": [
+      "ppo",
+      "reference"
+    ]
   },
   "entities": {
     "blue_guard_1": {
