@@ -14,10 +14,7 @@ namespace ppo::examples::twovstwo::defenders {
 
 namespace rlt = rl_tools;
 
-using InferenceSpecification =
-    rlt::nn_models::mlp::InferenceSpecification<
-        typename TrainingConfig::NN::ACTOR_STRUCTURE_SPEC>;
-using InferenceNetwork = rlt::nn_models::mlp::NeuralNetwork<InferenceSpecification>;
+using InferenceNetwork=AttentionActor<typename TrainingConfig::NN::ACTOR_SPEC>;
 using InferenceInput = rlt::MatrixDynamic<
     rlt::matrix::Specification<float, Index, 1, ObservationLayout::Size>>;
 using InferenceOutput = rlt::MatrixDynamic<
@@ -31,6 +28,7 @@ public:
         rlt::malloc(device_, network_);
         rlt::malloc(device_, input_);
         rlt::malloc(device_, output_);
+        rlt::malloc(device_, buffer_);
         try
         {
             Load(modelPath);
@@ -55,7 +53,7 @@ public:
                 throw std::invalid_argument("Nonfinite Blue PPO observation");
             rlt::set(input_, 0, i, observation[i]);
         }
-        rlt::evaluate(device_, network_, input_, output_);
+        rlt::evaluate(device_, network_, input_, output_, buffer_);
         Action action{};
         for (Index i = 0; i < ObservationLayout::ActionSize; ++i)
         {
@@ -88,6 +86,15 @@ private:
         ReadMatrix(stream, layer.biases.parameters);
     }
 
+    template<typename Block>
+    static void ReadAttention(std::istream& in,Block& b)
+    {
+        ReadMatrix(in,b.encoderW.parameters);
+        ReadMatrix(in,b.encoderB.parameters);
+        ReadMatrix(in,b.queryW.parameters);
+        ReadMatrix(in,b.queryB.parameters);
+    }
+
     void Load(std::filesystem::path const& path)
     {
         std::ifstream stream{path};
@@ -97,13 +104,15 @@ private:
         unsigned version = 0U;
         unsigned input = 0U, output = 0U, hidden = 0U, layers = 0U;
         if (!(stream >> magic >> version >> input >> output >> hidden >> layers)
-            || magic != "BLUE_PATROL_PPO_V1"
+            || magic != "BLUE_PATROL_PPO_V2"
             || version != ObservationLayout::Version
             || input != ObservationLayout::Size || output != ObservationLayout::ActionSize
             || hidden != TrainingParameters::ACTOR_HIDDEN_DIM
             || layers != TrainingParameters::ACTOR_NUM_LAYERS)
             throw std::runtime_error("Incompatible Blue PPO checkpoint contract");
 
+        ReadAttention(stream,network_.red);
+        ReadAttention(stream,network_.friendlies);
         ReadLayer(stream, network_.input_layer);
         for (auto& layer : network_.hidden_layers)
             ReadLayer(stream, layer);
@@ -126,6 +135,7 @@ private:
         rlt::free(device_, network_);
         rlt::free(device_, input_);
         rlt::free(device_, output_);
+        rlt::free(device_, buffer_);
         ready_ = false;
     }
 
@@ -133,6 +143,7 @@ private:
     InferenceNetwork network_{};
     InferenceInput input_{};
     InferenceOutput output_{};
+    InferenceNetwork::Buffer<1> buffer_{};
     bool ready_ = false;
 };
 } // namespace ppo::examples::twovstwo::defenders

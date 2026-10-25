@@ -105,6 +105,7 @@ bool terminated(DEVICE&, rl::environments::BluePatrol<T, TI> const&,
 }
 } // namespace rl_tools
 
+#include "attention_actor.hpp"
 #include <rl_tools/rl/algorithms/ppo/loop/core/config.h>
 #include <rl_tools/rl/algorithms/ppo/loop/core/operations_generic.h>
 
@@ -141,8 +142,16 @@ struct TrainingParameters
     static constexpr Index STEP_LIMIT = 300;
 };
 
+template<typename T,typename TI,typename ENV,typename PARAMETERS>
+struct AttentionApproximators
+    : rlt::rl::algorithms::ppo::loop::core::ConfigApproximatorsMLP<T,TI,ENV,PARAMETERS>
+{
+    using Base=rlt::rl::algorithms::ppo::loop::core::ConfigApproximatorsMLP<T,TI,ENV,PARAMETERS>;
+    using ACTOR_TYPE=AttentionActor<typename Base::ACTOR_SPEC>;
+};
+
 using TrainingConfig = rlt::rl::algorithms::ppo::loop::core::Config<
-    float, Index, Engine, Environment, TrainingParameters>;
+    float, Index, Engine, Environment, TrainingParameters, AttentionApproximators>;
 using TrainingState = typename TrainingConfig::template State<TrainingConfig>;
 
 } // namespace ppo::examples::twovstwo::defenders

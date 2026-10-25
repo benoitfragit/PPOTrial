@@ -167,7 +167,7 @@ bool LoadScenario(std::filesystem::path const& path,
     if (patrolOnly)
     {
         auto const checkpoint = std::filesystem::path{RESOURCE_PATH}.parent_path()
-            / "model" / "BluePatrol" / "prod" / "blue_patrol_v1.txt";
+            / "model" / "BluePatrol" / "prod" / "blue_patrol_v2.txt";
         if (std::filesystem::exists(checkpoint))
         {
             try
