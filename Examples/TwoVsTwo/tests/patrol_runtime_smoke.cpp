@@ -18,6 +18,7 @@ struct Sample
     std::array<bool, 2> present{}, destroyed{};
     std::array<float, 2> speed{};
     unsigned controllers = 0U;
+    bool learnerPresent = false;
 };
 
 Sample Capture(ppo::model::Environment const& environment)
@@ -42,7 +43,9 @@ Sample Capture(ppo::model::Environment const& environment)
         world.view<ppo::model::sAgentStateSnaphot>().each(
             [&](auto const& snapshot) {
                 std::string_view const name{snapshot.m_name};
-                if (name.find("Patrol ") == 0U)
+                if (name.find("Patrol PPO learner") == 0U)
+                    result.learnerPresent = true;
+                else if (name.find("Patrol ") == 0U)
                     ++result.controllers;
             });
     });
@@ -52,7 +55,7 @@ bool Ready(Sample const& s)
 {
     return s.present[0] && s.present[1] && !s.destroyed[0]
         && !s.destroyed[1] && s.speed[0] > 0.F && s.speed[1] > 0.F
-        && s.controllers == 2U;
+        && s.controllers == 2U && s.learnerPresent;
 }
 }
 
