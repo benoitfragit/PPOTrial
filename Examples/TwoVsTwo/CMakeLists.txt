@@ -12,7 +12,7 @@ target_compile_features(PPOTwoVsTwoExample PUBLIC cxx_std_17)
 target_include_directories(PPOTwoVsTwoExample PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/data")
 target_link_libraries(PPOTwoVsTwoExample PUBLIC
-    PPOAirspaceExample TwoVsTwoDefenderBackend TwoVsTwoBlueRuntime)
+    PPOAirspaceExample TwoVsTwoDefenderBackend TwoVsTwoPatrolRuntime)
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_executable(TwoVsTwoSpawnTests tests/spawn_tests.cpp)

@@ -9,16 +9,16 @@
 
 namespace ppo::examples::twovstwo::defenders {
 
-class BluePolicy;
-std::shared_ptr<BluePolicy> LoadBluePolicy(std::filesystem::path const& checkpoint);
+class PatrolPolicy;
+std::shared_ptr<PatrolPolicy> LoadPatrolPolicy(std::filesystem::path const& checkpoint);
 
 // Runtime inference adapter only: both agents use one shared RLtools actor;
 // the environment already sequences both ChooseAction calls before physics.
-class BlueProdAgent final : public ppo::model::IAgent
+class PatrolProdAgent final : public ppo::model::IAgent
 {
 public:
-    BlueProdAgent(ppo::model::BaseEntity& own, ppo::model::BaseEntity& teammate,
-                  std::size_t role, std::shared_ptr<BluePolicy> actor);
+    PatrolProdAgent(ppo::model::BaseEntity& own, ppo::model::BaseEntity& teammate,
+                  std::size_t role, std::shared_ptr<PatrolPolicy> actor);
 
     void Init() override;
     void ChooseAction() override;
@@ -33,7 +33,7 @@ private:
     ppo::model::BaseEntity own_;
     ppo::model::BaseEntity teammate_;
     std::size_t role_{};
-    std::shared_ptr<BluePolicy> actor_;
+    std::shared_ptr<PatrolPolicy> actor_;
     std::size_t step_ = 0U;
     unsigned long long id_ = ppo::model::GetNewUniqId();
     bool done_ = false;

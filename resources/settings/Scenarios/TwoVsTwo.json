@@ -1,62 +1,58 @@
 {
-    "formatVersion": 2,
-    "agentProfiles": "../AgentProfiles.json",
-    "twoVsTwo": {
-        "red2InitiallyDestroyedProbability": 0.15
+  "formatVersion": 2,
+  "agentProfiles": "../AgentProfiles.json",
+  "twoVsTwo": {
+    "red2InitiallyDestroyedProbability": 0.15
+  },
+  "entities": {
+    "blue_guard_1": {
+      "type": "Mobile",
+      "platform": "defender_car",
+      "side": "Friend",
+      "agents": []
     },
-    "entities": {
-        "blue_guard_1": {
-            "type": "Mobile",
-            "platform": "defender_car",
-            "side": "Friend",
-            "target": "",
-            "agents": []
-        },
-        "blue_guard_2": {
-            "type": "Mobile",
-            "platform": "defender_car",
-            "side": "Friend",
-            "target": "",
-            "agents": []
-        },
-        "blue_objective": {
-            "type": "Objective",
-            "platform": "",
-            "side": "Friend",
-            "target": "",
-            "agents": []
-        },
-        "blue_restricted_zone": {
-            "type": "RestrictedZone",
-            "platform": "restrictedzone",
-            "side": "Friend",
-            "target": "",
-            "agents": []
-        },
-        "red_1": {
-            "type": "Mobile",
-            "platform": "attacker_car",
-            "side": "Hostile",
-            "target": "blue_objective",
-            "agents": [
-                {
-                    "profile": "RLMission",
-                    "mode": "production"
-                }
-            ]
-        },
-        "red_2": {
-            "enabled": true,
-            "type": "Mobile",
-            "platform": "attacker_car",
-            "side": "Hostile",
-            "target": "blue_objective",
-            "agents": [
-                {
-                    "profile": "RLMission",
-                    "mode": "production"
-                }
-            ]
+    "blue_guard_2": {
+      "type": "Mobile",
+      "platform": "defender_car",
+      "side": "Friend",
+      "agents": []
+    },
+    "blue_objective": {
+      "type": "Objective",
+      "platform": "",
+      "side": "Friend",
+      "agents": []
+    },
+    "blue_restricted_zone": {
+      "type": "RestrictedZone",
+      "platform": "restrictedzone",
+      "side": "Friend",
+      "agents": []
+    },
+    "red_1": {
+      "type": "Mobile",
+      "platform": "attacker_car",
+      "side": "Hostile",
+      "target": "blue_objective",
+      "agents": [
+        {
+          "profile": "RLMission",
+          "mode": "production"
         }
+      ]
+    },
+    "red_2": {
+      "enabled": true,
+      "type": "Mobile",
+      "platform": "attacker_car",
+      "side": "Hostile",
+      "target": "blue_objective",
+      "agents": [
+        {
+          "profile": "RLMission",
+          "mode": "production"
+        }
+      ]
     }
+  }
 }

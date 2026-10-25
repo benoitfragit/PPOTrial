@@ -1,4 +1,4 @@
-#include "blue_agent.hpp"
+#include "patrol_agent.hpp"
 #include "patrol_policy.hpp"
 #include "initializer.hpp"
 #include "components.hpp"
@@ -9,9 +9,9 @@
 #include <utility>
 
 namespace ppo::examples::twovstwo::defenders {
-std::shared_ptr<BluePolicy> LoadBluePolicy(std::filesystem::path const& checkpoint)
+std::shared_ptr<PatrolPolicy> LoadPatrolPolicy(std::filesystem::path const& checkpoint)
 {
-    return std::make_shared<BluePolicy>(checkpoint);
+    return std::make_shared<PatrolPolicy>(checkpoint);
 }
 
 namespace {
@@ -31,9 +31,9 @@ Mobile FromEcs(ppo::model::BaseEntity& entity)
 
 } // namespace
 
-BlueProdAgent::BlueProdAgent(ppo::model::BaseEntity& own,
+PatrolProdAgent::PatrolProdAgent(ppo::model::BaseEntity& own,
                              ppo::model::BaseEntity& teammate,
-                             std::size_t role, std::shared_ptr<BluePolicy> actor)
+                             std::size_t role, std::shared_ptr<PatrolPolicy> actor)
     : own_(own.registry(), own.uniqid()),
       teammate_(teammate.registry(), teammate.uniqid()),
       role_(role), actor_(std::move(actor))
@@ -42,13 +42,13 @@ BlueProdAgent::BlueProdAgent(ppo::model::BaseEntity& own,
         throw std::invalid_argument("Invalid Blue PPO agent arguments");
 }
 
-void BlueProdAgent::Init()
+void PatrolProdAgent::Init()
 {
     step_ = 0U;
     done_ = false;
 }
 
-Parameters BlueProdAgent::ReadParameters()
+Parameters PatrolProdAgent::ReadParameters()
 {
     Parameters p{};
     auto* registry = own_.registry();
@@ -69,7 +69,7 @@ Parameters BlueProdAgent::ReadParameters()
     return p;
 }
 
-State BlueProdAgent::ReadState(Parameters const& p)
+State PatrolProdAgent::ReadState(Parameters const& p)
 {
     auto* registry = own_.registry();
     auto const& context = registry->ctx().get<InitializerContext>();
@@ -84,7 +84,7 @@ State BlueProdAgent::ReadState(Parameters const& p)
     return result;
 }
 
-void BlueProdAgent::ChooseAction()
+void PatrolProdAgent::ChooseAction()
 {
     if (done_ || !own_.has<ppo::model::sEntityState, ppo::model::sSNAControlState>())
         return;
@@ -98,7 +98,7 @@ void BlueProdAgent::ChooseAction()
     control.m_accCmd = action[1];
 }
 
-bool BlueProdAgent::SetNewState()
+bool PatrolProdAgent::SetNewState()
 {
     if (done_)
         return true;
@@ -114,10 +114,10 @@ bool BlueProdAgent::SetNewState()
     return done_;
 }
 
-ppo::model::sAgentStateSnaphot BlueProdAgent::GetSnapshot() const noexcept
+ppo::model::sAgentStateSnaphot PatrolProdAgent::GetSnapshot() const noexcept
 {
     ppo::model::sAgentStateSnaphot snapshot{};
-    snapshot.m_name = role_ == 0U ? "Blue 1 PPO (RLtools)" : "Blue 2 PPO (RLtools)";
+    snapshot.m_name = role_ == 0U ? "Patrol 1 PPO (RLtools)" : "Patrol 2 PPO (RLtools)";
     snapshot.m_id = id_;
     snapshot.m_common.m_step = static_cast<long long>(step_);
     snapshot.m_common.m_maxStep = 4096;
