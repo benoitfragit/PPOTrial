@@ -140,3 +140,22 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(entt)
+
+
+# RLtools (CPU, C++17) is the optional future defender policy backend.
+# The red RLMission production policy continues to use the legacy LibTorch model.
+set(RL_TOOLS_ENABLE_TARGETS OFF CACHE BOOL "Build upstream RLtools examples" FORCE)
+set(RL_TOOLS_ENABLE_TESTS OFF CACHE BOOL "Build upstream RLtools tests" FORCE)
+set(RL_TOOLS_ENABLE_HDF5 OFF CACHE BOOL "Use RLtools HDF5" FORCE)
+set(RL_TOOLS_ENABLE_TENSORBOARD OFF CACHE BOOL "Use RLtools TensorBoard" FORCE)
+set(RL_TOOLS_BACKEND_ENABLE_CUDA OFF CACHE BOOL "Use RLtools CUDA" FORCE)
+
+FetchContent_Declare(
+    rltools
+    GIT_REPOSITORY https://github.com/rl-tools/rl-tools.git
+    GIT_TAG 63a7520b2d0d967920ff14c7336ce4f7d682c21c
+)
+FetchContent_MakeAvailable(rltools)
+if (NOT TARGET RLtools::Core)
+    message(FATAL_ERROR "RLtools::Core is missing after FetchContent")
+endif()
