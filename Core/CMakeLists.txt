@@ -3,6 +3,7 @@ target_sources(GenericRLCore INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/include/ppo/core/agent_contract.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/ppo/core/buffers.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/ppo/core/multi_agent.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/ppo/core/team_episode.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/ppo/core/evaluation.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/ppo/core/learning_monitor.hpp")
 target_include_directories(GenericRLCore INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
