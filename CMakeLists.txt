@@ -8,7 +8,8 @@ if (MSVC)
 endif()
 
 option(PPO_BUILD_DESKTOP "Build existing LibTorch desktop application" ON)
-option(PPO_BUILD_CORE_TESTS "Build dependency-free RL core tests" ON)
+# Tests are opt-in for local development; CI workflows enable them explicitly.
+option(PPO_BUILD_CORE_TESTS "Build dependency-free RL core tests" OFF)
 option(PPO_BUILD_CHECKPOINT_TESTS "Verify existing policy checkpoints without training" OFF)
 
 if (PPO_BUILD_CORE_TESTS)
