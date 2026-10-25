@@ -154,6 +154,10 @@ FetchContent_Declare(
     rltools
     GIT_REPOSITORY https://github.com/rl-tools/rl-tools.git
     GIT_TAG 63a7520b2d0d967920ff14c7336ce4f7d682c21c
+    # RLtools::Core is header-only. The upstream optional submodules include
+    # unavailable commits; do not fetch them (CMP0097 NEW, CMake >= 3.16).
+    GIT_SUBMODULES ""
+    GIT_SUBMODULES_RECURSE FALSE
 )
 FetchContent_MakeAvailable(rltools)
 if (NOT TARGET RLtools::Core)
