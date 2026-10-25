@@ -21,7 +21,7 @@ public:
     ppo::model::sAgentStateSnaphot GetSnapshot() const noexcept override;
 
 private:
-    Parameters ReadParameters() const;
+    Parameters ReadParameters();
 
     ppo::model::BaseEntity own_;
     std::size_t role_ = 0U;
