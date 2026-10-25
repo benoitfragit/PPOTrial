@@ -40,8 +40,8 @@ add_executable(PPOPatrolEvaluate src/patrol_evaluate.cpp data/patrol_evaluator.h
 target_link_libraries(PPOPatrolEvaluate PRIVATE TwoVsTwoDefenderBackend nlohmann_json::nlohmann_json)
 target_compile_features(PPOPatrolEvaluate PRIVATE cxx_std_17)
 target_compile_definitions(PPOPatrolEvaluate PRIVATE
-    PPO_BLUE_SETTINGS_DIR="${CMAKE_SOURCE_DIR}/resources/settings"
-    PPO_BLUE_MODEL_PATH="${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/prod/blue_patrol_v2.txt")
+    PPO_BLUE_SETTINGS_DIR=\"${CMAKE_SOURCE_DIR}/resources/settings\"
+    PPO_BLUE_MODEL_PATH=\"${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/prod/blue_patrol_v2.txt\")
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_executable(TwoVsTwoPatrolEvaluationTests tests/patrol_evaluation_tests.cpp)
