@@ -15,20 +15,20 @@ Date : 2026-10-25. Contrat source : spécification bibliothèque `2026-10-25_11h
 
 Ce premier curriculum RLtools est **autonome/headless**. À chaque épisode un des deux rôles est entraîné et l'autre suit la référence de patrouille. Les épisodes alternent les rôles et partagent l'Actor. **Ce n'est pas encore un apprentissage couplé de deux PPO agissant simultanément**, ni du MAPPO.
 
-Le modèle initial RLtools est un MLP : les slots de pistes sont définis et masqués mais les **encodeurs/attentions appris des rouges et amis ne sont pas encore implémentés**. Ils nécessiteront une version de modèle distincte. La fonction d'observation intègre la frontière rectangulaire et les 61 directions du LiDAR, mais ne prend pas encore en charge d'autres obstacles/capteurs ECS. La dynamique d'entraînement transpose le mouvement SNA (mêmes conventions d'action et de pas) : elle n'appelle **pas encore** directement le système d'entités d'Airspace. Une validation de parité est nécessaire avant production.
+L'Actor RLtools dispose dès cette première étape de deux branches d'attention masquée entraînables, en amont du MLP de décision. Les poids de la branche rouge ne s'entraînent pas tant qu'aucune piste rouge n'est présente. La fonction d'observation intègre la frontière rectangulaire et les 61 directions du LiDAR, mais ne prend pas encore en charge d'autres obstacles/capteurs ECS. La dynamique d'entraînement transpose le mouvement SNA (mêmes conventions d'action et de pas) : elle n'appelle **pas encore** directement le système d'entités d'Airspace. Une validation de parité est nécessaire avant production.
 
-Les acteurs entraînés sont exportés en format texte versionné `BLUE_PATROL_PPO_V1` ; l'inférence dans `PPO.exe`, le chargement par les voitures bleues et l'entraînement véritablement collaboratif ne sont **pas** inclus dans cette première étape. Les modèles `RLMission` et `RLSNA` sont intacts.
+Les acteurs sont exportés dans le checkpoint `BLUE_PATROL_PPO_V2`. L'inférence côté deux défenseurs existe dans le scénario GUI `blue-patrol` ; l'entraînement véritablement collaboratif n'est **pas encore** inclus. Les modèles `RLMission` et `RLSNA` sont intacts.
 
 ## Compilation et exécution
 
-Configurer normalement le desktop avec `PPO_BUILD_DESKTOP=ON`, puis construire la cible `PPOBlueTrain`. Exécuter `PPOBlueTrain [seed] [checkpoint.txt] [updates]` (nombre de mises à jour facultatif, 300 par défaut). Cible de test `TwoVsTwoPatrolTests` via CTest. Le binaire `PPO.exe` historique est inchangé.
+Configurer normalement le desktop avec `PPO_BUILD_DESKTOP=ON`, puis construire la cible `PPOBlueTrain`. Exécuter `PPOBlueTrain [seed] [checkpoint.txt] [updates]` (nombre de mises à jour facultatif, 300 par défaut). Tests `TwoVsTwoPatrolTests`, `TwoVsTwoAttentionTests`, `TwoVsTwoPPOTrainingSmoke`, `BluePatrolExampleBootstrap` via CTest. Le binaire `PPO.exe` historique est inchangé.
 
 ## Points à compléter
 
-1. Faire converger les paramètres d'entraînement avec les fichiers JSON de plateformes et de monde ; partager définitivement le noyau de dynamique SNA au lieu de le dupliquer dans le curriculum.
+1. Mutualiser définitivement le noyau de dynamique SNA avec ECS (les limites du monde et du véhicule sont déjà lues depuis les JSON).
 2. Intégrer une paire d'Actors agissant simultanément dans la boucle on-policy ; vérifier la récompense d'équipe sans double comptage, plus l'évaluation des demi-tours.
-3. Ajouter chargement/inférence RLtools et représentation dans le GUI, puis évaluer avec le même moteur ECS.
-4. Ajouter attention masquée rouge/ami, les adversaires lointains puis l'interception, tout en préservant le contrat `RLMission`.
+3. Évaluer l'inférence RLtools déjà connectée au GUI et la cohérence avec le moteur ECS.
+4. Fournir de vraies pistes rouges aux branches d'attention existantes, puis enrichir la simulation des réactions ; préserver le contrat `RLMission`.
 5. Évoluer vers MAPPO avec Critic centralisé séparé, sans changer l'Actor ou les classes d'entités.
 
 
