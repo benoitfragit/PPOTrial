@@ -2987,8 +2987,21 @@ EnvironmentRenderer::DrawMinimapWindow(entt::registry const& snapshot)
         return ImVec2{ centerX + (east - centerEast) * scale, centerY - (north - centerNorth) * scale };
     };
 
-    ImVec2 const worldMin = toMinimap(-m_northRange, -m_eastRange);
-    ImVec2 const worldMax = toMinimap(m_northRange, m_eastRange);
+    // The legacy minimap ranges are half-extents. For TwoVsTwo the
+    // authoritative world limits are full sizes, shared with the LiDAR.
+    // Match the displayed work rectangle to the defended rectangle without
+    // altering the historical Airspace minimap.
+    float workHalfNorth = m_northRange;
+    float workHalfEast = m_eastRange;
+    if (snapshot.ctx().contains<ppo::model::sDefendedArea>()
+        && snapshot.ctx().contains<ppo::model::sEnvironmentState>())
+    {
+        auto const& world = snapshot.ctx().get<ppo::model::sEnvironmentState>();
+        workHalfNorth = 0.5F * world.m_maxNorth;
+        workHalfEast = 0.5F * world.m_maxEast;
+    }
+    ImVec2 const worldMin = toMinimap(-workHalfNorth, -workHalfEast);
+    ImVec2 const worldMax = toMinimap(workHalfNorth, workHalfEast);
     ImVec2 const workMin{ worldMin.x, worldMax.y };
     ImVec2 const workMax{ worldMax.x, worldMin.y };
 
