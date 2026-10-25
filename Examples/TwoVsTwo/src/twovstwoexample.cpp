@@ -198,9 +198,10 @@ bool LoadScenario(std::filesystem::path const& path,
             }
             catch (std::exception const& error)
             {
-                std::cerr << "[PATROL] Invalid PPO checkpoint: "
-                          << error.what() << '\n';
-                return false; // Do not silently fly with incompatible weights.
+                std::cerr << "[PATROL] Incompatible PPO checkpoint: "
+                          << error.what()
+                          << ". Switching to explicit reference controllers.\n";
+                bluePolicy.reset();
             }
         }
     }
