@@ -111,3 +111,26 @@ restent inchangés.
 
 Test `TwoVsTwoPatrolTests` : progression simulée des deux contrôleurs,
 demi-tours effectifs, bornes de la zone, et erreur maximale de suivi.
+
+## PPO actif et pénalité de collision (2026-10-25)
+
+Le scénario `BluePatrol.json` conserve `patrolControllers = ["ppo", "reference"]`.
+Il doit toujours avoir au moins un rôle `ppo` : un JSON ne contenant que des
+`reference` est refusé. `Play` reste une **simulation/inférence** et ne lance
+pas de mise à jour PPO. Avec un checkpoint valide, le garde 1 joue cette
+politique et le garde 2 suit la référence physique. Sans checkpoint (ou avec
+un checkpoint incompatible), un acteur PPO RLtools est initialisé avec la
+graine fixe 42 et **marqué `(untrained)` dans l'interface** ; ses poids
+ne sont pas mis à jour par `Play`. Pour apprendre, exécuter `PPOBlueTrain`
+puis redémarrer le scénario pour charger le checkpoint. Ne pas confondre
+initialisation de poids et entraînement.
+
+`TeamReward` intègre désormais une pénalité de proximité continue dès
+250 m (jusqu'à -0.5/step) et une pénalité terminale de -100 lors d'un
+contact entre défenseurs à 50 m ou moins. Les contrôles comparent les
+trajectoires relatives sur **tout le pas de simulation**, pour repérer
+les croisements entre deux échantillons. Le booléen `State.collided`
+est utilisé par `Advance` et `AdvanceBoth`; `terminated` RLtools
+retourne vrai en cas de collision via `State.failed`. Le classement
+`PatrolEvaluator` signale explicitement `PatrolFailure::Collision`.
+Le modèle de poursuite et les agents rouges ne sont pas modifiés.

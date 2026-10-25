@@ -71,6 +71,41 @@ int main()
     auto const failed = blue::Advance(p, out, {0.F, 0.F});
     if (!failed.failed || blue::TeamReward(p, out, {0.F, 0.F}, failed) != -100.F)
         return 10;
+    // A collision must be terminal and have the same severe negative reward
+    // even when the teammate is the deterministic, non-PPO reference driver.
+    auto colliding = state;
+    colliding.guards[0].north = 0.F;
+    colliding.guards[0].east = 0.F;
+    colliding.guards[1].north = 10.F;
+    colliding.guards[1].east = 0.F;
+    auto const crashed = blue::Advance(p, colliding, {0.F, 0.F});
+    if (!crashed.collided || !crashed.failed
+        || blue::TeamReward(p, colliding, {0.F, 0.F}, crashed) != -100.F)
+        return 15;
+
+    // Swept collision between two observations, without endpoint overlap.
+    auto crossing = state;
+    crossing.guards[0].north = -40.F;
+    crossing.guards[0].east = 0.F;
+    crossing.guards[1].north = 40.F;
+    crossing.guards[1].east = 0.F;
+    auto crossed = crossing;
+    crossed.guards[0].north = 40.F;
+    crossed.guards[1].north = -40.F;
+    if (blue::GuardSeparation(crossed) <= p.collisionDistance
+        || !blue::GuardsCollided(p, crossing, crossed))
+        return 16;
+
+    // The shaping penalty applies before contact, without ending the episode.
+    auto far = state, close = state;
+    far.guards[0].north = 0.F; far.guards[0].east = 0.F;
+    far.guards[1].north = 1000.F; far.guards[1].east = 0.F;
+    close.guards[0].north = 0.F; close.guards[0].east = 0.F;
+    close.guards[1].north = 100.F; close.guards[1].east = 0.F;
+    if (!(blue::TeamReward(p, far, {0.F, 0.F}, far)
+          > blue::TeamReward(p, close, {0.F, 0.F}, close)))
+        return 17;
+
     // Forced timeout has penalty but is not a victory or termination.
     auto timeout = next;
     timeout.step = p.episodeSteps;
