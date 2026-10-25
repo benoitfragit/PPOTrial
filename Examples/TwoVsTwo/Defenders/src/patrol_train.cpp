@@ -1,4 +1,5 @@
-#include "patrol_rltools.hpp"
+#include "patrol_training_agent.hpp"
+#include "patrol_config.hpp"
 
 #include <cstdlib>
 #include <filesystem>
@@ -88,35 +89,6 @@ void SavePolicy(std::filesystem::path const& path, Actor const& actor)
 }
 
 
-blue::Parameters ReadParameters()
-{
-    namespace fs = std::filesystem;
-    fs::path const settings{PPO_BLUE_SETTINGS_DIR};
-    auto read = [](fs::path const& path) {
-        std::ifstream file{path};
-        if (!file)
-            throw std::runtime_error("Cannot open configuration: " + path.string());
-        nlohmann::json data;
-        file >> data;
-        if (data.at("formatVersion").get<int>() != 2)
-            throw std::runtime_error("Unsupported configuration version: " + path.string());
-        return data;
-    };
-    auto const world = read(settings / "Environment.json").at("environment");
-    auto const flight = read(settings / "Platforms/Mobile/defender_car.json")
-        .at("parameters").at("FlightModel");
-    blue::Parameters p{};
-    p.halfNorth = world.at("maxNorth").get<float>() * 0.5F;
-    p.halfEast = world.at("maxEast").get<float>() * 0.5F;
-    p.dt = world.at("timeStep").get<float>();
-    p.maxSpeed = flight.at("MaxSpeed").get<float>();
-    p.maxAcceleration = flight.at("MaxAcceleration").get<float>();
-    p.maxRotationRate = flight.at("MaxRotAcceleration").get<float>();
-    if (!blue::Valid(p))
-        throw std::invalid_argument("Invalid Blue Patrol world/vehicle configuration");
-    return p;
-}
-
 unsigned ParseUnsigned(char const* input)
 {
     std::string const text{input};
@@ -148,43 +120,22 @@ int main(int argc, char** argv)
         if (updates == 0U)
             throw std::invalid_argument("PPO update count must be positive");
 
-        blue::Parameters const params = ReadParameters();
+        blue::Parameters const params = blue::LoadPatrolParameters(
+            std::filesystem::path{PPO_BLUE_SETTINGS_DIR});
         if (!blue::Valid(params))
             throw std::invalid_argument("Invalid patrol environment parameters");
 
-        blue::Device device;
-        std::unique_ptr<blue::TrainingState> training{new blue::TrainingState};
-        for (auto& env : training->envs)
-            env.parameters = params;
-        rlt::malloc(device, *training);
-        rlt::init(device, *training, seed);
-        training->actor_optimizer.parameters.alpha = 3.e-4F;
-        training->critic_optimizer.parameters.alpha = 3.e-4F;
-        while (training->step < updates)
+        blue::PatrolTrainingAgent training{params, seed};
+        while (training.StepCount() < updates)
         {
-            if (rlt::step(device, *training))
+            if (training.Step())
                 break;
-            if (training->step % 10U == 0U)
-                std::cout << "PPO update " << training->step
+            if (training.StepCount() % 10U == 0U)
+                std::cout << "PPO update " << training.StepCount()
                           << " / " << updates << '\n';
         }
-        SavePolicy(output, training->ppo.actor);
+        training.WithActor([&](auto const& actor) { SavePolicy(output, actor); });
         std::cout << "Saved actor: " << output.string() << '\n';
-        // RLtools' pinned core release has a typo in its aggregate free(State)
-        // overload. Free exactly the allocations made by malloc(State).
-        rlt::free(device, training->ppo);
-        rlt::free(device, training->ppo_buffers);
-        rlt::free(device, training->on_policy_runner_dataset);
-        rlt::free(device, training->on_policy_runner);
-        rlt::free(device, training->actor_eval_buffers);
-        rlt::free(device, training->actor_deterministic_evaluation_buffers);
-        rlt::free(device, training->actor_buffers);
-        rlt::free(device, training->critic_buffers);
-        rlt::free(device, training->critic_buffers_gae);
-        rlt::free(device, training->observation_normalizer);
-        rlt::free(device, training->observations_mean);
-        rlt::free(device, training->observations_std);
-        // BluePatrol has no dynamically allocated resources.
         return 0;
     }
     catch (std::exception const& e)

@@ -60,3 +60,29 @@ amie reçoivent des gradients ; les rouges seront activés à la seconde phase.
 Le MLP d'Actor et le Critic restent locaux ; les observations existantes,
 les deux commandes SNA et le budget de 124 entrées sont inchangés.
 Checkpoint v2 distinct et non compatible avec les premiers poids v1.
+
+## Evaluation déterministe et arrêt des épisodes (complément)
+
+Le pilote RLtools `PatrolTrainingAgent` possède le cycle de vie du learner
+(headless, sans classe ECS); `PatrolProdAgent` reste l'adaptateur ECS d'inférence.
+`PatrolEvaluator` utilise deux prédictions PPO par pas simulé et la même
+dynamique `Advance` pour les deux mobiles. Il ne prétend pas être un
+rollout multi-agent d'entraînement.
+
+Cas d'arrêt : échec sur limite du monde, collision entre défenseurs, zone
+circulaire interdite configurée ou dynamique/action non finie. Après le
+budget de pas, succès seulement si la durée représente suffisamment de
+circuits, que les deux agents tournent effectivement et que la fraction
+de suivi position/cap/vitesse dépasse le seuil ; sinon échec qualité, ou
+troncature si l'horizon est trop court. Les demi-tours individuels
+n'arrêtent pas l'épisode.
+
+La zone interdite est optionnelle dans l'évaluateur headless (rayon
+par défaut 0, donc désactivée). Une évaluation de parité complète avec
+la géométrie ECS et les collisions/destructions RLMission reste nécessaire
+avant validation finale du comportement. Ne pas confondre le score
+d'évaluation avec le signal de retour de PPO.
+
+`PPOPatrolEvaluate [checkpoint.txt] [episodes] [steps]` renvoie 0
+uniquement lorsque tous les scénarios ont un résultat succès. Tests
+`TwoVsTwoPatrolEvaluationTests`.

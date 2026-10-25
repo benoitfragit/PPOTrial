@@ -223,6 +223,26 @@ inline State Advance(Parameters const& p, State const& prev,
     return next;
 }
 
+// Advance two independent PPO-controlled defenders with a shared world clock.
+// Kept separate from the single-learner curriculum's Advance(State, Action).
+inline State AdvanceBoth(Parameters const& p, State const& previous,
+                         std::array<Action, 2> const& actions) noexcept
+{
+    State next = previous;
+    for (std::size_t role = 0; role < next.guards.size(); ++role)
+        next.guards[role] = Advance(p, previous.guards[role], actions[role]);
+    next.arclength += p.cruiseSpeed * p.dt;
+    ++next.step;
+    for (auto const& guard : next.guards)
+        if (!guard.available || !std::isfinite(guard.north)
+            || !std::isfinite(guard.east) || !std::isfinite(guard.heading)
+            || !std::isfinite(guard.speed) || !std::isfinite(guard.turnRate)
+            || std::abs(guard.north) >= p.halfNorth
+            || std::abs(guard.east) >= p.halfEast)
+            next.failed = true;
+    return next;
+}
+
 inline float RayDistanceToBounds(Parameters const& p, Mobile const& car,
                                 float angle) noexcept
 {
