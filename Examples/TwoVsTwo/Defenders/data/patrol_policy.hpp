@@ -25,7 +25,7 @@ class BluePolicy
 public:
     explicit BluePolicy(std::filesystem::path const& modelPath)
     {
-        rlt::malloc(device_, network_);
+        rlt::malloc(device_, *network_);
         rlt::malloc(device_, input_);
         rlt::malloc(device_, output_);
         rlt::malloc(device_, buffer_);
@@ -53,7 +53,7 @@ public:
                 throw std::invalid_argument("Nonfinite Blue PPO observation");
             rlt::set(input_, 0, i, observation[i]);
         }
-        rlt::evaluate(device_, network_, input_, output_, buffer_);
+        rlt::evaluate(device_, *network_, input_, output_, buffer_);
         Action action{};
         for (Index i = 0; i < ObservationLayout::ActionSize; ++i)
         {
@@ -111,12 +111,12 @@ private:
             || layers != TrainingParameters::ACTOR_NUM_LAYERS)
             throw std::runtime_error("Incompatible Blue PPO checkpoint contract");
 
-        ReadAttention(stream,network_.red);
-        ReadAttention(stream,network_.friendlies);
-        ReadLayer(stream, network_.input_layer);
-        for (auto& layer : network_.hidden_layers)
+        ReadAttention(stream,network_->red);
+        ReadAttention(stream,network_->friendlies);
+        ReadLayer(stream, network_->input_layer);
+        for (auto& layer : network_->hidden_layers)
             ReadLayer(stream, layer);
-        ReadLayer(stream, network_.output_layer);
+        ReadLayer(stream, network_->output_layer);
         // PPO exports stochastic exploration std too, but inference is
         // deliberately deterministic: only action means are evaluated.
         for (std::size_t i = 0; i < ObservationLayout::ActionSize; ++i)
@@ -132,7 +132,7 @@ private:
 
     void Free()
     {
-        rlt::free(device_, network_);
+        rlt::free(device_, *network_);
         rlt::free(device_, input_);
         rlt::free(device_, output_);
         rlt::free(device_, buffer_);
@@ -140,7 +140,7 @@ private:
     }
 
     Device device_{};
-    InferenceNetwork network_{};
+    std::unique_ptr<InferenceNetwork> network_{new InferenceNetwork};
     InferenceInput input_{};
     InferenceOutput output_{};
     InferenceNetwork::Buffer<1> buffer_{};

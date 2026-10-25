@@ -3,7 +3,7 @@
 // branches, shared per-track encoders, learned query, softmax, mean/max pool.
 // Designed to be called from native PPO, including backward gradients.
 #include "patrol_core.hpp"
-#include <rl_tools/nn_models/mlp_unconditional_stddev/operations_generic.h>
+#include <rl_tools/nn_models/mlp_unconditional_stddev/network.h>
 #include <array>
 #include <algorithm>
 #include <cmath>
