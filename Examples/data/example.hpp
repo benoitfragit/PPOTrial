@@ -21,6 +21,8 @@ struct ExampleDefinition
     // Reports whether every declared entity and agent was instantiated.
     // The desktop retains its historical permissive startup behavior.
     bool (*loadScenario)(std::filesystem::path const&, ppo::model::Environment&) = nullptr;
+    // Optional description displayed by the desktop example selector.
+    std::string_view description{};
 };
 
 inline bool IsValid(ExampleDefinition const& example) noexcept

@@ -2,8 +2,7 @@
 
 ## Scope and launch
 
-The binary remains PPO.exe. Launch the original example with no arguments.
-Launch the new scenario with PPO.exe --example two-vs-two. Its headless
+The binary remains PPO.exe. Launch without arguments to choose an example in the graphical selector, or launch the original example directly with PPO.exe --example airspace. Launch the new scenario directly with PPO.exe --example two-vs-two. Its headless
 bootstrap check is PPO.exe --example two-vs-two --check-example.
 
 Examples/Shared/World owns reusable 2D Mobile, Objective, RestrictedZone,

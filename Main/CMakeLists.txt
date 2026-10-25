@@ -3,6 +3,8 @@ project(PPO LANGUAGES CXX)
 
 add_executable(${PROJECT_NAME}
     ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/exampleselector.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/exampleselector.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/data)
@@ -24,6 +26,9 @@ add_dependencies(${PROJECT_NAME} GenericEntities
 								 AirspaceRenderer
 								 PPOExampleCatalog
                                  MetaReflection)
+
+# The launcher uses raylib/rlImGui directly before the simulation window opens.
+target_link_libraries(${PROJECT_NAME} PRIVATE raylib rlImGui imgui)
 
 # Copier les DLL automatiquement
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
@@ -62,4 +67,13 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         COMMAND $<TARGET_FILE:${PROJECT_NAME}> --example airspace --check-example)
     set_tests_properties(ExplicitAirspaceExampleBootstrap PROPERTIES
         PASS_REGULAR_EXPRESSION "Bootstrapped example: airspace")
+endif()
+
+if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
+    add_executable(ExampleSelectorPolicyTests tests/example_selector_tests.cpp)
+    target_compile_features(ExampleSelectorPolicyTests PRIVATE cxx_std_17)
+    target_include_directories(ExampleSelectorPolicyTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/data"
+        "${CMAKE_SOURCE_DIR}/Examples/data")
+    add_test(NAME ExampleSelectorPolicyTests COMMAND ExampleSelectorPolicyTests)
 endif()
