@@ -155,4 +155,14 @@ struct sFlightModelState
     float m_maxfuel{ 0.F };
 };
 
+// Scenario-defined defended area, distinct from the world boundaries.
+// Shared only as snapshot metadata; no collision behavior is imposed.
+struct sDefendedArea
+{
+    float m_north{0.F};
+    float m_east{0.F};
+    float m_halfNorth{0.F};
+    float m_halfEast{0.F};
+};
+
 } /* ppo::model */

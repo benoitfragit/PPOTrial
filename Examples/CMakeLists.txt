@@ -1,4 +1,5 @@
 add_subdirectory(Airspace)
+add_subdirectory(TwoVsTwo)
 
 # Explicit composition of compiled examples, separate from Main and the core.
 add_library(PPOExampleCatalog STATIC
@@ -8,7 +9,7 @@ add_library(PPOExampleCatalog STATIC
 target_compile_features(PPOExampleCatalog PUBLIC cxx_std_17)
 target_include_directories(PPOExampleCatalog PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/data")
-target_link_libraries(PPOExampleCatalog PUBLIC PPOAirspaceExample)
+target_link_libraries(PPOExampleCatalog PUBLIC PPOAirspaceExample PPOTwoVsTwoExample)
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     # Contract-only test: no LibTorch, renderer or concrete example needed.
