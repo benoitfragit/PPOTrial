@@ -3,6 +3,7 @@
 // Inference-only native RLtools actor. Reads the exact weight order emitted
 // by PPOBlueTrain. No optimizer, LibTorch, Python or GPU at inference time.
 #include "patrol_rltools.hpp"
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -39,7 +40,32 @@ public:
             throw;
         }
         ready_ = true;
+        trained_ = true;
     }
+
+    // PPO actor structure and initial weights, but no optimization has occurred.
+    // Use only for live visual inspection until a real checkpoint is trained.
+    explicit PatrolPolicy(std::uint32_t seed)
+    {
+        rlt::malloc(device_, *network_);
+        rlt::malloc(device_, input_);
+        rlt::malloc(device_, output_);
+        rlt::malloc(device_, buffer_);
+        try
+        {
+            auto rng = rlt::random::default_engine(
+                typename Device::SPEC::RANDOM{}, seed);
+            rlt::init_weights(device_, *network_, rng);
+        }
+        catch (...)
+        {
+            Free();
+            throw;
+        }
+        ready_ = true;
+    }
+
+    bool IsTrained() const noexcept { return trained_; }
 
     PatrolPolicy(PatrolPolicy const&) = delete;
     PatrolPolicy& operator=(PatrolPolicy const&) = delete;
@@ -145,5 +171,6 @@ private:
     InferenceOutput output_{};
     InferenceNetwork::Buffer<1> buffer_{};
     bool ready_ = false;
+    bool trained_ = false;
 };
 } // namespace ppo::examples::twovstwo::defenders

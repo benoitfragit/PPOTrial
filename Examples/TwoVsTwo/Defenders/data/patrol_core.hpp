@@ -49,6 +49,8 @@ struct Parameters
     float maxAcceleration = 100.F;
     float maxRotationRate = 0.4F;
     std::size_t episodeSteps = 4096;
+    float collisionDistance = 50.F;
+    float cautionDistance = 250.F;
 };
 
 inline bool Valid(Parameters const& p) noexcept
@@ -60,7 +62,10 @@ inline bool Valid(Parameters const& p) noexcept
         && p.halfNorth > 1000.F && p.halfEast > 1000.F
         && p.dt > 0.F && p.dt <= 1.F && p.cruiseSpeed > 0.F
         && p.maxSpeed >= p.cruiseSpeed && p.maxAcceleration > 0.F
-        && p.maxRotationRate > 0.F && p.episodeSteps > 0U;
+        && p.maxRotationRate > 0.F && p.episodeSteps > 0U
+        && std::isfinite(p.collisionDistance) && p.collisionDistance > 0.F
+        && std::isfinite(p.cautionDistance)
+        && p.cautionDistance > p.collisionDistance;
 }
 
 inline float Clamp(float x, float a, float b) noexcept
@@ -184,7 +189,37 @@ struct State
     float arclength;
     std::size_t step;
     bool failed;
+    bool collided;
 };
+
+// Separation is evaluated for the team, independently of the learning role.
+inline float GuardSeparation(State const& state) noexcept
+{
+    return std::hypot(state.guards[0].north - state.guards[1].north,
+                      state.guards[0].east - state.guards[1].east);
+}
+
+// Check the relative path over the entire step: two fast cars can cross
+// between discrete observations without ending inside the collision radius.
+inline float MinimumGuardSeparation(State const& before,
+                                    State const& after) noexcept
+{
+    float const rx = before.guards[0].north - before.guards[1].north;
+    float const ry = before.guards[0].east - before.guards[1].east;
+    float const dx = (after.guards[0].north - after.guards[1].north) - rx;
+    float const dy = (after.guards[0].east - after.guards[1].east) - ry;
+    float const travelled2 = dx * dx + dy * dy;
+    float const t = travelled2 > 1.e-8F
+        ? Clamp(-(rx * dx + ry * dy) / travelled2, 0.F, 1.F)
+        : 0.F;
+    return std::hypot(rx + t * dx, ry + t * dy);
+}
+
+inline bool GuardsCollided(Parameters const& p, State const& before,
+                           State const& after) noexcept
+{
+    return MinimumGuardSeparation(before, after) <= p.collisionDistance;
+}
 
 static_assert(std::is_trivially_copyable_v<State>,
     "RLtools stores patrol state in a matrix of trivially copyable values");
@@ -215,6 +250,8 @@ inline State Advance(Parameters const& p, State const& prev,
     next.guards[other] = OnReference(p, PatrolReference(
         p, next.side, other, next.arclength));
     ++next.step;
+    next.collided = GuardsCollided(p, prev, next);
+    next.failed |= next.collided;
     for (auto const& guard : next.guards)
         if (!std::isfinite(guard.north) || !std::isfinite(guard.east)
             || std::abs(guard.north) >= p.halfNorth
@@ -233,6 +270,8 @@ inline State AdvanceBoth(Parameters const& p, State const& previous,
         next.guards[role] = Advance(p, previous.guards[role], actions[role]);
     next.arclength += p.cruiseSpeed * p.dt;
     ++next.step;
+    next.collided = GuardsCollided(p, previous, next);
+    next.failed |= next.collided;
     for (auto const& guard : next.guards)
         if (!guard.available || !std::isfinite(guard.north)
             || !std::isfinite(guard.east) || !std::isfinite(guard.heading)
@@ -360,10 +399,16 @@ inline float TeamReward(Parameters const& p, State const& before,
         return -100.F;
     float const shared = 0.5F * (TrackingReward(p, after, 0U)
                                + TrackingReward(p, after, 1U));
+    // Shape close approaches before the actual -100 collision termination.
+    // The reference teammate is included, exactly as during PPO rollout.
+    float const distance = GuardSeparation(after);
+    float const proximity = Clamp(
+        (p.cautionDistance - distance) /
+        (p.cautionDistance - p.collisionDistance), 0.F, 1.F);
     float const control = 0.002F * (std::abs(action[0]) + std::abs(action[1]));
     float const timeout = after.step >= p.episodeSteps ? -15.F : 0.F;
     (void)before;
-    return shared - control - 0.005F + timeout;
+    return shared - control - 0.005F - 0.5F * proximity + timeout;
 }
 
 } // namespace ppo::examples::twovstwo::defenders

@@ -14,6 +14,11 @@ std::shared_ptr<PatrolPolicy> LoadPatrolPolicy(std::filesystem::path const& chec
     return std::make_shared<PatrolPolicy>(checkpoint);
 }
 
+std::shared_ptr<PatrolPolicy> CreateUntrainedPatrolPolicy(std::uint32_t seed)
+{
+    return std::make_shared<PatrolPolicy>(seed);
+}
+
 namespace {
 
 Mobile FromEcs(ppo::model::BaseEntity& entity)
@@ -117,7 +122,8 @@ bool PatrolProdAgent::SetNewState()
 ppo::model::sAgentStateSnaphot PatrolProdAgent::GetSnapshot() const noexcept
 {
     ppo::model::sAgentStateSnaphot snapshot{};
-    snapshot.m_name = role_ == 0U ? "Patrol 1 PPO (RLtools)" : "Patrol 2 PPO (RLtools)";
+    snapshot.m_name = role_ == 0U ? "Patrol 1 PPO" : "Patrol 2 PPO";
+    snapshot.m_name += actor_->IsTrained() ? " (checkpoint)" : " (untrained)";
     snapshot.m_id = id_;
     snapshot.m_common.m_step = static_cast<long long>(step_);
     snapshot.m_common.m_maxStep = 4096;

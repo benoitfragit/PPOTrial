@@ -13,6 +13,7 @@
 #include "serializer.hpp"
 #include "sharedworldcomponents.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <iostream>
@@ -63,6 +64,12 @@ bool LoadScenario(std::filesystem::path const& path,
                 return false;
             wantsPpo[role] = mode == "ppo";
         }
+    }
+    if (patrolOnly && !std::any_of(wantsPpo.begin(), wantsPpo.end(),
+                                   [](bool requested) { return requested; }))
+    {
+        std::cerr << "[PATROL] At least one PPO controller is required.\\n";
+        return false;
     }
     if (!settings.contains("red2InitiallyDestroyedProbability")
         || !settings["red2InitiallyDestroyedProbability"].is_number())
@@ -206,8 +213,22 @@ bool LoadScenario(std::filesystem::path const& path,
         }
     }
     if (patrolOnly && !bluePolicy)
-        std::cout << "[PATROL] No trained PPO checkpoint; "
-                     "using reference controllers.\n";
+    {
+        // A random, untrained RLtools actor is still a real PPO network, but
+        // inference in the GUI does not update its weights.
+        try
+        {
+            bluePolicy = defenders::CreateUntrainedPatrolPolicy(42U);
+        }
+        catch (std::exception const& error)
+        {
+            std::cerr << "[PATROL] Cannot initialize PPO policy: "
+                      << error.what() << '\n';
+            return false;
+        }
+        std::cout << "[PATROL] PPO actor initialized without training. "
+                     "Play runs inference only; train with PPOBlueTrain.\n";
+    }
     auto& world = registry->ctx().get<ppo::model::sEnvironmentState>();
     world.m_maxNorth = worldNorth;
     world.m_maxEast = worldEast;
@@ -230,7 +251,7 @@ bool LoadScenario(std::filesystem::path const& path,
         for (std::size_t role = 0; role < guards.size(); ++role)
         {
             std::shared_ptr<ppo::model::IAgent> controller;
-            if (wantsPpo[role] && bluePolicy)
+            if (wantsPpo[role])
             {
                 controller = environment.CreateAgent<defenders::PatrolProdAgent>(
                     *guards[role], *guards[1U - role], role, bluePolicy);

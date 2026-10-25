@@ -4,6 +4,7 @@
 #include "iagent.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 
@@ -11,6 +12,7 @@ namespace ppo::examples::twovstwo::defenders {
 
 class PatrolPolicy;
 std::shared_ptr<PatrolPolicy> LoadPatrolPolicy(std::filesystem::path const& checkpoint);
+std::shared_ptr<PatrolPolicy> CreateUntrainedPatrolPolicy(std::uint32_t seed);
 
 // Runtime inference adapter only: both agents use one shared RLtools actor;
 // the environment already sequences both ChooseAction calls before physics.

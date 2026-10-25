@@ -179,6 +179,13 @@ private:
             }
             State const next = AdvanceBoth(parameters_, state, actions);
             ++result.steps;
+            // Includes collisions between snapshots (swept relative geometry).
+            if (next.collided)
+            {
+                result.outcome = PatrolOutcome::Failure;
+                result.failure = PatrolFailure::Collision;
+                break;
+            }
             auto const safety = SafetyFailure(parameters_, next, settings_);
             if (safety != PatrolFailure::None)
             {
