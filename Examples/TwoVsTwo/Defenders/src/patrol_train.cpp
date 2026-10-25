@@ -30,6 +30,15 @@ void WriteLayer(std::ostream& out, Layer const& layer)
     WriteMatrix(out, layer.biases.parameters);
 }
 
+template<typename Block>
+void WriteAttention(std::ostream& out,Block const& b)
+{
+    WriteMatrix(out,b.encoderW.parameters);
+    WriteMatrix(out,b.encoderB.parameters);
+    WriteMatrix(out,b.queryW.parameters);
+    WriteMatrix(out,b.queryB.parameters);
+}
+
 template<typename Actor>
 void SavePolicy(std::filesystem::path const& path, Actor const& actor)
 {
@@ -39,12 +48,14 @@ void SavePolicy(std::filesystem::path const& path, Actor const& actor)
     std::ofstream out{temp, std::ios::trunc};
     if (!out)
         throw std::runtime_error("Cannot open temporary policy file");
-    out << "BLUE_PATROL_PPO_V1 " << blue::ObservationLayout::Version << ' '
+    out << "BLUE_PATROL_PPO_V2 " << blue::ObservationLayout::Version << ' '
         << blue::ObservationLayout::Size << ' '
         << blue::ObservationLayout::ActionSize << ' '
         << blue::TrainingParameters::ACTOR_HIDDEN_DIM << ' '
         << blue::TrainingParameters::ACTOR_NUM_LAYERS << '\n'
         << std::setprecision(std::numeric_limits<float>::max_digits10);
+    WriteAttention(out,actor.red);
+    WriteAttention(out,actor.friendlies);
     WriteLayer(out, actor.input_layer);
     for (auto const& layer : actor.hidden_layers)
         WriteLayer(out, layer);

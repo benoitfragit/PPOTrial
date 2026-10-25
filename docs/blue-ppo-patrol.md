@@ -5,7 +5,7 @@ Date : 2026-10-25. Contrat source : spécification bibliothèque `2026-10-25_11h
 ## Implémenté
 
 - RLtools CPU (FetchContent déjà verrouillé), PPO clip, GAE, politique gaussienne Actor commune, Critic local, C++17 ; exécutable dédié `PPOBlueTrain`.
-- Contrat `BLUE_PATROL_PPO_V1` : **124 entrées / 2 sorties** ; 7 propres, 61 LiDAR, 2×13 slots rouges masqués, 2×9 amis/objectif, 10 patrouille, 2 globales. Les sorties sont rotation et accélération SNA normalisées.
+- Contrat `BLUE_PATROL_PPO_V2` : **124 entrées / 2 sorties** ; 7 propres, 61 LiDAR, 2×13 slots rouges masqués, 2×9 amis/objectif, 10 patrouille, 2 globales. Les sorties sont rotation et accélération SNA normalisées.
 - Patrouille de référence en râteau (deux pistes latéralement décalées, phases décalées, demi-tours en demi-cercle) et reward d'équipe de progression, tenue de trajectoire, cap, vitesse, sécurité et timeout.
 - La patrouille de référence donne un **objectif cinématique**, jamais une action imposée au défenseur entraîné. Spawns et monde LiDAR n'ont pas été modifiés dans `TwoVsTwo`.
 - Terminaison : débordement du monde ; troncature : 4096 pas ; la configuration sans rouge n'est pas une victoire instantanée.
@@ -38,10 +38,25 @@ Le test `TwoVsTwoPPOTrainingSmoke` effectue une mise à jour RLtools PPO puis v�
 
 Le scénario additionnel `blue-patrol` charge `Scenarios/BluePatrol.json` sans aucun rouge.
 Après apprentissage, la politique est enregistrée par défaut sous
-`resources/model/BluePatrol/prod/blue_patrol_v1.txt` (non versionné).
+`resources/model/BluePatrol/prod/blue_patrol_v2.txt` (non versionné).
 Les deux bleus chargent une **seule instance du même Actor** RLtools et
 choisissent chacun leur action avant le pas physique du monde ECS.
 
 Lancer `PPO.exe --example blue-patrol`. Sans modèle, le scénario se charge
 mais les bleus restent sans agent ; un fichier invalide fait échouer le
 bootstrap plutôt que d'exécuter une politique incompatible.
+
+## Réseau avec attention (v2)
+
+Attention **apprise** native RLtools, initialisée avant la première phase d'entraînement.
+Deux branches paramétriques indépendantes : rouges (13 caractéristiques, 2 pistes,
+dimension latente 8), amis/objectif (9 caractéristiques, 2 pistes, latente 6).
+Chacune utilise un encodeur dense partagé, une requête issue de l'état propre,
+un softmax masqué puis concatène contexte, moyenne et maximum masqués. Les
+gradients sont rétropropagés vers les paramètres de l'encodeur et de la requête
+avec Adam lors des mises à jour PPO. Une branche entièrement masquée retourne
+strictement zéro, sans NaN. En patrouille initiale, seuls les poids de la branche
+amie reçoivent des gradients ; les rouges seront activés à la seconde phase.
+Le MLP d'Actor et le Critic restent locaux ; les observations existantes,
+les deux commandes SNA et le budget de 124 entrées sont inchangés.
+Checkpoint v2 distinct et non compatible avec les premiers poids v1.

@@ -33,7 +33,7 @@ struct ObservationLayout final
     static constexpr std::size_t GlobalOffset = PatrolOffset + Patrol;
     static constexpr std::size_t Size = GlobalOffset + Global;
     static constexpr std::size_t ActionSize = 2;
-    static constexpr std::uint32_t Version = 1;
+    static constexpr std::uint32_t Version = 2;
 };
 
 using Observation = std::array<float, ObservationLayout::Size>;
