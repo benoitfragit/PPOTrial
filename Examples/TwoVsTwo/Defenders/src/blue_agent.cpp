@@ -1,4 +1,5 @@
 #include "blue_agent.hpp"
+#include "patrol_policy.hpp"
 #include "initializer.hpp"
 #include "components.hpp"
 #include "sharedworldcomponents.hpp"
@@ -8,6 +9,11 @@
 #include <utility>
 
 namespace ppo::examples::twovstwo::defenders {
+std::shared_ptr<BluePolicy> LoadBluePolicy(std::filesystem::path const& checkpoint)
+{
+    return std::make_shared<BluePolicy>(checkpoint);
+}
+
 namespace {
 
 Mobile FromEcs(ppo::model::BaseEntity& entity)

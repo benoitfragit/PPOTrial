@@ -172,7 +172,7 @@ bool LoadScenario(std::filesystem::path const& path,
         {
             try
             {
-                bluePolicy = std::make_shared<defenders::BluePolicy>(checkpoint);
+                bluePolicy = defenders::LoadBluePolicy(checkpoint);
             }
             catch (std::exception const&)
             {

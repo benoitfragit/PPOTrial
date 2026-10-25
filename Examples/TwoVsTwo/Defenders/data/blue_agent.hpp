@@ -1,12 +1,16 @@
 #pragma once
-#include "patrol_policy.hpp"
+#include "patrol_core.hpp"
 #include "baseentity.hpp"
 #include "iagent.hpp"
 
 #include <cstddef>
+#include <filesystem>
 #include <memory>
 
 namespace ppo::examples::twovstwo::defenders {
+
+class BluePolicy;
+std::shared_ptr<BluePolicy> LoadBluePolicy(std::filesystem::path const& checkpoint);
 
 // Runtime inference adapter only: both agents use one shared RLtools actor;
 // the environment already sequences both ChooseAction calls before physics.
