@@ -129,7 +129,7 @@ int main(int argc, char** argv)
         unsigned const seed = argc >= 2 ? ParseUnsigned(argv[1]) : 1U;
         std::filesystem::path const output = argc >= 3
             ? std::filesystem::path{argv[2]}
-            : std::filesystem::path{"blue_patrol_v1.txt"};
+            : std::filesystem::path{PPO_BLUE_MODEL_PATH};
 
         unsigned const updates = argc >= 4 ? ParseUnsigned(argv[3]) :
             static_cast<unsigned>(blue::TrainingParameters::STEP_LIMIT);

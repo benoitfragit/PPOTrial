@@ -10,6 +10,9 @@ struct InitializerContext {
     std::size_t next{};
     int side{1};
     float red2DestroyedProbability{0.15F};
+    bool patrolOnly{false};
+    bool policyReady{false};
+    float arclength{0.F};
 };
 void InitializeEntity(ppo::model::Entity& entity);
 }

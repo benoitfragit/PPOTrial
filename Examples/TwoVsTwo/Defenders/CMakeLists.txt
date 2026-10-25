@@ -9,6 +9,8 @@ add_executable(PPOBlueTrain src/patrol_train.cpp data/patrol_core.hpp data/patro
 target_link_libraries(PPOBlueTrain PRIVATE TwoVsTwoDefenderBackend nlohmann_json::nlohmann_json)
 target_compile_definitions(PPOBlueTrain PRIVATE
     PPO_BLUE_SETTINGS_DIR=\"${CMAKE_SOURCE_DIR}/resources/settings\")
+target_compile_definitions(PPOBlueTrain PRIVATE
+    PPO_BLUE_MODEL_PATH=\"${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/prod/blue_patrol_v1.txt\")
 target_compile_features(PPOBlueTrain PRIVATE cxx_std_17)
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
@@ -19,3 +21,12 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         COMMAND $<TARGET_FILE:PPOBlueTrain> 7
                 "${CMAKE_CURRENT_BINARY_DIR}/blue_ppo_smoke.txt" 1)
 endif()
+
+# The desktop uses this inference-only actor, independently of the trainer.
+add_library(TwoVsTwoBlueRuntime STATIC
+    data/blue_agent.hpp data/patrol_policy.hpp src/blue_agent.cpp)
+target_compile_features(TwoVsTwoBlueRuntime PUBLIC cxx_std_17)
+target_include_directories(TwoVsTwoBlueRuntime PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../data")
+target_link_libraries(TwoVsTwoBlueRuntime PUBLIC
+    TwoVsTwoDefenderBackend GenericEnv SharedWorld LegacyAgentAPI)
