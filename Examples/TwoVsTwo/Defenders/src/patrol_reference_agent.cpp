@@ -23,7 +23,7 @@ void PatrolReferenceAgent::Init()
     done_ = false;
 }
 
-Parameters PatrolReferenceAgent::ReadParameters() const
+Parameters PatrolReferenceAgent::ReadParameters()
 {
     Parameters p{};
     auto* registry = own_.registry();
