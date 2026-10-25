@@ -16,7 +16,7 @@ std::shared_ptr<PatrolPolicy> CreateUntrainedPatrolPolicy(std::uint32_t seed);
 
 // Runtime inference adapter only: both agents use one shared RLtools actor;
 // the environment already sequences both ChooseAction calls before physics.
-class PatrolProdAgent final : public ppo::model::IAgent
+class PatrolProdAgent : public ppo::model::IAgent
 {
 public:
     PatrolProdAgent(ppo::model::BaseEntity& own, ppo::model::BaseEntity& teammate,
@@ -28,7 +28,7 @@ public:
     void ProcessCommand(ppo::model::sAgentRealTimeCommand const&) noexcept override {}
     ppo::model::sAgentStateSnaphot GetSnapshot() const noexcept override;
 
-private:
+protected:
     State ReadState(Parameters const& parameters);
     Parameters ReadParameters();
 

@@ -145,12 +145,6 @@ Environment::Impl::ProcessCommand(sRealTimeCommand const& command)
         break;
     case sRealTimeCommand::eTypeCommand::ChangeState:
         m_state = command.m_state;
-        for (auto const& agent : m_agents)
-            if (auto* observer = dynamic_cast<IPlaybackObserver*>(agent.get()))
-                observer->OnPlaybackState(
-                    m_state == eEnvironmentState::RUNNING ? PlaybackState::Running
-                    : m_state == eEnvironmentState::PAUSED ? PlaybackState::Paused
-                    : PlaybackState::Stopped);
         break;
     default:
         break;
@@ -221,11 +215,6 @@ Environment::Impl::Stop(void)
     m_running.store(false, std::memory_order_release);
     if (m_thread.joinable())
         m_thread.join();
-
-    // Stop can bypass the queued event when the worker exits immediately.
-    for (auto const& agent : m_agents)
-        if (auto* observer = dynamic_cast<IPlaybackObserver*>(agent.get()))
-            observer->OnPlaybackState(PlaybackState::Stopped);
 }
 
 /**

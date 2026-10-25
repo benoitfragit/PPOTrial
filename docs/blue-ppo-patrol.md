@@ -159,3 +159,26 @@ tous les 10 updates et à la fin ; le budget par défaut reste 300 updates.
 Les utilitaires headless `PPOBlueTrain` et `PPOPatrolEvaluate` sont
 optionnels avec `PPO_BUILD_PATROL_TOOLS=ON`, OFF par défaut. La CI
 vérifie directement une étape d'apprentissage sans exécutable auxiliaire.
+
+## Correction structurelle : agent PPO dans la boucle ECS (25 octobre 2026)
+
+L'intégration asynchrone expérimentale a été supprimée : aucun thread ou
+observateur Play/Pause/Stop ajouté à Environment. Le premier défenseur
+est directement un **PatrolTrainingAgent : IAgent** (dérivé de
+PatrolProdAgent) ; le second demeure un **PatrolReferenceAgent : IAgent**.
+L'exécutable reste PPO.exe, sans utilitaire complémentaire par défaut.
+
+Le moteur générique appelle ChooseAction() avant la physique et
+SetNewState() après la physique et les règles de monde. Pendant Play,
+PatrolTrainingAgent conserve son optimiseur RLtools à travers les
+réinitialisations d'épisodes ECS. Toutes les 128 transitions ECS, il effectue
+une mise à jour PPO via PatrolLearner (environnement de rollouts RLtools),
+puis publie les poids dans la politique de l'agent, de manière séquentielle,
+sans concurrence. La simulation graphique évalue donc la politique en cours
+de mise à jour. Le statut m_training et les updates sont exposés directement
+dans le snapshot de ce seul agent.
+
+Aucun nouvel IAgent technique ou mécanisme d'observation d'état n'est
+introduit dans la plateforme. Le coût d'un update PPO ponctuel reste subi
+par la boucle ECS ; si nécessaire, il faudra ensuite planifier ce travail
+en incréments bornés, plutôt qu'introduire implicitement un thread.

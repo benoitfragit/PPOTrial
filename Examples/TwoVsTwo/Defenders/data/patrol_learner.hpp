@@ -1,7 +1,7 @@
 #pragma once
 
-// Owns the RLtools PPO training lifecycle. The learner operates headlessly;
-// it is not an ECS IAgent and must not be confused with a production driver.
+// CPU PPO optimizer backend reused by both the GUI IAgent and optional CLI.
+// The surrounding IAgent, not this engine, is scheduled by Environment.
 #include "patrol_rltools.hpp"
 
 #include <cstdint>
@@ -11,10 +11,10 @@
 
 namespace ppo::examples::twovstwo::defenders {
 
-class PatrolTrainingAgent final
+class PatrolLearner final
 {
 public:
-    PatrolTrainingAgent(Parameters const& parameters, std::uint32_t seed)
+    PatrolLearner(Parameters const& parameters, std::uint32_t seed)
         : state_(std::make_unique<TrainingState>())
     {
         if (!Valid(parameters))
@@ -36,11 +36,11 @@ public:
         }
     }
 
-    ~PatrolTrainingAgent() { Release(); }
-    PatrolTrainingAgent(PatrolTrainingAgent const&) = delete;
-    PatrolTrainingAgent& operator=(PatrolTrainingAgent const&) = delete;
-    PatrolTrainingAgent(PatrolTrainingAgent&&) = delete;
-    PatrolTrainingAgent& operator=(PatrolTrainingAgent&&) = delete;
+    ~PatrolLearner() { Release(); }
+    PatrolLearner(PatrolLearner const&) = delete;
+    PatrolLearner& operator=(PatrolLearner const&) = delete;
+    PatrolLearner(PatrolLearner&&) = delete;
+    PatrolLearner& operator=(PatrolLearner&&) = delete;
 
     bool Step() { return rlt::step(device_, *state_); }
     std::uint64_t StepCount() const noexcept

@@ -3,7 +3,7 @@
 #include "twovstworules.hpp"
 #include "patrol_agent.hpp"
 #include "patrol_reference_agent.hpp"
-#include "patrol_training_runtime_agent.hpp"
+#include "patrol_training_ecs_agent.hpp"
 #include "patrol_config.hpp"
 
 #include "airspacecomponents.hpp"
@@ -247,19 +247,6 @@ bool LoadScenario(std::filesystem::path const& path,
     }
     if (patrolOnly)
     {
-        // Must precede production controllers in the ECS update order:
-        // publish each learned actor before the guard's next inference.
-        auto const checkpoint = std::filesystem::path{RESOURCE_PATH}.parent_path()
-            / "model" / "BluePatrol" / "prod" / "blue_patrol_v2.txt";
-        auto learner = environment.CreateAgent<defenders::PatrolTrainingRuntimeAgent>(
-            defenders::LoadPatrolParameters(path.parent_path().parent_path()),
-            bluePolicy, checkpoint);
-        if (!learner)
-            return false;
-        agents.push_back(std::move(learner));
-    }
-    if (patrolOnly)
-    {
         auto& first = *entities.at("blue_guard_1");
         auto& second = *entities.at("blue_guard_2");
         std::array<ppo::model::BaseEntity*, 2> guards{&first, &second};
@@ -268,8 +255,12 @@ bool LoadScenario(std::filesystem::path const& path,
             std::shared_ptr<ppo::model::IAgent> controller;
             if (wantsPpo[role])
             {
-                controller = environment.CreateAgent<defenders::PatrolProdAgent>(
-                    *guards[role], *guards[1U - role], role, bluePolicy);
+                auto const checkpoint = std::filesystem::path{RESOURCE_PATH}.parent_path()
+                    / "model" / "BluePatrol" / "prod" / "blue_patrol_v2.txt";
+                controller = environment.CreateAgent<defenders::PatrolTrainingAgent>(
+                    *guards[role], *guards[1U - role], role, bluePolicy,
+                    defenders::LoadPatrolParameters(path.parent_path().parent_path()),
+                    checkpoint);
             }
             else
             {

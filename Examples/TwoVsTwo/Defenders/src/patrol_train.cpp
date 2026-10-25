@@ -1,4 +1,4 @@
-#include "patrol_training_agent.hpp"
+#include "patrol_learner.hpp"
 #include "patrol_config.hpp"
 #include "patrol_checkpoint.hpp"
 
@@ -53,7 +53,7 @@ int main(int argc, char** argv)
         if (!blue::Valid(params))
             throw std::invalid_argument("Invalid patrol environment parameters");
 
-        blue::PatrolTrainingAgent training{params, seed};
+        blue::PatrolLearner training{params, seed};
         while (training.StepCount() < updates)
         {
             if (training.Step())
