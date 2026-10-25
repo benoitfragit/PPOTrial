@@ -1,7 +1,7 @@
 #include "twovstwoexample.hpp"
 #include "initializer.hpp"
 #include "twovstworules.hpp"
-#include "blue_agent.hpp"
+#include "patrol_agent.hpp"
 
 #include "airspacecomponents.hpp"
 #include "airspacemeta.hpp"
@@ -163,7 +163,7 @@ bool LoadScenario(std::filesystem::path const& path,
     context.count = entities.size();
     context.red2DestroyedProbability = probability;
     context.patrolOnly = patrolOnly;
-    std::shared_ptr<defenders::BluePolicy> bluePolicy;
+    std::shared_ptr<defenders::PatrolPolicy> bluePolicy;
     if (patrolOnly)
     {
         auto const checkpoint = std::filesystem::path{RESOURCE_PATH}.parent_path()
@@ -172,7 +172,7 @@ bool LoadScenario(std::filesystem::path const& path,
         {
             try
             {
-                bluePolicy = defenders::LoadBluePolicy(checkpoint);
+                bluePolicy = defenders::LoadPatrolPolicy(checkpoint);
             }
             catch (std::exception const&)
             {
@@ -197,9 +197,9 @@ bool LoadScenario(std::filesystem::path const& path,
     }
     if (bluePolicy)
     {
-        auto guard1 = environment.CreateAgent<defenders::BlueProdAgent>(
+        auto guard1 = environment.CreateAgent<defenders::PatrolProdAgent>(
             *entities.at("blue_guard_1"), *entities.at("blue_guard_2"), 0U, bluePolicy);
-        auto guard2 = environment.CreateAgent<defenders::BlueProdAgent>(
+        auto guard2 = environment.CreateAgent<defenders::PatrolProdAgent>(
             *entities.at("blue_guard_2"), *entities.at("blue_guard_1"), 1U, bluePolicy);
         if (!guard1 || !guard2)
             return false;

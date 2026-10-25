@@ -20,10 +20,10 @@ using InferenceInput = rlt::MatrixDynamic<
 using InferenceOutput = rlt::MatrixDynamic<
     rlt::matrix::Specification<float, Index, 1, ObservationLayout::ActionSize>>;
 
-class BluePolicy
+class PatrolPolicy
 {
 public:
-    explicit BluePolicy(std::filesystem::path const& modelPath)
+    explicit PatrolPolicy(std::filesystem::path const& modelPath)
     {
         rlt::malloc(device_, *network_);
         rlt::malloc(device_, input_);
@@ -41,9 +41,9 @@ public:
         ready_ = true;
     }
 
-    BluePolicy(BluePolicy const&) = delete;
-    BluePolicy& operator=(BluePolicy const&) = delete;
-    ~BluePolicy() { if (ready_) Free(); }
+    PatrolPolicy(PatrolPolicy const&) = delete;
+    PatrolPolicy& operator=(PatrolPolicy const&) = delete;
+    ~PatrolPolicy() { if (ready_) Free(); }
 
     Action Predict(Observation const& observation)
     {

@@ -3,35 +3,31 @@
   "agentProfiles": "../AgentProfiles.json",
   "twoVsTwo": {
     "patrolOnly": true,
-    "red2InitiallyDestroyedProbability": 0.0
+    "red2InitiallyDestroyedProbability": 0
   },
   "entities": {
     "blue_guard_1": {
       "type": "Mobile",
       "platform": "defender_car",
       "side": "Friend",
-      "target": "",
       "agents": []
     },
     "blue_guard_2": {
       "type": "Mobile",
       "platform": "defender_car",
       "side": "Friend",
-      "target": "",
       "agents": []
     },
     "blue_objective": {
       "type": "Objective",
       "platform": "",
       "side": "Friend",
-      "target": "",
       "agents": []
     },
     "blue_restricted_zone": {
       "type": "RestrictedZone",
       "platform": "restrictedzone",
       "side": "Friend",
-      "target": "",
       "agents": []
     }
   }
