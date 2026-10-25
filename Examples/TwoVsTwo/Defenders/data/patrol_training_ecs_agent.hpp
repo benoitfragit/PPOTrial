@@ -21,6 +21,7 @@ public:
                         std::uint64_t maxUpdates = 300U);
     ~PatrolTrainingAgent() override;
     void Init() override;
+    void ChooseAction() override;
     bool SetNewState() override;
     ppo::model::sAgentStateSnaphot GetSnapshot() const noexcept override;
 
@@ -32,7 +33,7 @@ private:
     std::filesystem::path checkpoint_;
     std::uint32_t seed_;
     std::uint64_t maxUpdates_;
-    std::uint64_t ticks_ = 0;
+    Action lastAction_{};
     std::uint64_t updates_ = 0;
     bool finished_ = false;
 };
