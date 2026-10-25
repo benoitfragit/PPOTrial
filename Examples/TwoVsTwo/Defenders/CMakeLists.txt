@@ -17,6 +17,10 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_executable(TwoVsTwoPatrolTests tests/patrol_tests.cpp)
     target_link_libraries(TwoVsTwoPatrolTests PRIVATE TwoVsTwoDefenderBackend)
     add_test(NAME TwoVsTwoPatrolTests COMMAND TwoVsTwoPatrolTests)
+    add_executable(TwoVsTwoAttentionTests tests/attention_tests.cpp)
+    target_link_libraries(TwoVsTwoAttentionTests PRIVATE TwoVsTwoDefenderBackend)
+    target_compile_features(TwoVsTwoAttentionTests PRIVATE cxx_std_17)
+    add_test(NAME TwoVsTwoAttentionTests COMMAND TwoVsTwoAttentionTests)
     add_test(NAME TwoVsTwoPPOTrainingSmoke
         COMMAND $<TARGET_FILE:PPOBlueTrain> 7
                 "${CMAKE_CURRENT_BINARY_DIR}/blue_ppo_smoke.txt" 1)
