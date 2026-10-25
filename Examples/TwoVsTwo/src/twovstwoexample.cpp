@@ -226,8 +226,6 @@ ppo::app::ExampleDefinition Definition()
     };
 }
 
-} // namespace ppo::examples::twovstwo
-
 ppo::app::ExampleDefinition BluePatrolDefinition()
 {
     return {
@@ -239,3 +237,5 @@ ppo::app::ExampleDefinition BluePatrolDefinition()
         "Two blue defenders patrol without red attackers; RLtools policy used when trained."
     };
 }
+
+} // namespace ppo::examples::twovstwo
