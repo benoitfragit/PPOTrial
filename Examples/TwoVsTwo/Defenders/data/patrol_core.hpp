@@ -221,6 +221,17 @@ inline bool GuardsCollided(Parameters const& p, State const& before,
     return MinimumGuardSeparation(before, after) <= p.collisionDistance;
 }
 
+// Smooth dense shaping: an agent learns to maintain separation before
+// collision, without penalizing nominal staggered patrol formations.
+inline float SeparationPenalty(Parameters const& p,
+                               State const& state) noexcept
+{
+    float const fraction = Clamp(
+        (p.cautionDistance - GuardSeparation(state)) /
+        (p.cautionDistance - p.collisionDistance), 0.F, 1.F);
+    return -0.5F * fraction;
+}
+
 static_assert(std::is_trivially_copyable_v<State>,
     "RLtools stores patrol state in a matrix of trivially copyable values");
 
@@ -400,15 +411,10 @@ inline float TeamReward(Parameters const& p, State const& before,
     float const shared = 0.5F * (TrackingReward(p, after, 0U)
                                + TrackingReward(p, after, 1U));
     // Shape close approaches before the actual -100 collision termination.
-    // The reference teammate is included, exactly as during PPO rollout.
-    float const distance = GuardSeparation(after);
-    float const proximity = Clamp(
-        (p.cautionDistance - distance) /
-        (p.cautionDistance - p.collisionDistance), 0.F, 1.F);
     float const control = 0.002F * (std::abs(action[0]) + std::abs(action[1]));
     float const timeout = after.step >= p.episodeSteps ? -15.F : 0.F;
     (void)before;
-    return shared - control - 0.005F - 0.5F * proximity + timeout;
+    return shared - control - 0.005F + SeparationPenalty(p, after) + timeout;
 }
 
 } // namespace ppo::examples::twovstwo::defenders
