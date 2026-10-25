@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.16)
 project(TopPPO LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -32,7 +32,7 @@ include(${CMAKE_SOURCE_DIR}/dependencies.cmake)
 
 add_subdirectory(Serialization)
 add_subdirectory(Entities)
-add_subdirectory(Shared/World)
+add_subdirectory(Examples/Shared/World)
 add_subdirectory(PPO)
 add_subdirectory(Bindings)
 add_subdirectory(Env)

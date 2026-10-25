@@ -1,7 +1,7 @@
 # SharedWorld: model naming and pseudo-LiDAR compatibility
 
 ## Purpose
-The reusable `Shared/World` C++17 library owns the concrete 2D world entities
+The reusable `Examples/Shared/World` C++17 library owns the concrete 2D world entities
 `Mobile`, `RestrictedZone`, `Objective`, the unchanged sensor/control/motion
 systems and their state layouts. `Examples/Airspace` owns the historic
 scenario, scoring, evaluator and graphical renderer, but no longer duplicates
