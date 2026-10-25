@@ -43,6 +43,10 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         COMMAND $<TARGET_FILE:${PROJECT_NAME}> --check-example)
     set_tests_properties(AirspaceExampleBootstrap PROPERTIES
         PASS_REGULAR_EXPRESSION "Bootstrapped example: airspace")
+    add_test(NAME TwoVsTwoExampleBootstrap
+        COMMAND $<TARGET_FILE:${PROJECT_NAME}> --example two-vs-two --check-example)
+    set_tests_properties(TwoVsTwoExampleBootstrap PROPERTIES
+        PASS_REGULAR_EXPRESSION "Bootstrapped example: two-vs-two")
 
     add_test(NAME UnknownExampleRejected
         COMMAND $<TARGET_FILE:${PROJECT_NAME}> --example unknown-example)

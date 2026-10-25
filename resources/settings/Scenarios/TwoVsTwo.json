@@ -1,0 +1,66 @@
+{
+    "formatVersion": 2,
+    "agentProfiles": "../AgentProfiles.json",
+    "twoVsTwo": {
+        "defendedArea": {
+            "halfNorth": 18000,
+            "halfEast": 20000
+        },
+        "red2InitiallyDestroyedProbability": 0.15
+    },
+    "entities": {
+        "blue_guard_1": {
+            "type": "Mobile",
+            "platform": "defender_car",
+            "side": "Friend",
+            "target": "",
+            "agents": []
+        },
+        "blue_guard_2": {
+            "type": "Mobile",
+            "platform": "defender_car",
+            "side": "Friend",
+            "target": "",
+            "agents": []
+        },
+        "blue_objective": {
+            "type": "Objective",
+            "platform": "",
+            "side": "Friend",
+            "target": "",
+            "agents": []
+        },
+        "blue_restricted_zone": {
+            "type": "RestrictedZone",
+            "platform": "restrictedzone",
+            "side": "Friend",
+            "target": "",
+            "agents": []
+        },
+        "red_1": {
+            "type": "Mobile",
+            "platform": "attacker_car",
+            "side": "Hostile",
+            "target": "blue_objective",
+            "agents": [
+                {
+                    "profile": "RLMission",
+                    "mode": "production"
+                }
+            ]
+        },
+        "red_2": {
+            "enabled": true,
+            "type": "Mobile",
+            "platform": "attacker_car",
+            "side": "Hostile",
+            "target": "blue_objective",
+            "agents": [
+                {
+                    "profile": "RLMission",
+                    "mode": "production"
+                }
+            ]
+        }
+    }
+}

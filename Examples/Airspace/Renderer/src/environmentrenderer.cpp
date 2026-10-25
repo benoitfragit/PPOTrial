@@ -25,6 +25,7 @@
 #include <imgui_internal.h>
 #include <implot.h>
 #include <rlImGui.h>
+#include <rlgl.h>
 
 #include "entt/meta/meta.hpp"
 #include "entt/meta/resolve.hpp"
@@ -698,6 +699,62 @@ DrawAircraftGlyph3D(ppo::model::sEntityState const& state, float scale, Color co
     DrawLine3D(wingLeft, wingRight, Fade(BLACK, 0.22F));
     DrawLine3D(tail, dorsal, Fade(color, 0.55F));
     DrawLine3D(tailLeft, tailRight, Fade(color, 0.48F));
+}
+
+/**
+* @brief Selects the car visualization without changing the Mobile entity type.
+*/
+bool IsCarVisual(entt::registry const& snapshot, entt::entity id)
+{
+    if (!snapshot.any_of<ppo::model::sEntityMetadata>(id))
+        return false;
+    auto const& name = snapshot.get<ppo::model::sEntityMetadata>(id).m_archetype;
+    return name == "defender_car" || name == "attacker_car";
+}
+
+/**
+* @brief Draws a heading-aligned low-poly car without external model assets.
+*/
+void DrawCarGlyph3D(ppo::model::sEntityState const& state, float scale, Color body)
+{
+    auto const center = ToWorld3D(state.m_x, state.m_y, 0.F, scale);
+    rlPushMatrix();
+    rlTranslatef(center.x, center.y, center.z);
+    rlRotatef(-state.m_rotation * DEG_PER_RAD, 0.F, 1.F, 0.F);
+
+    DrawCube(Vector3{0.F, 0.26F, 0.F}, 1.15F, 0.30F, 2.35F, body);
+    DrawCubeWires(Vector3{0.F, 0.26F, 0.F}, 1.15F, 0.30F, 2.35F, Fade(WHITE, 0.5F));
+    DrawCube(Vector3{0.F, 0.53F, 0.13F}, 0.92F, 0.28F, 1.14F,
+             Color{45, 67, 82, 255});
+    DrawCube(Vector3{0.F, 0.49F, -0.43F}, 0.88F, 0.12F, 0.07F,
+             Color{156, 198, 218, 255});
+    for (float side : {-0.63F, 0.63F})
+        for (float axle : {-0.72F, 0.72F})
+            DrawCube(Vector3{side, 0.16F, axle}, 0.22F, 0.32F, 0.46F,
+                     Color{17, 22, 29, 255});
+    for (float side : {-0.36F, 0.36F})
+        DrawCube(Vector3{side, 0.27F, -1.19F}, 0.20F, 0.12F, 0.05F, YELLOW);
+    rlPopMatrix();
+}
+
+/**
+* @brief Draws a north/east rectangle on the tactical ground plane.
+*/
+void DrawDefendedArea3D(ppo::model::sDefendedArea const& area, float scale)
+{
+    float const n0 = area.m_north - area.m_halfNorth;
+    float const n1 = area.m_north + area.m_halfNorth;
+    float const e0 = area.m_east - area.m_halfEast;
+    float const e1 = area.m_east + area.m_halfEast;
+    auto a = ToWorld3D(n0, e0, -0.06F * scale, scale);
+    auto b = ToWorld3D(n0, e1, -0.06F * scale, scale);
+    auto c = ToWorld3D(n1, e1, -0.06F * scale, scale);
+    auto d = ToWorld3D(n1, e0, -0.06F * scale, scale);
+    Color const color{79, 145, 245, 225};
+    DrawLineEx3D(a, b, 0.055F, color);
+    DrawLineEx3D(b, c, 0.055F, color);
+    DrawLineEx3D(c, d, 0.055F, color);
+    DrawLineEx3D(d, a, 0.055F, color);
 }
 
 void
@@ -2675,6 +2732,8 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
     }
 
     DrawPlane(Vector3{ 0.F, -0.02F, 0.F }, Vector2{ 320.F, 320.F }, Color{ 14, 21, 30, 255 });
+    if (snapshot.ctx().contains<ppo::model::sDefendedArea>())
+        DrawDefendedArea3D(snapshot.ctx().get<ppo::model::sDefendedArea>(), m_worldScale);
 
     entt::entity primaryTarget = entt::null;
     entt::entity pseudoLidarEntity = entt::null;
@@ -2718,7 +2777,9 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
 
         if (state.m_type == ppo::model::eEntityType::Mobile)
         {
-            if (auto const* aircraftModel = ResolveAircraftModelAsset(
+            if (IsCarVisual(snapshot, entity))
+                DrawCarGlyph3D(state, m_worldScale, renderColor);
+            else if (auto const* aircraftModel = ResolveAircraftModelAsset(
                     m_blueAircraftModel,
                     m_redAircraftModel,
                     snapshot,
@@ -2930,6 +2991,18 @@ EnvironmentRenderer::DrawMinimapWindow(entt::registry const& snapshot)
     draw->AddLine(ImVec2{ mapMin.x, centerY }, ImVec2{ mapMax.x, centerY }, IM_COL32(70, 94, 110, 110), 1.F);
     draw->AddLine(ImVec2{ centerX, mapMin.y }, ImVec2{ centerX, mapMax.y }, IM_COL32(70, 94, 110, 110), 1.F);
     draw->AddText(ImVec2{ workMin.x + 8.F, workMin.y + 6.F }, IM_COL32(235, 210, 120, 220), "Work Area");
+    if (snapshot.ctx().contains<ppo::model::sDefendedArea>())
+    {
+        auto const& area = snapshot.ctx().get<ppo::model::sDefendedArea>();
+        auto min = toMinimap(area.m_north + area.m_halfNorth,
+                             area.m_east - area.m_halfEast);
+        auto max = toMinimap(area.m_north - area.m_halfNorth,
+                             area.m_east + area.m_halfEast);
+        draw->AddRectFilled(min, max, IM_COL32(50, 100, 180, 24));
+        draw->AddRect(min, max, IM_COL32(75, 160, 255, 235), 1.F, 0, 2.F);
+        draw->AddText(ImVec2{min.x + 6.F, min.y + 6.F},
+                      IM_COL32(145, 195, 255, 255), "DEFENDED AREA");
+    }
 
     draw->AddLine(ImVec2{ mapMin.x + 18.F, mapMax.y - 28.F }, ImVec2{ mapMin.x + 18.F, mapMax.y - 48.F }, IM_COL32_WHITE, 2.F);
     draw->AddText(ImVec2{ mapMin.x + 24.F, mapMax.y - 54.F }, IM_COL32_WHITE, "N");
@@ -2965,7 +3038,23 @@ EnvironmentRenderer::DrawMinimapWindow(entt::registry const& snapshot)
         if (center.x < mapMin.x - 12.F || center.x > mapMax.x + 12.F || center.y < mapMin.y - 12.F || center.y > mapMax.y + 12.F)
             continue;
 
-        if (state.m_type == ppo::model::eEntityType::Mobile)
+        if (state.m_type == ppo::model::eEntityType::Mobile && IsCarVisual(snapshot, entity))
+        {
+            float const angle = state.m_rotation;
+            ImVec2 const forward{std::sin(angle), -std::cos(angle)};
+            ImVec2 const right{forward.y, -forward.x};
+            auto corner = [&](float longitudinal, float lateral) {
+                return ImVec2{center.x + forward.x * longitudinal + right.x * lateral,
+                              center.y + forward.y * longitudinal + right.y * lateral};
+            };
+            ImVec2 const car[4] = {corner(11.F, -5.8F), corner(11.F, 5.8F),
+                                   corner(-11.F, 5.8F), corner(-11.F, -5.8F)};
+            draw->AddQuadFilled(car[0], car[1], car[2], car[3], color);
+            draw->AddQuad(car[0], car[1], car[2], car[3], IM_COL32_WHITE, 1.4F);
+            draw->AddLine(corner(2.F, -5.F), corner(2.F, 5.F),
+                          IM_COL32(185, 220, 245, 230), 2.F);
+        }
+        else if (state.m_type == ppo::model::eEntityType::Mobile)
         {
             float const angle = state.m_rotation;
             float const len = 12.F;
