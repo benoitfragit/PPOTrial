@@ -68,7 +68,7 @@ bool LoadScenario(std::filesystem::path const& path,
     if (patrolOnly && !std::any_of(wantsPpo.begin(), wantsPpo.end(),
                                    [](bool requested) { return requested; }))
     {
-        std::cerr << "[PATROL] At least one PPO controller is required.\\n";
+        std::cerr << "[PATROL] At least one PPO controller is required.\n";
         return false;
     }
     if (!settings.contains("red2InitiallyDestroyedProbability")
