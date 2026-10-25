@@ -270,3 +270,19 @@ void backward(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<SPEC>
     rl_tools::free(d,d_input);rl_tools::free(d,transformed);
 }
 } // namespace rl_tools
+
+// Adam's generic step/reset templates are defined upstream before this actor.
+// Put the exact-type overloads in the actor's associated namespace so C++
+// argument-dependent lookup reaches the attention parameters as well as MLP.
+namespace ppo::examples::twovstwo::defenders {
+template<typename DEVICE,typename SPEC,typename OPT>
+void update(DEVICE& d,AttentionActor<SPEC>& actor,OPT& optimizer)
+{
+    rl_tools::update(d,actor,optimizer);
+}
+template<typename DEVICE,typename SPEC,typename OPT>
+void _reset_optimizer_state(DEVICE& d,AttentionActor<SPEC>& actor,OPT& optimizer)
+{
+    rl_tools::_reset_optimizer_state(d,actor,optimizer);
+}
+} // namespace ppo::examples::twovstwo::defenders
