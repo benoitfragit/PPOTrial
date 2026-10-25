@@ -1,5 +1,6 @@
 #include "patrol_training_agent.hpp"
 #include "patrol_config.hpp"
+#include "patrol_checkpoint.hpp"
 
 #include <cstdlib>
 #include <filesystem>
@@ -16,79 +17,6 @@ namespace blue = ppo::examples::twovstwo::defenders;
 namespace rlt = rl_tools;
 
 namespace {
-template<typename Matrix>
-void WriteMatrix(std::ostream& out, Matrix const& matrix)
-{
-    for (typename Matrix::SPEC::TI i = 0; i < Matrix::SPEC::ROWS; ++i)
-        for (typename Matrix::SPEC::TI j = 0; j < Matrix::SPEC::COLS; ++j)
-            out << rlt::get(matrix, i, j) << ' ';
-    out << '\n';
-}
-
-template<typename Layer>
-void WriteLayer(std::ostream& out, Layer const& layer)
-{
-    WriteMatrix(out, layer.weights.parameters);
-    WriteMatrix(out, layer.biases.parameters);
-}
-
-template<typename Block>
-void WriteAttention(std::ostream& out,Block const& b)
-{
-    WriteMatrix(out,b.encoderW.parameters);
-    WriteMatrix(out,b.encoderB.parameters);
-    WriteMatrix(out,b.queryW.parameters);
-    WriteMatrix(out,b.queryB.parameters);
-}
-
-template<typename Actor>
-void SavePolicy(std::filesystem::path const& path, Actor const& actor)
-{
-    if (path.has_parent_path())
-        std::filesystem::create_directories(path.parent_path());
-    auto const temp = path.string() + ".tmp";
-    std::ofstream out{temp, std::ios::trunc};
-    if (!out)
-        throw std::runtime_error("Cannot open temporary policy file");
-    out << "BLUE_PATROL_PPO_V2 " << blue::ObservationLayout::Version << ' '
-        << blue::ObservationLayout::Size << ' '
-        << blue::ObservationLayout::ActionSize << ' '
-        << blue::TrainingParameters::ACTOR_HIDDEN_DIM << ' '
-        << blue::TrainingParameters::ACTOR_NUM_LAYERS << '\n'
-        << std::setprecision(std::numeric_limits<float>::max_digits10);
-    WriteAttention(out,actor.red);
-    WriteAttention(out,actor.friendlies);
-    WriteLayer(out, actor.input_layer);
-    for (auto const& layer : actor.hidden_layers)
-        WriteLayer(out, layer);
-    WriteLayer(out, actor.output_layer);
-    WriteMatrix(out, actor.log_std.parameters);
-    out.flush();
-    if (!out)
-        throw std::runtime_error("Failed to serialize blue PPO policy");
-    out.close();
-    // Replace safely on Windows as well: retain the prior checkpoint until the
-    // new file is in place, restoring it if the final rename fails.
-    auto const backup = path.string() + ".bak";
-    std::filesystem::remove(backup);
-    bool const existing = std::filesystem::exists(path);
-    if (existing)
-        std::filesystem::rename(path, backup);
-    try
-    {
-        std::filesystem::rename(temp, path);
-    }
-    catch (...)
-    {
-        if (existing)
-            std::filesystem::rename(backup, path);
-        throw;
-    }
-    if (existing)
-        std::filesystem::remove(backup);
-}
-
-
 unsigned ParseUnsigned(char const* input)
 {
     std::string const text{input};
@@ -134,7 +62,7 @@ int main(int argc, char** argv)
                 std::cout << "PPO update " << training.StepCount()
                           << " / " << updates << '\n';
         }
-        training.WithActor([&](auto const& actor) { SavePolicy(output, actor); });
+        training.WithActor([&](auto const& actor) { blue::SavePatrolPolicy(output, actor); });
         std::cout << "Saved actor: " << output.string() << '\n';
         return 0;
     }

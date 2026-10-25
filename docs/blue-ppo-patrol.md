@@ -134,3 +134,28 @@ est utilisé par `Advance` et `AdvanceBoth`; `terminated` RLtools
 retourne vrai en cas de collision via `State.failed`. Le classement
 `PatrolEvaluator` signale explicitement `PatrolFailure::Collision`.
 Le modèle de poursuite et les agents rouges ne sont pas modifiés.
+
+## Apprentissage dans l'exécutable principal — 25 octobre 2026
+
+Sélectionner `BLUE PATROL PPO` dans le splashscreen de `PPO.exe`, puis
+cliquer sur `Play` démarre **l'entraînement PPO RLtools réel**, dans le
+même processus. Aucun lancement de `PPOBlueTrain.exe` n'est nécessaire.
+`Pause` suspend les nouveaux updates ; `Stop` suspend l'apprentissage.
+La fin du scénario ferme proprement le thread de calcul. Les agents rouges
+et leurs paramètres demeurent inchangés.
+
+`PatrolTrainingRuntimeAgent`, enregistré avant `PatrolProdAgent`,
+utilise un thread CPU pour les calculs PPO headless et publie une copie
+sérialisée immuable de l'acteur à chaque update. Le thread ECS charge
+ensuite ces poids dans l'agent PPO de la patrouille (pas de modification
+concurrente du réseau pendant `Predict`). Le second mobile suit son
+contrôleur de référence. La fenêtre présente une exécution vivante de la
+politique en cours d'apprentissage ; les transitions RLtools utilisées
+pour les gradients sont produites dans son environnement headless.
+
+Les statistiques `Patrol PPO learner (RLtools)` indiquent le nombre
+d'updates et l'état `m_training`. Sauvegarde atomique du checkpoint
+tous les 10 updates et à la fin ; le budget par défaut reste 300 updates.
+Les utilitaires headless `PPOBlueTrain` et `PPOPatrolEvaluate` sont
+optionnels avec `PPO_BUILD_PATROL_TOOLS=ON`, OFF par défaut. La CI
+vérifie directement une étape d'apprentissage sans exécutable auxiliaire.

@@ -3,6 +3,8 @@
 #include "twovstworules.hpp"
 #include "patrol_agent.hpp"
 #include "patrol_reference_agent.hpp"
+#include "patrol_training_runtime_agent.hpp"
+#include "patrol_config.hpp"
 
 #include "airspacecomponents.hpp"
 #include "airspacemeta.hpp"
@@ -226,8 +228,8 @@ bool LoadScenario(std::filesystem::path const& path,
                       << error.what() << '\n';
             return false;
         }
-        std::cout << "[PATROL] PPO actor initialized without training. "
-                     "Play runs inference only; train with PPOBlueTrain.\n";
+        std::cout << "[PATROL] PPO actor initialized; "
+                     "Play in PPO.exe starts embedded RLtools training.\n";
     }
     auto& world = registry->ctx().get<ppo::model::sEnvironmentState>();
     world.m_maxNorth = worldNorth;
@@ -242,6 +244,19 @@ bool LoadScenario(std::filesystem::path const& path,
         auto it = entities.find(item.m_name);
         if (it != entities.end())
             it->second->Init();
+    }
+    if (patrolOnly)
+    {
+        // Must precede production controllers in the ECS update order:
+        // publish each learned actor before the guard's next inference.
+        auto const checkpoint = std::filesystem::path{RESOURCE_PATH}.parent_path()
+            / "model" / "BluePatrol" / "prod" / "blue_patrol_v2.txt";
+        auto learner = environment.CreateAgent<defenders::PatrolTrainingRuntimeAgent>(
+            defenders::LoadPatrolParameters(path.parent_path().parent_path()),
+            bluePolicy, checkpoint);
+        if (!learner)
+            return false;
+        agents.push_back(std::move(learner));
     }
     if (patrolOnly)
     {
