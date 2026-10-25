@@ -1,184 +1,93 @@
-# PPO défenseurs bleus — première étape sans rouges
+# PPO Patrol — défenseurs (25 octobre 2026)
 
-Date : 2026-10-25. Contrat source : spécification bibliothèque `2026-10-25_11h44_PPO_2v2_Defenseurs_Specification_Initiale.md`.
+## Utilisation
 
-## Implémenté
+Dans l'exécutable principal `PPO.exe`, sélectionner `BLUE PATROL PPO`
+puis `Play`. Il n'est pas nécessaire de lancer un programme différent.
+`Pause` suspend la boucle existante d'`Environment`, donc aussi les mises
+à jour d'apprentissage. `Stop` arrête cette boucle. Aucun thread supplémentaire
+n'est créé pour RLtools.
 
-- RLtools CPU (FetchContent déjà verrouillé), PPO clip, GAE, politique gaussienne Actor commune, Critic local, C++17 ; exécutable dédié `PPOBlueTrain`.
-- Contrat `BLUE_PATROL_PPO_V2` : **124 entrées / 2 sorties** ; 7 propres, 61 LiDAR, 2×13 slots rouges masqués, 2×9 amis/objectif, 10 patrouille, 2 globales. Les sorties sont rotation et accélération SNA normalisées.
-- Patrouille de référence en râteau (deux pistes latéralement décalées, phases décalées, demi-tours en demi-cercle) et reward d'équipe de progression, tenue de trajectoire, cap, vitesse, sécurité et timeout.
-- La patrouille de référence donne un **objectif cinématique**, jamais une action imposée au défenseur entraîné. Spawns et monde LiDAR n'ont pas été modifiés dans `TwoVsTwo`.
-- Terminaison : débordement du monde ; troncature : 4096 pas ; la configuration sans rouge n'est pas une victoire instantanée.
-- `Core/include/ppo/core/team_episode.hpp` distingue observation acteur, reward individuel/collectif, `terminated`, `truncated` et état global pour l'évolution MAPPO, sans dépendance de simulation.
+Le scénario `resources/settings/Scenarios/BluePatrol.json` contient
+`"patrolControllers": ["ppo", "reference"]`. Les bleus n'ont **pas de cible
+par défaut**. Le premier mobile est un `PatrolTrainingAgent : IAgent`
+et le second un `PatrolReferenceAgent : IAgent`, qui suit la trajectoire
+cinématique via les commandes SNA. Les rouges, `RLMission` et leurs JSON
+restent inchangés. Un scénario sans aucun rôle `ppo` est refusé.
 
-## Important : frontière de la première étape
+## Cycle de vie et architecture
 
-Ce premier curriculum RLtools est **autonome/headless**. À chaque épisode un des deux rôles est entraîné et l'autre suit la référence de patrouille. Les épisodes alternent les rôles et partagent l'Actor. **Ce n'est pas encore un apprentissage couplé de deux PPO agissant simultanément**, ni du MAPPO.
+`ppo::core::StepAgents` (appelé par `Environment`) exécute :
 
-L'Actor RLtools dispose dès cette première étape de deux branches d'attention masquée entraînables, en amont du MLP de décision. Les poids de la branche rouge ne s'entraînent pas tant qu'aucune piste rouge n'est présente. La fonction d'observation intègre la frontière rectangulaire et les 61 directions du LiDAR, mais ne prend pas encore en charge d'autres obstacles/capteurs ECS. La dynamique d'entraînement transpose le mouvement SNA (mêmes conventions d'action et de pas) : elle n'appelle **pas encore** directement le système d'entités d'Airspace. Une validation de parité est nécessaire avant production.
+1. `ChooseAction()` des deux agents.
+2. Dynamique ECS/SNA et règles de collision.
+3. `SetNewState()` des deux agents.
 
-Les acteurs sont exportés dans le checkpoint `BLUE_PATROL_PPO_V2`. L'inférence côté deux défenseurs existe dans le scénario GUI `blue-patrol` ; l'entraînement véritablement collaboratif n'est **pas encore** inclus. Les modèles `RLMission` et `RLSNA` sont intacts.
+`PatrolTrainingAgent` dérive de `PatrolProdAgent` et délègue
+l'optimisation PPO au composant réutilisable `PatrolLearner` (RLtools).
+Il conserve son état d'optimisation lors des resets d'épisode ECS.
+Toutes les 128 transitions ECS, `SetNewState()` exécute une mise
+à jour PPO ; les poids sont publiés dans `PatrolPolicy` de façon
+séquentielle avant la prochaine action. Le snapshot de **l'agent PPO
+lui-même** porte le nombre d'updates et `m_training`.
 
-## Compilation et exécution
+**Limitation à connaître** : les trajectoires utilisées pour calculer
+les gradients proviennent pour l'instant de l'environnement de rollouts
+RLtools (`patrol_core.hpp`), non des transitions ECS visibles dans
+la fenêtre. La fenêtre présente la politique effectivement mise à jour.
+Ce curriculum entraîne un rôle PPO par épisode RLtools ; l'équipier
+suit la référence, en alternant les rôles avec Actor partagé.
+Ce n'est pas encore MAPPO et ce n'est pas un apprentissage directement
+fondé sur les trajectoires ECS. Une mise à jour PPO est synchrone et peut
+provoquer une pause perceptible dans la fenêtre : ne pas introduire
+un thread implicite pour masquer ce coût.
 
-Configurer normalement le desktop avec `PPO_BUILD_DESKTOP=ON`, puis construire la cible `PPOBlueTrain`. Exécuter `PPOBlueTrain [seed] [checkpoint.txt] [updates]` (nombre de mises à jour facultatif, 300 par défaut). Tests `TwoVsTwoPatrolTests`, `TwoVsTwoAttentionTests`, `TwoVsTwoPPOTrainingSmoke`, `BluePatrolExampleBootstrap` via CTest. Le binaire `PPO.exe` historique est inchangé.
+Le modèle est sauvegardé atomiquement tous les 10 updates et en fin
+de session sous
+`resources/model/BluePatrol/prod/blue_patrol_v2.txt`.
+La signature `BLUE_PATROL_PPO_V2` est conservée pour la compatibilité
+des checkpoints existants. Si aucun checkpoint compatible n'existe,
+l'Actor est initialisé de façon déterministe puis entraîné.
 
-## Points à compléter
+## Observation et contrôle
 
-1. Mutualiser définitivement le noyau de dynamique SNA avec ECS (les limites du monde et du véhicule sont déjà lues depuis les JSON).
-2. Intégrer une paire d'Actors agissant simultanément dans la boucle on-policy ; vérifier la récompense d'équipe sans double comptage, plus l'évaluation des demi-tours.
-3. Évaluer l'inférence RLtools déjà connectée au GUI et la cohérence avec le moteur ECS.
-4. Fournir de vraies pistes rouges aux branches d'attention existantes, puis enrichir la simulation des réactions ; préserver le contrat `RLMission`.
-5. Évoluer vers MAPPO avec Critic centralisé séparé, sans changer l'Actor ou les classes d'entités.
+Contrat 124 entrées, 2 sorties : 7 caractéristiques propres, 61 rayons
+LiDAR, deux pistes rouges (13 caractéristiques chacune, masquées dans
+ce premier scénario), deux pistes amies/objectif (9 chacune),
+10 caractéristiques de patrouille et 2 globales. Deux branches
+d'attention masquées précèdent l'Actor MLP. Les actions sont la vitesse
+de rotation et l'accélération longitudinales normalisées ; la physique
+est appliquée par le système ECS existant.
 
+La patrouille est en râteau : gardes décalés longitudinalement et
+latéralement, demi-tours à des moments distincts. Les observations
+rouges restent masquées tant qu'aucun attaquant n'est présent.
 
-Le test `TwoVsTwoPPOTrainingSmoke` effectue une mise à jour RLtools PPO puis vérifie la sortie du processus ; aucune métrique de convergence n'est revendiquée par ce smoke test.
+## Récompense et terminaison
 
-## Inference dans le scénario GUI sans rouges
+`TeamReward` combine suivi de route, progression, cap, vitesse et
+coût des commandes. Une approche à moins de 250 m entraîne une
+pénalité progressive jusqu'à −0,5 par pas ; une collision à 50 m
+ou moins entraîne −100 et une terminaison. La détection tient
+compte de la séparation minimale pendant tout le pas (collision
+entre deux échantillons). Sortie de monde et états invalides
+terminent également l'épisode. Timeout et troncature restent distincts.
 
-Le scénario additionnel `blue-patrol` charge `Scenarios/BluePatrol.json` sans aucun rouge.
-Après apprentissage, la politique est enregistrée par défaut sous
-`resources/model/BluePatrol/prod/blue_patrol_v2.txt` (non versionné).
-Les deux bleus chargent une **seule instance du même Actor** RLtools et
-choisissent chacun leur action avant le pas physique du monde ECS.
+`PatrolEvaluator` fournit un résultat explicite
+`Success`, `Failure` ou `Truncated` pour deux politiques simultanées.
+Il teste la collision, les zones interdites configurées, les
+limites du monde et la qualité de la patrouille.
 
-Lancer `PPO.exe --example blue-patrol`. Sans modèle, les deux gardes
-sont pilotés par des contrôleurs de référence explicitement identifiés.
-Un checkpoint PPO incompatible est signalé et provoque le même fallback
-de référence, jamais une exécution de poids incompatibles.
+## Build et validation
 
-## Réseau avec attention (v2)
+Le projet reste en C++17. `PPO_BUILD_CORE_TESTS` est OFF par défaut
+en local et explicitement ON en CI. Les programmes autonomes
+`PPOBlueTrain` et `PPOPatrolEvaluate` sont facultatifs :
+`PPO_BUILD_PATROL_TOOLS=ON` (OFF par défaut).
 
-Attention **apprise** native RLtools, initialisée avant la première phase d'entraînement.
-Deux branches paramétriques indépendantes : rouges (13 caractéristiques, 2 pistes,
-dimension latente 8), amis/objectif (9 caractéristiques, 2 pistes, latente 6).
-Chacune utilise un encodeur dense partagé, une requête issue de l'état propre,
-un softmax masqué puis concatène contexte, moyenne et maximum masqués. Les
-gradients sont rétropropagés vers les paramètres de l'encodeur et de la requête
-avec Adam lors des mises à jour PPO. Une branche entièrement masquée retourne
-strictement zéro, sans NaN. En patrouille initiale, seuls les poids de la branche
-amie reçoivent des gradients ; les rouges seront activés à la seconde phase.
-Le MLP d'Actor et le Critic restent locaux ; les observations existantes,
-les deux commandes SNA et le budget de 124 entrées sont inchangés.
-Checkpoint v2 distinct et non compatible avec les premiers poids v1.
-
-## Evaluation déterministe et arrêt des épisodes (complément)
-
-Le pilote RLtools `PatrolTrainingAgent` possède le cycle de vie du learner
-(headless, sans classe ECS); `PatrolProdAgent` reste l'adaptateur ECS d'inférence.
-`PatrolEvaluator` utilise deux prédictions PPO par pas simulé et la même
-dynamique `Advance` pour les deux mobiles. Il ne prétend pas être un
-rollout multi-agent d'entraînement.
-
-Cas d'arrêt : échec sur limite du monde, collision entre défenseurs, zone
-circulaire interdite configurée ou dynamique/action non finie. Après le
-budget de pas, succès seulement si la durée représente suffisamment de
-circuits, que les deux agents tournent effectivement et que la fraction
-de suivi position/cap/vitesse dépasse le seuil ; sinon échec qualité, ou
-troncature si l'horizon est trop court. Les demi-tours individuels
-n'arrêtent pas l'épisode.
-
-La zone interdite est optionnelle dans l'évaluateur headless (rayon
-par défaut 0, donc désactivée). Une évaluation de parité complète avec
-la géométrie ECS et les collisions/destructions RLMission reste nécessaire
-avant validation finale du comportement. Ne pas confondre le score
-d'évaluation avec le signal de retour de PPO.
-
-`PPOPatrolEvaluate [checkpoint.txt] [episodes] [steps]` renvoie 0
-uniquement lorsque tous les scénarios ont un résultat succès. Tests
-`TwoVsTwoPatrolEvaluationTests`.
-
-## Patrouille graphique sans modèle entraîné (correction de démarrage)
-
-La scène `blue-patrol` pilote toujours ses deux gardes dès le premier Play,
-même quand `resources/model/BluePatrol/prod/blue_patrol_v2.txt` est absent.
-Dans ce cas, le programme annonce explicitement que la politique PPO est
-indisponible et utilise deux `PatrolReferenceAgent` déterministes. Chaque
-contrôleur transmet des commandes SNA au moteur ECS, sans positionnement forcé
-à chaque pas. Il s'agit d'une démonstration cinématique, pas d'une preuve
-de convergence PPO.
-
-`Scenarios/BluePatrol.json` choisit le comportement de chaque garde avec
-`twoVsTwo.patrolControllers` (deux chaînes `"ppo"` ou `"reference"`).
-Par défaut dans l'exemple : garde 1 PPO, garde 2 référence ; faute de
-checkpoint valide, les demandes PPO basculent en référence avec indication
-explicite en console. Un checkpoint incompatible déclenche également
-une bascule explicite et journalisée vers la référence ; les poids
-incompatibles ne sont pas exécutés. Quand le mode patrouille est actif,
-les deux gardes sont initialisés sur leur trajectoire à la vitesse de
-croisière même sans checkpoint. Les JSON des attaquants et les agents rouges
-restent inchangés.
-
-Test `TwoVsTwoPatrolTests` : progression simulée des deux contrôleurs,
-demi-tours effectifs, bornes de la zone, et erreur maximale de suivi.
-
-## PPO actif et pénalité de collision (2026-10-25)
-
-Le scénario `BluePatrol.json` conserve `patrolControllers = ["ppo", "reference"]`.
-Il doit toujours avoir au moins un rôle `ppo` : un JSON ne contenant que des
-`reference` est refusé. `Play` reste une **simulation/inférence** et ne lance
-pas de mise à jour PPO. Avec un checkpoint valide, le garde 1 joue cette
-politique et le garde 2 suit la référence physique. Sans checkpoint (ou avec
-un checkpoint incompatible), un acteur PPO RLtools est initialisé avec la
-graine fixe 42 et **marqué `(untrained)` dans l'interface** ; ses poids
-ne sont pas mis à jour par `Play`. Pour apprendre, exécuter `PPOBlueTrain`
-puis redémarrer le scénario pour charger le checkpoint. Ne pas confondre
-initialisation de poids et entraînement.
-
-`TeamReward` intègre désormais une pénalité de proximité continue dès
-250 m (jusqu'à -0.5/step) et une pénalité terminale de -100 lors d'un
-contact entre défenseurs à 50 m ou moins. Les contrôles comparent les
-trajectoires relatives sur **tout le pas de simulation**, pour repérer
-les croisements entre deux échantillons. Le booléen `State.collided`
-est utilisé par `Advance` et `AdvanceBoth`; `terminated` RLtools
-retourne vrai en cas de collision via `State.failed`. Le classement
-`PatrolEvaluator` signale explicitement `PatrolFailure::Collision`.
-Le modèle de poursuite et les agents rouges ne sont pas modifiés.
-
-## Apprentissage dans l'exécutable principal — 25 octobre 2026
-
-Sélectionner `BLUE PATROL PPO` dans le splashscreen de `PPO.exe`, puis
-cliquer sur `Play` démarre **l'entraînement PPO RLtools réel**, dans le
-même processus. Aucun lancement de `PPOBlueTrain.exe` n'est nécessaire.
-`Pause` suspend les nouveaux updates ; `Stop` suspend l'apprentissage.
-La fin du scénario ferme proprement le thread de calcul. Les agents rouges
-et leurs paramètres demeurent inchangés.
-
-`PatrolTrainingRuntimeAgent`, enregistré avant `PatrolProdAgent`,
-utilise un thread CPU pour les calculs PPO headless et publie une copie
-sérialisée immuable de l'acteur à chaque update. Le thread ECS charge
-ensuite ces poids dans l'agent PPO de la patrouille (pas de modification
-concurrente du réseau pendant `Predict`). Le second mobile suit son
-contrôleur de référence. La fenêtre présente une exécution vivante de la
-politique en cours d'apprentissage ; les transitions RLtools utilisées
-pour les gradients sont produites dans son environnement headless.
-
-Les statistiques `Patrol PPO learner (RLtools)` indiquent le nombre
-d'updates et l'état `m_training`. Sauvegarde atomique du checkpoint
-tous les 10 updates et à la fin ; le budget par défaut reste 300 updates.
-Les utilitaires headless `PPOBlueTrain` et `PPOPatrolEvaluate` sont
-optionnels avec `PPO_BUILD_PATROL_TOOLS=ON`, OFF par défaut. La CI
-vérifie directement une étape d'apprentissage sans exécutable auxiliaire.
-
-## Correction structurelle : agent PPO dans la boucle ECS (25 octobre 2026)
-
-L'intégration asynchrone expérimentale a été supprimée : aucun thread ou
-observateur Play/Pause/Stop ajouté à Environment. Le premier défenseur
-est directement un **PatrolTrainingAgent : IAgent** (dérivé de
-PatrolProdAgent) ; le second demeure un **PatrolReferenceAgent : IAgent**.
-L'exécutable reste PPO.exe, sans utilitaire complémentaire par défaut.
-
-Le moteur générique appelle ChooseAction() avant la physique et
-SetNewState() après la physique et les règles de monde. Pendant Play,
-PatrolTrainingAgent conserve son optimiseur RLtools à travers les
-réinitialisations d'épisodes ECS. Toutes les 128 transitions ECS, il effectue
-une mise à jour PPO via PatrolLearner (environnement de rollouts RLtools),
-puis publie les poids dans la politique de l'agent, de manière séquentielle,
-sans concurrence. La simulation graphique évalue donc la politique en cours
-de mise à jour. Le statut m_training et les updates sont exposés directement
-dans le snapshot de ce seul agent.
-
-Aucun nouvel IAgent technique ou mécanisme d'observation d'état n'est
-introduit dans la plateforme. Le coût d'un update PPO ponctuel reste subi
-par la boucle ECS ; si nécessaire, il faudra ensuite planifier ce travail
-en incréments bornés, plutôt qu'introduire implicitement un thread.
+Tests : `TwoVsTwoPatrolTests`, `TwoVsTwoAttentionTests`,
+`TwoVsTwoEmbeddedLearnerSmoke`, `TwoVsTwoPatrolRuntimeSmoke`
+et `TwoVsTwoPatrolEvaluationTests`. Les smoke tests prouvent la
+progression mécanique et l'exécution d'un update PPO, pas la convergence
+du modèle. La compilation CI VS2022 et le comportement graphique
+doivent être validés avant fusion de la PR.
