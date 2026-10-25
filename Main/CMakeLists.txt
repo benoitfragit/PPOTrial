@@ -53,6 +53,11 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     set_tests_properties(TwoVsTwoExampleBootstrap PROPERTIES
         PASS_REGULAR_EXPRESSION "Bootstrapped example: two-vs-two")
 
+    add_test(NAME BluePatrolExampleBootstrap
+        COMMAND $<TARGET_FILE:${PROJECT_NAME}> --example blue-patrol --check-example)
+    set_tests_properties(BluePatrolExampleBootstrap PROPERTIES
+        PASS_REGULAR_EXPRESSION "Bootstrapped example: blue-patrol")
+
     add_test(NAME UnknownExampleRejected
         COMMAND $<TARGET_FILE:${PROJECT_NAME}> --example unknown-example)
     set_tests_properties(UnknownExampleRejected PROPERTIES WILL_FAIL TRUE)
