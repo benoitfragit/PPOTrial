@@ -142,8 +142,9 @@ ppo::model::sAgentStateSnaphot PatrolProdAgent::GetSnapshot() const noexcept
 }
 } // namespace ppo::examples::twovstwo::defenders
 
-// RLtools CPU code must be compiled once in the runtime library (MSVC LNK2005).
+// Only this translation unit instantiates the RLtools CPU backend for the GUI.
 namespace ppo::examples::twovstwo::defenders {
+
 PatrolTrainingAgent::PatrolTrainingAgent(
     ppo::model::BaseEntity& own, ppo::model::BaseEntity& teammate,
     std::size_t role, std::shared_ptr<PatrolPolicy> policy,
@@ -156,18 +157,55 @@ PatrolTrainingAgent::PatrolTrainingAgent(
     if (!Valid(parameters_) || !policy_ || checkpoint_.empty() || maxUpdates_ == 0)
         throw std::invalid_argument("Invalid patrol PPO training agent configuration");
 }
+
 PatrolTrainingAgent::~PatrolTrainingAgent()
 {
     Save();
 }
+
 void PatrolTrainingAgent::Init()
 {
-    // A world episode reset only resets car state; never the PPO optimizer.
+    // Reset physical episode state only. Keep optimizer and unfinished rollout.
     PatrolProdAgent::Init();
 }
+
+void PatrolTrainingAgent::ChooseAction()
+{
+    if (finished_)
+    {
+        PatrolProdAgent::ChooseAction();
+        return;
+    }
+    if (done_ || !own_.has<ppo::model::sEntityState, ppo::model::sSNAControlState>())
+        return;
+    auto const parameters = ReadParameters();
+    if (!Valid(parameters))
+        return;
+
+    try
+    {
+        if (!learner_)
+            learner_ = std::make_unique<PatrolLearner>(parameters_, seed_);
+
+        beforeStep_ = ReadState(parameters);
+        hasBeforeStep_ = true;
+        // This is the actual action that the ECS/SNA world will execute.
+        lastAction_ = learner_->ChooseAction(Observe(parameters, beforeStep_));
+        auto [control] = own_.get<ppo::model::sSNAControlState>();
+        control.m_rotSpeedCmd = Clamp(lastAction_[0], -1.F, 1.F);
+        control.m_accCmd = Clamp(lastAction_[1], -1.F, 1.F);
+    }
+    catch (std::exception const& e)
+    {
+        std::cerr << "[PATROL] ECS PPO action failed: " << e.what() << '\n';
+        finished_ = true;
+        PatrolProdAgent::ChooseAction();
+    }
+}
+
 void PatrolTrainingAgent::Save() noexcept
 {
-    if (!learner_ || updates_ == 0)
+    if (!learner_ || updates_ == 0U)
         return;
     try
     {
@@ -180,56 +218,68 @@ void PatrolTrainingAgent::Save() noexcept
         std::cerr << "[PATROL] Checkpoint save failed: " << e.what() << '\n';
     }
 }
+
 bool PatrolTrainingAgent::SetNewState()
 {
-    // Called by Environment after the two cars' physics and world rules.
-    bool const worldReset = PatrolProdAgent::SetNewState();
-    if (finished_)
-        return worldReset;
-
-    ++ticks_;
-    // RLtools performs one complete PPO optimizer update per Step.
-    // Amortize this cost over simulation steps to avoid running an optimizer
-    // on every rendered frame; all work remains on the existing ECS thread.
-    if (ticks_ % 128U != 0U)
-        return worldReset;
+    // The generic Environment scheduler has already applied ECS physics and
+    // world rules for both blue cars. Never advance a duplicate training world.
+    bool const resetRequested = PatrolProdAgent::SetNewState();
+    if (finished_ || !learner_ || !learner_->HasPendingAction())
+        return resetRequested;
 
     try
     {
-        if (!learner_)
-            learner_ = std::make_unique<PatrolLearner>(parameters_, seed_);
-        bool const done = learner_->Step();
-        updates_ = learner_->StepCount();
-        if (updates_ > 0)
+        auto const parameters = ReadParameters();
+        if (!Valid(parameters) || !hasBeforeStep_)
+            throw std::runtime_error("Invalid ECS feedback state");
+
+        State after = ReadState(parameters);
+        after.collided = GuardsCollided(parameters, beforeStep_, after);
+        after.failed = after.collided;
+        for (auto const& car : after.guards)
+            after.failed |= !car.available
+                || !std::isfinite(car.north) || !std::isfinite(car.east)
+                || !std::isfinite(car.heading) || !std::isfinite(car.speed)
+                || std::abs(car.north) >= parameters.halfNorth
+                || std::abs(car.east) >= parameters.halfEast;
+
+        float const reward = TeamReward(parameters, beforeStep_, lastAction_, after);
+        bool const truncated = resetRequested && !after.failed;
+        bool const updated = learner_->Observe(Observe(parameters, after), reward,
+                                               after.failed, truncated);
+        if (updated)
         {
+            updates_ = learner_->StepCount();
             std::ostringstream serialized;
             learner_->WithActor([&](auto const& actor) {
                 WritePatrolPolicy(serialized, actor);
-                if (updates_ % 10U == 0U || done || updates_ >= maxUpdates_)
+                if (updates_ % 10U == 0U || updates_ >= maxUpdates_)
                     SavePatrolPolicy(checkpoint_, actor);
             });
             policy_->ReloadFromText(serialized.str());
+            finished_ = updates_ >= maxUpdates_;
+            if (finished_)
+                std::cout << "[PATROL] ECS PPO completed after " << updates_
+                          << " updates\n";
         }
-        finished_ = done || updates_ >= maxUpdates_;
-        if (finished_)
-            std::cout << "[PATROL] PPO training completed after "
-                      << updates_ << " updates\n";
     }
     catch (std::exception const& e)
     {
-        std::cerr << "[PATROL] PPO training failed: " << e.what() << '\n';
+        std::cerr << "[PATROL] ECS PPO feedback failed: " << e.what() << '\n';
         finished_ = true;
     }
-    return worldReset;
+    return resetRequested;
 }
+
 ppo::model::sAgentStateSnaphot PatrolTrainingAgent::GetSnapshot() const noexcept
 {
-    auto snap = PatrolProdAgent::GetSnapshot();
-    snap.m_name = "Patrol PPO (training)";
-    snap.m_common.m_step = static_cast<long long>(updates_);
-    snap.m_common.m_maxStep = static_cast<long long>(maxUpdates_);
-    snap.m_common.m_training = !finished_;
-    snap.m_common.m_done = finished_;
-    return snap;
+    auto snapshot = PatrolProdAgent::GetSnapshot();
+    snapshot.m_name = "Patrol PPO (ECS training)";
+    snapshot.m_common.m_step = static_cast<long long>(updates_);
+    snapshot.m_common.m_maxStep = static_cast<long long>(maxUpdates_);
+    snapshot.m_common.m_training = !finished_;
+    snapshot.m_common.m_done = finished_;
+    return snapshot;
 }
+
 } // namespace ppo::examples::twovstwo::defenders
