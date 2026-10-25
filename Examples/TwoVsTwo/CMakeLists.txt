@@ -27,5 +27,13 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     target_compile_features(TwoVsTwoPatrolRuntimeSmoke PRIVATE cxx_std_17)
     target_link_libraries(TwoVsTwoPatrolRuntimeSmoke PRIVATE
         PPOTwoVsTwoExample GenericSerializer GenericEnv)
+    # The smoke executable links the legacy LibTorch desktop libraries;
+    # provide their runtime DLLs alongside the test binary on Windows.
+    if (WIN32)
+        add_custom_command(TARGET TwoVsTwoPatrolRuntimeSmoke POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_BINARY_DIR}/libtorch/lib"
+                "$<TARGET_FILE_DIR:TwoVsTwoPatrolRuntimeSmoke>")
+    endif()
     add_test(NAME TwoVsTwoPatrolRuntimeSmoke COMMAND TwoVsTwoPatrolRuntimeSmoke)
 endif()
