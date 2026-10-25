@@ -6,8 +6,8 @@ add_library(PPOTwoVsTwoExample STATIC
     data/initializer.hpp
     src/initializer.cpp
     data/spawn.hpp
-    data/worldrules.hpp
-    src/worldrules.cpp)
+    data/twovstworules.hpp
+    src/twovstworules.cpp)
 target_compile_features(PPOTwoVsTwoExample PUBLIC cxx_std_17)
 target_include_directories(PPOTwoVsTwoExample PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/data")
