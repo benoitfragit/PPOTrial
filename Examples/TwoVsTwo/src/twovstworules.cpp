@@ -1,6 +1,7 @@
 #include "twovstworules.hpp"
 #include "airspacecomponents.hpp"
 #include "baseentity.hpp"
+#include "entity.hpp"
 #include "components.hpp"
 #include "restrictedzonelidar.hpp"
 #include "sharedworldcomponents.hpp"
