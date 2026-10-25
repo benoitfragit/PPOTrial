@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <limits>
 #include <random>
+#include <type_traits>
 
 namespace ppo::examples::twovstwo::defenders {
 
@@ -75,10 +76,10 @@ inline float PositiveModulo(float value, float period) noexcept
 
 struct Mobile
 {
-    float north = 0.F, east = 0.F;
-    float heading = 0.F, speed = 0.F;
-    float turnRate = 0.F;
-    bool available = true;
+    float north, east;
+    float heading, speed;
+    float turnRate;
+    bool available;
 };
 
 struct Reference
@@ -177,13 +178,16 @@ inline Mobile Advance(Parameters const& p, Mobile current, Action const& action)
 
 struct State
 {
-    std::array<Mobile, 2> guards{};
-    std::size_t controlledRole = 0;
-    int side = 1;
-    float arclength = 0.F;
-    std::size_t step = 0;
-    bool failed = false;
+    std::array<Mobile, 2> guards;
+    std::size_t controlledRole;
+    int side;
+    float arclength;
+    std::size_t step;
+    bool failed;
 };
+
+static_assert(std::is_trivially_copyable_v<State>,
+    "RLtools stores patrol state in a matrix of trivially copyable values");
 
 // Model one controlled defender and one reference-following teammate.
 // Both roles share the same actor weights across RLtools training episodes.

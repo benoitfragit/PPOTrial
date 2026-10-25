@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <string>
 
@@ -53,10 +54,55 @@ void SavePolicy(std::filesystem::path const& path, Actor const& actor)
     if (!out)
         throw std::runtime_error("Failed to serialize blue PPO policy");
     out.close();
-    // Rename is atomic on the same filesystem when the destination is absent.
-    // Avoid removing an older checkpoint unless the new data was written.
-    std::filesystem::remove(path);
-    std::filesystem::rename(temp, path);
+    // Replace safely on Windows as well: retain the prior checkpoint until the
+    // new file is in place, restoring it if the final rename fails.
+    auto const backup = path.string() + ".bak";
+    std::filesystem::remove(backup);
+    bool const existing = std::filesystem::exists(path);
+    if (existing)
+        std::filesystem::rename(path, backup);
+    try
+    {
+        std::filesystem::rename(temp, path);
+    }
+    catch (...)
+    {
+        if (existing)
+            std::filesystem::rename(backup, path);
+        throw;
+    }
+    if (existing)
+        std::filesystem::remove(backup);
+}
+
+
+blue::Parameters ReadParameters()
+{
+    namespace fs = std::filesystem;
+    fs::path const settings{PPO_BLUE_SETTINGS_DIR};
+    auto read = [](fs::path const& path) {
+        std::ifstream file{path};
+        if (!file)
+            throw std::runtime_error("Cannot open configuration: " + path.string());
+        nlohmann::json data;
+        file >> data;
+        if (data.at("formatVersion").get<int>() != 2)
+            throw std::runtime_error("Unsupported configuration version: " + path.string());
+        return data;
+    };
+    auto const world = read(settings / "Environment.json").at("environment");
+    auto const flight = read(settings / "Platforms/Mobile/defender_car.json")
+        .at("parameters").at("FlightModel");
+    blue::Parameters p{};
+    p.halfNorth = world.at("maxNorth").get<float>() * 0.5F;
+    p.halfEast = world.at("maxEast").get<float>() * 0.5F;
+    p.dt = world.at("timeStep").get<float>();
+    p.maxSpeed = flight.at("MaxSpeed").get<float>();
+    p.maxAcceleration = flight.at("MaxAcceleration").get<float>();
+    p.maxRotationRate = flight.at("MaxRotAcceleration").get<float>();
+    if (!blue::Valid(p))
+        throw std::invalid_argument("Invalid Blue Patrol world/vehicle configuration");
+    return p;
 }
 
 unsigned ParseUnsigned(char const* input)
@@ -85,7 +131,7 @@ int main(int argc, char** argv)
             ? std::filesystem::path{argv[2]}
             : std::filesystem::path{"blue_patrol_v1.txt"};
 
-        blue::Parameters const params{};
+        blue::Parameters const params = ReadParameters();
         if (!blue::Valid(params))
             throw std::invalid_argument("Invalid patrol environment parameters");
 
