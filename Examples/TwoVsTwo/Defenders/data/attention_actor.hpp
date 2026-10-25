@@ -211,23 +211,11 @@ void init_weights(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<S
     blue_attention_detail::initialize(d,a.red,rng);
     blue_attention_detail::initialize(d,a.friendlies,rng);
 }
-template<typename DEVICE,typename SPEC,typename OPT>
-void _reset_optimizer_state(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<SPEC>& a,OPT& opt){
-    using B=typename ppo::examples::twovstwo::defenders::AttentionActor<SPEC>::Base;
-    rl_tools::_reset_optimizer_state(d,static_cast<B&>(a),opt);
-    blue_attention_detail::reset(d,a.red,opt);blue_attention_detail::reset(d,a.friendlies,opt);
-}
 template<typename DEVICE,typename SPEC>
 void zero_gradient(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<SPEC>& a){
     using B=typename ppo::examples::twovstwo::defenders::AttentionActor<SPEC>::Base;
     rl_tools::zero_gradient(d,static_cast<B&>(a));
     blue_attention_detail::zero(d,a.red);blue_attention_detail::zero(d,a.friendlies);
-}
-template<typename DEVICE,typename SPEC,typename OPT>
-void update(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<SPEC>& a,OPT& opt){
-    using B=typename ppo::examples::twovstwo::defenders::AttentionActor<SPEC>::Base;
-    rl_tools::update(d,static_cast<B&>(a),opt);
-    blue_attention_detail::update(d,a.red,opt);blue_attention_detail::update(d,a.friendlies,opt);
 }
 template<typename DEVICE,typename SPEC,typename IN_SPEC,typename OUT_SPEC,typename BUF>
 void evaluate(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<SPEC> const& a,
@@ -271,18 +259,24 @@ void backward(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<SPEC>
 }
 } // namespace rl_tools
 
-// Adam's generic step/reset templates are defined upstream before this actor.
-// Put the exact-type overloads in the actor's associated namespace so C++
-// argument-dependent lookup reaches the attention parameters as well as MLP.
+// Upstream Adam uses dependent unqualified calls. These overloads live only in
+// the actor's associated namespace (ADL). Providing duplicate overloads under
+// rl_tools causes MSVC C2668 ambiguity during PPO optimizer instantiation.
 namespace ppo::examples::twovstwo::defenders {
 template<typename DEVICE,typename SPEC,typename OPT>
-void update(DEVICE& d,AttentionActor<SPEC>& actor,OPT& optimizer)
+void update(DEVICE& device,AttentionActor<SPEC>& actor,OPT& optimizer)
 {
-    rl_tools::update(d,actor,optimizer);
+    using Base = typename AttentionActor<SPEC>::Base;
+    rl_tools::update(device, static_cast<Base&>(actor), optimizer);
+    rl_tools::blue_attention_detail::update(device, actor.red, optimizer);
+    rl_tools::blue_attention_detail::update(device, actor.friendlies, optimizer);
 }
 template<typename DEVICE,typename SPEC,typename OPT>
-void _reset_optimizer_state(DEVICE& d,AttentionActor<SPEC>& actor,OPT& optimizer)
+void _reset_optimizer_state(DEVICE& device,AttentionActor<SPEC>& actor,OPT& optimizer)
 {
-    rl_tools::_reset_optimizer_state(d,actor,optimizer);
+    using Base = typename AttentionActor<SPEC>::Base;
+    rl_tools::_reset_optimizer_state(device, static_cast<Base&>(actor), optimizer);
+    rl_tools::blue_attention_detail::reset(device, actor.red, optimizer);
+    rl_tools::blue_attention_detail::reset(device, actor.friendlies, optimizer);
 }
 } // namespace ppo::examples::twovstwo::defenders
