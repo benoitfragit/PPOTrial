@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <string>
@@ -152,36 +153,36 @@ int main(int argc, char** argv)
             throw std::invalid_argument("Invalid patrol environment parameters");
 
         blue::Device device;
-        blue::TrainingState training{};
-        for (auto& env : training.envs)
+        std::unique_ptr<blue::TrainingState> training{new blue::TrainingState};
+        for (auto& env : training->envs)
             env.parameters = params;
-        rlt::malloc(device, training);
-        rlt::init(device, training, seed);
-        training.actor_optimizer.parameters.alpha = 3.e-4F;
-        training.critic_optimizer.parameters.alpha = 3.e-4F;
-        while (training.step < updates)
+        rlt::malloc(device, *training);
+        rlt::init(device, *training, seed);
+        training->actor_optimizer.parameters.alpha = 3.e-4F;
+        training->critic_optimizer.parameters.alpha = 3.e-4F;
+        while (training->step < updates)
         {
-            if (rlt::step(device, training))
+            if (rlt::step(device, *training))
                 break;
-            if (training.step % 10U == 0U)
-                std::cout << "PPO update " << training.step
+            if (training->step % 10U == 0U)
+                std::cout << "PPO update " << training->step
                           << " / " << updates << '\n';
         }
-        SavePolicy(output, training.ppo.actor);
+        SavePolicy(output, training->ppo.actor);
         std::cout << "Saved actor: " << output.string() << '\n';
         // RLtools' pinned core release has a typo in its aggregate free(State)
         // overload. Free exactly the allocations made by malloc(State).
-        rlt::free(device, training.ppo);
-        rlt::free(device, training.ppo_buffers);
-        rlt::free(device, training.on_policy_runner_dataset);
-        rlt::free(device, training.on_policy_runner);
-        rlt::free(device, training.actor_eval_buffers);
-        rlt::free(device, training.actor_buffers);
-        rlt::free(device, training.critic_buffers);
-        rlt::free(device, training.critic_buffers_gae);
-        rlt::free(device, training.observation_normalizer);
-        rlt::free(device, training.observations_mean);
-        rlt::free(device, training.observations_std);
+        rlt::free(device, training->ppo);
+        rlt::free(device, training->ppo_buffers);
+        rlt::free(device, training->on_policy_runner_dataset);
+        rlt::free(device, training->on_policy_runner);
+        rlt::free(device, training->actor_eval_buffers);
+        rlt::free(device, training->actor_buffers);
+        rlt::free(device, training->critic_buffers);
+        rlt::free(device, training->critic_buffers_gae);
+        rlt::free(device, training->observation_normalizer);
+        rlt::free(device, training->observations_mean);
+        rlt::free(device, training->observations_std);
         // BluePatrol has no dynamically allocated resources.
         return 0;
     }
