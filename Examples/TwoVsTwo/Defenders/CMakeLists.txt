@@ -15,4 +15,7 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_executable(TwoVsTwoPatrolTests tests/patrol_tests.cpp)
     target_link_libraries(TwoVsTwoPatrolTests PRIVATE TwoVsTwoDefenderBackend)
     add_test(NAME TwoVsTwoPatrolTests COMMAND TwoVsTwoPatrolTests)
+    add_test(NAME TwoVsTwoPPOTrainingSmoke
+        COMMAND $<TARGET_FILE:PPOBlueTrain> 7
+                "${CMAKE_CURRENT_BINARY_DIR}/blue_ppo_smoke.txt" 1)
 endif()

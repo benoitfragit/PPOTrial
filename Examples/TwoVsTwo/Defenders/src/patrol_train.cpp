@@ -121,15 +121,20 @@ int main(int argc, char** argv)
     try
     {
         // Optional seed and output path. No dependency on LibTorch or GPU.
-        if (argc > 3)
+        if (argc > 4)
         {
-            std::cerr << "Usage: PPOBlueTrain [seed] [checkpoint.txt]\n";
+            std::cerr << "Usage: PPOBlueTrain [seed] [checkpoint.txt] [updates]\n";
             return 2;
         }
         unsigned const seed = argc >= 2 ? ParseUnsigned(argv[1]) : 1U;
         std::filesystem::path const output = argc >= 3
             ? std::filesystem::path{argv[2]}
             : std::filesystem::path{"blue_patrol_v1.txt"};
+
+        unsigned const updates = argc >= 4 ? ParseUnsigned(argv[3]) :
+            static_cast<unsigned>(blue::TrainingParameters::STEP_LIMIT);
+        if (updates == 0U)
+            throw std::invalid_argument("PPO update count must be positive");
 
         blue::Parameters const params = ReadParameters();
         if (!blue::Valid(params))
@@ -143,11 +148,13 @@ int main(int argc, char** argv)
         rlt::init(device, training, seed);
         training.actor_optimizer.parameters.alpha = 3.e-4F;
         training.critic_optimizer.parameters.alpha = 3.e-4F;
-        while (!rlt::step(device, training))
+        while (training.step < updates)
         {
+            if (rlt::step(device, training))
+                break;
             if (training.step % 10U == 0U)
                 std::cout << "PPO update " << training.step
-                          << " / " << blue::TrainingParameters::STEP_LIMIT << '\n';
+                          << " / " << updates << '\n';
         }
         SavePolicy(output, training.ppo.actor);
         std::cout << "Saved actor: " << output.string() << '\n';
