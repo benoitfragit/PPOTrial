@@ -131,9 +131,9 @@ struct TrainingParameters
     : rlt::rl::algorithms::ppo::loop::core::Parameters<float, Index, Environment>
 {
     using PPO_PARAMETERS = PPOParameters;
-    static constexpr Index N_ENVIRONMENTS = 16;
-    static constexpr Index ON_POLICY_RUNNER_STEPS_PER_ENV = 256;
-    static constexpr Index BATCH_SIZE = 256;
+    static constexpr Index N_ENVIRONMENTS = 1;
+    static constexpr Index ON_POLICY_RUNNER_STEPS_PER_ENV = 128;
+    static constexpr Index BATCH_SIZE = 128;
     static constexpr Index ACTOR_HIDDEN_DIM = 128;
     static constexpr Index CRITIC_HIDDEN_DIM = 128;
     static constexpr Index ACTOR_NUM_LAYERS = 3;
