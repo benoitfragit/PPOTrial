@@ -243,15 +243,6 @@ public:
     virtual sAgentStateSnaphot GetSnapshot(void) const noexcept = 0;
 };
 
-// Optional playback notification. Legacy agents need not implement it.
-enum class PlaybackState : std::uint8_t { Running, Paused, Stopped };
-class IPlaybackObserver
-{
-public:
-    virtual ~IPlaybackObserver() = default;
-    virtual void OnPlaybackState(PlaybackState state) noexcept = 0;
-};
-
 /**
 * @brief Interface for asynchronous evaluator backends.
 */

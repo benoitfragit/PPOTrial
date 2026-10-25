@@ -8,7 +8,7 @@ target_link_libraries(TwoVsTwoDefenderBackend INTERFACE RLtools::Core GenericRLC
 option(PPO_BUILD_PATROL_TOOLS "Build auxiliary patrol CLI executables" OFF)
 if (PPO_BUILD_PATROL_TOOLS)
     # Separate CPU learner. PPO.exe remains the historical desktop application.
-    add_executable(PPOBlueTrain src/patrol_train.cpp data/patrol_training_agent.hpp data/patrol_config.hpp data/patrol_core.hpp data/patrol_rltools.hpp data/attention_actor.hpp)
+    add_executable(PPOBlueTrain src/patrol_train.cpp data/patrol_learner.hpp data/patrol_config.hpp data/patrol_core.hpp data/patrol_rltools.hpp data/attention_actor.hpp)
     target_link_libraries(PPOBlueTrain PRIVATE TwoVsTwoDefenderBackend nlohmann_json::nlohmann_json)
     target_compile_definitions(PPOBlueTrain PRIVATE
         PPO_BLUE_SETTINGS_DIR=\"${CMAKE_SOURCE_DIR}/resources/settings\")
@@ -36,13 +36,14 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     endif()
 endif()
 
-# The desktop uses this inference-only actor, independently of the trainer.
+# One PPO training IAgent, one reference IAgent, both called by Environment.
 add_library(TwoVsTwoPatrolRuntime STATIC
     data/patrol_agent.hpp data/patrol_policy.hpp data/attention_actor.hpp
     data/patrol_reference_agent.hpp data/patrol_reference_controller.hpp
+    data/patrol_training_ecs_agent.hpp data/patrol_learner.hpp
+    data/patrol_checkpoint.hpp
     src/patrol_agent.cpp src/patrol_reference_agent.cpp
-    data/patrol_checkpoint.hpp data/patrol_training_runtime_agent.hpp
-    src/patrol_training_runtime_agent.cpp)
+    src/patrol_training_ecs_agent.cpp)
 target_compile_features(TwoVsTwoPatrolRuntime PUBLIC cxx_std_17)
 target_include_directories(TwoVsTwoPatrolRuntime PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../data")
