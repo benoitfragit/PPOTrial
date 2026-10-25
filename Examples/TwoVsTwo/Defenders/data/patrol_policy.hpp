@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <memory>
@@ -71,6 +72,15 @@ public:
     PatrolPolicy& operator=(PatrolPolicy const&) = delete;
     ~PatrolPolicy() { if (ready_) Free(); }
 
+    // The environment thread alone owns inference and safely replaces its
+    // weights from an immutable serialized snapshot of the learner.
+    void ReloadFromText(std::string const& serialized)
+    {
+        std::istringstream in{serialized};
+        Load(in);
+        trained_ = true;
+    }
+
     Action Predict(Observation const& observation)
     {
         for (Index i = 0; i < ObservationLayout::Size; ++i)
@@ -126,6 +136,11 @@ private:
         std::ifstream stream{path};
         if (!stream)
             throw std::runtime_error("Cannot open Blue PPO checkpoint: " + path.string());
+        Load(stream);
+    }
+
+    void Load(std::istream& stream)
+    {
         std::string magic;
         unsigned version = 0U;
         unsigned input = 0U, output = 0U, hidden = 0U, layers = 0U;
