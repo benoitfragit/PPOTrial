@@ -50,16 +50,19 @@ int main(int argc, char** argv)
 
         blue::Parameters const params = blue::LoadPatrolParameters(
             std::filesystem::path{PPO_BLUE_SETTINGS_DIR});
+        blue::PatrolTrainingSettings const settings =
+            blue::LoadPatrolTrainingSettings(
+                std::filesystem::path{PPO_BLUE_SETTINGS_DIR});
         if (!blue::Valid(params))
             throw std::invalid_argument("Invalid patrol environment parameters");
 
-        blue::PatrolLearner training{params, seed};
+        blue::PatrolLearner training{params, seed, settings.rolloutSteps};
         while (training.StepCount() < updates)
         {
             if (training.Step())
                 break;
             if (training.StepCount() % 10U == 0U)
-                std::cout << "PPO update " << training.StepCount()
+                std::cout << "MAPPO update " << training.StepCount()
                           << " / " << updates << '\n';
         }
         training.WithActor([&](auto const& actor) { blue::SavePatrolPolicy(output, actor); });
@@ -68,7 +71,7 @@ int main(int argc, char** argv)
     }
     catch (std::exception const& e)
     {
-        std::cerr << "Blue PPO training failed: " << e.what() << '\n';
+        std::cerr << "Blue MAPPO training failed: " << e.what() << '\n';
         return 1;
     }
 }

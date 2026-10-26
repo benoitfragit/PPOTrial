@@ -10,10 +10,13 @@ resources/settings/
 ├── Environment.json              monde de simulation principal
 ├── Renderer.json                 affichage et caméra
 ├── Training/
+│   ├── BluePatrol.json           MAPPO RLTools des deux défenseurs
 │   ├── RLMission.json            PPO, récompenses et version du modèle
 │   └── RLSNA.json
 ├── Scenarios/
+│   ├── BluePatrol.json           curriculum de patrouille sans rouge
 │   ├── Playground.json           composition du monde principal
+│   ├── TwoVsTwo.json             défense MAPPO face à RLMission
 │   └── Evaluation/
 │       ├── RLMission.json        composition et limites des tests
 │       └── RLSNA.json
@@ -33,7 +36,8 @@ Aucun doublon d'ancienne configuration n'est conservé, y compris parmi les fixt
 
 1. **Scenarios/Playground.json** : qui est dans le monde, quelle équipe, quelle cible et quel agent pilote chaque entité.
 2. **AgentProfiles.json** : quel agent C++ est associé à chaque profil logique et à chaque mode.
-3. **Training/RLMission.json**, ou **Training/RLSNA.json** : réglages PPO et pondération des récompenses.
+3. **Training/RLMission.json**, **Training/RLSNA.json** ou
+   **Training/BluePatrol.json** : réglages PPO et pondération des récompenses.
 
 L'évaluation est indépendante : sa composition se trouve dans **Scenarios/Evaluation/**, ses scénarios de référence dans **Evaluation/Cases/**.
 
@@ -125,6 +129,101 @@ Le convertisseur typé de **Serialization/training_settings.cpp** reconstruit le
 
 **checkpointEvery** mesure les mises à jour PPO entre deux demandes d'évaluation ; **rolloutSteps** mesure les pas d'apprentissage par rollout. Ils ne représentent ni des secondes, ni le nombre de cas d'évaluation. **modelVersion** est un état évoluant avec l'entraînement.
 
+### Patrouille bleue MAPPO/RLTools
+
+`Training/BluePatrol.json` possède un contrat volontairement plus petit que
+les profils LibTorch historiques :
+
+~~~json
+{
+  "formatVersion": 2,
+  "training": {
+    "rolloutSteps": 2048,
+    "maxUpdates": 300,
+    "checkpointEvery": 10,
+    "seed": 42
+  },
+  "evaluation": {
+    "episodes": 8,
+    "maxSteps": 4096,
+    "seed": 4242,
+    "minimumTrackingFraction": 0.8
+  },
+  "rewards": {
+    "clamp": 100.0,
+    "weights": {
+      "Patrol tracking": 1.0,
+      "Formation safety": 1.0,
+      "Control effort": 1.0,
+      "Zone protection": 1.0,
+      "Interception": 1.0,
+      "Mission outcome": 1.0,
+      "Timeout": 1.0
+    }
+  }
+}
+~~~
+
+Ici, `rolloutSteps` compte les pas ECS de l'équipe. Chaque pas fournit deux
+transitions au buffer, une par défenseur. Les valeurs applicatives proposées
+sont 512, 1024, 2048 et 4096 ; 128 reste la taille interne d'un mini-batch PPO.
+Les modifications faites dans l'IHM s'appliquent à la session en cours. Pour
+un nouveau démarrage reproductible, modifier le JSON lorsque l'application est
+arrêtée.
+
+Les coefficients s'appliquent à des canaux conditionnés par la mission. Sans
+menace, `Patrol tracking` évalue les deux bleus. Avec une menace, le bleu le plus
+proche intercepte et seul son équipier reste évalué sur la patrouille ; avec
+deux menaces, les deux bleus sont affectés un-à-un et ce canal devient nul.
+`Zone protection` contient alors le rapprochement dense vers les menaces et
+leur éloignement de l'objectif, ainsi qu'un signal de spécialisation qui pousse
+chaque voiture vers sa propre affectation. `Formation safety` combine la marge
+anticollision et, sans menace, le respect de la pose leader–suiveur. `Timeout`
+vaut -15 si une menace active ou encore planifiée reste irrésolue à l'horizon ;
+une patrouille sans menace n'est pas punie pour avoir atteint sa durée normale.
+
+`checkpointEvery` lance réellement l'évaluateur intégré après le nombre de
+mises à jour indiqué. L'acteur agit alors de façon déterministe pendant
+`evaluation.episodes` cas de `evaluation.maxSteps` pas au maximum. En 2v2, ces
+cas conservent les rouges RLMission de production et alternent 2v2/2v1, côtés
+et phases. Le score et sa progression sont visibles dans l'IHM ; seul un
+candidat meilleur remplace le checkpoint de production.
+
+Le dossier `resources/model/BluePatrol/latest/` reçoit deux fichiers après la
+première mise à jour : l'acteur v4 destiné à l'inférence et
+`blue_patrol_training_v1.txt` destiné à la reprise. Ce second fichier conserve
+le critique, les états Adam, le compteur de mises à jour et le RNG. Les données
+du rollout ne sont pas conservées ; le buffer repart vide au redémarrage. Le
+dossier `prod/` reste volontairement limité au meilleur acteur évalué et à son
+score.
+
+### Géométrie aléatoire du 2v2
+
+`Scenarios/TwoVsTwo.json` règle les conditions initiales sans modifier les
+agents RLMission. `redSpawn.minimumWorldScale` et `maximumWorldScale` placent
+les attaquants au-delà de la limite rectangulaire ; cette limite reste un
+repère et ne bloque pas leur mouvement. Les angles, exprimés en degrés, sont
+mesurés autour de la direction opposée à l'objectif : 0° est frontal et ±90°
+est latéral. `minimumSeparation` est une distance en mètres garantie entre les
+deux rouges.
+
+`threatCurriculum` ne modifie que les épisodes d'entraînement 2v2. Les champs
+`noThreatProbability` et `singleThreatProbability` définissent respectivement
+les cas à zéro et une menace ; la probabilité restante crée deux menaces.
+`delayedFirstThreatProbability` applique la plage `minimumFirstDelaySteps` à
+`maximumFirstDelaySteps` à la première activation. Pour deux menaces,
+`delayedSecondThreatProbability` ajoute la seconde plage après la première.
+Une entité non encore activée reste détruite et sa piste est masquée dans
+l'attention. Les campagnes d'évaluation désactivent le curriculum stochastique
+et conservent les cas immédiats 2v1/2v2.
+
+`restrictedZoneSpawn.enabledProbability` contrôle la présence de la zone. Ses
+quatre fractions définissent une boîte de tirage relative aux demi-dimensions
+du monde ; les fractions est sont orientées vers le côté défendu. Avec les
+valeurs distribuées, la zone est active dans 75 % des épisodes. Une même
+graine reproduit les positions et le calendrier d'entraînement ; les campagnes
+d'évaluation utilisent leur propre calendrier déterministe.
+
 ## Scénarios et cas d'évaluation
 
 Les scènes de **Scenarios/Evaluation/RLMission.json** et **RLSNA.json** utilisent les mêmes déclarations d'entités que Playground, plus une section d'évaluation :
@@ -181,7 +280,14 @@ Les paramètres des plateformes sont séparés des algorithmes :
 }
 ~~~
 
-Le profil réel contient l'intégralité des sections nécessaires à la plateforme ; le chemin **Platforms/Aircraft/trainingaircraft.json** identifie la plateforme, sans répéter son nom à la racine.
+Le profil réel contient l'intégralité des sections nécessaires à la plateforme ; le chemin **Platforms/Mobile/trainingaircraft.json** identifie la plateforme, sans répéter son nom à la racine.
+
+Pour les défenseurs MAPPO, `Platforms/Mobile/defender_car.json` contient aussi
+`FlightModel.CruiseSpeed`. Cette vitesse nominale est utilisée au spawn et par
+la référence de patrouille ; `MaxSpeed`, `MaxAcceleration` et
+`MaxRotAcceleration` restent les limites physiques. La section `SNA` règle la
+zone sans échappement et l'angle d'engagement des bleus indépendamment de la
+plateforme rouge `attacker_car`.
 
 **Evaluation/InitialStates.json** contient des collections de points initiaux nommés, au format **presets.blueeval[]** et **presets.redeval[]**, avec les coordonnées et commandes dans des champs explicites **north**, **east**, **heading**, **speed**, **turnAcceleration**, **acceleration**. L'initialiseur C++ peut les utiliser comme auparavant, sans liste opaque de six nombres ni ancien chemin. Le champ **evaluationSettings** conserve les paramètres numériques associés à ces jeux d'initialisation.
 

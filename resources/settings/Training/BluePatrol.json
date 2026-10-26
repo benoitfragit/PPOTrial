@@ -1,0 +1,27 @@
+{
+  "formatVersion": 2,
+  "training": {
+    "rolloutSteps": 2048,
+    "maxUpdates": 300,
+    "checkpointEvery": 10,
+    "seed": 42
+  },
+  "evaluation": {
+    "episodes": 8,
+    "maxSteps": 4096,
+    "seed": 4242,
+    "minimumTrackingFraction": 0.8
+  },
+  "rewards": {
+    "clamp": 100.0,
+    "weights": {
+      "Patrol tracking": 1.0,
+      "Formation safety": 1.0,
+      "Control effort": 1.0,
+      "Zone protection": 1.0,
+      "Interception": 1.0,
+      "Mission outcome": 1.0,
+      "Timeout": 1.0
+    }
+  }
+}

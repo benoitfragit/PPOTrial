@@ -188,6 +188,12 @@ void transform(DEVICE& d,ACTOR const& actor,IN const& input,OUT& output){
         actor.friendlies.Transform(input,row,L::FriendOffset,output);
         for(typename ACTOR::TI j=L::RedOffset+24;j<L::FriendOffset;++j)
             rl_tools::set(output,row,j,0.F);
+        // Centralized-training/decentralized-execution boundary: only the
+        // critic may consume the appended global team state. Keeping the
+        // actor input dimension unchanged lets native RLtools PPO share one
+        // dataset without leaking privileged data into inference.
+        for(typename ACTOR::TI j=L::CentralOffset;j<L::Size;++j)
+            rl_tools::set(output,row,j,0.F);
     }
 }
 } // namespace blue_attention_detail

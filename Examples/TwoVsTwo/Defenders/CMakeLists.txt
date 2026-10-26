@@ -13,7 +13,7 @@ if (PPO_BUILD_PATROL_TOOLS)
     target_compile_definitions(PPOBlueTrain PRIVATE
         PPO_BLUE_SETTINGS_DIR=\"${CMAKE_SOURCE_DIR}/resources/settings\")
     target_compile_definitions(PPOBlueTrain PRIVATE
-        PPO_BLUE_MODEL_PATH=\"${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/prod/blue_patrol_v2.txt\")
+        PPO_BLUE_MODEL_PATH=\"${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/latest/blue_patrol_mappo_v4.txt\")
     target_compile_features(PPOBlueTrain PRIVATE cxx_std_17)
 
 endif()
@@ -36,18 +36,21 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     endif()
 endif()
 
-# One PPO training IAgent, one reference IAgent, both called by Environment.
+# One cooperative MAPPO IAgent controls both blue defenders in one ECS step.
 add_library(TwoVsTwoPatrolRuntime STATIC
     data/patrol_agent.hpp data/patrol_policy.hpp data/attention_actor.hpp
     data/patrol_reference_agent.hpp data/patrol_reference_controller.hpp
-    data/patrol_training_ecs_agent.hpp data/patrol_learner.hpp
-    data/patrol_checkpoint.hpp
-    src/patrol_agent.cpp src/patrol_reference_agent.cpp)
+    data/patrol_team_agent.hpp data/patrol_training_settings.hpp
+    data/patrol_evaluation_settings.hpp data/patrol_evaluation_campaign.hpp
+    data/patrol_learner.hpp data/patrol_config.hpp
+    data/patrol_checkpoint.hpp data/patrol_training_checkpoint.hpp
+    src/patrol_reference_agent.cpp src/patrol_team_agent.cpp)
 target_compile_features(TwoVsTwoPatrolRuntime PUBLIC cxx_std_17)
 target_include_directories(TwoVsTwoPatrolRuntime PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../data")
 target_link_libraries(TwoVsTwoPatrolRuntime PUBLIC
-    TwoVsTwoDefenderBackend GenericEnv SharedWorld LegacyAgentAPI)
+    TwoVsTwoDefenderBackend GenericEnv SharedWorld LegacyAgentAPI
+    nlohmann_json::nlohmann_json)
 
 # Optional deterministic headless evaluator.
 if (PPO_BUILD_PATROL_TOOLS)
@@ -56,7 +59,7 @@ target_link_libraries(PPOPatrolEvaluate PRIVATE TwoVsTwoDefenderBackend nlohmann
 target_compile_features(PPOPatrolEvaluate PRIVATE cxx_std_17)
 target_compile_definitions(PPOPatrolEvaluate PRIVATE
     PPO_BLUE_SETTINGS_DIR=\"${CMAKE_SOURCE_DIR}/resources/settings\"
-    PPO_BLUE_MODEL_PATH=\"${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/prod/blue_patrol_v2.txt\")
+    PPO_BLUE_MODEL_PATH=\"${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/prod/blue_patrol_mappo_v4.txt\")
 
 endif()
 

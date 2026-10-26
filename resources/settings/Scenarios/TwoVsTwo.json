@@ -2,7 +2,33 @@
   "formatVersion": 2,
   "agentProfiles": "../AgentProfiles.json",
   "twoVsTwo": {
-    "red2InitiallyDestroyedProbability": 0.15
+    "blueController": "mappo",
+    "red2InitiallyDestroyedProbability": 0.15,
+    "redSpawn": {
+      "minimumWorldScale": 1.05,
+      "maximumWorldScale": 1.35,
+      "minimumBearingDegrees": -90.0,
+      "maximumBearingDegrees": 90.0,
+      "minimumSeparation": 10000.0
+    },
+    "threatCurriculum": {
+      "enabled": true,
+      "noThreatProbability": 0.20,
+      "singleThreatProbability": 0.35,
+      "delayedFirstThreatProbability": 0.35,
+      "delayedSecondThreatProbability": 0.70,
+      "minimumFirstDelaySteps": 256,
+      "maximumFirstDelaySteps": 768,
+      "minimumSecondDelaySteps": 384,
+      "maximumSecondDelaySteps": 1024
+    },
+    "restrictedZoneSpawn": {
+      "enabledProbability": 0.75,
+      "minimumNorthFraction": -0.45,
+      "maximumNorthFraction": 0.45,
+      "minimumEastFraction": 0.15,
+      "maximumEastFraction": 0.65
+    }
   },
   "entities": {
     "blue_guard_1": {

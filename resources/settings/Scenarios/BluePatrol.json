@@ -3,11 +3,23 @@
   "agentProfiles": "../AgentProfiles.json",
   "twoVsTwo": {
     "patrolOnly": true,
+    "blueController": "mappo",
     "red2InitiallyDestroyedProbability": 0,
-    "patrolControllers": [
-      "ppo",
-      "reference"
-    ]
+    "redSpawn": {
+      "minimumWorldScale": 1.05,
+      "maximumWorldScale": 1.35,
+      "minimumBearingDegrees": -90.0,
+      "maximumBearingDegrees": 90.0,
+      "minimumSeparation": 10000.0
+    },
+    "restrictedZoneSpawn": {
+      "enabledProbability": 1.0,
+      "minimumNorthFraction": 0.0,
+      "maximumNorthFraction": 0.0,
+      "minimumEastFraction": 0.0,
+      "maximumEastFraction": 0.0
+    },
+    "description": "Cooperative blue MAPPO patrol curriculum"
   },
   "entities": {
     "blue_guard_1": {

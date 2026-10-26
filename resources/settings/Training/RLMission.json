@@ -1,36 +1,36 @@
 {
     "formatVersion": 2,
-    "training": {
-        "rolloutSteps": 2021,
-        "checkpointEvery": 5,
-        "modelVersion": 125
+    "ppo": {
+        "batchSize": 64,
+        "clipEpsilon": 0.20000000298023224,
+        "entropyCoefficient": 0.019999999552965164,
+        "epochs": 4,
+        "gaeLambda": 0.949999988079071,
+        "gamma": 0.9900000095367432,
+        "learningRate": 0.0003000000142492354,
+        "targetKL": 0.025999998673796654,
+        "valueCoefficient": 0.5
     },
     "rewards": {
-        "clamp": 60,
+        "clamp": 60.0,
         "weights": {
-            "Main target destruction": 1,
-            "Secondary target destruction": 0.15000000596046448,
-            "Ownship destruction": 1.100000023841858,
-            "Wingmen destruction": 0.800000011920929,
             "Civilian destruction": 0.8999999761581421,
-            "MissionFailure": 1,
-            "Intercept": 1,
             "Danger": 0.699999988079071,
-            "Out Of Area": 0.25,
-            "Range": 0.8999999761581421,
             "Fuel": 0.019999999552965164,
-            "NearDanger": 0.4000000059604645
+            "Intercept": 1.0,
+            "Main target destruction": 1.0,
+            "MissionFailure": 1.0,
+            "NearDanger": 0.4000000059604645,
+            "Out Of Area": 0.25,
+            "Ownship destruction": 1.100000023841858,
+            "Range": 0.8999999761581421,
+            "Secondary target destruction": 0.15000000596046448,
+            "Wingmen destruction": 0.800000011920929
         }
     },
-    "ppo": {
-        "gamma": 0.9900000095367432,
-        "gaeLambda": 0.949999988079071,
-        "clipEpsilon": 0.20000000298023224,
-        "valueCoefficient": 0.5,
-        "entropyCoefficient": 0.019999999552965164,
-        "learningRate": 0.0003000000142492354,
-        "epochs": 4,
-        "batchSize": 64,
-        "targetKL": 0.025999998673796654
+    "training": {
+        "checkpointEvery": 5,
+        "modelVersion": 127,
+        "rolloutSteps": 2021
     }
 }

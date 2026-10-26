@@ -2417,7 +2417,31 @@ EnvironmentRenderer::DrawTrainingControls(std::shared_ptr<AgentController> const
         return;
 
     agent->m_rollout = static_cast<int>(state.m_common.m_maxStep);
-    if (ImGui::SliderInt("Rollout Buffer", &agent->m_rollout, 1, 10000))
+    bool changed = false;
+    if (state.m_name.rfind("Blue MAPPO", 0U) == 0U)
+    {
+        static constexpr std::array<int, 4> rolloutValues{
+            512, 1024, 2048, 4096
+        };
+        static constexpr std::array<char const*, 4> rolloutLabels{
+            "512", "1024", "2048", "4096"
+        };
+        auto const found = std::find(rolloutValues.begin(), rolloutValues.end(),
+                                     agent->m_rollout);
+        int selected = found == rolloutValues.end() ? 3
+            : static_cast<int>(std::distance(rolloutValues.begin(), found));
+        if (ImGui::Combo("Rollout Buffer", &selected, rolloutLabels.data(),
+                         static_cast<int>(rolloutLabels.size())))
+        {
+            agent->m_rollout = rolloutValues[static_cast<std::size_t>(selected)];
+            changed = true;
+        }
+    }
+    else
+    {
+        changed = ImGui::SliderInt("Rollout Buffer", &agent->m_rollout, 1, 10000);
+    }
+    if (changed)
     {
         ppo::model::sAgentRealTimeCommand command{};
         command.m_id = agent->m_id;
@@ -2473,6 +2497,11 @@ EnvironmentRenderer::DrawRewardControls(std::shared_ptr<AgentController> const& 
             command.m_rewardScalingType = static_cast<unsigned char>(i);
             command.m_type = ppo::model::sAgentRealTimeCommand::eTypeCommand::RewardScaling;
             p_environment->AddAgentCommand(command);
+        }
+        if (i < state.m_rewards.size())
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled("current %+.4f", state.m_rewards[i]);
         }
         ImGui::PopID();
     }
@@ -3436,7 +3465,20 @@ EnvironmentRenderer::DrawAgentsWindow(entt::registry const& snapshot)
                 }
                 if (ImGui::BeginTabItem("Diagnostics"))
                 {
-                    ImGui::TextDisabled("Losses sampled per completed model update.");
+                    if (state.m_common.m_version == 0U)
+                        ImGui::TextDisabled(
+                            "Waiting for the first complete PPO rollout.");
+                    else
+                    {
+                        ImGui::Text("Update %u  |  Total %.5f",
+                            state.m_common.m_version, state.m_common.m_loss);
+                        ImGui::Text("Actor %.5f  |  Value %.5f  |  Entropy %.5f",
+                            state.m_common.m_actorloss,
+                            state.m_common.m_valueloss,
+                            state.m_common.m_entropyloss);
+                    }
+                    ImGui::TextDisabled(
+                        "Losses sampled from the last PPO mini-batch.");
                     DrawAgentPlot(agent, state);
                     if (ImGui::CollapsingHeader("Agent snapshot"))
                         DrawMetaAnyRecursive(state.m_name.c_str(), entt::forward_as_meta(state));
