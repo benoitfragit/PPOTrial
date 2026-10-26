@@ -3,6 +3,7 @@
 // Deterministic headless evaluation of *two* concurrently controlled patrol
 // defenders. Independent of RLtools: the caller supplies its prediction adapter.
 #include "patrol_core.hpp"
+#include "patrol_evaluation_settings.hpp"
 
 #include <array>
 #include <cmath>
@@ -18,22 +19,6 @@ namespace ppo::examples::twovstwo::defenders {
 enum class PatrolOutcome : std::uint8_t { Success, Failure, Truncated };
 enum class PatrolFailure : std::uint8_t {
     None, WorldBoundary, Collision, RestrictedZone, InvalidState, TrackingQuality
-};
-
-struct PatrolEvaluationSettings
-{
-    std::size_t episodes = 8U;
-    std::size_t maxSteps = 4096U;
-    float minimumCircuits = 1.F;
-    float trackingTolerance = 0.10F;    // normalized displacement, not metres
-    float minimumTrackingFraction = 0.80F;
-    float minimumHeadingCosine = 0.60F;
-    float minimumSpeedFraction = 0.50F;
-    float collisionDistance = 50.F;    // platform separation, metres
-    // Optional forbidden disk in world coordinates. Zero disables this check.
-    float restrictedNorth = 0.F;
-    float restrictedEast = 0.F;
-    float restrictedRadius = 0.F;
 };
 
 struct PatrolEpisodeResult
@@ -61,23 +46,6 @@ struct PatrolEvaluationReport
     }
 };
 
-inline bool Valid(PatrolEvaluationSettings const& s) noexcept
-{
-    return s.episodes > 0U && s.episodes <= 10000U
-        && s.maxSteps > 0U && s.maxSteps <= 1000000U
-        && std::isfinite(s.minimumCircuits) && s.minimumCircuits >= 0.F
-        && std::isfinite(s.trackingTolerance) && s.trackingTolerance > 0.F
-        && std::isfinite(s.minimumTrackingFraction)
-        && s.minimumTrackingFraction >= 0.F && s.minimumTrackingFraction <= 1.F
-        && std::isfinite(s.minimumHeadingCosine)
-        && s.minimumHeadingCosine >= -1.F && s.minimumHeadingCosine <= 1.F
-        && std::isfinite(s.minimumSpeedFraction)
-        && s.minimumSpeedFraction >= 0.F && s.minimumSpeedFraction <= 1.F
-        && std::isfinite(s.collisionDistance) && s.collisionDistance > 0.F
-        && std::isfinite(s.restrictedNorth) && std::isfinite(s.restrictedEast)
-        && std::isfinite(s.restrictedRadius) && s.restrictedRadius >= 0.F;
-}
-
 inline float WrapAngle(float angle) noexcept
 {
     return std::remainder(angle, kTwoPi);
@@ -92,8 +60,8 @@ inline PatrolFailure SafetyFailure(Parameters const& p, State const& state,
             || !std::isfinite(guard.east) || !std::isfinite(guard.heading)
             || !std::isfinite(guard.speed) || !std::isfinite(guard.turnRate))
             return PatrolFailure::InvalidState;
-        if (std::abs(guard.north) >= p.halfNorth
-            || std::abs(guard.east) >= p.halfEast)
+        if (std::abs(guard.north) >= p.hardBoundaryScale * p.halfNorth
+            || std::abs(guard.east) >= p.hardBoundaryScale * p.halfEast)
             return PatrolFailure::WorldBoundary;
         if (settings.restrictedRadius > 0.F
             && std::hypot(guard.north - settings.restrictedNorth,

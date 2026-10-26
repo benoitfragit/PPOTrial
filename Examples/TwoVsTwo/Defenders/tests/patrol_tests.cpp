@@ -10,12 +10,15 @@ namespace blue = ppo::examples::twovstwo::defenders;
 
 int main()
 {
-    static_assert(blue::ObservationLayout::Size == 124U);
+    static_assert(blue::ObservationLayout::LocalSize == 124U);
+    static_assert(blue::ObservationLayout::Size == 156U);
     static_assert(blue::ObservationLayout::ActionSize == 2U);
     blue::Parameters const p{};
     if (!blue::Valid(p))
         return 1;
     float const length = blue::CircuitLength(p);
+    if (blue::StraightHalfLength(p) <= 0.8F * p.halfEast)
+        return 29;
     // Entire orbit stays within world, starts/ends on the same tangent.
     for (int side : {-1, 1})
         for (std::size_t role = 0; role < 2; ++role)
@@ -38,8 +41,16 @@ int main()
     auto state = blue::InitialState(p, 1, 0U, 0.F);
     auto const r0 = blue::PatrolReference(p, 1, 0, 0.F);
     auto const r1 = blue::PatrolReference(p, 1, 1, 0.F);
-    if (r0.north <= r1.north || r0.east == r1.east)
-        return 4; // Leader ahead, wingman offset inward.
+    if (r0.east <= r1.east || r0.north != r1.north
+        || blue::FormationGap(p) < 7000.F)
+        return 4; // Phase-staggered formation on the long east/west leg.
+    auto compressedFormation = state;
+    compressedFormation.guards[0] = compressedFormation.guards[1];
+    if (!(blue::FormationReward(p, state, true)
+          > blue::FormationReward(p, compressedFormation, true))
+        || blue::FormationReward(p, state, false)
+            != blue::SeparationPenalty(p, state))
+        return 27;
     for (std::size_t i = 0; i < 61; ++i)
     {
         auto const obs = blue::Observe(p, state);
@@ -52,12 +63,26 @@ int main()
          i < blue::ObservationLayout::FriendOffset; ++i)
         if (observation[i] != 0.F)
             return 6;
+    auto threatState = state;
+    threatState.attackers[0] = blue::Mobile{1000.F, -2000.F, 0.2F, 220.F,
+                                            0.F, true};
+    auto const threatObservation = blue::Observe(p, threatState);
+    if (threatObservation[blue::ObservationLayout::RedOffset
+            + blue::ObservationLayout::RedFeatures - 1U] != 1.F
+        || threatObservation[blue::ObservationLayout::RedOffset
+            + 2U * blue::ObservationLayout::RedFeatures - 1U] != 0.F)
+        return 18;
     if (observation[blue::ObservationLayout::FriendOffset + 8] != 1.F
         || observation[blue::ObservationLayout::FriendOffset + 17] != 1.F)
         return 7;
+    auto lostObjective = state;
+    lostObjective.objectiveAvailable = false;
+    auto const lostObjectiveObservation = blue::Observe(p, lostObjective);
+    if (lostObjectiveObservation[blue::ObservationLayout::FriendOffset + 17] != 0.F)
+        return 19;
     auto const next = blue::Advance(p, state, blue::Action{0.F, 0.F});
     if (next.step != state.step + 1
-        || next.guards[0].north <= state.guards[0].north
+        || next.guards[0].east <= state.guards[0].east
         || !std::isfinite(blue::TeamReward(p, state, {0.F, 0.F}, next)))
         return 8;
     // A stopped agent must not score the same progression as the reference.
@@ -66,11 +91,24 @@ int main()
     if (!(blue::TrackingReward(p, stopped, 0U)
         < blue::TrackingReward(p, next, 0U)))
         return 9;
-    auto out = state;
-    out.guards[0].north = p.halfNorth + 1.F;
-    auto const failed = blue::Advance(p, out, {0.F, 0.F});
-    if (!failed.failed || blue::TeamReward(p, out, {0.F, 0.F}, failed) != -100.F)
+    auto outside = state;
+    outside.guards[0].north = 1.10F * p.halfNorth;
+    auto const allowedOutside = blue::Advance(p, outside, {0.F, 0.F});
+    if (allowedOutside.failed || !(blue::SoftBoundaryPenalty(p, allowedOutside) < 0.F))
         return 10;
+    auto remoteThreat = allowedOutside;
+    remoteThreat.attackers[0] = blue::Mobile{
+        0.F, -static_cast<float>(remoteThreat.side) * p.halfEast,
+        0.F, 200.F, 0.F, true};
+    if (!(std::abs(blue::SoftBoundaryPenalty(p, remoteThreat))
+          < std::abs(blue::SoftBoundaryPenalty(p, allowedOutside))))
+        return 20;
+    auto hardOutside = state;
+    hardOutside.guards[0].north = p.hardBoundaryScale * p.halfNorth + 1.F;
+    auto const failed = blue::Advance(p, hardOutside, {0.F, 0.F});
+    if (!failed.failed
+        || blue::TeamReward(p, hardOutside, {0.F, 0.F}, failed) != -100.F)
+        return 21;
     // A collision must be terminal and have the same severe negative reward
     // even when the teammate is the deterministic, non-PPO reference driver.
     auto colliding = state;
@@ -82,13 +120,13 @@ int main()
 
     // Swept collision between two observations, without endpoint overlap.
     auto crossing = state;
-    crossing.guards[0].north = -40.F;
+    crossing.guards[0].north = -800.F;
     crossing.guards[0].east = 0.F;
-    crossing.guards[1].north = 40.F;
+    crossing.guards[1].north = 800.F;
     crossing.guards[1].east = 0.F;
     auto crossed = crossing;
-    crossed.guards[0].north = 40.F;
-    crossed.guards[1].north = -40.F;
+    crossed.guards[0].north = 800.F;
+    crossed.guards[1].north = -800.F;
     if (blue::GuardSeparation(crossed) <= p.collisionDistance
         || !blue::GuardsCollided(p, crossing, crossed))
         return 16;
@@ -96,21 +134,88 @@ int main()
     // The shaping penalty applies before contact, without ending the episode.
     auto far = state, close = state;
     far.guards[0].north = 0.F; far.guards[0].east = 0.F;
-    far.guards[1].north = 1000.F; far.guards[1].east = 0.F;
+    far.guards[1].north = 2500.F; far.guards[1].east = 0.F;
     close.guards[0].north = 0.F; close.guards[0].east = 0.F;
-    close.guards[1].north = 100.F; close.guards[1].east = 0.F;
+    close.guards[1].north = 1500.F; close.guards[1].east = 0.F;
     if (!(blue::SeparationPenalty(p, far) == 0.F
           && blue::SeparationPenalty(p, close) < 0.F
           && blue::SeparationPenalty(p, close) > -0.5F))
         return 17;
 
-    // Forced timeout has penalty but is not a victory or termination.
+    // A patrol-only horizon is a normal finite-horizon completion and must not
+    // receive the unresolved-threat timeout penalty.
     auto timeout = next;
     timeout.step = p.episodeSteps;
-    if (timeout.failed ||
-        !(blue::TeamReward(p, state, {0.F, 0.F}, timeout)
-          < blue::TeamReward(p, state, {0.F, 0.F}, next) - 14.F))
+    auto const patrolTimeout = blue::TeamRewardBreakdown(
+        p, state, std::array<blue::Action, 2>{}, timeout);
+    if (timeout.failed
+        || patrolTimeout.values[static_cast<std::size_t>(
+            blue::RewardChannel::Timeout)] != 0.F)
         return 11;
+
+    // With one threat, the nearest guard intercepts and its teammate remains
+    // evaluated against the patrol circuit.
+    auto oneThreat = state;
+    oneThreat.guards[0].north = 0.F;
+    oneThreat.guards[0].east = 0.F;
+    oneThreat.guards[1].north = 10000.F;
+    oneThreat.guards[1].east = 0.F;
+    oneThreat.attackers[0] = blue::Mobile{1000.F, 0.F, 0.F, 220.F, 0.F, true};
+    auto const oneAssignment = blue::AssignThreats(oneThreat);
+    if (oneAssignment.activeThreats != 1U
+        || oneAssignment.attackerForGuard[0] != 0U
+        || oneAssignment.attackerForGuard[1] < oneThreat.attackers.size()
+        || std::abs(blue::MissionPatrolReward(p, oneThreat, oneAssignment)
+                    - blue::TrackingReward(p, oneThreat, 1U)) > 1.e-6F)
+        return 22;
+
+    // Closing an assigned hostile must be better than opening the range.
+    auto closing = oneThreat;
+    auto retreating = oneThreat;
+    closing.guards[0].north = 100.F;
+    retreating.guards[0].north = -100.F;
+    if (!(blue::EngagementReward(p, oneThreat, closing, oneAssignment)
+          > blue::EngagementReward(p, oneThreat, retreating, oneAssignment)))
+        return 23;
+
+    // Two threats release both guards from the patrol path and create a stable
+    // one-to-one assignment instead of rewarding both cars for circling.
+    auto twoThreats = oneThreat;
+    twoThreats.attackers[1] = blue::Mobile{
+        9000.F, 0.F, 0.F, 220.F, 0.F, true};
+    auto const twoAssignment = blue::AssignThreats(twoThreats);
+    if (twoAssignment.activeThreats != 2U
+        || twoAssignment.attackerForGuard[0] == twoAssignment.attackerForGuard[1]
+        || blue::MissionPatrolReward(p, twoThreats, twoAssignment) != 0.F)
+        return 24;
+    auto duplicateCoverage = twoThreats;
+    duplicateCoverage.guards[1] = duplicateCoverage.guards[0];
+    if (!(blue::ThreatCoverageReward(p, twoThreats, twoAssignment)
+          > blue::ThreatCoverageReward(p, duplicateCoverage, twoAssignment)))
+        return 28;
+
+    // A remaining threat at the finite horizon is an explicit mission failure
+    // signal, while destroying the last threat earns both sparse bonuses.
+    auto threatTimeout = oneThreat;
+    threatTimeout.step = p.episodeSteps;
+    auto const threatTimeoutReward = blue::TeamRewardBreakdown(
+        p, oneThreat, std::array<blue::Action, 2>{}, threatTimeout);
+    if (threatTimeoutReward.values[static_cast<std::size_t>(
+            blue::RewardChannel::Timeout)] != -15.F)
+        return 25;
+    auto defeated = oneThreat;
+    defeated.attackers[0].available = false;
+    auto const victoryReward = blue::TeamRewardBreakdown(
+        p, oneThreat, std::array<blue::Action, 2>{}, defeated);
+    auto const stagedVictoryReward = blue::TeamRewardBreakdown(
+        p, oneThreat, std::array<blue::Action, 2>{}, defeated, true);
+    if (victoryReward.values[static_cast<std::size_t>(
+            blue::RewardChannel::Interception)] != 10.F
+        || victoryReward.values[static_cast<std::size_t>(
+            blue::RewardChannel::MissionOutcome)] != 25.F
+        || stagedVictoryReward.values[static_cast<std::size_t>(
+            blue::RewardChannel::MissionOutcome)] != 0.F)
+        return 26;
     // Reference controllers use the same normalized SNA actions/physics as
     // the production ECS; both guards must move and turn without PPO weights.
     for (int side : {-1, 1})

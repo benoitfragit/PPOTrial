@@ -18,29 +18,54 @@ void InitializeEntity(ppo::model::Entity& entity)
         return;
     if (config.next == 0)
     {
-        config.side = std::bernoulli_distribution{0.5}(config.rng) ? 1 : -1;
-        if (config.patrolOnly)
+        config.elapsedSteps = 0U;
+        auto const& world = registry->ctx().get<ppo::model::sEnvironmentState>();
+        auto const bounds = WorldBounds{
+            0.5F * world.m_maxNorth, 0.5F * world.m_maxEast};
+        defenders::Parameters p{};
+        p.halfNorth = bounds.halfNorth;
+        p.halfEast = bounds.halfEast;
+        p.cruiseSpeed = config.patrolCruiseSpeed;
+        if (config.evaluationOverride)
         {
-            auto const& world = registry->ctx().get<ppo::model::sEnvironmentState>();
-            defenders::Parameters p{};
-            p.halfNorth = 0.5F * world.m_maxNorth;
-            p.halfEast = 0.5F * world.m_maxEast;
+            config.side = config.evaluationSide < 0 ? -1 : 1;
+            config.arclength = defenders::PositiveModulo(
+                config.evaluationArclength, defenders::CircuitLength(p));
+        }
+        else
+        {
+            config.side = std::bernoulli_distribution{0.5}(config.rng) ? 1 : -1;
             config.arclength = std::uniform_real_distribution<float>{
                 0.F, defenders::CircuitLength(p)}(config.rng);
         }
+        auto spawnSettings = config.spawnSettings;
+        if (config.evaluationOverride)
+        {
+            // Evaluations retain their deterministic immediate 2v1/2v2 cases;
+            // stochastic activation schedules belong to training only.
+            spawnSettings.threatCurriculum.enabled = false;
+            spawnSettings.red2DestroyedProbability =
+                config.evaluationSecondAttackerDestroyed ? 1.F : 0.F;
+        }
+        config.episodeLayout = GenerateEpisodeSpawnLayout(
+            config.side, spawnSettings, bounds, config.rng);
     }
+
+    if (!config.episodeLayout)
+        return;
 
     auto const& [metadata] = entity.get<ppo::model::sEntityMetadata>();
     auto const& world = registry->ctx().get<ppo::model::sEnvironmentState>();
     auto const bounds = WorldBounds{0.5F * world.m_maxNorth, 0.5F * world.m_maxEast};
-    auto pose = MakeSpawn(metadata.m_name, config.side,
-                                config.red2DestroyedProbability, bounds, config.rng);
-    if (pose && config.patrolOnly
+    auto pose = MakeSpawn(metadata.m_name, *config.episodeLayout,
+                          bounds, config.rng);
+    if (pose
         && (metadata.m_name == "blue_guard_1" || metadata.m_name == "blue_guard_2"))
     {
         defenders::Parameters p{};
         p.halfNorth = bounds.halfNorth;
         p.halfEast = bounds.halfEast;
+        p.cruiseSpeed = config.patrolCruiseSpeed;
         auto const role = metadata.m_name == "blue_guard_1" ? 0U : 1U;
         auto const reference = defenders::PatrolReference(p, config.side,
                                                          role, config.arclength);

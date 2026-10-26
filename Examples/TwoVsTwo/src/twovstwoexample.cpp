@@ -1,9 +1,9 @@
 #include "twovstwoexample.hpp"
 #include "initializer.hpp"
+#include "spawn_config.hpp"
 #include "twovstworules.hpp"
 #include "patrol_agent.hpp"
-#include "patrol_reference_agent.hpp"
-#include "patrol_training_ecs_agent.hpp"
+#include "patrol_team_agent.hpp"
 #include "patrol_config.hpp"
 
 #include "airspacecomponents.hpp"
@@ -49,36 +49,13 @@ bool LoadScenario(std::filesystem::path const& path,
         return false;
     bool const patrolOnly = settings.value("patrolOnly", false);
 
-    // Explicit per-guard controllers. Missing PPO weights are never silently
-    // treated as a trained policy: the visual scenario uses reference guidance.
-    std::array<bool, 2> wantsPpo{true, true};
-    if (settings.contains("patrolControllers"))
-    {
-        auto const& controllers = settings["patrolControllers"];
-        if (!patrolOnly || !controllers.is_array() || controllers.size() != 2U)
-            return false;
-        for (std::size_t role = 0U; role < wantsPpo.size(); ++role)
-        {
-            if (!controllers[role].is_string())
-                return false;
-            auto const mode = controllers[role].get<std::string>();
-            if (mode != "ppo" && mode != "reference")
-                return false;
-            wantsPpo[role] = mode == "ppo";
-        }
-    }
-    if (patrolOnly && !std::any_of(wantsPpo.begin(), wantsPpo.end(),
-                                   [](bool requested) { return requested; }))
-    {
-        std::cerr << "[PATROL] At least one PPO controller is required.\n";
+    if (settings.contains("blueController")
+        && (!settings["blueController"].is_string()
+            || settings["blueController"].get<std::string>() != "mappo"))
         return false;
-    }
-    if (!settings.contains("red2InitiallyDestroyedProbability")
-        || !settings["red2InitiallyDestroyedProbability"].is_number())
-        return false;
-    float const probability = settings["red2InitiallyDestroyedProbability"].get<float>();
-    if (!std::isfinite(probability) || probability < 0.F || probability > 1.F
-        || !document.contains("entities") || !document["entities"].is_object())
+    auto const spawnSettings = ParseSpawnSettings(settings);
+    if (!spawnSettings || !document.contains("entities")
+        || !document["entities"].is_object())
         return false;
 
     // Initial entity spawns precede Serializer::Load. Read its exact file
@@ -100,6 +77,11 @@ bool LoadScenario(std::filesystem::path const& path,
     float const worldEast = worldConfig["maxEast"].get<float>();
     if (!std::isfinite(worldNorth) || !std::isfinite(worldEast)
         || worldNorth <= 0.F || worldEast <= 0.F)
+        return false;
+    std::mt19937 validationRng{0U};
+    WorldBounds const worldBounds{0.5F * worldNorth, 0.5F * worldEast};
+    if (!GenerateEpisodeSpawnLayout(
+            1, *spawnSettings, worldBounds, validationRng))
         return false;
 
     std::map<std::string, std::shared_ptr<ppo::model::Entity>> entities;
@@ -190,46 +172,66 @@ bool LoadScenario(std::filesystem::path const& path,
     auto* registry = entities.begin()->second->registry();
     if (!registry)
         return false;
+
+    auto const settingsRoot = path.parent_path().parent_path();
+    defenders::Parameters patrolParameters{};
+    defenders::PatrolTrainingSettings patrolTraining{};
+    try
+    {
+        patrolParameters = defenders::LoadPatrolParameters(settingsRoot);
+        patrolTraining = defenders::LoadPatrolTrainingSettings(settingsRoot);
+    }
+    catch (std::exception const& error)
+    {
+        std::cerr << "[BLUE MAPPO] Configuration failed: "
+                  << error.what() << '\n';
+        return false;
+    }
+
     auto& context = registry->ctx().emplace<InitializerContext>();
     context.count = entities.size();
-    context.red2DestroyedProbability = probability;
+    context.spawnSettings = *spawnSettings;
     context.patrolOnly = patrolOnly;
+    context.patrolCruiseSpeed = patrolParameters.cruiseSpeed;
     std::shared_ptr<defenders::PatrolPolicy> bluePolicy;
-    if (patrolOnly)
+    auto const modelRoot = std::filesystem::path{RESOURCE_PATH}.parent_path()
+        / "model" / "BluePatrol";
+    auto const latestCheckpoint = modelRoot / "latest"
+        / "blue_patrol_mappo_v4.txt";
+    auto const trainingCheckpoint = modelRoot / "latest"
+        / "blue_patrol_training_v1.txt";
+    auto const productionCheckpoint = modelRoot / "prod"
+        / "blue_patrol_mappo_v4.txt";
+    std::filesystem::path const warmStartCheckpoint =
+        std::filesystem::exists(latestCheckpoint)
+        ? latestCheckpoint : productionCheckpoint;
+    if (std::filesystem::exists(warmStartCheckpoint))
     {
-        auto const checkpoint = std::filesystem::path{RESOURCE_PATH}.parent_path()
-            / "model" / "BluePatrol" / "prod" / "blue_patrol_v2.txt";
-        if (std::filesystem::exists(checkpoint))
+        try
         {
-            try
-            {
-                bluePolicy = defenders::LoadPatrolPolicy(checkpoint);
-            }
-            catch (std::exception const& error)
-            {
-                std::cerr << "[PATROL] Incompatible PPO checkpoint: "
-                          << error.what()
-                          << ". Switching to explicit reference controllers.\n";
-                bluePolicy.reset();
-            }
+            bluePolicy = defenders::LoadPatrolPolicy(warmStartCheckpoint);
+        }
+        catch (std::exception const& error)
+        {
+            std::cerr << "[BLUE MAPPO] Incompatible checkpoint: "
+                      << error.what() << ". Starting a new Actor.\n";
+            bluePolicy.reset();
         }
     }
-    if (patrolOnly && !bluePolicy)
+    if (!bluePolicy)
     {
-        // A random, untrained RLtools actor is still a real PPO network, but
-        // inference in the GUI does not update its weights.
         try
         {
             bluePolicy = defenders::CreateUntrainedPatrolPolicy(42U);
         }
         catch (std::exception const& error)
         {
-            std::cerr << "[PATROL] Cannot initialize PPO policy: "
+            std::cerr << "[BLUE MAPPO] Cannot initialize Actor: "
                       << error.what() << '\n';
             return false;
         }
-        std::cout << "[PATROL] PPO actor initialized; "
-                     "Play in PPO.exe starts embedded RLtools training.\n";
+        std::cout << "[BLUE MAPPO] Actor initialized; Play starts embedded "
+                     "RLtools training.\n";
     }
     auto& world = registry->ctx().get<ppo::model::sEnvironmentState>();
     world.m_maxNorth = worldNorth;
@@ -245,32 +247,29 @@ bool LoadScenario(std::filesystem::path const& path,
         if (it != entities.end())
             it->second->Init();
     }
-    if (patrolOnly)
+    try
     {
         auto& first = *entities.at("blue_guard_1");
         auto& second = *entities.at("blue_guard_2");
         std::array<ppo::model::BaseEntity*, 2> guards{&first, &second};
-        for (std::size_t role = 0; role < guards.size(); ++role)
-        {
-            std::shared_ptr<ppo::model::IAgent> controller;
-            if (wantsPpo[role])
-            {
-                auto const checkpoint = std::filesystem::path{RESOURCE_PATH}.parent_path()
-                    / "model" / "BluePatrol" / "prod" / "blue_patrol_v2.txt";
-                controller = environment.CreateAgent<defenders::PatrolTrainingAgent>(
-                    *guards[role], *guards[1U - role], role, bluePolicy,
-                    defenders::LoadPatrolParameters(path.parent_path().parent_path()),
-                    checkpoint);
-            }
-            else
-            {
-                controller = environment.CreateAgent<defenders::PatrolReferenceAgent>(
-                    *guards[role], role);
-            }
-            if (!controller)
-                return false;
-            agents.push_back(std::move(controller));
-        }
+        std::vector<ppo::model::BaseEntity*> attackers;
+        if (auto red = entities.find("red_1"); red != entities.end())
+            attackers.push_back(red->second.get());
+        if (auto red = entities.find("red_2"); red != entities.end())
+            attackers.push_back(red->second.get());
+        auto controller = environment.CreateAgent<defenders::PatrolMappoAgent>(
+            guards, attackers, *entities.at("blue_objective"), bluePolicy,
+            patrolParameters, patrolTraining,
+            latestCheckpoint, trainingCheckpoint, productionCheckpoint);
+        if (!controller)
+            return false;
+        agents.push_back(std::move(controller));
+    }
+    catch (std::exception const& error)
+    {
+        std::cerr << "[BLUE MAPPO] Configuration failed: "
+                  << error.what() << '\n';
+        return false;
     }
     for (auto const& agent : agents)
         agent->Init();
@@ -284,7 +283,7 @@ ppo::app::ExampleDefinition Definition()
 {
     return {
         "two-vs-two",
-        "TWO VS TWO",
+        "TWO VS TWO - MAPPO vs RLMission",
         std::filesystem::path("Scenarios") / "TwoVsTwo.json",
         &ppo::examples::airspace::RegisterAirspaceMeta,
         &LoadScenario,
@@ -296,11 +295,11 @@ ppo::app::ExampleDefinition BluePatrolDefinition()
 {
     return {
         "blue-patrol",
-        "BLUE PATROL PPO",
+        "BLUE PATROL ONLY - NO RED",
         std::filesystem::path("Scenarios") / "BluePatrol.json",
         &ppo::examples::airspace::RegisterAirspaceMeta,
         &LoadScenario,
-        "Two blue defenders patrol without red attackers; RLtools policy used when trained."
+        "Two blue defenders train a cooperative RLtools MAPPO patrol without attackers."
     };
 }
 

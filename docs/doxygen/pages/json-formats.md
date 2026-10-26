@@ -11,13 +11,24 @@ No alternate runtime loaders or old-file path fallbacks exist.
 | --- | --- |
 | Logical agent profiles | AgentProfiles.json |
 | Main scenario | Scenarios/Playground.json |
+| Blue MAPPO scenarios | Scenarios/BluePatrol.json, Scenarios/TwoVsTwo.json |
 | Evaluation scenarios | Scenarios/Evaluation/RLMission.json, Scenarios/Evaluation/RLSNA.json |
-| PPO settings | Training/RLMission.json, Training/RLSNA.json |
-| Platform parameters | Platforms/Aircraft/*.json, Platforms/Ground/*.json |
+| PPO/MAPPO settings | Training/RLMission.json, Training/RLSNA.json, Training/BluePatrol.json |
+| Platform parameters | Platforms/Mobile/*.json, Platforms/RestrictedZone/*.json |
 | Evaluation cases | Evaluation/Cases/RLMission.json, Evaluation/Cases/RLSNA.json |
 | Named initial-state presets | Evaluation/InitialStates.json |
 | Simulation state | Environment.json |
 | Display state | Renderer.json |
+
+The `twoVsTwo` object in `Scenarios/TwoVsTwo.json` owns the episode spawn
+curriculum. `redSpawn` defines the front/lateral bearing interval, the scale
+beyond the rectangular world boundary and the guaranteed attacker separation.
+`threatCurriculum` selects zero, one or two training threats and optional
+first/second activation delays in ECS team steps. Deterministic evaluation
+cases disable this stochastic schedule and keep immediate 2v1/2v2 layouts.
+`restrictedZoneSpawn` defines a side-relative position box and an activation
+probability. World limits remain sensor and reward references; they do not stop
+the production RLMission attackers.
 
 See docs/configuration-guide.md for explanations and examples.
 
@@ -62,6 +73,29 @@ missing or unknown channels.
   learningRate, epochs, batchSize, targetKL: PPO hyperparameters.
 
 The settings files are updated by the application on exit.
+
+Training/BluePatrol.json configures the separate native RLTools MAPPO backend.
+It contains training.rolloutSteps, training.maxUpdates,
+training.checkpointEvery, training.seed, rewards.clamp and seven named reward
+weights. Its rolloutSteps value counts ECS team steps: two defenders generate
+two actor transitions per team step. The application presets are 512, 1024,
+2048 and 4096; 128 is the PPO mini-batch size, not the application rollout.
+Its evaluation object contains episodes, maxSteps, seed and
+minimumTrackingFraction. checkpointEvery starts this deterministic live-ECS
+campaign; the current Actor is promoted to production only after improving the
+recorded score.
+
+Blue MAPPO writes an inference Actor and a separate complete training state in
+`model/BluePatrol/latest`. The training state contains Actor, centralized
+Critic, both Adam states, update count and RLTools RNG. Rollout samples are not
+serialized; resume starts a fresh rollout. `model/BluePatrol/prod` remains an
+inference-only promoted Actor plus its evaluation score.
+
+The blue `Platforms/Mobile/defender_car.json` profile also exposes
+`FlightModel.CruiseSpeed`. The TwoVsTwo loader uses it consistently for the
+initial state and patrol reference. The remaining `FlightModel` and `SNA`
+fields define the blue physical and engagement limits without changing the
+red `attacker_car` profile.
 
 ## Evaluation
 

@@ -370,3 +370,10 @@ docs/generated/
 resources/model/BluePatrol/prod/*.txt
 resources/model/BluePatrol/prod/*.txt.tmp
 resources/model/BluePatrol/prod/*.txt.bak
+resources/model/BluePatrol/prod/*.score
+resources/model/BluePatrol/prod/*.score.tmp
+resources/model/BluePatrol/prod/*.score.bak
+resources/model/BluePatrol/latest/*.txt
+resources/model/BluePatrol/latest/*.txt.tmp
+resources/model/BluePatrol/latest/*.txt.bak
+resources/model/BluePatrol/archive/*.txt

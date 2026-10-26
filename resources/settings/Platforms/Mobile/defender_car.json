@@ -2,16 +2,17 @@
     "formatVersion": 2,
     "parameters": {
         "FlightModel": {
-            "MaxAcceleration": 100,
+            "CruiseSpeed": 300,
+            "MaxAcceleration": 600,
             "MaxFuel": 2000000,
-            "MaxRotAcceleration": 0.4,
-            "MaxSpeed": 400,
-            "MinSpeed": 0
+            "MaxRotAcceleration": 0.70000059604645,
+            "MaxSpeed": 700,
+            "MinSpeed": 10
         },
         "SNA": {
             "MaxMissile": 8,
-            "MaxNoEscapeZoneRange": 4000,
-            "MaxShootAngle": 1.047198057
+            "MaxNoEscapeZoneRange": 5000,
+            "MaxShootAngle": 1.0471980571746826
         },
         "SNAControl": {
             "Available": true

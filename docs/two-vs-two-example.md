@@ -1,63 +1,137 @@
-# PPOTrial — TwoVsTwo baseline architecture
+# Exemple TwoVsTwo
 
-## Scope and launch
+## Lancement
 
-The binary remains PPO.exe. Launch without arguments to choose an example in the graphical selector, or launch the original example directly with PPO.exe --example airspace. Launch the new scenario directly with PPO.exe --example two-vs-two. Its headless
-bootstrap check is PPO.exe --example two-vs-two --check-example.
+L'exemple complet se lance avec :
 
-Examples/Shared/World owns reusable 2D Mobile, Objective, RestrictedZone,
-kinematics, SNA/control and the exact 61-bin pseudo-LiDAR implementations.
-Examples/Airspace retains the original scenario, production agents and world
-rules; Examples/TwoVsTwo composes these with its own scenario, positioning
-logic and renderer metadata. Core remains domain-neutral.
+~~~powershell
+PPO.exe --example two-vs-two
+~~~
 
-## Scenario
+Le contrôle de chargement sans interface graphique est :
 
-The defended area is the **entire world**: the centered rectangle in
-`resources/settings/Environment.json` (currently approximately 44.66 km
-north × 71.45 km east). Both the 61-ray LiDAR boundary calculations and
-the highlighted defended-area overlay in 3D and minimap use the exact same
-`sEnvironmentState` dimensions. There is no independent defended-area
-rectangle in `TwoVsTwo.json`, and the overlay creates no additional collision
-boundary. The loader reads `Environment.json` before initial spawns, since
-the regular serializer load runs afterward.
+~~~powershell
+PPO.exe --example two-vs-two --check-example
+~~~
 
-Two blue Mobile defenders are initially stationary without agents on a
-randomly chosen east/west side of this area. The static blue Objective is
-behind the defenders. A friendly RestrictedZone is between the teams.
-The blue units can use their historical SNA range/angle destruction system,
-but no defender RLtools policy, patrol logic, or training is active yet.
+Le curriculum sans ennemi est disponible avec `--example blue-patrol`.
 
-One mandatory red Mobile and an optional second red Mobile spawn on the
-opposite side, **1 to 3 km outside** the defended-area/world east boundary.
-The red mobile positions/headings/speeds vary each initialization. Red
-units are allowed to enter from outside; their initial positions are not
-clamped to the world rectangle.
-red_2 can start destroyed with configurable probability (default 0.15).
-To test 2-vs-1, set red_2.enabled=false in TwoVsTwo.json.
-Every red Mobile has target blue_objective resolved from its JSON declaration
-and uses the *existing* RLMission production agent / prod/model.pt.
+## Composition du scénario
 
-The same 61-ray pseudo-LiDAR, world boundary intersection, zone threat and
-destruction rules are reused; no RLMission checkpoint, observation, action
-or network format has changed. Every car also has a sensor component, including
-agent-free defenders. Because attackers now start outside the world boundary,
-their trained boundary-avoidance behavior must be validated in a GUI smoke
-test: this patch does not change the established LiDAR model or policy.
+Le monde est le rectangle centré défini par `Environment.json`. Avec les
+valeurs distribuées, l'axe est/ouest est plus long que l'axe nord/sud. La
+patrouille bleue suit donc l'axe est/ouest.
 
-The renderer uses the existing 3D tactical view and optional 2D minimap.
-The car platform archetype triggers a procedural car drawing with heading
-and side color; the world-aligned defended rectangle is shown in both views. Enable
-the minimap using Panels > Minimap. No third-party model asset is required.
+Le scénario contient :
 
-## Build
+- deux défenseurs bleus pilotés ensemble par `PatrolMappoAgent` et RLTools ;
+- un objectif bleu à protéger ;
+- une zone restreinte amie ;
+- deux entités rouges pilotées par les agents `RLMission` de production
+  existants, dont l'activation dépend du curriculum d'entraînement.
 
-RLtools is fetched via FetchContent from the immutable v1.0.0 commit and
-exposed as RLtools::Core through TwoVsTwoDefenderBackend (C++17, CPU-only).
-The upstream RLtools executables/tests and optional backends are disabled.
-Its compile smoke test verifies header access. LibTorch remains the
-production inference backend for red, unchanged.
+Les rouges apparaissent sur un arc extérieur devant l'objectif, pouvant aller
+jusqu'aux entrées latérales nord et sud. Leur distance au centre vaut entre
+1,05 et 1,35 fois la limite du rectangle dans cette direction et une séparation
+initiale minimale de 10 km est imposée. Ils visent ensuite l'objectif avec une
+petite variation de cap. Les limites du monde ne sont pas des murs et ne les
+arrêtent pas : les agents RLMission de production continuent à les piloter.
 
-Validation: dependency-free core tests, desktop VS2022 x64 Debug/Release,
-CTest including TwoVsTwoSpawnTests / TwoVsTwoExampleBootstrap, plus GUI
-review. No training, MAPPO, 2D vehicle physics or blue patrol is in this PR.
+Le second rouge peut toujours être retiré avec `red_2.enabled=false`. Lorsque
+`threatCurriculum.enabled` vaut `false`, le réglage historique
+`red2InitiallyDestroyedProbability` choisit les épisodes 2v1. Lorsqu'il vaut
+`true`, les deux entités restent chargées mais commencent masquées jusqu'à leur
+éventuelle étape d'activation.
+
+La zone restreinte est elle aussi régénérée à chaque épisode dans la partie
+défendue. Elle est active dans 75 % des cas et absente dans 25 % des cas, ce qui
+crée des situations plus favorables aux attaquants. L'ensemble du tirage est
+reproductible à graine identique, y compris pendant les évaluations.
+
+Ces valeurs sont configurables dans `Scenarios/TwoVsTwo.json` :
+
+~~~json
+"redSpawn": {
+  "minimumWorldScale": 1.05,
+  "maximumWorldScale": 1.35,
+  "minimumBearingDegrees": -90.0,
+  "maximumBearingDegrees": 90.0,
+  "minimumSeparation": 10000.0
+},
+"threatCurriculum": {
+  "enabled": true,
+  "noThreatProbability": 0.20,
+  "singleThreatProbability": 0.35,
+  "delayedFirstThreatProbability": 0.35,
+  "delayedSecondThreatProbability": 0.70,
+  "minimumFirstDelaySteps": 256,
+  "maximumFirstDelaySteps": 768,
+  "minimumSecondDelaySteps": 384,
+  "maximumSecondDelaySteps": 1024
+},
+"restrictedZoneSpawn": {
+  "enabledProbability": 0.75,
+  "minimumNorthFraction": -0.45,
+  "maximumNorthFraction": 0.45,
+  "minimumEastFraction": 0.15,
+  "maximumEastFraction": 0.65
+}
+~~~
+
+La probabilité restante après `noThreatProbability` et
+`singleThreatProbability` correspond aux épisodes à deux menaces. Le premier
+intervalle est le délai absolu de la première activation ; le second est un
+délai supplémentaire appliqué à la seconde. Les évaluations désactivent ce
+tirage et conservent des cas immédiats 2v1/2v2 reproductibles.
+
+Un angle de 0° place un rouge directement en face de l'objectif ; -90° et
++90° correspondent aux deux côtés. Les fractions de la zone sont relatives
+aux demi-dimensions du monde, et les fractions est sont orientées vers le côté
+défendu. Dans `BluePatrol.json`, la zone reste volontairement fixe et toujours
+active afin de ne pas modifier le curriculum sans menace.
+
+## Responsabilités des modules
+
+`Examples/Shared/World` fournit les entités 2D, la cinématique, les commandes
+SNA et le pseudo-LiDAR. `Examples/TwoVsTwo` compose le scénario, les positions
+initiales, les règles et le contrôleur bleu. `Examples/Airspace` conserve les
+agents RLMission rouges et le renderer partagé.
+
+Le contrôleur bleu utilise un acteur partagé, une récompense d'équipe et un
+critique centralisé. Les observations locales contiennent les deux pistes
+rouges avec leur masque vivant/disponible ; un encodeur partagé, une attention
+masquée et les poolings moyen/max masqués agrègent ces pistes. Le détail du
+contrat se trouve dans [blue-ppo-patrol.md](blue-ppo-patrol.md).
+
+Le format, le réseau et les checkpoints RLMission ne changent pas. Les modèles
+rouges restent sous `resources/model/RLMission/`.
+
+## Affichage et entraînement
+
+Le renderer montre les entités dans la vue tactique 3D et dans la minimap. Le
+panneau `Blue MAPPO (RLTools)` affiche la progression du rollout, la récompense
+totale, les sept canaux de récompense, leurs coefficients et le nombre de mises
+à jour PPO. Il affiche aussi les campagnes d'évaluation automatiques, avec
+progression, score, succès, survie et timeouts.
+
+Le rollout bleu vaut 2048 pas d'équipe par défaut et se configure dans
+`resources/settings/Training/BluePatrol.json`. Les 128 échantillons visibles
+dans le backend correspondent à la taille d'un mini-batch PPO, pas à un arrêt
+de l'entraînement.
+
+Toutes les dix mises à jour par défaut, le candidat courant est testé sans
+exploration sur des cas reproductibles 2v2 et 2v1. Les rouges restent les
+agents RLMission de production pendant ces tests. Seul un score meilleur est
+promu vers le checkpoint `prod` ; la collecte MAPPO reprend ensuite.
+
+## Build et tests
+
+RLTools est intégré en C++17 et utilisé sur CPU. LibTorch reste le backend des
+rouges. La validation principale couvre :
+
+- le spawn 2v2 ;
+- le chargement des deux scénarios ;
+- l'avancement conjoint des deux défenseurs ;
+- la présence des observations rouges et des récompenses dans les snapshots ;
+- une mise à jour MAPPO complète en smoke test ;
+- la patrouille sur l'axe long et les règles de terminaison.

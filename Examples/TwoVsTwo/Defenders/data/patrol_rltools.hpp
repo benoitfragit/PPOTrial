@@ -97,11 +97,13 @@ void observe_privileged(DEVICE& device, rl::environments::BluePatrol<T, TI> cons
 }
 
 template<typename DEVICE, typename T, typename TI, typename RNG>
-bool terminated(DEVICE&, rl::environments::BluePatrol<T, TI> const&,
+bool terminated(DEVICE&, rl::environments::BluePatrol<T, TI> const& env,
                 typename rl::environments::BluePatrol<T, TI>::State const& state,
                 RNG&)
 {
-    return state.failed; // Time limit is truncated by RLtools runner instead.
+    // The patrol horizon is a genuine finite-horizon episode. Marking it as a
+    // terminal value boundary preserves its final reward in RLtools GAE.
+    return state.failed || state.step >= env.parameters.episodeSteps;
 }
 } // namespace rl_tools
 
@@ -127,12 +129,15 @@ struct PPOParameters : rlt::rl::algorithms::ppo::DefaultParameters<float, Index>
     static constexpr bool NORMALIZE_OBSERVATIONS = false; // Features normalized in Observe.
 };
 
-struct TrainingParameters
+template<Index RolloutSteps>
+struct TrainingParametersFor
     : rlt::rl::algorithms::ppo::loop::core::Parameters<float, Index, Environment>
 {
+    static_assert(RolloutSteps >= 128 && RolloutSteps <= 4096,
+                  "Patrol rollout capacity is outside the supported range");
     using PPO_PARAMETERS = PPOParameters;
-    static constexpr Index N_ENVIRONMENTS = 1;
-    static constexpr Index ON_POLICY_RUNNER_STEPS_PER_ENV = 128;
+    static constexpr Index N_ENVIRONMENTS = 2;
+    static constexpr Index ON_POLICY_RUNNER_STEPS_PER_ENV = RolloutSteps;
     static constexpr Index BATCH_SIZE = 128;
     static constexpr Index ACTOR_HIDDEN_DIM = 128;
     static constexpr Index CRITIC_HIDDEN_DIM = 128;
@@ -150,8 +155,13 @@ struct AttentionApproximators
     using ACTOR_TYPE=AttentionActor<typename Base::ACTOR_SPEC>;
 };
 
-using TrainingConfig = rlt::rl::algorithms::ppo::loop::core::Config<
-    float, Index, Engine, Environment, TrainingParameters, AttentionApproximators>;
+template<Index RolloutSteps>
+using TrainingConfigFor = rlt::rl::algorithms::ppo::loop::core::Config<
+    float, Index, Engine, Environment, TrainingParametersFor<RolloutSteps>,
+    AttentionApproximators>;
+
+using TrainingParameters = TrainingParametersFor<2048>;
+using TrainingConfig = TrainingConfigFor<2048>;
 using TrainingState = typename TrainingConfig::template State<TrainingConfig>;
 
 } // namespace ppo::examples::twovstwo::defenders

@@ -36,6 +36,21 @@ int main()
     actor.red.Differentiate(input,0,Layout::RedOffset,grad,empty);
     if(rlt::get(actor.red.encoderW.gradient,0,0)!=0.F)return 3;
 
+    // One live red track participates in attention; the destroyed/absent
+    // second track remains excluded from softmax and every pooling branch.
+    rlt::set(input,0,Layout::RedOffset,0.4F);
+    rlt::set(input,0,Layout::RedOffset+Layout::RedFeatures-1,1.F);
+    auto const oneThreat=actor.red.Transform(input,0,Layout::RedOffset,output);
+    if(oneThreat.count!=1 || !oneThreat.valid[0] || oneThreat.valid[1])return 6;
+
+    // Privileged CTDE state is visible to the Critic dataset but must be
+    // exactly masked from decentralized Actor evaluation.
+    for(blue::Index i=Layout::CentralOffset;i<Layout::Size;++i)
+        rlt::set(input,0,i,0.5F);
+    rlt::blue_attention_detail::transform(device,actor,input,output);
+    for(blue::Index i=Layout::CentralOffset;i<Layout::Size;++i)
+        if(rlt::get(output,0,i)!=0.F)return 7;
+
     // Both friend and objective tracks valid. Finite-difference gradient
     // must match the analytic PPO chain rule through masked attention.
     rlt::set(input,0,0,0.23F);
