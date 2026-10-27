@@ -97,6 +97,23 @@ Pour ajouter un profil, déclarer le nouvel adaptateur C++ dans la couche applic
 ~~~json
 {
   "formatVersion": 2,
+  "patrol": {
+    "racetrack": {
+      "lengthMeters": { "min": 50000.0, "max": 60000.0 },
+      "widthMeters": { "min": 9000.0, "max": 13000.0 },
+      "headingDegrees": { "min": 80.0, "max": 100.0 }
+    },
+    "formation": {
+      "separationDistanceMeters": { "min": 6000.0, "max": 9000.0 },
+      "separationAngleDegrees": { "min": 10.0, "max": 25.0 }
+    },
+    "defense": {
+      "activationRisk": 0.55,
+      "deactivationRisk": 0.35,
+      "minimumAssignmentSeconds": 8.0,
+      "recoverySeconds": 15.0
+    }
+  },
   "training": {
     "rolloutSteps": 2021,
     "checkpointEvery": 5,
@@ -172,15 +189,15 @@ un nouveau démarrage reproductible, modifier le JSON lorsque l'application est
 arrêtée.
 
 Les coefficients s'appliquent à des canaux conditionnés par la mission. Sans
-menace, `Patrol tracking` évalue les deux bleus. Avec une menace, le bleu le plus
-proche intercepte et seul son équipier reste évalué sur la patrouille ; avec
-deux menaces, les deux bleus sont affectés un-à-un et ce canal devient nul.
-`Zone protection` contient alors le rapprochement dense vers les menaces et
-leur éloignement de l'objectif, ainsi qu'un signal de spécialisation qui pousse
-chaque voiture vers sa propre affectation. `Formation safety` combine la marge
-anticollision et, sans menace, le respect de la pose leader–suiveur. `Timeout`
-vaut -15 si une menace active ou encore planifiée reste irrésolue à l'horizon ;
-une patrouille sans menace n'est pas punie pour avoir atteint sa durée normale.
+menace crédible, `Patrol tracking` évalue les deux bleus. Une menace visible
+mais lointaine ou en éloignement ne suffit pas. Avec une menace crédible,
+l'affectation stable choisit un intercepteur et conserve l'autre en réserve ;
+avec deux menaces crédibles, les deux bleus reçoivent des cibles distinctes.
+Les contributions patrouille/défense suivent le poids continu `q`, y compris
+pendant la récupération. `Formation safety` combine le wedge pondéré et une
+marge anticollision toujours active. `Timeout` vaut -15 si une menace active
+ou encore planifiée reste irrésolue à l'horizon ; une patrouille sans menace
+n'est pas punie pour avoir atteint sa durée normale.
 
 `checkpointEvery` lance réellement l'évaluateur intégré après le nombre de
 mises à jour indiqué. L'acteur agit alors de façon déterministe pendant
@@ -190,12 +207,18 @@ et phases. Le score et sa progression sont visibles dans l'IHM ; seul un
 candidat meilleur remplace le checkpoint de production.
 
 Le dossier `resources/model/BluePatrol/latest/` reçoit deux fichiers après la
-première mise à jour : l'acteur v4 destiné à l'inférence et
-`blue_patrol_training_v1.txt` destiné à la reprise. Ce second fichier conserve
+première mise à jour : `blue_patrol_mappo_v5.txt` destiné à l'inférence et
+`blue_patrol_training_v2.txt` destiné à la reprise. Ce second fichier conserve
 le critique, les états Adam, le compteur de mises à jour et le RNG. Les données
 du rollout ne sont pas conservées ; le buffer repart vide au redémarrage. Le
 dossier `prod/` reste volontairement limité au meilleur acteur évalué et à son
 score.
+
+La version v5 doit être entraînée depuis des poids neufs : la dimension de
+l'observation reste identique, mais les entrées de patrouille représentent
+désormais la projection sur une courbe analytique continue, et non une cible
+ou une progression temporelle. Les noms et signatures v5/v2 empêchent le
+chargement silencieux des anciens fichiers v4/v1.
 
 ### Géométrie aléatoire du 2v2
 
