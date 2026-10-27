@@ -174,10 +174,10 @@ récompensent notamment l'éloignement des menaces de l'objectif et leur
 interception ; la perte de l'objectif ou d'un défenseur est terminale.
 
 Le scénario `two-vs-two` applique pendant l'entraînement un curriculum défini
-dans `Scenarios/TwoVsTwo.json`. Par défaut, 20 % des épisodes n'activent aucun
-rouge, 35 % en activent un et 45 % en activent deux. La première activation est
-retardée dans 35 % des cas ; lorsqu'une seconde menace existe, elle est décalée
-dans 70 % des cas. La destruction de la première ne termine pas l'épisode tant
+dans `Scenarios/TwoVsTwo.json`. Par défaut, 10 % des épisodes n'activent aucun
+rouge, 30 % en activent un et 60 % en activent deux. La première activation est
+retardée dans 20 % des cas ; lorsqu'une seconde menace existe, elle est décalée
+dans 45 % des cas. La destruction de la première ne termine pas l'épisode tant
 qu'une autre activation est planifiée. Ce mécanisme ne change ni le réseau ni
 le contrôleur RLMission.
 

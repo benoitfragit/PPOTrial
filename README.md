@@ -26,8 +26,8 @@ actuellement x64 ; les builds Debug sont recommandés pour le diagnostic.
 
 Dans le sélecteur, ces entrées sont libellées explicitement `BLUE PATROL ONLY
 - NO RED` et `TWO VS TWO - MAPPO vs RLMission`. Le second scénario conserve
-toujours les deux entités rouges, mais son curriculum d'entraînement tire 20 %
-d'épisodes sans menace, 35 % avec une menace et 45 % avec deux menaces. La
+toujours les deux entités rouges, mais son curriculum d'entraînement tire 10 %
+d'épisodes sans menace, 30 % avec une menace et 60 % avec deux menaces. La
 première menace peut être retardée et, dans un épisode à deux menaces, la
 seconde peut apparaître plus tard. Les campagnes d'évaluation restent des cas
 immédiats et déterministes 2v1/2v2.
