@@ -201,7 +201,7 @@ int main()
         || oneAssignment.attackerForGuard[1] < oneThreat.attackers.size()
         || std::abs(blue::MissionPatrolReward(
                         p, oneThreat, oneThreat, oneAssignment)
-                    - blue::TrackingReward(
+                    - 0.5F * blue::TrackingReward(
                         p, oneThreat, oneThreat, 1U)) > 1.e-6F)
         return 22;
     auto dangerousDefense = oneThreat;

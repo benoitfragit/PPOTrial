@@ -151,6 +151,38 @@ inline Parameters LoadPatrolParameters(std::filesystem::path const& settings)
         shaping, "separationPenaltyWeight");
     parameters.controlEffortWeight = patrol_config_detail::FiniteNumber(
         shaping, "controlEffortWeight");
+    auto const& defense = patrolDocument.at("patrol").at("defense");
+    parameters.defense.activationRisk = patrol_config_detail::FiniteNumber(
+        defense, "activationRisk");
+    parameters.defense.deactivationRisk = patrol_config_detail::FiniteNumber(
+        defense, "deactivationRisk");
+    parameters.defense.activationDistanceMeters =
+        patrol_config_detail::FiniteNumber(
+            defense, "activationDistanceMeters");
+    parameters.defense.deactivationDistanceMeters =
+        patrol_config_detail::FiniteNumber(
+            defense, "deactivationDistanceMeters");
+    parameters.defense.protectedRadiusMeters =
+        patrol_config_detail::FiniteNumber(defense, "protectedRadiusMeters");
+    parameters.defense.timeToIntrusionSeconds =
+        patrol_config_detail::FiniteNumber(defense, "timeToIntrusionSeconds");
+    parameters.defense.teammateThreatDistanceMeters =
+        patrol_config_detail::FiniteNumber(
+            defense, "teammateThreatDistanceMeters");
+    parameters.defense.teammateVulnerabilityWeight =
+        patrol_config_detail::FiniteNumber(
+            defense, "teammateVulnerabilityWeight");
+    parameters.defense.minimumAssignmentSeconds =
+        patrol_config_detail::FiniteNumber(
+            defense, "minimumAssignmentSeconds");
+    parameters.defense.deactivationHoldSeconds =
+        patrol_config_detail::FiniteNumber(
+            defense, "deactivationHoldSeconds");
+    parameters.defense.recoverySeconds = patrol_config_detail::FiniteNumber(
+        defense, "recoverySeconds");
+    parameters.defense.switchImprovementFraction =
+        patrol_config_detail::FiniteNumber(
+            defense, "switchImprovementFraction");
     PatrolGeometrySettings const geometrySettings =
         LoadPatrolGeometrySettings(settings);
     PatrolSamplingConstraints const constraints{

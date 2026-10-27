@@ -28,6 +28,10 @@ if (PPO_BUILD_PATROL_TOOLS)
 endif()
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
+    add_executable(TwoVsTwoPatrolDefenseTests Tests/patrol_defense_tests.cpp)
+    target_link_libraries(TwoVsTwoPatrolDefenseTests PRIVATE
+        TwoVsTwoDefenderBackend)
+    add_test(NAME TwoVsTwoPatrolDefenseTests COMMAND TwoVsTwoPatrolDefenseTests)
     add_executable(TwoVsTwoPatrolGeometryTests Tests/patrol_geometry_tests.cpp)
     target_link_libraries(TwoVsTwoPatrolGeometryTests PRIVATE
         TwoVsTwoDefenderBackend nlohmann_json::nlohmann_json)
@@ -53,6 +57,7 @@ endif()
 add_library(TwoVsTwoPatrolRuntime STATIC
     Core/data/patrol_agent.hpp
     Core/data/patrol_config.hpp
+    Core/data/patrol_defense.hpp
     Core/data/patrol_geometry.hpp
     Evaluation/data/patrol_evaluation_campaign.hpp
     Evaluation/data/patrol_evaluation_settings.hpp
