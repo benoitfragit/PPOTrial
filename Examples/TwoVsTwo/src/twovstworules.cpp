@@ -198,5 +198,13 @@ void TwoVsTwoWorldRules::CopySnapshot(entt::registry& source, entt::registry& ta
                                       0.5F * world.m_maxNorth,
                                       0.5F * world.m_maxEast});
     }
+    if (source.ctx().contains<InitializerContext>())
+    {
+        auto const& context = source.ctx().get<InitializerContext>();
+        if (context.patrolGeometryReady
+            && context.patrolTrackOverlay.m_sampleCount >= 2U)
+            target.ctx().emplace<ppo::model::sPatrolTrackOverlay>(
+                context.patrolTrackOverlay);
+    }
 }
 }

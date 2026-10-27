@@ -5,6 +5,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 
 #include "entt/entt.hpp"
 #include "entitytypes.hpp"
@@ -163,6 +164,26 @@ struct sDefendedArea
     float m_east{0.F};
     float m_halfNorth{0.F};
     float m_halfEast{0.F};
+};
+
+/**
+ * @brief Snapshot-only samples used to draw the analytical patrol curves.
+ *
+ * These points have no navigation or training semantics: the controller uses
+ * the continuous geometry directly. The fixed-size storage avoids allocations
+ * while copying and rendering snapshots.
+ */
+struct sPatrolTrackOverlay final
+{
+    /** @brief Number of samples reserved per closed defender curve. */
+    static constexpr std::size_t SampleCapacity = 97U;
+
+    /** @brief North coordinates, indexed by defender role then sample. */
+    std::array<std::array<float, SampleCapacity>, 2> m_north{};
+    /** @brief East coordinates, indexed by defender role then sample. */
+    std::array<std::array<float, SampleCapacity>, 2> m_east{};
+    /** @brief Number of valid entries in each coordinate array. */
+    std::size_t m_sampleCount{};
 };
 
 } /* ppo::model */

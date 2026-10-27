@@ -134,6 +134,59 @@ void TestDelayedThreatActivation()
             "a never-scheduled threat was activated");
 }
 
+void TestPatrolOverlaySnapshot()
+{
+    using namespace ppo::model;
+    using ppo::examples::twovstwo::InitializerContext;
+
+    entt::registry world;
+    auto& environment = world.ctx().emplace<sEnvironmentState>();
+    environment.m_maxNorth = 50000.F;
+    environment.m_maxEast = 80000.F;
+    auto& context = world.ctx().emplace<InitializerContext>();
+    context.patrolGeometryReady = true;
+    context.patrolGeometry.anchorNorth = 120.F;
+    context.patrolGeometry.anchorEast = -340.F;
+    auto& sourceOverlay = context.patrolTrackOverlay;
+    sourceOverlay.m_sampleCount = sourceOverlay.SampleCapacity;
+    float const circuit = ppo::examples::twovstwo::defenders::CircuitLength(
+        context.patrolGeometry);
+    for (std::size_t role = 0U; role < 2U; ++role)
+        for (std::size_t sample = 0U;
+             sample < sourceOverlay.m_sampleCount; ++sample)
+        {
+            auto const pose =
+                ppo::examples::twovstwo::defenders::EvaluatePatrolCurve(
+                    context.patrolGeometry, role,
+                    circuit * static_cast<float>(sample)
+                        / static_cast<float>(sourceOverlay.m_sampleCount - 1U));
+            sourceOverlay.m_north[role][sample] = pose.north;
+            sourceOverlay.m_east[role][sample] = pose.east;
+        }
+
+    entt::registry snapshot;
+    ppo::examples::twovstwo::TwoVsTwoWorldRules rules;
+    rules.CopySnapshot(world, snapshot);
+    Require(snapshot.ctx().contains<sPatrolTrackOverlay>(),
+            "TwoVsTwo snapshot has no patrol visualization overlay");
+    auto const& overlay = snapshot.ctx().get<sPatrolTrackOverlay>();
+    Require(overlay.m_sampleCount == sPatrolTrackOverlay::SampleCapacity,
+            "patrol overlay sample count is invalid");
+    for (std::size_t role = 0U; role < 2U; ++role)
+    {
+        std::size_t const last = overlay.m_sampleCount - 1U;
+        Require(std::hypot(
+                    overlay.m_north[role][0] - overlay.m_north[role][last],
+                    overlay.m_east[role][0] - overlay.m_east[role][last])
+                    < 0.1F,
+                "patrol overlay is not closed");
+    }
+    Require(std::hypot(
+                overlay.m_north[0][0] - overlay.m_north[1][0],
+                overlay.m_east[0][0] - overlay.m_east[1][0]) > 100.F,
+            "leader and follower overlays are indistinguishable");
+}
+
 } // namespace
 
 int main()
@@ -143,6 +196,7 @@ int main()
         TestSweptBlueCollision();
         TestBlueNearMiss();
         TestDelayedThreatActivation();
+        TestPatrolOverlaySnapshot();
         return 0;
     }
     catch (std::exception const& error)

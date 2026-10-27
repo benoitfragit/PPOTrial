@@ -757,6 +757,54 @@ void DrawDefendedArea3D(ppo::model::sDefendedArea const& area, float scale)
     DrawLineEx3D(d, a, 0.055F, color);
 }
 
+/**
+ * @brief Draws both sampled views of the analytical TwoVsTwo patrol curve.
+ * @param overlay Snapshot-only curve samples.
+ * @param scale World-to-render scale.
+ */
+void DrawPatrolTrack3D(ppo::model::sPatrolTrackOverlay const& overlay,
+                       float scale)
+{
+    std::size_t const count = std::min(
+        overlay.m_sampleCount,
+        ppo::model::sPatrolTrackOverlay::SampleCapacity);
+    if (count < 2U)
+        return;
+
+    std::array<Color, 2> const colors{
+        Color{70, 190, 255, 225}, Color{105, 235, 175, 205}};
+    for (std::size_t role = 0U; role < overlay.m_north.size(); ++role)
+    {
+        for (std::size_t sample = 1U; sample < count; ++sample)
+        {
+            Vector3 const previous = ToWorld3D(
+                overlay.m_north[role][sample - 1U],
+                overlay.m_east[role][sample - 1U], -0.09F * scale, scale);
+            Vector3 const current = ToWorld3D(
+                overlay.m_north[role][sample],
+                overlay.m_east[role][sample], -0.09F * scale, scale);
+            DrawLineEx3D(previous, current,
+                         role == 0U ? 0.075F : 0.050F, colors[role]);
+        }
+        for (std::size_t sample = 16U; sample + 1U < count; sample += 16U)
+        {
+            Vector3 const tip = ToWorld3D(
+                overlay.m_north[role][sample],
+                overlay.m_east[role][sample], -0.11F * scale, scale);
+            Vector3 const previous = ToWorld3D(
+                overlay.m_north[role][sample - 1U],
+                overlay.m_east[role][sample - 1U], -0.11F * scale, scale);
+            Vector3 const forward = VectorNormalizeSafe(VectorSub(tip, previous));
+            Vector3 const side{-forward.z, 0.F, forward.x};
+            Vector3 const base = VectorSub(tip, VectorScale(forward, 0.8F));
+            DrawLineEx3D(tip, VectorAdd(base, VectorScale(side, 0.35F)),
+                         0.06F, colors[role]);
+            DrawLineEx3D(tip, VectorSub(base, VectorScale(side, 0.35F)),
+                         0.06F, colors[role]);
+        }
+    }
+}
+
 void
 DrawSamGlyph3D(ppo::model::sEntityState const& state, float scale, Color color)
 {
@@ -1553,6 +1601,7 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
             m_showInspection = section.value("showInspection", m_showInspection);
             m_showSimulation = section.value("showSimulation", m_showSimulation);
             m_showPseudoLidar = section.value("showPseudoLidar", m_showPseudoLidar);
+            m_showPatrolTrack = section.value("showPatrolTrack", m_showPatrolTrack);
             m_focusSelectionInMinimap = section.value("focusSelectionInMinimap", m_focusSelectionInMinimap);
             m_cameraDistance = std::clamp(section.value("cameraDistance", m_cameraDistance), 5.F, 60.F);
             m_cameraHeight = std::clamp(section.value("cameraHeight", m_cameraHeight), 2.F, 25.F);
@@ -1608,6 +1657,7 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
             section["showInspection"] = m_showInspection;
             section["showSimulation"] = m_showSimulation;
             section["showPseudoLidar"] = m_showPseudoLidar;
+            section["showPatrolTrack"] = m_showPatrolTrack;
             section["focusSelectionInMinimap"] = m_focusSelectionInMinimap;
             section["cameraDistance"] = m_cameraDistance;
             section["cameraHeight"] = m_cameraHeight;
@@ -2763,6 +2813,11 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
     DrawPlane(Vector3{ 0.F, -0.02F, 0.F }, Vector2{ 320.F, 320.F }, Color{ 14, 21, 30, 255 });
     if (snapshot.ctx().contains<ppo::model::sDefendedArea>())
         DrawDefendedArea3D(snapshot.ctx().get<ppo::model::sDefendedArea>(), m_worldScale);
+    if (m_showPatrolTrack
+        && snapshot.ctx().contains<ppo::model::sPatrolTrackOverlay>())
+        DrawPatrolTrack3D(
+            snapshot.ctx().get<ppo::model::sPatrolTrackOverlay>(),
+            m_worldScale);
 
     entt::entity primaryTarget = entt::null;
     entt::entity pseudoLidarEntity = entt::null;
@@ -2958,6 +3013,11 @@ EnvironmentRenderer::DrawTacticalWindow(entt::registry const& snapshot)
     ImGui::Text("Episodes %u", m_missionTelemetry.m_totalEpisodes);
     ImGui::SameLine();
     ImGui::Text("%s", m_missionTelemetry.m_lastEpisodeSuccess ? "Last: Success" : "Last: Pending/Fail");
+    if (snapshot.ctx().contains<ppo::model::sPatrolTrackOverlay>())
+    {
+        ImGui::SameLine();
+        ImGui::Checkbox("Show patrol track", &m_showPatrolTrack);
+    }
 
     ImVec2 const size = ImGui::GetContentRegionAvail();
     RenderTacticalScene(snapshot, static_cast<int>(size.x), static_cast<int>(size.y));
@@ -3057,6 +3117,47 @@ EnvironmentRenderer::DrawMinimapWindow(entt::registry const& snapshot)
         draw->AddRect(min, max, IM_COL32(75, 160, 255, 235), 1.F, 0, 2.F);
         draw->AddText(ImVec2{min.x + 6.F, min.y + 6.F},
                       IM_COL32(145, 195, 255, 255), "DEFENDED AREA");
+    }
+    if (m_showPatrolTrack
+        && snapshot.ctx().contains<ppo::model::sPatrolTrackOverlay>())
+    {
+        auto const& overlay =
+            snapshot.ctx().get<ppo::model::sPatrolTrackOverlay>();
+        std::size_t const count = std::min(
+            overlay.m_sampleCount,
+            ppo::model::sPatrolTrackOverlay::SampleCapacity);
+        std::array<ImVec2,
+                   ppo::model::sPatrolTrackOverlay::SampleCapacity> points{};
+        std::array<ImU32, 2> const colors{
+            IM_COL32(70, 190, 255, 235), IM_COL32(105, 235, 175, 215)};
+        for (std::size_t role = 0U;
+             role < overlay.m_north.size() && count >= 2U; ++role)
+        {
+            for (std::size_t sample = 0U; sample < count; ++sample)
+                points[sample] = toMinimap(
+                    overlay.m_north[role][sample],
+                    overlay.m_east[role][sample]);
+            draw->AddPolyline(points.data(), static_cast<int>(count),
+                              colors[role], 0, role == 0U ? 2.5F : 1.8F);
+            for (std::size_t sample = 16U;
+                 sample + 1U < count; sample += 16U)
+            {
+                ImVec2 const tip = points[sample];
+                ImVec2 const previous = points[sample - 1U];
+                float const dx = tip.x - previous.x;
+                float const dy = tip.y - previous.y;
+                float const length = std::max(std::hypot(dx, dy), 0.001F);
+                float const forwardX = dx / length;
+                float const forwardY = dy / length;
+                ImVec2 const base{tip.x - 8.F * forwardX,
+                                  tip.y - 8.F * forwardY};
+                ImVec2 const left{base.x - 3.5F * forwardY,
+                                  base.y + 3.5F * forwardX};
+                ImVec2 const right{base.x + 3.5F * forwardY,
+                                   base.y - 3.5F * forwardX};
+                draw->AddTriangleFilled(tip, left, right, colors[role]);
+            }
+        }
     }
 
     draw->AddLine(ImVec2{ mapMin.x + 18.F, mapMax.y - 28.F }, ImVec2{ mapMin.x + 18.F, mapMax.y - 48.F }, IM_COL32_WHITE, 2.F);

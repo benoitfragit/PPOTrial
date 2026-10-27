@@ -1,6 +1,7 @@
 #pragma once
 #include "entity.hpp"
 #include "patrol_geometry.hpp"
+#include "sharedworldcomponents.hpp"
 #include "spawn.hpp"
 #include <cstddef>
 #include <cstdint>
@@ -31,6 +32,8 @@ struct InitializerContext {
     defenders::PatrolGeometrySettings patrolGeometrySettings{};
     /** @brief Immutable continuous racetrack used by the current episode. */
     defenders::PatrolGeometry patrolGeometry{};
+    /** @brief Snapshot-only rendering samples generated once per episode. */
+    ppo::model::sPatrolTrackOverlay patrolTrackOverlay{};
     /** @brief True after a feasible geometry has been sampled for the reset. */
     bool patrolGeometryReady{false};
     /** @brief Signals an exhausted bounded sampling attempt sequence. */
