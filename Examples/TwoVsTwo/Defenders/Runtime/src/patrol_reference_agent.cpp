@@ -34,6 +34,14 @@ Parameters PatrolReferenceAgent::ReadParameters()
         p.halfEast = 0.5F * world.m_maxEast;
         p.dt = world.m_dt;
     }
+    if (registry && registry->ctx().contains<InitializerContext>())
+    {
+        auto const& context = registry->ctx().get<InitializerContext>();
+        p.cruiseSpeed = context.patrolCruiseSpeed;
+        p.collisionDistance = context.patrolCollisionDistance;
+        if (context.patrolGeometryReady)
+            p.geometry = context.patrolGeometry;
+    }
     if (own_.has<ppo::model::sFlightModelState>())
     {
         auto const [flight] = own_.get<ppo::model::sFlightModelState>();

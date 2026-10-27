@@ -15,7 +15,7 @@
 namespace ppo::examples::twovstwo::defenders {
 
 /** @brief Version of the complete blue MAPPO training-state contract. */
-inline constexpr unsigned kPatrolTrainingCheckpointVersion = 1U;
+inline constexpr unsigned kPatrolTrainingCheckpointVersion = 2U;
 
 namespace training_checkpoint_detail {
 
@@ -174,7 +174,7 @@ void WritePatrolTrainingState(std::ostream& stream,
                               RNG const& rng,
                               std::uint64_t updates)
 {
-    stream << "BLUE_PATROL_TRAINING_V1 "
+    stream << "BLUE_PATROL_TRAINING_V2 "
            << kPatrolTrainingCheckpointVersion << ' '
            << ObservationLayout::Version << ' '
            << ObservationLayout::Size << ' '
@@ -241,7 +241,7 @@ std::uint64_t ReadPatrolTrainingState(std::istream& stream,
     if (!(stream >> magic >> formatVersion >> observationVersion
           >> input >> output >> actorHidden >> actorLayers
           >> criticHidden >> criticLayers)
-        || magic != "BLUE_PATROL_TRAINING_V1"
+        || magic != "BLUE_PATROL_TRAINING_V2"
         || formatVersion != kPatrolTrainingCheckpointVersion
         || observationVersion != ObservationLayout::Version
         || input != ObservationLayout::Size

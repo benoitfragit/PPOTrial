@@ -17,7 +17,8 @@ int main()
     if (!blue::Valid(p))
         return 1;
     float const length = blue::CircuitLength(p);
-    if (blue::StraightHalfLength(p) <= 0.8F * p.halfEast)
+    if (blue::StraightHalfLength(p) <= 0.F
+        || p.geometry.length <= p.geometry.width)
         return 29;
     // Entire orbit stays within world, starts/ends on the same tangent.
     for (int side : {-1, 1})
@@ -41,9 +42,10 @@ int main()
     auto state = blue::InitialState(p, 1, 0U, 0.F);
     auto const r0 = blue::PatrolReference(p, 1, 0, 0.F);
     auto const r1 = blue::PatrolReference(p, 1, 1, 0.F);
-    if (r0.east <= r1.east || r0.north != r1.north
-        || blue::FormationGap(p) < 7000.F)
-        return 4; // Phase-staggered formation on the long east/west leg.
+    if (std::hypot(r0.north - r1.north, r0.east - r1.east)
+            <= p.collisionDistance
+        || blue::FormationGap(p) <= p.collisionDistance)
+        return 4; // Rear/inward wedge remains safely separated.
     auto compressedFormation = state;
     compressedFormation.guards[0] = compressedFormation.guards[1];
     if (!(blue::FormationReward(p, state, true)
@@ -235,12 +237,10 @@ int main()
                 return 12;
             for (std::size_t role = 0; role < patrol.guards.size(); ++role)
             {
-                auto const reference = blue::PatrolReference(
-                    p, side, role, patrol.arclength);
                 auto const& car = patrol.guards[role];
-                maxError = std::max(maxError,
-                    std::hypot(car.north - reference.north,
-                               car.east - reference.east));
+                auto const projection = blue::ProjectOnPatrolCurve(
+                    p.geometry, role, car.north, car.east);
+                maxError = std::max(maxError, projection.distance);
                 accumulatedTurn += std::abs(car.turnRate * p.dt);
             }
             if (i == 0U

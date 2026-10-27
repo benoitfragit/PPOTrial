@@ -3,6 +3,7 @@
 #include "components.hpp"
 #include "sharedworldcomponents.hpp"
 #include "patrol_core.hpp"
+#include <iostream>
 #include <random>
 
 namespace ppo::examples::twovstwo {
@@ -14,7 +15,7 @@ void InitializeEntity(ppo::model::Entity& entity)
         return;
 
     auto& config = registry->ctx().get<InitializerContext>();
-    if (config.count == 0)
+    if (config.count == 0 || config.patrolGeometrySamplingFailed)
         return;
     if (config.next == 0)
     {
@@ -26,6 +27,37 @@ void InitializeEntity(ppo::model::Entity& entity)
         p.halfNorth = bounds.halfNorth;
         p.halfEast = bounds.halfEast;
         p.cruiseSpeed = config.patrolCruiseSpeed;
+        p.maxRotationRate = config.patrolMaximumRotationRate;
+        p.collisionDistance = config.patrolCollisionDistance;
+        defenders::PatrolSamplingConstraints const constraints{
+            p.halfNorth, p.halfEast, p.cruiseSpeed, p.maxRotationRate,
+            p.collisionDistance};
+        auto const geometry = defenders::SamplePatrolGeometry(
+            config.patrolGeometrySettings, constraints, config.rng);
+        if (!geometry)
+        {
+            config.patrolGeometryReady = false;
+            config.patrolGeometrySamplingFailed = true;
+            config.episodeLayout.reset();
+            std::cerr << "[BLUE PATROL] Cannot sample a feasible racetrack after "
+                      << config.patrolGeometrySettings.maximumSamplingAttempts
+                      << " attempts; check Training/BluePatrol.json.\n";
+            return;
+        }
+        config.patrolGeometry = *geometry;
+        config.patrolGeometryReady = true;
+        p.geometry = *geometry;
+        ++config.episodeIndex;
+        std::clog << "[BLUE PATROL] Episode " << config.episodeIndex
+                  << " racetrack length=" << geometry->length
+                  << "m width=" << geometry->width
+                  << "m heading=" << geometry->heading
+                  << "rad anchor=(" << geometry->anchorNorth << ','
+                  << geometry->anchorEast << ")m wedge="
+                  << geometry->separationDistance << "m/"
+                  << geometry->separationAngle << "rad direction="
+                  << (geometry->direction > 0 ? "counter-clockwise" : "clockwise")
+                  << '\n';
         if (config.evaluationOverride)
         {
             config.side = config.evaluationSide < 0 ? -1 : 1;
@@ -66,6 +98,9 @@ void InitializeEntity(ppo::model::Entity& entity)
         p.halfNorth = bounds.halfNorth;
         p.halfEast = bounds.halfEast;
         p.cruiseSpeed = config.patrolCruiseSpeed;
+        p.maxRotationRate = config.patrolMaximumRotationRate;
+        p.collisionDistance = config.patrolCollisionDistance;
+        p.geometry = config.patrolGeometry;
         auto const role = metadata.m_name == "blue_guard_1" ? 0U : 1U;
         auto const reference = defenders::PatrolReference(p, config.side,
                                                          role, config.arclength);

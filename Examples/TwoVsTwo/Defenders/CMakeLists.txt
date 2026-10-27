@@ -22,12 +22,16 @@ if (PPO_BUILD_PATROL_TOOLS)
     target_compile_definitions(PPOBlueTrain PRIVATE
         PPO_BLUE_SETTINGS_DIR=\"${CMAKE_SOURCE_DIR}/resources/settings\")
     target_compile_definitions(PPOBlueTrain PRIVATE
-        PPO_BLUE_MODEL_PATH=\"${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/latest/blue_patrol_mappo_v4.txt\")
+        PPO_BLUE_MODEL_PATH=\"${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/latest/blue_patrol_mappo_v5.txt\")
     target_compile_features(PPOBlueTrain PRIVATE cxx_std_17)
 
 endif()
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
+    add_executable(TwoVsTwoPatrolGeometryTests Tests/patrol_geometry_tests.cpp)
+    target_link_libraries(TwoVsTwoPatrolGeometryTests PRIVATE
+        TwoVsTwoDefenderBackend nlohmann_json::nlohmann_json)
+    add_test(NAME TwoVsTwoPatrolGeometryTests COMMAND TwoVsTwoPatrolGeometryTests)
     add_executable(TwoVsTwoPatrolTests Tests/patrol_tests.cpp)
     target_link_libraries(TwoVsTwoPatrolTests PRIVATE TwoVsTwoDefenderBackend)
     add_test(NAME TwoVsTwoPatrolTests COMMAND TwoVsTwoPatrolTests)
@@ -49,6 +53,7 @@ endif()
 add_library(TwoVsTwoPatrolRuntime STATIC
     Core/data/patrol_agent.hpp
     Core/data/patrol_config.hpp
+    Core/data/patrol_geometry.hpp
     Evaluation/data/patrol_evaluation_campaign.hpp
     Evaluation/data/patrol_evaluation_settings.hpp
     Runtime/data/patrol_policy.hpp
@@ -78,7 +83,7 @@ target_link_libraries(PPOPatrolEvaluate PRIVATE TwoVsTwoDefenderBackend nlohmann
 target_compile_features(PPOPatrolEvaluate PRIVATE cxx_std_17)
 target_compile_definitions(PPOPatrolEvaluate PRIVATE
     PPO_BLUE_SETTINGS_DIR=\"${CMAKE_SOURCE_DIR}/resources/settings\"
-    PPO_BLUE_MODEL_PATH=\"${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/prod/blue_patrol_mappo_v4.txt\")
+    PPO_BLUE_MODEL_PATH=\"${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/prod/blue_patrol_mappo_v5.txt\")
 
 endif()
 
