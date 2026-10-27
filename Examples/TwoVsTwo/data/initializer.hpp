@@ -40,11 +40,34 @@ struct InitializerContext {
     bool patrolGeometrySamplingFailed{false};
     /** @brief Monotonic episode number used by diagnostics. */
     std::uint64_t episodeIndex{};
+    /** @brief Physical blue-guard index assigned leader role for this episode. */
+    std::size_t leaderGuardIndex{};
     float arclength{0.F};
     bool evaluationOverride{false};
     int evaluationSide{1};
     float evaluationArclength{0.F};
     bool evaluationSecondAttackerDestroyed{false};
+
+    /**
+     * @brief Maps a physical blue-guard index to the semantic policy role.
+     * @param guardIndex Zero for blue_guard_1, one for blue_guard_2.
+     * @return Zero for leader, one for wingman.
+     */
+    std::size_t RoleForGuard(std::size_t guardIndex) const noexcept
+    {
+        return guardIndex % 2U == leaderGuardIndex % 2U ? 0U : 1U;
+    }
+
+    /**
+     * @brief Maps a semantic role to its physical blue-guard index.
+     * @param role Zero for leader, one for wingman.
+     * @return Zero for blue_guard_1, one for blue_guard_2.
+     */
+    std::size_t GuardForRole(std::size_t role) const noexcept
+    {
+        return role % 2U == 0U ? leaderGuardIndex % 2U
+                               : 1U - leaderGuardIndex % 2U;
+    }
 };
 
 /**

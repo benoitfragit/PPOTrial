@@ -94,9 +94,10 @@ Critic, both Adam states, update count and RLTools RNG. Rollout samples are not
 serialized; resume starts a fresh rollout. `model/BluePatrol/prod` remains an
 inference-only promoted Actor plus its evaluation score.
 
-The current blue checkpoint contract is Actor v5 and training-state v2. A v4
-Actor or v1 training state is not a warm start for this observation contract;
-start training from new weights. Red RLMission checkpoints are unaffected.
+The current blue checkpoint contract is Actor v6 and training-state v3. Older
+blue checkpoints are not warm starts for the episode-random leader/wingman
+observation contract; start training from new weights. Red RLMission
+checkpoints are unaffected.
 
 The blue `Platforms/Mobile/defender_car.json` profile also exposes
 `FlightModel.CruiseSpeed`. The TwoVsTwo loader uses it consistently for the

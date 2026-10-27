@@ -1,5 +1,11 @@
 # Architecture et feuille de route de la patrouille bleue
 
+> Note historique : cette feuille de route décrit les contrats v4/v5 étudiés
+> avant la v6. L'architecture active est documentée dans
+> [blue-patrol-v6-architecture.md](blue-patrol-v6-architecture.md) : rôles
+> leader/équipier aléatoires, piste réservée au leader et wedge réservé à
+> l'équipier.
+
 Date de référence : 26 octobre 2026.
 
 ## 1. Objet du document

@@ -37,12 +37,12 @@
       }
     },
     "defense": {
-      "activationRisk": 0.55,
-      "deactivationRisk": 0.35,
-      "activationDistanceMeters": 25000.0,
-      "deactivationDistanceMeters": 35000.0,
+      "activationRisk": 0.45,
+      "deactivationRisk": 0.25,
+      "activationDistanceMeters": 32000.0,
+      "deactivationDistanceMeters": 42000.0,
       "protectedRadiusMeters": 12000.0,
-      "timeToIntrusionSeconds": 60.0,
+      "timeToIntrusionSeconds": 90.0,
       "teammateThreatDistanceMeters": 12000.0,
       "teammateVulnerabilityWeight": 0.75,
       "minimumAssignmentSeconds": 8.0,

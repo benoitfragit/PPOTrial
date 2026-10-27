@@ -167,7 +167,7 @@ struct sDefendedArea
 };
 
 /**
- * @brief Snapshot-only samples used to draw the analytical patrol curves.
+ * @brief Snapshot-only samples used to draw the leader's analytical patrol.
  *
  * These points have no navigation or training semantics: the controller uses
  * the continuous geometry directly. The fixed-size storage avoids allocations
@@ -175,14 +175,14 @@ struct sDefendedArea
  */
 struct sPatrolTrackOverlay final
 {
-    /** @brief Number of samples reserved per closed defender curve. */
+    /** @brief Number of samples reserved for the closed leader curve. */
     static constexpr std::size_t SampleCapacity = 97U;
 
-    /** @brief North coordinates, indexed by defender role then sample. */
-    std::array<std::array<float, SampleCapacity>, 2> m_north{};
-    /** @brief East coordinates, indexed by defender role then sample. */
-    std::array<std::array<float, SampleCapacity>, 2> m_east{};
-    /** @brief Number of valid entries in each coordinate array. */
+    /** @brief North coordinates indexed by sample. */
+    std::array<float, SampleCapacity> m_north{};
+    /** @brief East coordinates indexed by sample. */
+    std::array<float, SampleCapacity> m_east{};
+    /** @brief Number of valid entries in the coordinate arrays. */
     std::size_t m_sampleCount{};
 };
 

@@ -145,29 +145,13 @@ inline float CircuitLength(PatrolGeometry const& geometry) noexcept
         + kPatrolTwoPi * Radius(geometry);
 }
 
-inline float InwardOffset(PatrolGeometry const& geometry,
-                          std::size_t role) noexcept
-{
-    return role == 0U ? 0.F
-        : geometry.separationDistance * std::sin(geometry.separationAngle);
-}
-
-inline float BackwardOffset(PatrolGeometry const& geometry,
-                            std::size_t role) noexcept
-{
-    return role == 0U ? 0.F
-        : geometry.separationDistance * std::cos(geometry.separationAngle);
-}
-
 inline LocalPose EvaluateCanonical(PatrolGeometry const& geometry,
-                                   float canonicalArclength,
-                                   float inwardOffset) noexcept
+                                   float canonicalArclength) noexcept
 {
     float const half = StraightHalfLength(geometry);
-    float const centreRadius = Radius(geometry);
-    float const roleRadius = centreRadius - inwardOffset;
+    float const radius = Radius(geometry);
     float const straight = 2.F * half;
-    float const arc = kPatrolPi * centreRadius;
+    float const arc = kPatrolPi * radius;
     float const s = PositiveModulo(
         canonicalArclength, 2.F * (straight + arc));
 
@@ -175,35 +159,35 @@ inline LocalPose EvaluateCanonical(PatrolGeometry const& geometry,
     if (s < straight)
     {
         result.major = -half + s;
-        result.minor = -roleRadius;
+        result.minor = -radius;
         result.tangentMajor = 1.F;
     }
     else if (s < straight + arc)
     {
         float const angle = -0.5F * kPatrolPi
-            + (s - straight) / centreRadius;
-        result.major = half + roleRadius * std::cos(angle);
-        result.minor = roleRadius * std::sin(angle);
+            + (s - straight) / radius;
+        result.major = half + radius * std::cos(angle);
+        result.minor = radius * std::sin(angle);
         result.tangentMajor = -std::sin(angle);
         result.tangentMinor = std::cos(angle);
-        result.curvature = 1.F / roleRadius;
+        result.curvature = 1.F / radius;
     }
     else if (s < 2.F * straight + arc)
     {
         float const onStraight = s - straight - arc;
         result.major = half - onStraight;
-        result.minor = roleRadius;
+        result.minor = radius;
         result.tangentMajor = -1.F;
     }
     else
     {
         float const angle = 0.5F * kPatrolPi
-            + (s - 2.F * straight - arc) / centreRadius;
-        result.major = -half + roleRadius * std::cos(angle);
-        result.minor = roleRadius * std::sin(angle);
+            + (s - 2.F * straight - arc) / radius;
+        result.major = -half + radius * std::cos(angle);
+        result.minor = radius * std::sin(angle);
         result.tangentMajor = -std::sin(angle);
         result.tangentMinor = std::cos(angle);
-        result.curvature = 1.F / roleRadius;
+        result.curvature = 1.F / radius;
     }
     return result;
 }
@@ -293,24 +277,20 @@ inline float CircuitLength(PatrolGeometry const& geometry) noexcept
 }
 
 /**
- * @brief Evaluates one defender's continuous reference curve.
+ * @brief Evaluates the leader's unique continuous patrol curve.
  * @param geometry Episode geometry.
- * @param role Zero for the leader, one for the inward follower.
  * @param teamArclength Continuous team progress in the configured direction.
  * @return Reference pose without any steering or acceleration command.
  */
 inline PatrolCurvePose EvaluatePatrolCurve(PatrolGeometry const& geometry,
-                                           std::size_t role,
                                            float teamArclength) noexcept
 {
     using namespace patrol_geometry_detail;
     float const length = patrol_geometry_detail::CircuitLength(geometry);
-    float const roleArclength = PositiveModulo(
-        teamArclength - BackwardOffset(geometry, role), length);
     float const canonicalArclength = geometry.direction >= 0
-        ? roleArclength : PositiveModulo(length - roleArclength, length);
-    LocalPose local = EvaluateCanonical(
-        geometry, canonicalArclength, InwardOffset(geometry, role));
+        ? PositiveModulo(teamArclength, length)
+        : PositiveModulo(length - teamArclength, length);
+    LocalPose local = EvaluateCanonical(geometry, canonicalArclength);
     local.tangentMajor *= static_cast<float>(geometry.direction);
     local.tangentMinor *= static_cast<float>(geometry.direction);
     local.curvature *= static_cast<float>(geometry.direction);
@@ -329,15 +309,39 @@ inline PatrolCurvePose EvaluatePatrolCurve(PatrolGeometry const& geometry,
 }
 
 /**
- * @brief Projects a position onto one defender's continuous reference curve.
+ * @brief Builds the desired wingman pose from the physical leader pose.
+ * @param geometry Episode wedge geometry.
+ * @param leader Current or predicted leader pose.
+ * @return Rear/inward pose. It is not a second patrol curve.
+ */
+inline PatrolCurvePose EvaluateWedgePose(
+    PatrolGeometry const& geometry, PatrolCurvePose const& leader) noexcept
+{
+    float const tangentNorth = std::cos(leader.heading);
+    float const tangentEast = std::sin(leader.heading);
+    float const inwardNorth = static_cast<float>(geometry.direction)
+        * -tangentEast;
+    float const inwardEast = static_cast<float>(geometry.direction)
+        * tangentNorth;
+    float const backward = geometry.separationDistance
+        * std::cos(geometry.separationAngle);
+    float const inward = geometry.separationDistance
+        * std::sin(geometry.separationAngle);
+    return {
+        leader.north - backward * tangentNorth + inward * inwardNorth,
+        leader.east - backward * tangentEast + inward * inwardEast,
+        leader.heading, leader.arclength, leader.phase, leader.curvature
+    };
+}
+
+/**
+ * @brief Projects a position onto the leader's unique patrol curve.
  * @param geometry Episode geometry.
- * @param role Zero for the leader, one for the inward follower.
  * @param north World north coordinate in metres.
  * @param east World east coordinate in metres.
  * @return Nearest curve pose and signed cross-track error.
  */
 inline PatrolProjection ProjectOnPatrolCurve(PatrolGeometry const& geometry,
-                                              std::size_t role,
                                               float north,
                                               float east) noexcept
 {
@@ -347,21 +351,21 @@ inline PatrolProjection ProjectOnPatrolCurve(PatrolGeometry const& geometry,
     float const minor = local[1];
     float const half = StraightHalfLength(geometry);
     float const centreRadius = Radius(geometry);
-    float const roleRadius = centreRadius - InwardOffset(geometry, role);
+    float const radius = centreRadius;
     float const straight = 2.F * half;
     float const arc = kPatrolPi * centreRadius;
 
     ProjectionCandidate best{};
     float const straightMajor = Clamp(major, -half, half);
     KeepCloser({straightMajor + half,
-                DistanceSquared(major, minor, straightMajor, -roleRadius)}, best);
+                DistanceSquared(major, minor, straightMajor, -radius)}, best);
     KeepCloser({straight + arc + (half - straightMajor),
-                DistanceSquared(major, minor, straightMajor, roleRadius)}, best);
+                DistanceSquared(major, minor, straightMajor, radius)}, best);
 
     float rightAngle = std::atan2(minor, major - half);
     rightAngle = Clamp(rightAngle, -0.5F * kPatrolPi, 0.5F * kPatrolPi);
-    float const rightMajor = half + roleRadius * std::cos(rightAngle);
-    float const rightMinor = roleRadius * std::sin(rightAngle);
+    float const rightMajor = half + radius * std::cos(rightAngle);
+    float const rightMinor = radius * std::sin(rightAngle);
     KeepCloser({straight + (rightAngle + 0.5F * kPatrolPi) * centreRadius,
                 DistanceSquared(major, minor, rightMajor, rightMinor)}, best);
 
@@ -369,8 +373,8 @@ inline PatrolProjection ProjectOnPatrolCurve(PatrolGeometry const& geometry,
     if (leftAngle < 0.5F * kPatrolPi)
         leftAngle += kPatrolTwoPi;
     leftAngle = Clamp(leftAngle, 0.5F * kPatrolPi, 1.5F * kPatrolPi);
-    float const leftMajor = -half + roleRadius * std::cos(leftAngle);
-    float const leftMinor = roleRadius * std::sin(leftAngle);
+    float const leftMajor = -half + radius * std::cos(leftAngle);
+    float const leftMinor = radius * std::sin(leftAngle);
     KeepCloser({2.F * straight + arc
                     + (leftAngle - 0.5F * kPatrolPi) * centreRadius,
                 DistanceSquared(major, minor, leftMajor, leftMinor)}, best);
@@ -379,10 +383,8 @@ inline PatrolProjection ProjectOnPatrolCurve(PatrolGeometry const& geometry,
     float directedArclength = geometry.direction >= 0
         ? best.canonicalArclength
         : PositiveModulo(length - best.canonicalArclength, length);
-    float const teamArclength = PositiveModulo(
-        directedArclength + BackwardOffset(geometry, role), length);
     PatrolCurvePose const pose = EvaluatePatrolCurve(
-        geometry, role, teamArclength);
+        geometry, directedArclength);
     float const deltaNorth = north - pose.north;
     float const deltaEast = east - pose.east;
     float const leftNorth = -std::sin(pose.heading);
@@ -425,12 +427,10 @@ inline bool Valid(PatrolGeometry const& geometry,
         || constraints.collisionDistance <= 0.F)
         return false;
 
-    float const inward = InwardOffset(geometry, 1U);
-    float const backward = BackwardOffset(geometry, 1U);
     float const minimumTurnRadius = constraints.cruiseSpeed
         / constraints.maximumRotationRate;
-    if (Radius(geometry) - inward < minimumTurnRadius
-        || backward <= constraints.collisionDistance)
+    if (Radius(geometry) < minimumTurnRadius
+        || geometry.separationDistance <= constraints.collisionDistance)
         return false;
 
     float const halfLength = 0.5F * geometry.length;
@@ -445,18 +445,22 @@ inline bool Valid(PatrolGeometry const& geometry,
             + settings.boundaryMarginMeters > constraints.halfEast)
         return false;
 
-    float minimumSeparation = std::numeric_limits<float>::infinity();
     float const circuit = patrol_geometry_detail::CircuitLength(geometry);
     for (std::size_t sample = 0U; sample < 64U; ++sample)
     {
         float const arclength = circuit * static_cast<float>(sample) / 64.F;
-        auto const leader = EvaluatePatrolCurve(geometry, 0U, arclength);
-        auto const follower = EvaluatePatrolCurve(geometry, 1U, arclength);
-        minimumSeparation = std::min(minimumSeparation,
-            std::hypot(leader.north - follower.north,
-                       leader.east - follower.east));
+        auto const leader = EvaluatePatrolCurve(geometry, arclength);
+        auto const wingman = EvaluateWedgePose(geometry, leader);
+        auto const insideBounds = [&](PatrolCurvePose const& pose) {
+            return std::abs(pose.north) + settings.boundaryMarginMeters
+                    <= constraints.halfNorth
+                && std::abs(pose.east) + settings.boundaryMarginMeters
+                    <= constraints.halfEast;
+        };
+        if (!insideBounds(leader) || !insideBounds(wingman))
+            return false;
     }
-    return minimumSeparation > constraints.collisionDistance;
+    return true;
 }
 
 /**

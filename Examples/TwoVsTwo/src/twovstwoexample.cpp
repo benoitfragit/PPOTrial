@@ -209,11 +209,11 @@ bool LoadScenario(std::filesystem::path const& path,
     auto const modelRoot = std::filesystem::path{RESOURCE_PATH}.parent_path()
         / "model" / "BluePatrol";
     auto const latestCheckpoint = modelRoot / "latest"
-        / "blue_patrol_mappo_v5.txt";
+        / "blue_patrol_mappo_v6.txt";
     auto const trainingCheckpoint = modelRoot / "latest"
-        / "blue_patrol_training_v2.txt";
+        / "blue_patrol_training_v3.txt";
     auto const productionCheckpoint = modelRoot / "prod"
-        / "blue_patrol_mappo_v5.txt";
+        / "blue_patrol_mappo_v6.txt";
     if (useMappo)
     {
         std::filesystem::path const warmStartCheckpoint =
@@ -246,7 +246,7 @@ bool LoadScenario(std::filesystem::path const& path,
                 return false;
             }
             std::cout << "[BLUE MAPPO] Actor initialized; Play starts embedded "
-                         "RLtools v5 training from new weights.\n";
+                         "RLtools v6 training from new weights.\n";
         }
     }
     auto& world = registry->ctx().get<ppo::model::sEnvironmentState>();
@@ -291,9 +291,9 @@ bool LoadScenario(std::filesystem::path const& path,
         else
         {
             auto leader = environment.CreateAgent<
-                defenders::PatrolReferenceAgent>(first, 0U);
+                defenders::PatrolReferenceAgent>(first, second, 0U);
             auto follower = environment.CreateAgent<
-                defenders::PatrolReferenceAgent>(second, 1U);
+                defenders::PatrolReferenceAgent>(second, first, 1U);
             if (!leader || !follower)
                 return false;
             agents.push_back(std::move(leader));

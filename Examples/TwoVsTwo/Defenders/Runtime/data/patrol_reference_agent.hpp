@@ -7,12 +7,24 @@
 
 namespace ppo::examples::twovstwo::defenders {
 
-// Drives a guard along the reference path using the same ECS vehicle dynamics
-// as a PPO actor. This controller is NOT a trained or trainable PPO policy.
+/**
+ * @brief Drives one guard with the same ECS dynamics as the MAPPO actors.
+ *
+ * The episode context determines whether the physical guard follows the
+ * racetrack as leader or follows the leader's wedge as wingman.
+ */
 class PatrolReferenceAgent final : public ppo::model::IAgent
 {
 public:
-    PatrolReferenceAgent(ppo::model::BaseEntity& own, std::size_t role);
+    /**
+     * @brief Creates one physical reference driver with episode-random roles.
+     * @param own Physical blue guard controlled by this agent.
+     * @param teammate The other physical blue guard.
+     * @param guardIndex Stable physical index: zero or one.
+     */
+    PatrolReferenceAgent(ppo::model::BaseEntity& own,
+                         ppo::model::BaseEntity& teammate,
+                         std::size_t guardIndex);
 
     void Init() override;
     void ChooseAction() override;
@@ -22,9 +34,13 @@ public:
 
 private:
     Parameters ReadParameters();
+    /** @brief Returns this physical guard's semantic role for the episode. */
+    std::size_t Role() const noexcept;
 
+    entt::registry* registry_{};
     ppo::model::BaseEntity own_;
-    std::size_t role_ = 0U;
+    ppo::model::BaseEntity teammate_;
+    std::size_t guardIndex_ = 0U;
     std::size_t step_ = 0U;
     unsigned long long id_ = ppo::model::GetNewUniqId();
     bool done_ = false;

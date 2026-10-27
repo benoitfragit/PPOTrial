@@ -22,26 +22,28 @@ int main()
         return 29;
     // Entire orbit stays within world, starts/ends on the same tangent.
     for (int side : {-1, 1})
-        for (std::size_t role = 0; role < 2; ++role)
+    {
+        auto const first = blue::PatrolReference(p, side, 0.F);
+        auto const last = blue::PatrolReference(p, side, length);
+        if (std::abs(first.north - last.north) > 0.01F
+            || std::abs(first.east - last.east) > 0.01F
+            || std::abs(std::sin(first.heading - last.heading)) > 0.001F)
+            return 2;
+        for (unsigned i = 0; i < 2000U; ++i)
         {
-            auto const first = blue::PatrolReference(p, side, role, 0.F);
-            auto const last = blue::PatrolReference(p, side, role, length);
-            if (std::abs(first.north - last.north) > 0.01F
-                || std::abs(first.east - last.east) > 0.01F
-                || std::abs(std::sin(first.heading - last.heading)) > 0.001F)
-                return 2;
-            for (unsigned i = 0; i < 2000U; ++i)
-            {
-                auto const at = blue::PatrolReference(p, side, role,
-                                   length * static_cast<float>(i) / 2000.F);
-                if (std::abs(at.north) >= p.halfNorth
-                    || std::abs(at.east) >= p.halfEast)
-                    return 3;
-            }
+            auto const at = blue::PatrolReference(
+                p, side, length * static_cast<float>(i) / 2000.F);
+            auto const wingman = blue::WingmanReference(p, at);
+            if (std::abs(at.north) >= p.halfNorth
+                || std::abs(at.east) >= p.halfEast
+                || std::abs(wingman.north) >= p.halfNorth
+                || std::abs(wingman.east) >= p.halfEast)
+                return 3;
         }
+    }
     auto state = blue::InitialState(p, 1, 0U, 0.F);
-    auto const r0 = blue::PatrolReference(p, 1, 0, 0.F);
-    auto const r1 = blue::PatrolReference(p, 1, 1, 0.F);
+    auto const r0 = blue::PatrolReference(p, 1, 0.F);
+    auto const r1 = blue::WingmanReference(p, r0);
     if (std::hypot(r0.north - r1.north, r0.east - r1.east)
             <= p.collisionDistance
         || blue::FormationGap(p) <= p.collisionDistance)
@@ -83,6 +85,13 @@ int main()
     if (followerObservation[blue::ObservationLayout::PatrolOffset + 8U]
             != 1.F)
         return 32;
+    for (std::size_t i = 0U; i < 6U; ++i)
+        if (followerObservation[blue::ObservationLayout::PatrolOffset + i]
+            != 0.F)
+            return 36; // The wingman receives no racetrack-relative inputs.
+    if (observation[blue::ObservationLayout::PatrolOffset + 6U] != 0.F
+        || observation[blue::ObservationLayout::PatrolOffset + 7U] != 0.F)
+        return 37; // Wedge errors are reserved for the wingman.
     for (std::size_t i = blue::ObservationLayout::RedOffset;
          i < blue::ObservationLayout::FriendOffset; ++i)
         if (observation[i] != 0.F)
@@ -112,18 +121,18 @@ int main()
     // A stopped agent must not score the same progression as the reference.
     auto stopped = state;
     stopped.guards[0].speed = 0.F;
-    if (!(blue::TrackingReward(p, state, stopped, 0U)
-        < blue::TrackingReward(p, state, next, 0U)))
+    if (!(blue::TrackingReward(p, state, stopped)
+        < blue::TrackingReward(p, state, next)))
         return 9;
     auto projectionJump = next;
-    projectionJump.patrolProgress[0] += 0.5F * length;
-    if (blue::TrackingReward(p, state, projectionJump, 0U) > 0.F)
+    projectionJump.patrolProgress += 0.5F * length;
+    if (blue::TrackingReward(p, state, projectionJump) > 0.F)
         return 33;
     auto backward = state;
     backward.guards[0] = blue::OnReference(
-        p, blue::PatrolReference(p, 1, 0U, length - 60.F));
+        p, blue::PatrolReference(p, 1, length - 60.F));
     blue::UpdatePatrolProgress(p, backward);
-    if (blue::TrackingReward(p, state, backward, 0U) >= 0.F)
+    if (blue::TrackingReward(p, state, backward) >= 0.F)
         return 34;
     auto outside = state;
     outside.guards[0].north = 1.10F * p.halfNorth;
@@ -187,8 +196,8 @@ int main()
             blue::RewardChannel::Timeout)] != 0.F)
         return 11;
 
-    // With one threat, the nearest guard intercepts and its teammate remains
-    // evaluated against the patrol circuit.
+    // With one threat assigned to the leader, racetrack shaping is suspended;
+    // the wingman nevertheless keeps its wedge unless it is the interceptor.
     auto oneThreat = state;
     oneThreat.guards[0].north = 0.F;
     oneThreat.guards[0].east = 0.F;
@@ -199,10 +208,8 @@ int main()
     if (oneAssignment.activeThreats != 1U
         || oneAssignment.attackerForGuard[0] != 0U
         || oneAssignment.attackerForGuard[1] < oneThreat.attackers.size()
-        || std::abs(blue::MissionPatrolReward(
-                        p, oneThreat, oneThreat, oneAssignment)
-                    - blue::TrackingReward(
-                        p, oneThreat, oneThreat, 1U)) > 1.e-6F)
+        || blue::MissionPatrolReward(
+            p, oneThreat, oneThreat, oneAssignment) != 0.F)
         return 22;
     auto dangerousDefense = oneThreat;
     dangerousDefense.guards[1] = dangerousDefense.guards[0];
@@ -274,26 +281,34 @@ int main()
             std::array<blue::Action, 2> commands{};
             for (std::size_t role = 0; role < commands.size(); ++role)
                 commands[role] = blue::PatrolReferenceAction(
-                    p, patrol.guards[role], side, role, patrol.arclength);
+                    p, patrol.guards[role], patrol.guards[0], side, role,
+                    patrol.arclength);
             auto const previous = patrol;
             patrol = blue::AdvanceBoth(p, patrol, commands);
             if (patrol.failed || patrol.step != i + 1U)
                 return 12;
+            auto const projection = blue::ProjectOnPatrolCurve(
+                p.geometry, patrol.guards[0].north, patrol.guards[0].east);
+            auto const formation = blue::MeasureFormationErrors(p, patrol);
+            maxError = std::max(maxError, projection.distance);
+            maxError = std::max(maxError,
+                std::hypot(formation.longitudinal, formation.inward)
+                    * p.geometry.separationDistance);
             for (std::size_t role = 0; role < patrol.guards.size(); ++role)
-            {
-                auto const& car = patrol.guards[role];
-                auto const projection = blue::ProjectOnPatrolCurve(
-                    p.geometry, role, car.north, car.east);
-                maxError = std::max(maxError, projection.distance);
-                accumulatedTurn += std::abs(car.turnRate * p.dt);
-            }
+                accumulatedTurn += std::abs(
+                    patrol.guards[role].turnRate * p.dt);
             if (i == 0U
                 && (std::abs(patrol.guards[0].north - previous.guards[0].north)
                     + std::abs(patrol.guards[0].east - previous.guards[0].east)) < 1.F)
                 return 13;
         }
-        if (maxError > 300.F || accumulatedTurn < blue::kTwoPi)
+        if (maxError > 0.25F * p.geometry.separationDistance
+            || accumulatedTurn < blue::kTwoPi)
+        {
+            std::cerr << "reference max error=" << maxError
+                      << " accumulated turn=" << accumulatedTurn << '\n';
             return 14;
+        }
     }
     return 0;
 }

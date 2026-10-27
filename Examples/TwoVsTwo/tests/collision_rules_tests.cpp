@@ -151,18 +151,17 @@ void TestPatrolOverlaySnapshot()
     sourceOverlay.m_sampleCount = sourceOverlay.SampleCapacity;
     float const circuit = ppo::examples::twovstwo::defenders::CircuitLength(
         context.patrolGeometry);
-    for (std::size_t role = 0U; role < 2U; ++role)
-        for (std::size_t sample = 0U;
-             sample < sourceOverlay.m_sampleCount; ++sample)
-        {
-            auto const pose =
-                ppo::examples::twovstwo::defenders::EvaluatePatrolCurve(
-                    context.patrolGeometry, role,
-                    circuit * static_cast<float>(sample)
-                        / static_cast<float>(sourceOverlay.m_sampleCount - 1U));
-            sourceOverlay.m_north[role][sample] = pose.north;
-            sourceOverlay.m_east[role][sample] = pose.east;
-        }
+    for (std::size_t sample = 0U;
+         sample < sourceOverlay.m_sampleCount; ++sample)
+    {
+        auto const pose =
+            ppo::examples::twovstwo::defenders::EvaluatePatrolCurve(
+                context.patrolGeometry,
+                circuit * static_cast<float>(sample)
+                    / static_cast<float>(sourceOverlay.m_sampleCount - 1U));
+        sourceOverlay.m_north[sample] = pose.north;
+        sourceOverlay.m_east[sample] = pose.east;
+    }
 
     entt::registry snapshot;
     ppo::examples::twovstwo::TwoVsTwoWorldRules rules;
@@ -172,19 +171,26 @@ void TestPatrolOverlaySnapshot()
     auto const& overlay = snapshot.ctx().get<sPatrolTrackOverlay>();
     Require(overlay.m_sampleCount == sPatrolTrackOverlay::SampleCapacity,
             "patrol overlay sample count is invalid");
-    for (std::size_t role = 0U; role < 2U; ++role)
-    {
-        std::size_t const last = overlay.m_sampleCount - 1U;
-        Require(std::hypot(
-                    overlay.m_north[role][0] - overlay.m_north[role][last],
-                    overlay.m_east[role][0] - overlay.m_east[role][last])
-                    < 0.1F,
-                "patrol overlay is not closed");
-    }
+    std::size_t const last = overlay.m_sampleCount - 1U;
     Require(std::hypot(
-                overlay.m_north[0][0] - overlay.m_north[1][0],
-                overlay.m_east[0][0] - overlay.m_east[1][0]) > 100.F,
-            "leader and follower overlays are indistinguishable");
+                overlay.m_north[0] - overlay.m_north[last],
+                overlay.m_east[0] - overlay.m_east[last]) < 0.1F,
+            "leader patrol overlay is not closed");
+}
+
+void TestBlueRolePermutationContract()
+{
+    using ppo::examples::twovstwo::InitializerContext;
+    InitializerContext context{};
+    for (std::size_t leader = 0U; leader < 2U; ++leader)
+    {
+        context.leaderGuardIndex = leader;
+        Require(context.RoleForGuard(0U) != context.RoleForGuard(1U),
+                "blue guards received duplicate patrol roles");
+        Require(context.RoleForGuard(context.GuardForRole(0U)) == 0U
+                    && context.RoleForGuard(context.GuardForRole(1U)) == 1U,
+                "blue role permutation is not bijective");
+    }
 }
 
 } // namespace
@@ -197,6 +203,7 @@ int main()
         TestBlueNearMiss();
         TestDelayedThreatActivation();
         TestPatrolOverlaySnapshot();
+        TestBlueRolePermutationContract();
         return 0;
     }
     catch (std::exception const& error)

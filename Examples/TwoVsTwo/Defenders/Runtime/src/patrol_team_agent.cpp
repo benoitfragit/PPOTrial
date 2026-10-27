@@ -146,7 +146,7 @@ Parameters PatrolMappoAgent::ReadParameters() const
         if (context.patrolGeometryReady)
             result.geometry = context.patrolGeometry;
     }
-    ppo::model::BaseEntity first{registry_, guardIds_[0]};
+    ppo::model::BaseEntity first{registry_, GuardIdForRole(0U)};
     if (first.has<ppo::model::sFlightModelState>())
     {
         auto const [flight] = first.get<ppo::model::sFlightModelState>();
@@ -155,6 +155,20 @@ Parameters PatrolMappoAgent::ReadParameters() const
         result.maxRotationRate = flight.m_maxAccRot;
     }
     return result;
+}
+
+entt::entity PatrolMappoAgent::GuardIdForRole(std::size_t role) const noexcept
+{
+    std::size_t guardIndex = role % guardIds_.size();
+    if (registry_ != nullptr
+        && registry_->ctx().contains<
+            ppo::examples::twovstwo::InitializerContext>())
+    {
+        auto const& context = registry_->ctx().get<
+            ppo::examples::twovstwo::InitializerContext>();
+        guardIndex = context.GuardForRole(role);
+    }
+    return guardIds_[guardIndex];
 }
 
 State PatrolMappoAgent::ReadState(Parameters const& parameters) const
@@ -177,7 +191,7 @@ State PatrolMappoAgent::ReadState(Parameters const& parameters) const
 
     for (std::size_t role = 0; role < guardIds_.size(); ++role)
     {
-        ppo::model::BaseEntity guard{registry_, guardIds_[role]};
+        ppo::model::BaseEntity guard{registry_, GuardIdForRole(role)};
         result.guards[role] = FromEcs(guard);
         Mobile const& mobile = result.guards[role];
         result.failed |= !mobile.available || !std::isfinite(mobile.north)
@@ -316,7 +330,7 @@ void PatrolMappoAgent::ChooseAction()
 
         for (std::size_t role = 0; role < guardIds_.size(); ++role)
         {
-            ppo::model::BaseEntity guard{registry_, guardIds_[role]};
+            ppo::model::BaseEntity guard{registry_, GuardIdForRole(role)};
             auto [control] = guard.get<ppo::model::sSNAControlState>();
             control.m_rotSpeedCmd = Clamp(lastActions_[role][0], -1.F, 1.F);
             control.m_accCmd = Clamp(lastActions_[role][1], -1.F, 1.F);
