@@ -8,6 +8,10 @@ bleu reçoit des mesures locales lui permettant de comprendre où il se trouve,
 dans quel sens progresser et comment retrouver sa formation. Le réseau reste
 seul à produire `m_rotSpeedCmd` et `m_accCmd`.
 
+La famille de circuits par défaut mesure 50 à 60 km de long et 16 à 20 km de
+large. Cette largeur maintient des virages progressifs, y compris pour la
+courbe intérieure du follower décalée par le wedge.
+
 Ce contrat impose un nouvel entraînement. Les dimensions de tenseur sont
 restées stables, mais leur sémantique a changé : un acteur v4 ne doit donc pas
 être repris. Les checkpoints bleus sont désormais :

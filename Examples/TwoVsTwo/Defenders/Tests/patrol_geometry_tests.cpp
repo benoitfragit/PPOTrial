@@ -16,7 +16,7 @@ nlohmann::json ValidDocument()
         {"patrol", {
             {"racetrack", {
                 {"lengthMeters", {{"min", 50000.F}, {"max", 60000.F}}},
-                {"widthMeters", {{"min", 9000.F}, {"max", 13000.F}}},
+                {"widthMeters", {{"min", 16000.F}, {"max", 20000.F}}},
                 {"headingDegrees", {{"min", 80.F}, {"max", 100.F}}},
                 {"anchorNorthMeters", {{"min", -1500.F}, {"max", 1500.F}}},
                 {"anchorEastMeters", {{"min", -2000.F}, {"max", 2000.F}}},
@@ -71,7 +71,7 @@ int main()
 
     auto fixed = settings;
     fixed.lengthMeters = {55000.F, 55000.F};
-    fixed.widthMeters = {11000.F, 11000.F};
+    fixed.widthMeters = {18000.F, 18000.F};
     fixed.headingRadians = {0.5F * patrol::kPatrolPi,
                             0.5F * patrol::kPatrolPi};
     fixed.anchorNorthMeters = {0.F, 0.F};

@@ -45,6 +45,10 @@ sa largeur, son orientation, son ancrage et le wedge sont tirés une fois par
 l'acteur partagé, le critique centralisé, le buffer on-policy et l'optimiseur
 des deux bleus.
 
+La configuration livrée conserve une longueur de 50 à 60 km et échantillonne
+une largeur de 16 à 20 km. Ces rayons plus progressifs laissent au follower
+intérieur une marge de virage suffisante pendant l'exploration initiale.
+
 La plateforme bleue reprend la dynamique de `trainingaircraft` : vitesse de
 croisière initiale 300 m/s, vitesse maximale 700 m/s, accélération 600 m/s² et
 rotation maximale d'environ 40,1°/s (0,7000006 rad/s). Sa zone SNA sans

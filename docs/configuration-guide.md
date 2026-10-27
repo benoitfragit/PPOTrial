@@ -100,7 +100,7 @@ Pour ajouter un profil, déclarer le nouvel adaptateur C++ dans la couche applic
   "patrol": {
     "racetrack": {
       "lengthMeters": { "min": 50000.0, "max": 60000.0 },
-      "widthMeters": { "min": 9000.0, "max": 13000.0 },
+      "widthMeters": { "min": 16000.0, "max": 20000.0 },
       "headingDegrees": { "min": 80.0, "max": 100.0 }
     },
     "formation": {
