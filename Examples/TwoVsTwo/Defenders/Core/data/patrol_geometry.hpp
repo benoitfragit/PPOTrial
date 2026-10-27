@@ -32,7 +32,7 @@ struct PatrolRange final
 struct PatrolGeometrySettings final
 {
     PatrolRange lengthMeters{50000.F, 60000.F};
-    PatrolRange widthMeters{9000.F, 13000.F};
+    PatrolRange widthMeters{16000.F, 20000.F};
     PatrolRange headingRadians{1.3962634F, 1.7453293F};
     PatrolRange anchorNorthMeters{-1500.F, 1500.F};
     PatrolRange anchorEastMeters{-2000.F, 2000.F};
