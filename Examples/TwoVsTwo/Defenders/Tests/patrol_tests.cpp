@@ -61,6 +61,28 @@ int main()
             return 5;
     }
     auto const observation = blue::Observe(p, state);
+    auto clockShifted = state;
+    clockShifted.arclength += 0.25F * length;
+    auto const clockShiftedObservation = blue::Observe(p, clockShifted);
+    for (std::size_t i = blue::ObservationLayout::PatrolOffset;
+         i < blue::ObservationLayout::GlobalOffset; ++i)
+        if (observation[i] != clockShiftedObservation[i])
+            return 30; // No observation may follow an artificial clock.
+    if (std::abs(observation[blue::ObservationLayout::PatrolOffset] - 1.F)
+            > 1.e-4F
+        || std::abs(observation[blue::ObservationLayout::PatrolOffset + 1U])
+            > 1.e-4F
+        || std::abs(observation[blue::ObservationLayout::PatrolOffset + 2U])
+            > 1.e-4F
+        || observation[blue::ObservationLayout::PatrolOffset + 8U] != -1.F
+        || observation[blue::ObservationLayout::PatrolOffset + 9U] != 0.F)
+        return 31;
+    auto followerState = state;
+    followerState.controlledRole = 1U;
+    auto const followerObservation = blue::Observe(p, followerState);
+    if (followerObservation[blue::ObservationLayout::PatrolOffset + 8U]
+            != 1.F)
+        return 32;
     for (std::size_t i = blue::ObservationLayout::RedOffset;
          i < blue::ObservationLayout::FriendOffset; ++i)
         if (observation[i] != 0.F)

@@ -29,6 +29,7 @@ struct PatrolEpisodeResult
     float trackingFraction = 0.F;
     float meanNormalizedError = 0.F;
     std::array<float, 2> accumulatedTurnRadians{};
+    std::array<float, 2> accumulatedProgressMeters{};
     int side = 1;
     float initialPhase = 0.F;
 };
@@ -165,18 +166,21 @@ private:
             for (std::size_t role = 0; role < 2; ++role)
             {
                 Mobile const& car = next.guards[role];
-                auto const ref = PatrolReference(parameters_, next.side, role, next.arclength);
-                float const error = std::hypot(
-                    (car.north - ref.north) / parameters_.halfNorth,
-                    (car.east - ref.east) / parameters_.halfEast);
+                auto const projection = ProjectOnPatrolCurve(
+                    parameters_.geometry, role, car.north, car.east);
+                float const error = projection.distance
+                    / std::hypot(parameters_.halfNorth, parameters_.halfEast);
                 summedError += error;
-                float const heading = std::cos(car.heading - ref.heading);
+                float const heading = std::cos(
+                    car.heading - projection.pose.heading);
                 if (error <= settings_.trackingTolerance
                     && heading >= settings_.minimumHeadingCosine
                     && car.speed >= settings_.minimumSpeedFraction * parameters_.cruiseSpeed)
                     ++trackingSamples;
                 result.accumulatedTurnRadians[role] +=
                     std::abs(WrapAngle(car.heading - state.guards[role].heading));
+                result.accumulatedProgressMeters[role] += std::max(
+                    PatrolProgressDelta(parameters_, state, next, role), 0.F);
             }
             state = next;
         }
@@ -193,8 +197,9 @@ private:
             return result;
 
         // A short horizon is a truncation, not proof of a good/bad patrol.
-        float const travelled = parameters_.cruiseSpeed * parameters_.dt
-            * static_cast<float>(result.steps);
+        float const travelled = 0.5F
+            * (result.accumulatedProgressMeters[0]
+               + result.accumulatedProgressMeters[1]);
         if (travelled < settings_.minimumCircuits * CircuitLength(parameters_))
         {
             result.outcome = PatrolOutcome::Truncated;
