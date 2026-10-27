@@ -7,6 +7,33 @@
 #include <random>
 
 namespace ppo::examples::twovstwo {
+
+namespace {
+
+/**
+ * @brief Samples the continuous patrol solely for snapshot visualization.
+ * @param config Episode context containing a valid immutable geometry.
+ */
+void BuildPatrolTrackOverlay(InitializerContext& config) noexcept
+{
+    auto& overlay = config.patrolTrackOverlay;
+    overlay = ppo::model::sPatrolTrackOverlay{};
+    overlay.m_sampleCount = overlay.SampleCapacity;
+    float const length = defenders::CircuitLength(config.patrolGeometry);
+    for (std::size_t role = 0U; role < overlay.m_north.size(); ++role)
+        for (std::size_t sample = 0U; sample < overlay.m_sampleCount; ++sample)
+        {
+            float const arclength = length * static_cast<float>(sample)
+                / static_cast<float>(overlay.m_sampleCount - 1U);
+            auto const pose = defenders::EvaluatePatrolCurve(
+                config.patrolGeometry, role, arclength);
+            overlay.m_north[role][sample] = pose.north;
+            overlay.m_east[role][sample] = pose.east;
+        }
+}
+
+} // namespace
+
 void InitializeEntity(ppo::model::Entity& entity)
 {
     auto* registry = entity.registry();
@@ -38,6 +65,7 @@ void InitializeEntity(ppo::model::Entity& entity)
         {
             config.patrolGeometryReady = false;
             config.patrolGeometrySamplingFailed = true;
+            config.patrolTrackOverlay = ppo::model::sPatrolTrackOverlay{};
             config.episodeLayout.reset();
             std::cerr << "[BLUE PATROL] Cannot sample a feasible racetrack after "
                       << config.patrolGeometrySettings.maximumSamplingAttempts
@@ -46,6 +74,7 @@ void InitializeEntity(ppo::model::Entity& entity)
         }
         config.patrolGeometry = *geometry;
         config.patrolGeometryReady = true;
+        BuildPatrolTrackOverlay(config);
         p.geometry = *geometry;
         ++config.episodeIndex;
         std::clog << "[BLUE PATROL] Episode " << config.episodeIndex

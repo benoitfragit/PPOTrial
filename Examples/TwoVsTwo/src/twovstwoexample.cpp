@@ -4,6 +4,7 @@
 #include "twovstworules.hpp"
 #include "patrol_agent.hpp"
 #include "patrol_team_agent.hpp"
+#include "patrol_reference_agent.hpp"
 #include "patrol_config.hpp"
 
 #include "airspacecomponents.hpp"
@@ -50,8 +51,12 @@ bool LoadScenario(std::filesystem::path const& path,
     bool const patrolOnly = settings.value("patrolOnly", false);
 
     if (settings.contains("blueController")
-        && (!settings["blueController"].is_string()
-            || settings["blueController"].get<std::string>() != "mappo"))
+        && !settings["blueController"].is_string())
+        return false;
+    std::string const blueController =
+        settings.value("blueController", std::string{"mappo"});
+    bool const useMappo = blueController == "mappo";
+    if (!useMappo && blueController != "reference")
         return false;
     auto const spawnSettings = ParseSpawnSettings(settings);
     if (!spawnSettings || !document.contains("entities")
@@ -209,37 +214,40 @@ bool LoadScenario(std::filesystem::path const& path,
         / "blue_patrol_training_v2.txt";
     auto const productionCheckpoint = modelRoot / "prod"
         / "blue_patrol_mappo_v5.txt";
-    std::filesystem::path const warmStartCheckpoint =
-        std::filesystem::exists(latestCheckpoint)
-        ? latestCheckpoint : productionCheckpoint;
-    if (std::filesystem::exists(warmStartCheckpoint))
+    if (useMappo)
     {
-        try
+        std::filesystem::path const warmStartCheckpoint =
+            std::filesystem::exists(latestCheckpoint)
+            ? latestCheckpoint : productionCheckpoint;
+        if (std::filesystem::exists(warmStartCheckpoint))
         {
-            bluePolicy = defenders::LoadPatrolPolicy(warmStartCheckpoint);
+            try
+            {
+                bluePolicy = defenders::LoadPatrolPolicy(warmStartCheckpoint);
+            }
+            catch (std::exception const& error)
+            {
+                std::cerr << "[BLUE MAPPO] Incompatible checkpoint: "
+                          << error.what() << ". Starting a new Actor.\n";
+                bluePolicy.reset();
+            }
         }
-        catch (std::exception const& error)
+        if (!bluePolicy)
         {
-            std::cerr << "[BLUE MAPPO] Incompatible checkpoint: "
-                      << error.what() << ". Starting a new Actor.\n";
-            bluePolicy.reset();
+            try
+            {
+                bluePolicy = defenders::CreateUntrainedPatrolPolicy(
+                    patrolTraining.seed);
+            }
+            catch (std::exception const& error)
+            {
+                std::cerr << "[BLUE MAPPO] Cannot initialize Actor: "
+                          << error.what() << '\n';
+                return false;
+            }
+            std::cout << "[BLUE MAPPO] Actor initialized; Play starts embedded "
+                         "RLtools v5 training from new weights.\n";
         }
-    }
-    if (!bluePolicy)
-    {
-        try
-        {
-            bluePolicy = defenders::CreateUntrainedPatrolPolicy(
-                patrolTraining.seed);
-        }
-        catch (std::exception const& error)
-        {
-            std::cerr << "[BLUE MAPPO] Cannot initialize Actor: "
-                      << error.what() << '\n';
-            return false;
-        }
-        std::cout << "[BLUE MAPPO] Actor initialized; Play starts embedded "
-                     "RLtools v5 training from new weights.\n";
     }
     auto& world = registry->ctx().get<ppo::model::sEnvironmentState>();
     world.m_maxNorth = worldNorth;
@@ -262,19 +270,35 @@ bool LoadScenario(std::filesystem::path const& path,
     {
         auto& first = *entities.at("blue_guard_1");
         auto& second = *entities.at("blue_guard_2");
-        std::array<ppo::model::BaseEntity*, 2> guards{&first, &second};
-        std::vector<ppo::model::BaseEntity*> attackers;
-        if (auto red = entities.find("red_1"); red != entities.end())
-            attackers.push_back(red->second.get());
-        if (auto red = entities.find("red_2"); red != entities.end())
-            attackers.push_back(red->second.get());
-        auto controller = environment.CreateAgent<defenders::PatrolMappoAgent>(
-            guards, attackers, *entities.at("blue_objective"), bluePolicy,
-            patrolParameters, patrolTraining,
-            latestCheckpoint, trainingCheckpoint, productionCheckpoint);
-        if (!controller)
-            return false;
-        agents.push_back(std::move(controller));
+        if (useMappo)
+        {
+            std::array<ppo::model::BaseEntity*, 2> guards{&first, &second};
+            std::vector<ppo::model::BaseEntity*> attackers;
+            if (auto red = entities.find("red_1"); red != entities.end())
+                attackers.push_back(red->second.get());
+            if (auto red = entities.find("red_2"); red != entities.end())
+                attackers.push_back(red->second.get());
+            auto controller = environment.CreateAgent<
+                defenders::PatrolMappoAgent>(
+                    guards, attackers, *entities.at("blue_objective"),
+                    bluePolicy, patrolParameters, patrolTraining,
+                    latestCheckpoint, trainingCheckpoint,
+                    productionCheckpoint);
+            if (!controller)
+                return false;
+            agents.push_back(std::move(controller));
+        }
+        else
+        {
+            auto leader = environment.CreateAgent<
+                defenders::PatrolReferenceAgent>(first, 0U);
+            auto follower = environment.CreateAgent<
+                defenders::PatrolReferenceAgent>(second, 1U);
+            if (!leader || !follower)
+                return false;
+            agents.push_back(std::move(leader));
+            agents.push_back(std::move(follower));
+        }
     }
     catch (std::exception const& error)
     {

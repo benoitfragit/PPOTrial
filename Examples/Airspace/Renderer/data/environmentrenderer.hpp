@@ -548,6 +548,8 @@ private:
     * @brief True when the pseudo-lidar overlay is visible.
     */
     bool m_showPseudoLidar{ false };
+    /** @brief True when the TwoVsTwo analytical patrol overlay is visible. */
+    bool m_showPatrolTrack{ false };
     /**
     * @brief True when the minimap follows the current selection.
     */
