@@ -126,6 +126,8 @@ inline Parameters LoadPatrolParameters(std::filesystem::path const& settings)
     auto const world = ReadPatrolJson(settings / "Environment.json").at("environment");
     auto const flight = ReadPatrolJson(settings / "Platforms/Mobile/defender_car.json")
         .at("parameters").at("FlightModel");
+    auto const patrolDocument = ReadPatrolJson(
+        settings / "Training/BluePatrol.json");
     Parameters parameters{};
     parameters.halfNorth = 0.5F * world.at("maxNorth").get<float>();
     parameters.halfEast = 0.5F * world.at("maxEast").get<float>();
@@ -134,6 +136,21 @@ inline Parameters LoadPatrolParameters(std::filesystem::path const& settings)
     parameters.maxSpeed = flight.at("MaxSpeed").get<float>();
     parameters.maxAcceleration = flight.at("MaxAcceleration").get<float>();
     parameters.maxRotationRate = flight.at("MaxRotAcceleration").get<float>();
+    auto const& shaping = patrolDocument.at("rewards").at("shaping");
+    parameters.patrolProgressWeight = patrol_config_detail::FiniteNumber(
+        shaping, "patrolProgressWeight");
+    parameters.patrolCrossTrackWeight = patrol_config_detail::FiniteNumber(
+        shaping, "patrolCrossTrackWeight");
+    parameters.patrolCrossTrackScale = patrol_config_detail::FiniteNumber(
+        shaping, "patrolCrossTrackScaleMeters");
+    parameters.formationErrorWeight = patrol_config_detail::FiniteNumber(
+        shaping, "formationErrorWeight");
+    parameters.formationTolerance = patrol_config_detail::FiniteNumber(
+        shaping, "formationToleranceFraction");
+    parameters.separationPenaltyWeight = patrol_config_detail::FiniteNumber(
+        shaping, "separationPenaltyWeight");
+    parameters.controlEffortWeight = patrol_config_detail::FiniteNumber(
+        shaping, "controlEffortWeight");
     PatrolGeometrySettings const geometrySettings =
         LoadPatrolGeometrySettings(settings);
     PatrolSamplingConstraints const constraints{

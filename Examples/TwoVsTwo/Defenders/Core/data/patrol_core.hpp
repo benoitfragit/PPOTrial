@@ -65,6 +65,13 @@ struct Parameters
     float hardBoundaryScale = 2.F;
     float boundaryPenaltyDepth = 0.25F;
     float minimumThreatBoundaryScale = 0.20F;
+    float patrolProgressWeight = 0.50F;
+    float patrolCrossTrackWeight = 0.75F;
+    float patrolCrossTrackScale = 4000.F;
+    float formationErrorWeight = 0.40F;
+    float formationTolerance = 0.10F;
+    float separationPenaltyWeight = 0.50F;
+    float controlEffortWeight = 0.002F;
     PatrolGeometry geometry{};
 };
 
@@ -86,6 +93,20 @@ inline bool Valid(Parameters const& p) noexcept
         && std::isfinite(p.minimumThreatBoundaryScale)
         && p.minimumThreatBoundaryScale >= 0.F
         && p.minimumThreatBoundaryScale <= 1.F
+        && std::isfinite(p.patrolProgressWeight)
+        && p.patrolProgressWeight >= 0.F
+        && std::isfinite(p.patrolCrossTrackWeight)
+        && p.patrolCrossTrackWeight >= 0.F
+        && std::isfinite(p.patrolCrossTrackScale)
+        && p.patrolCrossTrackScale > 0.F
+        && std::isfinite(p.formationErrorWeight)
+        && p.formationErrorWeight >= 0.F
+        && std::isfinite(p.formationTolerance)
+        && p.formationTolerance >= 0.F
+        && std::isfinite(p.separationPenaltyWeight)
+        && p.separationPenaltyWeight >= 0.F
+        && std::isfinite(p.controlEffortWeight)
+        && p.controlEffortWeight >= 0.F
         && p.geometry.length > p.geometry.width
         && p.geometry.width > 0.F
         && p.geometry.separationDistance > p.collisionDistance
@@ -318,7 +339,7 @@ inline float SeparationPenalty(Parameters const& p,
     float const fraction = Clamp(
         (p.cautionDistance - GuardSeparation(state)) /
         (p.cautionDistance - p.collisionDistance), 0.F, 1.F);
-    return -0.5F * fraction;
+    return -p.separationPenaltyWeight * fraction;
 }
 
 /**
@@ -336,9 +357,12 @@ inline float FormationReward(Parameters const& p, State const& state,
         return reward;
 
     FormationErrors const errors = MeasureFormationErrors(p, state);
-    float const relativeError = std::hypot(
-        errors.longitudinal, errors.inward);
-    reward += 0.40F * (1.F - Clamp(relativeError, 0.F, 2.F));
+    float const longitudinal = std::max(
+        std::abs(errors.longitudinal) - p.formationTolerance, 0.F);
+    float const inward = std::max(
+        std::abs(errors.inward) - p.formationTolerance, 0.F);
+    float const relativeError = std::hypot(longitudinal, inward);
+    reward -= p.formationErrorWeight * Clamp(relativeError, 0.F, 1.F);
     return reward;
 }
 
@@ -554,23 +578,32 @@ inline Observation Observe(Parameters const& p, State const& state) noexcept
     return obs;
 }
 
-inline float TrackingReward(Parameters const& p, State const& state,
+/**
+ * @brief Scores physically realized signed progress and cross-track accuracy.
+ * @param p Valid patrol and shaping parameters.
+ * @param before State before vehicle integration.
+ * @param after State after vehicle integration and projection.
+ * @param role Defender role in [0, 1].
+ * @return Bounded dense tracking reward without time-based advancement.
+ */
+inline float TrackingReward(Parameters const& p,
+                            State const& before,
+                            State const& after,
                             std::size_t role) noexcept
 {
-    Mobile const& own = state.guards[role];
+    Mobile const& own = after.guards[role];
     PatrolProjection const projection = ProjectOnPatrolCurve(
         p.geometry, role, own.north, own.east);
-    float const trackingScale = std::max(
-        0.5F * p.geometry.width, p.cautionDistance);
-    float const error = projection.distance / trackingScale;
-    float const direction = std::cos(
-        own.heading - projection.pose.heading);
-    float const progress = (own.speed / p.cruiseSpeed) * direction;
-    float const speedError = std::abs(own.speed - p.cruiseSpeed) / p.cruiseSpeed;
-    return 0.35F * Clamp(progress, -2.F, 2.F)
-         + 0.20F * direction
-         - 1.20F * Clamp(error, 0.F, 2.F)
-         - 0.20F * Clamp(speedError, 0.F, 2.F);
+    float const progress = Clamp(
+        PatrolProgressDelta(p, before, after, role)
+            / std::max(p.cruiseSpeed * p.dt, 1.F),
+        -1.F, 1.F);
+    float const crossTrackError = Clamp(
+        std::abs(projection.signedCrossTrackError)
+            / p.patrolCrossTrackScale,
+        0.F, 1.F);
+    return p.patrolProgressWeight * progress
+         - p.patrolCrossTrackWeight * crossTrackError;
 }
 
 /**
@@ -711,7 +744,8 @@ inline ThreatAssignment AssignThreats(State const& state) noexcept
 /**
  * @brief Computes mission-aware patrol shaping for the blue team.
  * @param p Valid patrol parameters.
- * @param state Post-step team state.
+ * @param before Pre-step team state used for signed progress.
+ * @param after Post-step team state used for cross-track error.
  * @param assignment Threat assignment selected before the step.
  * @return Mean tracking reward of guards currently held in patrol reserve.
  *
@@ -719,16 +753,18 @@ inline ThreatAssignment AssignThreats(State const& state) noexcept
  * unassigned reserve guard is evaluated against the circuit. With two threats,
  * both guards are released from the patrol reference to intercept.
  */
-inline float MissionPatrolReward(Parameters const& p, State const& state,
+inline float MissionPatrolReward(Parameters const& p,
+                                 State const& before,
+                                 State const& after,
                                  ThreatAssignment const& assignment) noexcept
 {
     float reward = 0.F;
     std::size_t patrollingGuards = 0U;
-    for (std::size_t guard = 0U; guard < state.guards.size(); ++guard)
+    for (std::size_t guard = 0U; guard < after.guards.size(); ++guard)
     {
-        if (assignment.attackerForGuard[guard] < state.attackers.size())
+        if (assignment.attackerForGuard[guard] < after.attackers.size())
             continue;
-        reward += TrackingReward(p, state, guard);
+        reward += TrackingReward(p, before, after, guard);
         ++patrollingGuards;
     }
     return patrollingGuards > 0U
@@ -888,12 +924,13 @@ inline RewardBreakdown TeamRewardBreakdown(
     auto& values = result.values;
     ThreatAssignment const assignment = AssignThreats(before);
     values[static_cast<std::size_t>(RewardChannel::PatrolTracking)] =
-        MissionPatrolReward(p, after, assignment);
+        MissionPatrolReward(p, before, after, assignment);
     values[static_cast<std::size_t>(RewardChannel::FormationSafety)] =
         FormationReward(p, after, assignment.activeThreats == 0U);
     values[static_cast<std::size_t>(RewardChannel::ControlEffort)] =
-        -0.002F * (std::abs(actions[0][0]) + std::abs(actions[0][1])
-                 + std::abs(actions[1][0]) + std::abs(actions[1][1]));
+        -p.controlEffortWeight
+        * (std::abs(actions[0][0]) + std::abs(actions[0][1])
+           + std::abs(actions[1][0]) + std::abs(actions[1][1]));
 
     float protection = EngagementReward(p, before, after, assignment);
     float interception = 0.F;
