@@ -159,8 +159,7 @@ State PatrolMappoAgent::ReadState(Parameters const& parameters) const
         auto const& context = registry_->ctx().get<
             ppo::examples::twovstwo::InitializerContext>();
         result.side = context.side;
-        result.arclength = context.arclength
-            + static_cast<float>(episodeStep_) * parameters.dt * parameters.cruiseSpeed;
+        result.arclength = context.arclength;
     }
     else
     {
@@ -199,6 +198,7 @@ State PatrolMappoAgent::ReadState(Parameters const& parameters) const
         auto const [state] = objective.get<ppo::model::sEntityState>();
         result.objectiveAvailable = !state.m_destroyed;
     }
+    UpdatePatrolProgress(parameters, result);
     return result;
 }
 

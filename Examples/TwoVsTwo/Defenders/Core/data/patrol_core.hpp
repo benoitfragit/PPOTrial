@@ -194,12 +194,92 @@ struct State
     std::array<Mobile, 2> attackers{};
     std::size_t controlledRole;
     int side;
+    /** @brief Nearest continuous team arclength for each guard. */
+    std::array<float, 2> patrolProgress{};
+    /** @brief Per-guard blend from patrol (0) to defence (1). */
+    std::array<float, 2> defenseWeight{};
+    /** @brief Initial team phase retained for deterministic evaluation cases. */
     float arclength;
     std::size_t step;
     bool failed;
     bool collided;
     bool objectiveAvailable{true};
 };
+
+/**
+ * @brief Signed longitudinal and inward formation errors in leader coordinates.
+ */
+struct FormationErrors final
+{
+    float longitudinal{};
+    float inward{};
+};
+
+/**
+ * @brief Computes the current wedge error without advancing either mobile.
+ * @param p Episode patrol parameters.
+ * @param state Current team state.
+ * @return Errors normalized by the configured separation distance.
+ */
+inline FormationErrors MeasureFormationErrors(Parameters const& p,
+                                              State const& state) noexcept
+{
+    PatrolProjection const leaderProjection = ProjectOnPatrolCurve(
+        p.geometry, 0U, state.guards[0].north, state.guards[0].east);
+    float const tangentNorth = std::cos(leaderProjection.pose.heading);
+    float const tangentEast = std::sin(leaderProjection.pose.heading);
+    float const inwardNorth = static_cast<float>(p.geometry.direction)
+        * -tangentEast;
+    float const inwardEast = static_cast<float>(p.geometry.direction)
+        * tangentNorth;
+    float const backward = p.geometry.separationDistance
+        * std::cos(p.geometry.separationAngle);
+    float const inward = p.geometry.separationDistance
+        * std::sin(p.geometry.separationAngle);
+    float const actualNorth = state.guards[1].north - state.guards[0].north;
+    float const actualEast = state.guards[1].east - state.guards[0].east;
+    float const scale = std::max(p.geometry.separationDistance, 1.F);
+    return {
+        (actualNorth * tangentNorth + actualEast * tangentEast + backward)
+            / scale,
+        (actualNorth * inwardNorth + actualEast * inwardEast - inward)
+            / scale
+    };
+}
+
+/**
+ * @brief Refreshes both continuous curve projections from physical positions.
+ * @param p Episode patrol parameters.
+ * @param state Mutable state receiving per-guard team progress.
+ */
+inline void UpdatePatrolProgress(Parameters const& p, State& state) noexcept
+{
+    for (std::size_t role = 0U; role < state.guards.size(); ++role)
+        state.patrolProgress[role] = ProjectOnPatrolCurve(
+            p.geometry, role, state.guards[role].north,
+            state.guards[role].east).pose.arclength;
+}
+
+/**
+ * @brief Returns physically plausible signed progress between two states.
+ * @param p Episode patrol parameters.
+ * @param before Pre-step state.
+ * @param after Post-step state.
+ * @param role Defender role in [0, 1].
+ * @return Signed metres on the loop, or zero for a projection discontinuity.
+ */
+inline float PatrolProgressDelta(Parameters const& p,
+                                 State const& before,
+                                 State const& after,
+                                 std::size_t role) noexcept
+{
+    float const circuit = CircuitLength(p);
+    float const delta = std::remainder(
+        after.patrolProgress[role] - before.patrolProgress[role], circuit);
+    float const maximumPhysicalProgress =
+        2.F * p.maxSpeed * p.dt + 1.F;
+    return std::abs(delta) <= maximumPhysicalProgress ? delta : 0.F;
+}
 
 // Separation is evaluated for the team, independently of the learning role.
 inline float GuardSeparation(State const& state) noexcept
@@ -255,18 +335,9 @@ inline float FormationReward(Parameters const& p, State const& state,
     if (!maintainFormation)
         return reward;
 
-    Reference const leader = PatrolReference(p, state.side, 0U,
-                                             state.arclength);
-    Reference const follower = PatrolReference(p, state.side, 1U,
-                                               state.arclength);
-    float const desiredNorth = leader.north - follower.north;
-    float const desiredEast = leader.east - follower.east;
-    float const actualNorth = state.guards[0].north - state.guards[1].north;
-    float const actualEast = state.guards[0].east - state.guards[1].east;
-    float const scale = std::max(
-        std::hypot(desiredNorth, desiredEast), p.cautionDistance);
+    FormationErrors const errors = MeasureFormationErrors(p, state);
     float const relativeError = std::hypot(
-        actualNorth - desiredNorth, actualEast - desiredEast) / scale;
+        errors.longitudinal, errors.inward);
     reward += 0.40F * (1.F - Clamp(relativeError, 0.F, 2.F));
     return reward;
 }
@@ -286,6 +357,7 @@ inline State InitialState(Parameters const& p, int side,
     state.arclength = PositiveModulo(phase, CircuitLength(p));
     for (std::size_t i = 0; i < state.guards.size(); ++i)
         state.guards[i] = OnReference(p, PatrolReference(p, state.side, i, state.arclength));
+    state.patrolProgress.fill(state.arclength);
     return state;
 }
 
@@ -294,11 +366,8 @@ inline State Advance(Parameters const& p, State const& prev,
 {
     State next = prev;
     std::size_t const me = next.controlledRole;
-    std::size_t const other = 1U - me;
     next.guards[me] = Advance(p, next.guards[me], action);
-    next.arclength += p.cruiseSpeed * p.dt;
-    next.guards[other] = OnReference(p, PatrolReference(
-        p, next.side, other, next.arclength));
+    UpdatePatrolProgress(p, next);
     ++next.step;
     next.collided = GuardsCollided(p, prev, next);
     next.failed |= next.collided;
@@ -318,7 +387,7 @@ inline State AdvanceBoth(Parameters const& p, State const& previous,
     State next = previous;
     for (std::size_t role = 0; role < next.guards.size(); ++role)
         next.guards[role] = Advance(p, previous.guards[role], actions[role]);
-    next.arclength += p.cruiseSpeed * p.dt;
+    UpdatePatrolProgress(p, next);
     ++next.step;
     next.collided = GuardsCollided(p, previous, next);
     next.failed |= next.collided;
@@ -365,8 +434,8 @@ inline Observation Observe(Parameters const& p, State const& state) noexcept
     Observation obs{};  // Red-track slots remain exactly zero: absent/masked.
     Mobile const& own = state.guards[state.controlledRole];
     Mobile const& mate = state.guards[1U - state.controlledRole];
-    Reference const ref = PatrolReference(
-        p, state.side, state.controlledRole, state.arclength);
+    PatrolProjection const projection = ProjectOnPatrolCurve(
+        p.geometry, state.controlledRole, own.north, own.east);
     std::size_t k = 0;
     obs[k++] = own.north / p.halfNorth;
     obs[k++] = own.east / p.halfEast;
@@ -436,20 +505,26 @@ inline Observation Observe(Parameters const& p, State const& state) noexcept
                            state.objectiveAvailable};
     writeFriend(objective, 1.F);
     k = ObservationLayout::PatrolOffset;
-    float const dx = ref.north - own.north;
-    float const dy = ref.east - own.east;
-    float const along = dx * std::cos(ref.heading) + dy * std::sin(ref.heading);
-    float const across = -dx * std::sin(ref.heading) + dy * std::cos(ref.heading);
-    obs[k++] = dx / p.halfNorth;
-    obs[k++] = dy / p.halfEast;
-    obs[k++] = std::cos(ref.heading - own.heading);
-    obs[k++] = std::sin(ref.heading - own.heading);
-    obs[k++] = along / p.halfNorth;
-    obs[k++] = across / p.halfEast;
-    obs[k++] = ref.phase;
-    obs[k++] = static_cast<float>(state.controlledRole);
-    obs[k++] = p.cruiseSpeed / p.maxSpeed;
-    obs[k++] = ref.distanceToTurn / CircuitLength(p);
+    float const relativeTangent = projection.pose.heading - own.heading;
+    float const phaseAngle = kTwoPi * projection.pose.phase;
+    float const lookahead = std::max(
+        3.F * own.speed, 0.25F * p.geometry.width);
+    PatrolCurvePose const preview = EvaluatePatrolCurve(
+        p.geometry, state.controlledRole,
+        projection.pose.arclength + lookahead);
+    FormationErrors const formation = MeasureFormationErrors(p, state);
+    float const minimumTurnRadius = p.cruiseSpeed / p.maxRotationRate;
+    obs[k++] = std::cos(relativeTangent);
+    obs[k++] = std::sin(relativeTangent);
+    obs[k++] = Clamp(projection.signedCrossTrackError
+        / std::max(0.5F * p.geometry.width, 1.F), -2.F, 2.F);
+    obs[k++] = std::sin(phaseAngle);
+    obs[k++] = std::cos(phaseAngle);
+    obs[k++] = Clamp(preview.curvature * minimumTurnRadius, -1.F, 1.F);
+    obs[k++] = Clamp(formation.longitudinal, -2.F, 2.F);
+    obs[k++] = Clamp(formation.inward, -2.F, 2.F);
+    obs[k++] = state.controlledRole == 0U ? -1.F : 1.F;
+    obs[k++] = Clamp(state.defenseWeight[state.controlledRole], 0.F, 1.F);
     obs[ObservationLayout::GlobalOffset] = 1.F; // Initial ammunition ratio.
     obs[ObservationLayout::GlobalOffset + 1] =
         std::any_of(state.attackers.begin(), state.attackers.end(),
@@ -475,7 +550,7 @@ inline Observation Observe(Parameters const& p, State const& state) noexcept
     obs[k++] = 0.F;
     obs[k++] = (state.side >= 0 ? 1.F : -1.F) * 0.92F;
     obs[k++] = state.objectiveAvailable ? 1.F : 0.F;
-    obs[k++] = PositiveModulo(state.arclength, CircuitLength(p)) / CircuitLength(p);
+    obs[k++] = projection.pose.phase;
     return obs;
 }
 
@@ -483,11 +558,13 @@ inline float TrackingReward(Parameters const& p, State const& state,
                             std::size_t role) noexcept
 {
     Mobile const& own = state.guards[role];
-    Reference const ref = PatrolReference(p, state.side, role, state.arclength);
-    float const trackingScale = std::max(Radius(p), p.cautionDistance);
-    float const error = std::hypot(own.north - ref.north,
-                                   own.east - ref.east) / trackingScale;
-    float const direction = std::cos(own.heading - ref.heading);
+    PatrolProjection const projection = ProjectOnPatrolCurve(
+        p.geometry, role, own.north, own.east);
+    float const trackingScale = std::max(
+        0.5F * p.geometry.width, p.cautionDistance);
+    float const error = projection.distance / trackingScale;
+    float const direction = std::cos(
+        own.heading - projection.pose.heading);
     float const progress = (own.speed / p.cruiseSpeed) * direction;
     float const speedError = std::abs(own.speed - p.cruiseSpeed) / p.cruiseSpeed;
     return 0.35F * Clamp(progress, -2.F, 2.F)

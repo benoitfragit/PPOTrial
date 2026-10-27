@@ -4,6 +4,7 @@
 #include "patrol_evaluation_settings.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -66,6 +67,8 @@ public:
         trackingTotal_ = 0U;
         episodeTrackingGood_ = 0U;
         episodeTrackingTotal_ = 0U;
+        episodeProgressMeters_.fill(0.F);
+        previousProgress_.fill(0.F);
         initialThreats_ = 0U;
         episodeStarted_ = false;
         startedAt_ = Clock::now();
@@ -124,6 +127,8 @@ public:
         episodeSteps_ = 0U;
         episodeTrackingGood_ = 0U;
         episodeTrackingTotal_ = 0U;
+        episodeProgressMeters_.fill(0.F);
+        previousProgress_ = initial.patrolProgress;
         episodeStarted_ = true;
     }
 
@@ -141,12 +146,12 @@ public:
         for (std::size_t role = 0; role < state.guards.size(); ++role)
         {
             Mobile const& guard = state.guards[role];
-            Reference const reference = PatrolReference(
-                parameters, state.side, role, state.arclength);
-            float const error = std::hypot(
-                (guard.north - reference.north) / parameters.halfNorth,
-                (guard.east - reference.east) / parameters.halfEast);
-            float const heading = std::cos(guard.heading - reference.heading);
+            PatrolProjection const projection = ProjectOnPatrolCurve(
+                parameters.geometry, role, guard.north, guard.east);
+            float const error = projection.distance
+                / std::hypot(parameters.halfNorth, parameters.halfEast);
+            float const heading = std::cos(
+                guard.heading - projection.pose.heading);
             ++episodeTrackingTotal_;
             if (guard.available && std::isfinite(error)
                 && error <= settings_.trackingTolerance
@@ -154,6 +159,15 @@ public:
                 && guard.speed >= settings_.minimumSpeedFraction
                                    * parameters.cruiseSpeed)
                 ++episodeTrackingGood_;
+
+            float const delta = std::remainder(
+                state.patrolProgress[role] - previousProgress_[role],
+                CircuitLength(parameters));
+            float const maximumPhysicalProgress =
+                2.F * parameters.maxSpeed * parameters.dt + 1.F;
+            if (std::abs(delta) <= maximumPhysicalProgress)
+                episodeProgressMeters_[role] += std::max(delta, 0.F);
+            previousProgress_[role] = state.patrolProgress[role];
         }
     }
 
@@ -178,8 +192,8 @@ public:
             ? static_cast<float>(episodeTrackingGood_)
                 / static_cast<float>(episodeTrackingTotal_)
             : 0.F;
-        float const travelled = parameters.cruiseSpeed * parameters.dt
-            * static_cast<float>(episodeSteps_);
+        float const travelled = 0.5F
+            * (episodeProgressMeters_[0] + episodeProgressMeters_[1]);
         bool const patrolDistanceReached = travelled >=
             settings_.minimumCircuits * CircuitLength(parameters);
         bool const safe = finalState.objectiveAvailable && !finalState.failed;
@@ -313,6 +327,8 @@ private:
     std::size_t trackingTotal_{};
     std::uint64_t stepsExecuted_{};
     std::uint64_t completedCampaigns_{};
+    std::array<float, 2> episodeProgressMeters_{};
+    std::array<float, 2> previousProgress_{};
     float survivingGuardFractionSum_{};
     float latestScore_{};
     float bestScore_{std::numeric_limits<float>::quiet_NaN()};

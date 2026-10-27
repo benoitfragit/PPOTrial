@@ -70,10 +70,8 @@ void PatrolReferenceAgent::ChooseAction()
     auto const [state] = own_.get<ppo::model::sEntityState>();
     Mobile const mobile{state.m_x, state.m_y, state.m_rotation,
                         state.m_speed, 0.F, !state.m_destroyed};
-    float const arclength = ctx.arclength
-        + static_cast<float>(step_) * p.dt * p.cruiseSpeed;
     auto const action = PatrolReferenceAction(
-        p, mobile, ctx.side, role_, arclength);
+        p, mobile, ctx.side, role_, 0.F);
 
     auto [command] = own_.get<ppo::model::sSNAControlState>();
     command.m_rotSpeedCmd = action[0];
