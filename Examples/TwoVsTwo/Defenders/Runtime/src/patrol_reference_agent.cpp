@@ -10,11 +10,22 @@
 namespace ppo::examples::twovstwo::defenders {
 
 PatrolReferenceAgent::PatrolReferenceAgent(ppo::model::BaseEntity& own,
-                                           std::size_t role)
-    : own_(own.registry(), own.uniqid()), role_(role)
+                                           ppo::model::BaseEntity& teammate,
+                                           std::size_t guardIndex)
+    : registry_(own.registry()), own_(own.registry(), own.uniqid()),
+      teammate_(teammate.registry(), teammate.uniqid()),
+      guardIndex_(guardIndex)
 {
-    if (own.registry() == nullptr || role_ >= 2U)
+    if (own.registry() == nullptr || teammate.registry() != own.registry()
+        || guardIndex_ >= 2U)
         throw std::invalid_argument("Invalid patrol reference agent");
+}
+
+std::size_t PatrolReferenceAgent::Role() const noexcept
+{
+    if (!registry_ || !registry_->ctx().contains<InitializerContext>())
+        return guardIndex_;
+    return registry_->ctx().get<InitializerContext>().RoleForGuard(guardIndex_);
 }
 
 void PatrolReferenceAgent::Init()
@@ -55,7 +66,8 @@ Parameters PatrolReferenceAgent::ReadParameters()
 void PatrolReferenceAgent::ChooseAction()
 {
     if (done_ || !own_.has<ppo::model::sEntityState,
-                             ppo::model::sSNAControlState>())
+                             ppo::model::sSNAControlState>()
+        || !teammate_.has<ppo::model::sEntityState>())
         return;
 
     auto* registry = own_.registry();
@@ -68,10 +80,16 @@ void PatrolReferenceAgent::ChooseAction()
 
     auto const& ctx = registry->ctx().get<InitializerContext>();
     auto const [state] = own_.get<ppo::model::sEntityState>();
+    auto const [teammateState] = teammate_.get<ppo::model::sEntityState>();
     Mobile const mobile{state.m_x, state.m_y, state.m_rotation,
                         state.m_speed, 0.F, !state.m_destroyed};
+    std::size_t const role = Role();
+    auto const& leaderState = role == 0U ? state : teammateState;
+    Mobile const leader{leaderState.m_x, leaderState.m_y,
+                        leaderState.m_rotation, leaderState.m_speed, 0.F,
+                        !leaderState.m_destroyed};
     auto const action = PatrolReferenceAction(
-        p, mobile, ctx.side, role_, 0.F);
+        p, mobile, leader, ctx.side, role, 0.F);
 
     auto [command] = own_.get<ppo::model::sSNAControlState>();
     command.m_rotSpeedCmd = action[0];
@@ -100,8 +118,8 @@ bool PatrolReferenceAgent::SetNewState()
 ppo::model::sAgentStateSnaphot PatrolReferenceAgent::GetSnapshot() const noexcept
 {
     ppo::model::sAgentStateSnaphot snapshot{};
-    snapshot.m_name = role_ == 0U ? "Patrol 1 (reference)"
-                                  : "Patrol 2 (reference)";
+    snapshot.m_name = Role() == 0U ? "Patrol leader (reference)"
+                                   : "Patrol wingman (reference)";
     snapshot.m_id = id_;
     snapshot.m_common.m_step = static_cast<long long>(step_);
     snapshot.m_common.m_maxStep = 4096;

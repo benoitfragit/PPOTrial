@@ -22,12 +22,11 @@ thread de simulation caché.
 ## Patrouille
 
 Le circuit en hippodrome suit l'axe est/ouest, qui est l'axe long du monde
-configuré. Les demi-tours se font près des extrémités est et ouest. Les deux
-gardes partagent le même circuit en file leader–suiveur. Les lignes droites
-parcourent presque toute la longueur de la zone ; les demi-tours conservent un
-rayon complet de marge avec la frontière. Le déphasage longitudinal vaut 16 %
-d'une ligne droite, avec un minimum de 2,5 fois la distance de prudence :
-environ 9,6 km dans le monde distribué. Les demi-tours restent donc décalés.
+configuré. Les demi-tours se font près des extrémités est et ouest. Il n'existe
+qu'une piste : seul le leader y est projeté. L'équipier suit directement la
+pose du leader avec un décalage arrière/intérieur défini par le wedge ; il ne
+possède ni courbe ni reward de piste. À chaque reset, une permutation aléatoire
+attribue exactement un rôle à chacune des deux voitures physiques.
 
 La référence est recalculée depuis `Environment.json` : elle reste donc dans le
 monde si ses dimensions changent.
@@ -104,8 +103,8 @@ bleues entre deux pas ECS. Une distance minimale inférieure ou égale à 1 km
 détruit les deux véhicules, publie les deux explosions et termine l'épisode
 avec la pénalité de mission, même si les voitures se sont croisées entre deux
 positions échantillonnées. Le canal `Formation safety` applique une pénalité
-progressive entre 2 km et 1 km et, sans menace, une récompense dense sur la
-pose relative leader–suiveur. Le suivi de référence utilise une échelle locale
+progressive entre 2 km et 1 km et entraîne uniquement l'équipier sur la pose
+relative au leader. Le suivi de référence du leader utilise une échelle locale
 proche du rayon du circuit plutôt que les dimensions complètes du monde : une
 dérive de quelques kilomètres n'est donc plus presque invisible.
 
@@ -144,9 +143,11 @@ collecte reprend ensuite jusqu'à `maxUpdates`.
 
 La fonction de récompense change explicitement de mission selon les menaces :
 
-- sans rouge actif, les deux bleus sont récompensés pour tenir le circuit ;
-- avec un rouge, le bleu le plus proche l'intercepte et son équipier reste en
-  patrouille de réserve ;
+- sans rouge actif, le leader est récompensé pour suivre le circuit et
+  l'équipier pour tenir le wedge ;
+- avec un rouge, le bleu au meilleur coût d'interception peut l'intercepter.
+  Si c'est le leader, l'équipier continue le mutual support en wedge ; si c'est
+  l'équipier, son shaping de formation est suspendu ;
 - avec deux rouges, une affectation un-à-un de distance totale minimale libère
   les deux bleus de la référence de patrouille ;
 - l'intercepteur affecté est récompensé lorsqu'il devient plus proche de sa
@@ -217,14 +218,14 @@ complet, il indique explicitement qu'aucune mise à jour n'est encore disponible
 - le clamp de récompense ;
 - les sept coefficients nommés.
 
-Le contrat d'acteur courant est v4. Le candidat acteur est écrit dans
-`resources/model/BluePatrol/latest/blue_patrol_mappo_v4.txt` ; seul le meilleur
+Le contrat d'acteur courant est v6. Le candidat acteur est écrit dans
+`resources/model/BluePatrol/latest/blue_patrol_mappo_v6.txt` ; seul le meilleur
 acteur évalué est écrit dans
-`resources/model/BluePatrol/prod/blue_patrol_mappo_v4.txt`. Au redémarrage,
+`resources/model/BluePatrol/prod/blue_patrol_mappo_v6.txt`. Au redémarrage,
 `latest` est chargé en priorité, puis `prod` si aucun candidat n'existe.
 
 La reprise d'entraînement complète utilise en plus
-`resources/model/BluePatrol/latest/blue_patrol_training_v1.txt`. Ce fichier
+`resources/model/BluePatrol/latest/blue_patrol_training_v3.txt`. Ce fichier
 atomique contient l'acteur partagé, le critique centralisé, les moments et les
 compteurs Adam des deux optimiseurs, le nombre de mises à jour et le RNG
 RLTools. Le buffer de rollout et une éventuelle transition en attente ne sont
@@ -232,9 +233,8 @@ volontairement pas sérialisés : la reprise ouvre un rollout vide avec le même
 niveau d'entraînement. Cela permet aussi de changer `rolloutSteps` entre deux
 exécutions sans invalider le modèle ni les optimiseurs.
 
-En l'absence de ce nouveau fichier, un ancien v4 reste accepté comme warm-start
-de l'acteur uniquement ; le premier checkpoint complet sera créé après la
-prochaine mise à jour PPO. Un checkpoint incompatible est refusé explicitement.
+Les contrats antérieurs sont incompatibles et refusés explicitement afin que
+le changement de sémantique des rôles ne réutilise aucun poids bleu obsolète.
 Les fichiers `.pt` de RLMission ne sont jamais écrits par ce contrôleur.
 
 ## Build et validation

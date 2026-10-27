@@ -37,8 +37,8 @@ par pas d'équipe. Le mini-batch interne de 128 n'est pas la longueur du
 rollout. `checkpointEvery` déclenche les cas déterministes 2v1/2v2 ; le
 checkpoint de production n'est remplacé qu'après un meilleur score.
 
-Après une mise à jour PPO, `model/BluePatrol/latest/` contient l'acteur v4 et
-`blue_patrol_training_v1.txt`. Ce dernier permet une vraie reprise de l'acteur,
+Après une mise à jour PPO, `model/BluePatrol/latest/` contient l'acteur v6 et
+`blue_patrol_training_v3.txt`. Ce dernier permet une vraie reprise de l'acteur,
 du critique, d'Adam, du compteur et du RNG ; le buffer de rollout repart vide.
 `model/BluePatrol/prod/` ne contient que le meilleur acteur évalué.
 

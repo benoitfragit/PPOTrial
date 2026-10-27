@@ -45,7 +45,7 @@ struct ObservationLayout final
         CentralEntities * CentralEntityFeatures + CentralObjective + CentralPatrol;
     static constexpr std::size_t Size = LocalSize + CentralSize;
     static constexpr std::size_t ActionSize = 2;
-    static constexpr std::uint32_t Version = 5;
+    static constexpr std::uint32_t Version = 6;
 };
 
 using Observation = std::array<float, ObservationLayout::Size>;
@@ -171,22 +171,33 @@ inline float FormationGap(Parameters const& p) noexcept
 }
 
 /**
- * @brief Returns the long-axis racetrack reference for one defender.
+ * @brief Returns the leader's long-axis racetrack reference.
  * @param p Valid patrol and world parameters.
  * @param side Objective side; it mirrors the initial travel direction.
- * @param role Defender role in the shared policy, in the range [0, 1].
  * @param distance Team arclength travelled on the circuit in metres.
  * @return Reference pose and progress information.
- *
- * The straight legs follow the east (long) axis. The second guard is behind
- * the first on the same patrol envelope so their U-turns remain staggered.
  */
-inline Reference PatrolReference(Parameters const& p, int side, std::size_t role,
+inline Reference PatrolReference(Parameters const& p, int side,
                                  float distance) noexcept
 {
     (void)side;
     PatrolCurvePose const pose = EvaluatePatrolCurve(
-        p.geometry, role % 2U, distance);
+        p.geometry, distance);
+    return {pose.north, pose.east, pose.heading, pose.phase, 0.F};
+}
+
+/**
+ * @brief Returns the desired wingman pose relative to the leader.
+ * @param p Valid wedge geometry.
+ * @param leader Current or predicted leader reference.
+ * @return Rear/inward formation pose, independent of the patrol curve.
+ */
+inline Reference WingmanReference(Parameters const& p,
+                                  Reference const& leader) noexcept
+{
+    PatrolCurvePose const leaderPose{
+        leader.north, leader.east, leader.heading, 0.F, leader.phase, 0.F};
+    PatrolCurvePose const pose = EvaluateWedgePose(p.geometry, leaderPose);
     return {pose.north, pose.east, pose.heading, pose.phase, 0.F};
 }
 
@@ -218,8 +229,8 @@ struct State
     std::array<Mobile, 2> attackers{};
     std::size_t controlledRole;
     int side;
-    /** @brief Nearest continuous team arclength for each guard. */
-    std::array<float, 2> patrolProgress{};
+    /** @brief Nearest continuous leader arclength on the unique racetrack. */
+    float patrolProgress{};
     /** @brief Per-guard blend from patrol (0) to defence (1). */
     std::array<float, 2> defenseWeight{};
     /** @brief Stable hostile assignment for each guard. */
@@ -258,7 +269,7 @@ inline FormationErrors MeasureFormationErrors(Parameters const& p,
                                               State const& state) noexcept
 {
     PatrolProjection const leaderProjection = ProjectOnPatrolCurve(
-        p.geometry, 0U, state.guards[0].north, state.guards[0].east);
+        p.geometry, state.guards[0].north, state.guards[0].east);
     float const tangentNorth = std::cos(leaderProjection.pose.heading);
     float const tangentEast = std::sin(leaderProjection.pose.heading);
     float const inwardNorth = static_cast<float>(p.geometry.direction)
@@ -281,16 +292,15 @@ inline FormationErrors MeasureFormationErrors(Parameters const& p,
 }
 
 /**
- * @brief Refreshes both continuous curve projections from physical positions.
+ * @brief Refreshes the leader's continuous curve projection.
  * @param p Episode patrol parameters.
- * @param state Mutable state receiving per-guard team progress.
+ * @param state Mutable state receiving leader progress.
  */
 inline void UpdatePatrolProgress(Parameters const& p, State& state) noexcept
 {
-    for (std::size_t role = 0U; role < state.guards.size(); ++role)
-        state.patrolProgress[role] = ProjectOnPatrolCurve(
-            p.geometry, role, state.guards[role].north,
-            state.guards[role].east).pose.arclength;
+    state.patrolProgress = ProjectOnPatrolCurve(
+        p.geometry, state.guards[0].north,
+        state.guards[0].east).pose.arclength;
 }
 
 /**
@@ -298,17 +308,15 @@ inline void UpdatePatrolProgress(Parameters const& p, State& state) noexcept
  * @param p Episode patrol parameters.
  * @param before Pre-step state.
  * @param after Post-step state.
- * @param role Defender role in [0, 1].
  * @return Signed metres on the loop, or zero for a projection discontinuity.
  */
 inline float PatrolProgressDelta(Parameters const& p,
                                  State const& before,
-                                 State const& after,
-                                 std::size_t role) noexcept
+                                 State const& after) noexcept
 {
     float const circuit = CircuitLength(p);
     float const delta = std::remainder(
-        after.patrolProgress[role] - before.patrolProgress[role], circuit);
+        after.patrolProgress - before.patrolProgress, circuit);
     float const maximumPhysicalProgress =
         2.F * p.maxSpeed * p.dt + 1.F;
     return std::abs(delta) <= maximumPhysicalProgress ? delta : 0.F;
@@ -355,7 +363,7 @@ inline float SeparationPenalty(Parameters const& p,
 }
 
 /**
- * @brief Rewards an ordered leader/follower formation when no threat is active.
+ * @brief Rewards the wingman's ordered pose relative to the leader.
  * @param p Valid patrol geometry and safety distances.
  * @param state Current team state.
  * @param maintainFormation False while one or both cars are intercepting.
@@ -379,10 +387,10 @@ inline float FormationReward(Parameters const& p, State const& state,
 }
 
 /**
- * @brief Blends wedge shaping while defenders leave or recover from defence.
+ * @brief Blends wingman wedge shaping during defence and recovery.
  * @param p Valid patrol geometry and safety distances.
  * @param state Current team state.
- * @param formationWeight Formation contribution in [0, 1].
+ * @param formationWeight Wingman formation contribution in [0, 1].
  * @return Blended wedge shaping plus the always-active separation penalty.
  */
 inline float FormationReward(Parameters const& p, State const& state,
@@ -412,9 +420,10 @@ inline State InitialState(Parameters const& p, int side,
     state.side = side < 0 ? -1 : 1;
     state.controlledRole = controlledRole % 2U;
     state.arclength = PositiveModulo(phase, CircuitLength(p));
-    for (std::size_t i = 0; i < state.guards.size(); ++i)
-        state.guards[i] = OnReference(p, PatrolReference(p, state.side, i, state.arclength));
-    state.patrolProgress.fill(state.arclength);
+    Reference const leader = PatrolReference(p, state.side, state.arclength);
+    state.guards[0] = OnReference(p, leader);
+    state.guards[1] = OnReference(p, WingmanReference(p, leader));
+    state.patrolProgress = state.arclength;
     return state;
 }
 
@@ -491,8 +500,8 @@ inline Observation Observe(Parameters const& p, State const& state) noexcept
     Observation obs{};  // Red-track slots remain exactly zero: absent/masked.
     Mobile const& own = state.guards[state.controlledRole];
     Mobile const& mate = state.guards[1U - state.controlledRole];
-    PatrolProjection const projection = ProjectOnPatrolCurve(
-        p.geometry, state.controlledRole, own.north, own.east);
+    PatrolProjection const leaderProjection = ProjectOnPatrolCurve(
+        p.geometry, state.guards[0].north, state.guards[0].east);
     std::size_t k = 0;
     obs[k++] = own.north / p.halfNorth;
     obs[k++] = own.east / p.halfEast;
@@ -562,24 +571,32 @@ inline Observation Observe(Parameters const& p, State const& state) noexcept
                            state.objectiveAvailable};
     writeFriend(objective, 1.F);
     k = ObservationLayout::PatrolOffset;
-    float const relativeTangent = projection.pose.heading - own.heading;
-    float const phaseAngle = kTwoPi * projection.pose.phase;
-    float const lookahead = std::max(
-        3.F * own.speed, 0.25F * p.geometry.width);
-    PatrolCurvePose const preview = EvaluatePatrolCurve(
-        p.geometry, state.controlledRole,
-        projection.pose.arclength + lookahead);
-    FormationErrors const formation = MeasureFormationErrors(p, state);
-    float const minimumTurnRadius = p.cruiseSpeed / p.maxRotationRate;
-    obs[k++] = std::cos(relativeTangent);
-    obs[k++] = std::sin(relativeTangent);
-    obs[k++] = Clamp(projection.signedCrossTrackError
-        / std::max(0.5F * p.geometry.width, 1.F), -2.F, 2.F);
-    obs[k++] = std::sin(phaseAngle);
-    obs[k++] = std::cos(phaseAngle);
-    obs[k++] = Clamp(preview.curvature * minimumTurnRadius, -1.F, 1.F);
-    obs[k++] = Clamp(formation.longitudinal, -2.F, 2.F);
-    obs[k++] = Clamp(formation.inward, -2.F, 2.F);
+    if (state.controlledRole == 0U)
+    {
+        float const relativeTangent =
+            leaderProjection.pose.heading - own.heading;
+        float const phaseAngle = kTwoPi * leaderProjection.pose.phase;
+        float const lookahead = std::max(
+            3.F * own.speed, 0.25F * p.geometry.width);
+        PatrolCurvePose const preview = EvaluatePatrolCurve(
+            p.geometry, leaderProjection.pose.arclength + lookahead);
+        float const minimumTurnRadius = p.cruiseSpeed / p.maxRotationRate;
+        obs[k++] = std::cos(relativeTangent);
+        obs[k++] = std::sin(relativeTangent);
+        obs[k++] = Clamp(leaderProjection.signedCrossTrackError
+            / std::max(0.5F * p.geometry.width, 1.F), -2.F, 2.F);
+        obs[k++] = std::sin(phaseAngle);
+        obs[k++] = std::cos(phaseAngle);
+        obs[k++] = Clamp(preview.curvature * minimumTurnRadius, -1.F, 1.F);
+        k += 2U; // Wedge errors are reserved for the wingman Actor.
+    }
+    else
+    {
+        FormationErrors const formation = MeasureFormationErrors(p, state);
+        k += 6U; // The wingman never receives racetrack-relative inputs.
+        obs[k++] = Clamp(formation.longitudinal, -2.F, 2.F);
+        obs[k++] = Clamp(formation.inward, -2.F, 2.F);
+    }
     obs[k++] = state.controlledRole == 0U ? -1.F : 1.F;
     obs[k++] = Clamp(state.defenseWeight[state.controlledRole], 0.F, 1.F);
     obs[ObservationLayout::GlobalOffset] = 1.F; // Initial ammunition ratio.
@@ -609,7 +626,7 @@ inline Observation Observe(Parameters const& p, State const& state) noexcept
     obs[k++] = 0.F;
     obs[k++] = (state.side >= 0 ? 1.F : -1.F) * 0.92F;
     obs[k++] = state.objectiveAvailable ? 1.F : 0.F;
-    obs[k++] = projection.pose.phase;
+    obs[k++] = leaderProjection.pose.phase;
     return obs;
 }
 
@@ -618,19 +635,17 @@ inline Observation Observe(Parameters const& p, State const& state) noexcept
  * @param p Valid patrol and shaping parameters.
  * @param before State before vehicle integration.
  * @param after State after vehicle integration and projection.
- * @param role Defender role in [0, 1].
  * @return Bounded dense tracking reward without time-based advancement.
  */
 inline float TrackingReward(Parameters const& p,
                             State const& before,
-                            State const& after,
-                            std::size_t role) noexcept
+                            State const& after) noexcept
 {
-    Mobile const& own = after.guards[role];
+    Mobile const& own = after.guards[0];
     PatrolProjection const projection = ProjectOnPatrolCurve(
-        p.geometry, role, own.north, own.east);
+        p.geometry, own.north, own.east);
     float const progress = Clamp(
-        PatrolProgressDelta(p, before, after, role)
+        PatrolProgressDelta(p, before, after)
             / std::max(p.cruiseSpeed * p.dt, 1.F),
         -1.F, 1.F);
     float const crossTrackError = Clamp(
@@ -828,27 +843,18 @@ inline float DefenseBlend(State const& state,
  * @param before Pre-step team state used for signed progress.
  * @param after Post-step team state used for cross-track error.
  * @param assignment Threat assignment selected before the step.
- * @return Mean tracking reward of guards currently held in patrol reserve.
+ * @return Leader tracking reward, faded only while the leader defends.
  *
- * Both guards patrol when there is no threat. With one threat, only the
- * unassigned reserve guard is evaluated against the circuit. With two threats,
- * both guards are released from the patrol reference to intercept.
+ * The wingman is never projected onto the racetrack. It is trained through the
+ * formation channel and may leave the wedge when assigned to an interception.
  */
 inline float MissionPatrolReward(Parameters const& p,
                                  State const& before,
                                  State const& after,
                                  ThreatAssignment const& assignment) noexcept
 {
-    float reward = 0.F;
-    float patrolWeight = 0.F;
-    for (std::size_t guard = 0U; guard < after.guards.size(); ++guard)
-    {
-        float const weight = 1.F - DefenseBlend(
-            before, assignment, guard);
-        reward += weight * TrackingReward(p, before, after, guard);
-        patrolWeight += weight;
-    }
-    return patrolWeight > 0.F ? reward / patrolWeight : 0.F;
+    float const leaderWeight = 1.F - DefenseBlend(before, assignment, 0U);
+    return leaderWeight * TrackingReward(p, before, after);
 }
 
 /**
@@ -1010,11 +1016,10 @@ inline RewardBreakdown TeamRewardBreakdown(
         ? CoordinatedThreatAssignment(before) : AssignThreats(before);
     values[static_cast<std::size_t>(RewardChannel::PatrolTracking)] =
         MissionPatrolReward(p, before, after, assignment);
-    float const maximumDefenseWeight = std::max(
-        DefenseBlend(before, assignment, 0U),
-        DefenseBlend(before, assignment, 1U));
+    float const wingmanFormationWeight =
+        1.F - DefenseBlend(before, assignment, 1U);
     values[static_cast<std::size_t>(RewardChannel::FormationSafety)] =
-        FormationReward(p, after, 1.F - maximumDefenseWeight);
+        FormationReward(p, after, wingmanFormationWeight);
     values[static_cast<std::size_t>(RewardChannel::ControlEffort)] =
         -0.5F * p.controlEffortWeight
         * (std::abs(actions[0][0]) + std::abs(actions[0][1])

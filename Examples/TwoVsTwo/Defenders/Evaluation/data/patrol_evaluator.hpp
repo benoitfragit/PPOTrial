@@ -163,25 +163,38 @@ private:
                 break;
             }
 
+            PatrolProjection const projection = ProjectOnPatrolCurve(
+                parameters_.geometry, next.guards[0].north,
+                next.guards[0].east);
+            float const leaderError = projection.distance
+                / std::hypot(parameters_.halfNorth, parameters_.halfEast);
+            FormationErrors const formation = MeasureFormationErrors(
+                parameters_, next);
+            float const wingmanError = std::hypot(
+                formation.longitudinal, formation.inward);
+            summedError += leaderError + wingmanError;
+            float const leaderHeading = std::cos(
+                next.guards[0].heading - projection.pose.heading);
+            float const wingmanHeading = std::cos(
+                next.guards[1].heading - next.guards[0].heading);
+            if (leaderError <= settings_.trackingTolerance
+                && leaderHeading >= settings_.minimumHeadingCosine
+                && next.guards[0].speed >= settings_.minimumSpeedFraction
+                    * parameters_.cruiseSpeed)
+                ++trackingSamples;
+            if (wingmanError <= settings_.trackingTolerance
+                && wingmanHeading >= settings_.minimumHeadingCosine
+                && next.guards[1].speed >= settings_.minimumSpeedFraction
+                    * parameters_.cruiseSpeed)
+                ++trackingSamples;
             for (std::size_t role = 0; role < 2; ++role)
             {
                 Mobile const& car = next.guards[role];
-                auto const projection = ProjectOnPatrolCurve(
-                    parameters_.geometry, role, car.north, car.east);
-                float const error = projection.distance
-                    / std::hypot(parameters_.halfNorth, parameters_.halfEast);
-                summedError += error;
-                float const heading = std::cos(
-                    car.heading - projection.pose.heading);
-                if (error <= settings_.trackingTolerance
-                    && heading >= settings_.minimumHeadingCosine
-                    && car.speed >= settings_.minimumSpeedFraction * parameters_.cruiseSpeed)
-                    ++trackingSamples;
                 result.accumulatedTurnRadians[role] +=
                     std::abs(WrapAngle(car.heading - state.guards[role].heading));
-                result.accumulatedProgressMeters[role] += std::max(
-                    PatrolProgressDelta(parameters_, state, next, role), 0.F);
             }
+            result.accumulatedProgressMeters[0] += std::max(
+                PatrolProgressDelta(parameters_, state, next), 0.F);
             state = next;
         }
 
@@ -197,9 +210,7 @@ private:
             return result;
 
         // A short horizon is a truncation, not proof of a good/bad patrol.
-        float const travelled = 0.5F
-            * (result.accumulatedProgressMeters[0]
-               + result.accumulatedProgressMeters[1]);
+        float const travelled = result.accumulatedProgressMeters[0];
         if (travelled < settings_.minimumCircuits * CircuitLength(parameters_))
         {
             result.outcome = PatrolOutcome::Truncated;

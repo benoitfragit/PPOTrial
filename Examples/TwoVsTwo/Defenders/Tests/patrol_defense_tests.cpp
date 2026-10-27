@@ -47,7 +47,17 @@ int main()
         || decision.credibleThreats != 0U)
         return 3;
 
+    // The defensive profile now commits while a closing hostile is still
+    // outside the former 25 km activation envelope.
+    coordinator.Reset();
+    attackers[0] = Track(30000.F, 0.F, 3.14159265358979323846F);
+    decision = coordinator.Update(settings, dt, guards, attackers, objective);
+    if (decision.threatRisk[0] < settings.activationRisk
+        || decision.credibleThreats != 1U)
+        return 13;
+
     // A hostile closing on the defended objective activates one interceptor.
+    coordinator.Reset();
     attackers[0] = Track(20000.F, 0.F, 3.14159265358979323846F);
     decision = coordinator.Update(settings, dt, guards, attackers, objective);
     if (decision.threatRisk[0] < settings.activationRisk

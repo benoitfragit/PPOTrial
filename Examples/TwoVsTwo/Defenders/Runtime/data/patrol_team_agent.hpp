@@ -30,7 +30,7 @@ class PatrolMappoAgent final : public ppo::model::IAgent
 public:
     /**
      * @brief Creates the blue team controller.
-     * @param guards The two blue mobile entities, in stable role order.
+     * @param guards The two physical blue entities in stable scenario order.
      * @param attackers Optional red mobiles controlled elsewhere by RLMission.
      * @param objective Defended blue objective.
      * @param policy Shared deterministic inference policy.
@@ -62,6 +62,12 @@ public:
 
 private:
     Parameters ReadParameters() const;
+    /**
+     * @brief Resolves an episode semantic role to a physical blue entity.
+     * @param role Zero for leader, one for wingman.
+     * @return ECS entity identifier in stable physical storage.
+     */
+    entt::entity GuardIdForRole(std::size_t role) const noexcept;
     State ReadState(Parameters const& parameters) const;
     void UpdateDefenseState(Parameters const& parameters, State& state);
     void ApplyCurrentDefenseState(State& state) const noexcept;

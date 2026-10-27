@@ -13,12 +13,12 @@ namespace ppo::examples::twovstwo::defenders {
  */
 struct DefenseSettings final
 {
-    float activationRisk{0.55F};
-    float deactivationRisk{0.35F};
-    float activationDistanceMeters{25000.F};
-    float deactivationDistanceMeters{35000.F};
+    float activationRisk{0.45F};
+    float deactivationRisk{0.25F};
+    float activationDistanceMeters{32000.F};
+    float deactivationDistanceMeters{42000.F};
     float protectedRadiusMeters{12000.F};
-    float timeToIntrusionSeconds{60.F};
+    float timeToIntrusionSeconds{90.F};
     float teammateThreatDistanceMeters{12000.F};
     float teammateVulnerabilityWeight{0.75F};
     float minimumAssignmentSeconds{8.F};

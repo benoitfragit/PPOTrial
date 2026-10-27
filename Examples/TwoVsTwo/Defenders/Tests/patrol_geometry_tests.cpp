@@ -88,20 +88,22 @@ int main()
         return 3;
 
     float const circuit = patrol::CircuitLength(*first);
-    for (std::size_t role = 0U; role < 2U; ++role)
-        for (std::size_t sample = 0U; sample < 128U; ++sample)
-        {
-            float const arclength = circuit
-                * static_cast<float>(sample) / 128.F;
-            auto const pose = patrol::EvaluatePatrolCurve(
-                *first, role, arclength);
-            auto const projection = patrol::ProjectOnPatrolCurve(
-                *first, role, pose.north, pose.east);
-            if (!std::isfinite(pose.heading)
-                || projection.distance > 0.05F
-                || std::abs(projection.signedCrossTrackError) > 0.05F)
-                return 4;
-        }
+    for (std::size_t sample = 0U; sample < 128U; ++sample)
+    {
+        float const arclength = circuit
+            * static_cast<float>(sample) / 128.F;
+        auto const pose = patrol::EvaluatePatrolCurve(*first, arclength);
+        auto const projection = patrol::ProjectOnPatrolCurve(
+            *first, pose.north, pose.east);
+        auto const wingman = patrol::EvaluateWedgePose(*first, pose);
+        float const separation = std::hypot(
+            pose.north - wingman.north, pose.east - wingman.east);
+        if (!std::isfinite(pose.heading)
+            || projection.distance > 0.05F
+            || std::abs(projection.signedCrossTrackError) > 0.05F
+            || std::abs(separation - first->separationDistance) > 0.05F)
+            return 4;
+    }
 
     auto impossible = settings;
     impossible.widthMeters = {500.F, 500.F};

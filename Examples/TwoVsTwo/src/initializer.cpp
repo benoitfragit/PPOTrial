@@ -11,7 +11,7 @@ namespace ppo::examples::twovstwo {
 namespace {
 
 /**
- * @brief Samples the continuous patrol solely for snapshot visualization.
+ * @brief Samples the leader patrol solely for snapshot visualization.
  * @param config Episode context containing a valid immutable geometry.
  */
 void BuildPatrolTrackOverlay(InitializerContext& config) noexcept
@@ -20,16 +20,15 @@ void BuildPatrolTrackOverlay(InitializerContext& config) noexcept
     overlay = ppo::model::sPatrolTrackOverlay{};
     overlay.m_sampleCount = overlay.SampleCapacity;
     float const length = defenders::CircuitLength(config.patrolGeometry);
-    for (std::size_t role = 0U; role < overlay.m_north.size(); ++role)
-        for (std::size_t sample = 0U; sample < overlay.m_sampleCount; ++sample)
-        {
-            float const arclength = length * static_cast<float>(sample)
-                / static_cast<float>(overlay.m_sampleCount - 1U);
-            auto const pose = defenders::EvaluatePatrolCurve(
-                config.patrolGeometry, role, arclength);
-            overlay.m_north[role][sample] = pose.north;
-            overlay.m_east[role][sample] = pose.east;
-        }
+    for (std::size_t sample = 0U; sample < overlay.m_sampleCount; ++sample)
+    {
+        float const arclength = length * static_cast<float>(sample)
+            / static_cast<float>(overlay.m_sampleCount - 1U);
+        auto const pose = defenders::EvaluatePatrolCurve(
+            config.patrolGeometry, arclength);
+        overlay.m_north[sample] = pose.north;
+        overlay.m_east[sample] = pose.east;
+    }
 }
 
 } // namespace
@@ -76,6 +75,8 @@ void InitializeEntity(ppo::model::Entity& entity)
         config.patrolGeometryReady = true;
         BuildPatrolTrackOverlay(config);
         p.geometry = *geometry;
+        config.leaderGuardIndex =
+            std::bernoulli_distribution{0.5}(config.rng) ? 0U : 1U;
         ++config.episodeIndex;
         std::clog << "[BLUE PATROL] Episode " << config.episodeIndex
                   << " racetrack length=" << geometry->length
@@ -86,6 +87,7 @@ void InitializeEntity(ppo::model::Entity& entity)
                   << geometry->separationDistance << "m/"
                   << geometry->separationAngle << "rad direction="
                   << (geometry->direction > 0 ? "counter-clockwise" : "clockwise")
+                  << " leader=blue_guard_" << config.leaderGuardIndex + 1U
                   << '\n';
         if (config.evaluationOverride)
         {
@@ -130,9 +132,13 @@ void InitializeEntity(ppo::model::Entity& entity)
         p.maxRotationRate = config.patrolMaximumRotationRate;
         p.collisionDistance = config.patrolCollisionDistance;
         p.geometry = config.patrolGeometry;
-        auto const role = metadata.m_name == "blue_guard_1" ? 0U : 1U;
-        auto const reference = defenders::PatrolReference(p, config.side,
-                                                         role, config.arclength);
+        std::size_t const guardIndex =
+            metadata.m_name == "blue_guard_1" ? 0U : 1U;
+        std::size_t const role = config.RoleForGuard(guardIndex);
+        auto const leader = defenders::PatrolReference(
+            p, config.side, config.arclength);
+        auto const reference = role == 0U
+            ? leader : defenders::WingmanReference(p, leader);
         auto const mobile = defenders::OnReference(p, reference);
         pose->north = mobile.north;
         pose->east = mobile.east;

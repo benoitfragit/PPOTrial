@@ -39,15 +39,17 @@ zone, pas un mur : RLMission continue normalement à piloter les rouges vers
 l'objectif. La zone restreinte est déplacée dans la moitié défendue et n'est
 active que dans 75 % des épisodes.
 
-La patrouille est un hippodrome analytique continu, sans waypoint. Sa longueur,
-sa largeur, son orientation, son ancrage et le wedge sont tirés une fois par
-épisode dans les intervalles configurés. Un seul contrôleur MAPPO possède
-l'acteur partagé, le critique centralisé, le buffer on-policy et l'optimiseur
-des deux bleus.
+La patrouille est un unique hippodrome analytique continu, sans waypoint. Sa
+longueur, sa largeur, son orientation, son ancrage et le wedge sont tirés une
+fois par épisode. Les deux voitures reçoivent alors aléatoirement des rôles
+bijectifs : exactement un leader et un équipier. Seul le leader suit la piste ;
+l'équipier tient une pose arrière/intérieure relative au leader. Un seul
+contrôleur MAPPO possède l'acteur partagé, le critique centralisé, le buffer
+on-policy et l'optimiseur des deux bleus.
 
 La configuration livrée conserve une longueur de 50 à 60 km et échantillonne
-une largeur de 16 à 20 km. Ces rayons plus progressifs laissent au follower
-intérieur une marge de virage suffisante pendant l'exploration initiale.
+une largeur de 16 à 20 km. Ces rayons progressifs facilitent l'exploration
+initiale du leader et la tenue du wedge dans les demi-tours.
 
 La plateforme bleue reprend la dynamique de `trainingaircraft` : vitesse de
 croisière initiale 300 m/s, vitesse maximale 700 m/s, accélération 600 m/s² et
@@ -73,26 +75,29 @@ Une évaluation déterministe intégrée est lancée à chaque checkpoint : elle
 utilise les vrais rouges RLMission dans le 2v2, publie ses mesures dans l'IHM et
 ne promeut dans `resources/model/BluePatrol/prod` que le meilleur acteur. Les
 acteurs non encore validés restent dans `BluePatrol/latest`. Le même dossier
-contient `blue_patrol_training_v2.txt`, qui restaure l'acteur, le critique,
+contient `blue_patrol_training_v3.txt`, qui restaure l'acteur, le critique,
 les deux états Adam, le compteur de mises à jour et le RNG. Le buffer de rollout
 n'est volontairement pas sauvegardé : une reprise commence un rollout vide au
 même niveau d'optimisation.
 
 La collision entre les deux bleus est terminale à 1 km, avec une pénalité de
 sécurité progressive à partir de 2 km. Sans menace crédible, le canal de
-formation entretient le wedge leader–suiveur tiré entre 6 et 9 km. Un
-coordinateur avec hystérésis attribue au plus une menace crédible à chaque
-bleu ; il ne produit aucune commande. Le réseau reste seul responsable des
-commandes continues de rotation et d'accélération.
+formation entraîne uniquement l'équipier à tenir le wedge tiré entre 6 et
+9 km. Le suivi d'hippodrome entraîne uniquement le leader. Un coordinateur avec
+hystérésis attribue au plus une menace crédible à chaque bleu ; il s'active dès
+32 km avec un horizon d'intrusion de 90 s, mais ne produit aucune commande. Les
+deux acteurs conservent leurs pistes rouges, leur pooling et leur attention, et
+peuvent donc tous deux intercepter. Avec deux menaces, l'affectation un-à-un
+reste inchangée.
 
-Le contrat bleu est désormais v5. Il faut donc entraîner un nouveau modèle :
-les anciens acteurs v4 et états d'entraînement v1 sont volontairement ignorés,
+Le contrat bleu est désormais v6. Il faut donc entraîner un nouveau modèle :
+les anciens acteurs et états d'entraînement bleus sont volontairement ignorés,
 car les 10 entrées locales de patrouille ont changé de sens. Les nouveaux
-fichiers sont `blue_patrol_mappo_v5.txt` et
-`blue_patrol_training_v2.txt`. Aucun checkpoint rouge n'est concerné.
+fichiers sont `blue_patrol_mappo_v6.txt` et
+`blue_patrol_training_v3.txt`. Aucun checkpoint rouge n'est concerné.
 
 Dans le scénario TwoVsTwo, la barre de la vue tactique propose `Show patrol
-track`. Cette option dessine les deux courbes et leur sens dans la vue 3D et la
+track`. Cette option dessine l'unique piste du leader et son sens dans la vue 3D et la
 minimap ; elle n'existe pas dans Airspace et n'influence jamais la simulation.
 Le champ de scénario `blueController` accepte `mappo` ou `reference`, ce qui
 permet le même affichage avec ou sans PPO.
@@ -101,7 +106,7 @@ permet le même affichage avec ou sans PPO.
 
 - [Architecture de la patrouille MAPPO](docs/blue-ppo-patrol.md)
 - [Architecture et feuille de route de la patrouille](docs/blue-patrol-architecture-roadmap.md)
-- [Architecture v5 : hippodrome continu et défense](docs/blue-patrol-v5-architecture.md)
+- [Architecture v6 : rôles leader/équipier et défense](docs/blue-patrol-v6-architecture.md)
 - [Scénario TwoVsTwo](docs/two-vs-two-example.md)
 - [Guide de configuration](docs/configuration-guide.md)
 

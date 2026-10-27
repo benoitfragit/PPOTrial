@@ -128,7 +128,7 @@ public:
         episodeTrackingGood_ = 0U;
         episodeTrackingTotal_ = 0U;
         episodeProgressMeters_.fill(0.F);
-        previousProgress_ = initial.patrolProgress;
+        previousProgress_.fill(initial.patrolProgress);
         episodeStarted_ = true;
     }
 
@@ -143,32 +143,41 @@ public:
             throw std::logic_error("Blue patrol evaluation episode was not initialized");
         ++episodeSteps_;
         ++stepsExecuted_;
-        for (std::size_t role = 0; role < state.guards.size(); ++role)
-        {
-            Mobile const& guard = state.guards[role];
-            PatrolProjection const projection = ProjectOnPatrolCurve(
-                parameters.geometry, role, guard.north, guard.east);
-            float const error = projection.distance
-                / std::hypot(parameters.halfNorth, parameters.halfEast);
-            float const heading = std::cos(
-                guard.heading - projection.pose.heading);
-            ++episodeTrackingTotal_;
-            if (guard.available && std::isfinite(error)
-                && error <= settings_.trackingTolerance
-                && heading >= settings_.minimumHeadingCosine
-                && guard.speed >= settings_.minimumSpeedFraction
-                                   * parameters.cruiseSpeed)
-                ++episodeTrackingGood_;
+        PatrolProjection const projection = ProjectOnPatrolCurve(
+            parameters.geometry, state.guards[0].north,
+            state.guards[0].east);
+        float const leaderError = projection.distance
+            / std::hypot(parameters.halfNorth, parameters.halfEast);
+        float const leaderHeading = std::cos(
+            state.guards[0].heading - projection.pose.heading);
+        FormationErrors const formation = MeasureFormationErrors(
+            parameters, state);
+        float const wingmanError = std::hypot(
+            formation.longitudinal, formation.inward);
+        float const wingmanHeading = std::cos(
+            state.guards[1].heading - state.guards[0].heading);
+        episodeTrackingTotal_ += 2U;
+        if (state.guards[0].available && std::isfinite(leaderError)
+            && leaderError <= settings_.trackingTolerance
+            && leaderHeading >= settings_.minimumHeadingCosine
+            && state.guards[0].speed >= settings_.minimumSpeedFraction
+                                       * parameters.cruiseSpeed)
+            ++episodeTrackingGood_;
+        if (state.guards[1].available && std::isfinite(wingmanError)
+            && wingmanError <= settings_.trackingTolerance
+            && wingmanHeading >= settings_.minimumHeadingCosine
+            && state.guards[1].speed >= settings_.minimumSpeedFraction
+                                       * parameters.cruiseSpeed)
+            ++episodeTrackingGood_;
 
-            float const delta = std::remainder(
-                state.patrolProgress[role] - previousProgress_[role],
-                CircuitLength(parameters));
-            float const maximumPhysicalProgress =
-                2.F * parameters.maxSpeed * parameters.dt + 1.F;
-            if (std::abs(delta) <= maximumPhysicalProgress)
-                episodeProgressMeters_[role] += std::max(delta, 0.F);
-            previousProgress_[role] = state.patrolProgress[role];
-        }
+        float const delta = std::remainder(
+            state.patrolProgress - previousProgress_[0],
+            CircuitLength(parameters));
+        float const maximumPhysicalProgress =
+            2.F * parameters.maxSpeed * parameters.dt + 1.F;
+        if (std::abs(delta) <= maximumPhysicalProgress)
+            episodeProgressMeters_[0] += std::max(delta, 0.F);
+        previousProgress_[0] = state.patrolProgress;
     }
 
     /**
@@ -192,8 +201,7 @@ public:
             ? static_cast<float>(episodeTrackingGood_)
                 / static_cast<float>(episodeTrackingTotal_)
             : 0.F;
-        float const travelled = 0.5F
-            * (episodeProgressMeters_[0] + episodeProgressMeters_[1]);
+        float const travelled = episodeProgressMeters_[0];
         bool const patrolDistanceReached = travelled >=
             settings_.minimumCircuits * CircuitLength(parameters);
         bool const safe = finalState.objectiveAvailable && !finalState.failed;

@@ -189,7 +189,8 @@ un nouveau démarrage reproductible, modifier le JSON lorsque l'application est
 arrêtée.
 
 Les coefficients s'appliquent à des canaux conditionnés par la mission. Sans
-menace crédible, `Patrol tracking` évalue les deux bleus. Une menace visible
+menace crédible, `Patrol tracking` évalue uniquement le leader et `Formation
+safety` entraîne uniquement l'équipier sur le wedge. Une menace visible
 mais lointaine ou en éloignement ne suffit pas. Avec une menace crédible,
 l'affectation stable choisit un intercepteur et conserve l'autre en réserve ;
 avec deux menaces crédibles, les deux bleus reçoivent des cibles distinctes.
@@ -207,18 +208,18 @@ et phases. Le score et sa progression sont visibles dans l'IHM ; seul un
 candidat meilleur remplace le checkpoint de production.
 
 Le dossier `resources/model/BluePatrol/latest/` reçoit deux fichiers après la
-première mise à jour : `blue_patrol_mappo_v5.txt` destiné à l'inférence et
-`blue_patrol_training_v2.txt` destiné à la reprise. Ce second fichier conserve
+première mise à jour : `blue_patrol_mappo_v6.txt` destiné à l'inférence et
+`blue_patrol_training_v3.txt` destiné à la reprise. Ce second fichier conserve
 le critique, les états Adam, le compteur de mises à jour et le RNG. Les données
 du rollout ne sont pas conservées ; le buffer repart vide au redémarrage. Le
 dossier `prod/` reste volontairement limité au meilleur acteur évalué et à son
 score.
 
-La version v5 doit être entraînée depuis des poids neufs : la dimension de
-l'observation reste identique, mais les entrées de patrouille représentent
-désormais la projection sur une courbe analytique continue, et non une cible
-ou une progression temporelle. Les noms et signatures v5/v2 empêchent le
-chargement silencieux des anciens fichiers v4/v1.
+La version v6 doit être entraînée depuis des poids neufs : la dimension de
+l'observation reste identique, mais les entrées 0–5 ne décrivent la piste que
+pour le leader et les entrées 6–7 ne décrivent le wedge que pour l'équipier.
+Les noms et signatures v6/v3 empêchent le chargement silencieux des anciens
+fichiers bleus.
 
 ### Géométrie aléatoire du 2v2
 
