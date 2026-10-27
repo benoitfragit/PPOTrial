@@ -75,7 +75,10 @@ missing or unknown channels.
 The settings files are updated by the application on exit.
 
 Training/BluePatrol.json configures the separate native RLTools MAPPO backend.
-It contains training.rolloutSteps, training.maxUpdates,
+Its patrol object contains the bounded racetrack, wedge, and credible-threat
+defence settings. All geometry ranges are sampled once per episode from the
+configured seed; no waypoint list is generated. It also contains
+training.rolloutSteps, training.maxUpdates,
 training.checkpointEvery, training.seed, rewards.clamp and seven named reward
 weights. Its rolloutSteps value counts ECS team steps: two defenders generate
 two actor transitions per team step. The application presets are 512, 1024,
@@ -90,6 +93,10 @@ Blue MAPPO writes an inference Actor and a separate complete training state in
 Critic, both Adam states, update count and RLTools RNG. Rollout samples are not
 serialized; resume starts a fresh rollout. `model/BluePatrol/prod` remains an
 inference-only promoted Actor plus its evaluation score.
+
+The current blue checkpoint contract is Actor v5 and training-state v2. A v4
+Actor or v1 training state is not a warm start for this observation contract;
+start training from new weights. Red RLMission checkpoints are unaffected.
 
 The blue `Platforms/Mobile/defender_car.json` profile also exposes
 `FlightModel.CruiseSpeed`. The TwoVsTwo loader uses it consistently for the

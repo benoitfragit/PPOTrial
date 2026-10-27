@@ -39,15 +39,19 @@ zone, pas un mur : RLMission continue normalement à piloter les rouges vers
 l'objectif. La zone restreinte est déplacée dans la moitié défendue et n'est
 active que dans 75 % des épisodes.
 
-La patrouille suit l'axe est/ouest, le plus long du monde configuré. Un seul
-contrôleur MAPPO possède l'acteur partagé, le critique centralisé, le buffer
-on-policy et l'optimiseur des deux bleus.
+La patrouille est un hippodrome analytique continu, sans waypoint. Sa longueur,
+sa largeur, son orientation, son ancrage et le wedge sont tirés une fois par
+épisode dans les intervalles configurés. Un seul contrôleur MAPPO possède
+l'acteur partagé, le critique centralisé, le buffer on-policy et l'optimiseur
+des deux bleus.
 
 La plateforme bleue reprend la dynamique de `trainingaircraft` : vitesse de
 croisière initiale 300 m/s, vitesse maximale 700 m/s, accélération 600 m/s² et
 rotation maximale d'environ 40,1°/s (0,7000006 rad/s). Sa zone SNA sans
 échappement vaut 5 km et sa zone d'engagement atteint 10 km, contre 4 et 8 km
-pour les rouges, qui restent inchangés.
+pour les rouges. Son domaine angulaire reprend aussi celui de
+`trainingaircraft` (`MaxShootAngle` = 3,147198 rad). Les rouges restent
+inchangés.
 
 ## Configuration bleue
 
@@ -65,21 +69,35 @@ Une évaluation déterministe intégrée est lancée à chaque checkpoint : elle
 utilise les vrais rouges RLMission dans le 2v2, publie ses mesures dans l'IHM et
 ne promeut dans `resources/model/BluePatrol/prod` que le meilleur acteur. Les
 acteurs non encore validés restent dans `BluePatrol/latest`. Le même dossier
-contient `blue_patrol_training_v1.txt`, qui restaure l'acteur, le critique,
+contient `blue_patrol_training_v2.txt`, qui restaure l'acteur, le critique,
 les deux états Adam, le compteur de mises à jour et le RNG. Le buffer de rollout
 n'est volontairement pas sauvegardé : une reprise commence un rollout vide au
 même niveau d'optimisation.
 
 La collision entre les deux bleus est terminale à 1 km, avec une pénalité de
-sécurité progressive à partir de 2 km. Sans menace, le canal de formation
-récompense aussi explicitement une file leader–suiveur espacée d'environ
-9,6 km dans le monde par défaut. Avec plusieurs menaces, le façonnage récompense
-au contraire leur séparation et la couverture d'une cible distincte chacun.
+sécurité progressive à partir de 2 km. Sans menace crédible, le canal de
+formation entretient le wedge leader–suiveur tiré entre 6 et 9 km. Un
+coordinateur avec hystérésis attribue au plus une menace crédible à chaque
+bleu ; il ne produit aucune commande. Le réseau reste seul responsable des
+commandes continues de rotation et d'accélération.
+
+Le contrat bleu est désormais v5. Il faut donc entraîner un nouveau modèle :
+les anciens acteurs v4 et états d'entraînement v1 sont volontairement ignorés,
+car les 10 entrées locales de patrouille ont changé de sens. Les nouveaux
+fichiers sont `blue_patrol_mappo_v5.txt` et
+`blue_patrol_training_v2.txt`. Aucun checkpoint rouge n'est concerné.
+
+Dans le scénario TwoVsTwo, la barre de la vue tactique propose `Show patrol
+track`. Cette option dessine les deux courbes et leur sens dans la vue 3D et la
+minimap ; elle n'existe pas dans Airspace et n'influence jamais la simulation.
+Le champ de scénario `blueController` accepte `mappo` ou `reference`, ce qui
+permet le même affichage avec ou sans PPO.
 
 ## Documentation
 
 - [Architecture de la patrouille MAPPO](docs/blue-ppo-patrol.md)
 - [Architecture et feuille de route de la patrouille](docs/blue-patrol-architecture-roadmap.md)
+- [Architecture v5 : hippodrome continu et défense](docs/blue-patrol-v5-architecture.md)
 - [Scénario TwoVsTwo](docs/two-vs-two-example.md)
 - [Guide de configuration](docs/configuration-guide.md)
 
