@@ -35,6 +35,20 @@
         "min": 10.0,
         "max": 25.0
       }
+    },
+    "defense": {
+      "activationRisk": 0.55,
+      "deactivationRisk": 0.35,
+      "activationDistanceMeters": 25000.0,
+      "deactivationDistanceMeters": 35000.0,
+      "protectedRadiusMeters": 12000.0,
+      "timeToIntrusionSeconds": 60.0,
+      "teammateThreatDistanceMeters": 12000.0,
+      "teammateVulnerabilityWeight": 0.75,
+      "minimumAssignmentSeconds": 8.0,
+      "deactivationHoldSeconds": 5.0,
+      "recoverySeconds": 15.0,
+      "switchImprovementFraction": 0.15
     }
   },
   "training": {
