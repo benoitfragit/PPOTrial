@@ -840,10 +840,15 @@ inline float MissionPatrolReward(Parameters const& p,
                                  ThreatAssignment const& assignment) noexcept
 {
     float reward = 0.F;
+    float patrolWeight = 0.F;
     for (std::size_t guard = 0U; guard < after.guards.size(); ++guard)
-        reward += (1.F - DefenseBlend(before, assignment, guard))
-            * TrackingReward(p, before, after, guard);
-    return 0.5F * reward;
+    {
+        float const weight = 1.F - DefenseBlend(
+            before, assignment, guard);
+        reward += weight * TrackingReward(p, before, after, guard);
+        patrolWeight += weight;
+    }
+    return patrolWeight > 0.F ? reward / patrolWeight : 0.F;
 }
 
 /**
@@ -864,6 +869,7 @@ inline float EngagementReward(Parameters const& p, State const& before,
                               ThreatAssignment const& assignment) noexcept
 {
     float reward = 0.F;
+    float defenseWeight = 0.F;
     float const diagonal = std::hypot(p.halfNorth, p.halfEast);
     float const distancePerStep = std::max(p.maxSpeed * p.dt, 1.F);
     for (std::size_t guard = 0U; guard < before.guards.size(); ++guard)
@@ -882,10 +888,12 @@ inline float EngagementReward(Parameters const& p, State const& before,
         float const closingProgress = Clamp(
             (beforeRange - afterRange) / distancePerStep, -1.F, 1.F);
         float const normalizedRange = Clamp(afterRange / diagonal, 0.F, 1.F);
-        reward += DefenseBlend(before, assignment, guard)
+        float const weight = DefenseBlend(before, assignment, guard);
+        reward += weight
             * (0.35F * closingProgress - 0.10F * normalizedRange);
+        defenseWeight += weight;
     }
-    return reward;
+    return defenseWeight > 0.F ? reward / defenseWeight : 0.F;
 }
 
 /**
@@ -1008,7 +1016,7 @@ inline RewardBreakdown TeamRewardBreakdown(
     values[static_cast<std::size_t>(RewardChannel::FormationSafety)] =
         FormationReward(p, after, 1.F - maximumDefenseWeight);
     values[static_cast<std::size_t>(RewardChannel::ControlEffort)] =
-        -p.controlEffortWeight
+        -0.5F * p.controlEffortWeight
         * (std::abs(actions[0][0]) + std::abs(actions[0][1])
            + std::abs(actions[1][0]) + std::abs(actions[1][1]));
 
