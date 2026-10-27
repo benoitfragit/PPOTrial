@@ -149,7 +149,7 @@ public:
 
     /**
      * @brief Replaces the trainable shared Actor with checkpoint parameters.
-     * @param checkpoint Compatible v4 Actor checkpoint.
+     * @param checkpoint Compatible v5 Actor checkpoint.
      */
     void LoadActor(std::filesystem::path const& checkpoint)
     {

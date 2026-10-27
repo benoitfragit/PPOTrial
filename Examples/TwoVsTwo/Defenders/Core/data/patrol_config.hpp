@@ -2,12 +2,46 @@
 
 #include "patrol_core.hpp"
 #include "patrol_training_settings.hpp"
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include <random>
 #include <stdexcept>
+#include <string>
 
 namespace ppo::examples::twovstwo::defenders {
+
+namespace patrol_config_detail {
+
+inline float FiniteNumber(nlohmann::json const& object, char const* key)
+{
+    auto const item = object.find(key);
+    if (item == object.end() || !item->is_number())
+        throw std::invalid_argument(
+            std::string{"Missing numeric patrol setting: "} + key);
+    float const value = item->get<float>();
+    if (!std::isfinite(value))
+        throw std::invalid_argument(
+            std::string{"Nonfinite patrol setting: "} + key);
+    return value;
+}
+
+inline PatrolRange Range(nlohmann::json const& object, char const* key)
+{
+    auto const item = object.find(key);
+    if (item == object.end() || !item->is_object())
+        throw std::invalid_argument(
+            std::string{"Missing patrol range: "} + key);
+    PatrolRange const result{
+        FiniteNumber(*item, "min"), FiniteNumber(*item, "max")};
+    if (result.minimum > result.maximum)
+        throw std::invalid_argument(
+            std::string{"Invalid patrol range (min > max): "} + key);
+    return result;
+}
+
+} // namespace patrol_config_detail
 
 inline nlohmann::json ReadPatrolJson(std::filesystem::path const& path)
 {
@@ -19,6 +53,72 @@ inline nlohmann::json ReadPatrolJson(std::filesystem::path const& path)
     if (document.at("formatVersion").get<int>() != 2)
         throw std::runtime_error("Unsupported patrol configuration version");
     return document;
+}
+
+/**
+ * @brief Parses and validates episode-level racetrack and wedge ranges.
+ * @param document Full BluePatrol JSON document.
+ * @return Validated ranges expressed in metres and radians.
+ */
+inline PatrolGeometrySettings
+ParsePatrolGeometrySettings(nlohmann::json const& document)
+{
+    constexpr float degreesToRadians = kPatrolPi / 180.F;
+    auto const patrolItem = document.find("patrol");
+    if (patrolItem == document.end() || !patrolItem->is_object())
+        throw std::invalid_argument("Missing BluePatrol patrol settings");
+    auto const racetrackItem = patrolItem->find("racetrack");
+    auto const formationItem = patrolItem->find("formation");
+    if (racetrackItem == patrolItem->end() || !racetrackItem->is_object()
+        || formationItem == patrolItem->end() || !formationItem->is_object())
+        throw std::invalid_argument(
+            "Missing BluePatrol racetrack or formation settings");
+
+    PatrolGeometrySettings result{};
+    result.lengthMeters = patrol_config_detail::Range(
+        *racetrackItem, "lengthMeters");
+    result.widthMeters = patrol_config_detail::Range(
+        *racetrackItem, "widthMeters");
+    result.headingRadians = patrol_config_detail::Range(
+        *racetrackItem, "headingDegrees");
+    result.headingRadians.minimum *= degreesToRadians;
+    result.headingRadians.maximum *= degreesToRadians;
+    result.anchorNorthMeters = patrol_config_detail::Range(
+        *racetrackItem, "anchorNorthMeters");
+    result.anchorEastMeters = patrol_config_detail::Range(
+        *racetrackItem, "anchorEastMeters");
+    result.boundaryMarginMeters = patrol_config_detail::FiniteNumber(
+        *racetrackItem, "boundaryMarginMeters");
+    auto const attempts = racetrackItem->find("maximumSamplingAttempts");
+    auto const clockwise = racetrackItem->find("clockwise");
+    if (attempts == racetrackItem->end() || !attempts->is_number_unsigned()
+        || clockwise == racetrackItem->end() || !clockwise->is_boolean())
+        throw std::invalid_argument(
+            "Invalid racetrack sampling attempts or direction");
+    result.maximumSamplingAttempts = attempts->get<std::size_t>();
+    result.clockwise = clockwise->get<bool>();
+
+    result.separationDistanceMeters = patrol_config_detail::Range(
+        *formationItem, "separationDistanceMeters");
+    result.separationAngleRadians = patrol_config_detail::Range(
+        *formationItem, "separationAngleDegrees");
+    result.separationAngleRadians.minimum *= degreesToRadians;
+    result.separationAngleRadians.maximum *= degreesToRadians;
+    if (!Valid(result))
+        throw std::invalid_argument("Invalid BluePatrol patrol geometry ranges");
+    return result;
+}
+
+/**
+ * @brief Loads and validates the episode-level racetrack and wedge ranges.
+ * @param settings Root resources/settings directory.
+ * @return Validated ranges expressed in metres and radians.
+ */
+inline PatrolGeometrySettings
+LoadPatrolGeometrySettings(std::filesystem::path const& settings)
+{
+    return ParsePatrolGeometrySettings(
+        ReadPatrolJson(settings / "Training/BluePatrol.json"));
 }
 
 inline Parameters LoadPatrolParameters(std::filesystem::path const& settings)
@@ -34,6 +134,18 @@ inline Parameters LoadPatrolParameters(std::filesystem::path const& settings)
     parameters.maxSpeed = flight.at("MaxSpeed").get<float>();
     parameters.maxAcceleration = flight.at("MaxAcceleration").get<float>();
     parameters.maxRotationRate = flight.at("MaxRotAcceleration").get<float>();
+    PatrolGeometrySettings const geometrySettings =
+        LoadPatrolGeometrySettings(settings);
+    PatrolSamplingConstraints const constraints{
+        parameters.halfNorth, parameters.halfEast, parameters.cruiseSpeed,
+        parameters.maxRotationRate, parameters.collisionDistance};
+    std::mt19937 validationRng{0U};
+    auto const geometry = SamplePatrolGeometry(
+        geometrySettings, constraints, validationRng);
+    if (!geometry)
+        throw std::invalid_argument(
+            "BluePatrol geometry has no feasible sample within the attempt limit");
+    parameters.geometry = *geometry;
     if (!Valid(parameters))
         throw std::invalid_argument("Invalid patrol world or vehicle parameters");
     return parameters;

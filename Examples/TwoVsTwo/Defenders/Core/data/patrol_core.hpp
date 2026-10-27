@@ -3,6 +3,7 @@
 // Deterministic 2D patrol and protection domain used by the blue MAPPO team.
 // Coordinates: north x / east y, metres; heading 0 towards north.
 // No dependencies on Torch, EnTT, a renderer, or RLtools in this domain layer.
+#include "patrol_geometry.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -43,7 +44,7 @@ struct ObservationLayout final
         CentralEntities * CentralEntityFeatures + CentralObjective + CentralPatrol;
     static constexpr std::size_t Size = LocalSize + CentralSize;
     static constexpr std::size_t ActionSize = 2;
-    static constexpr std::uint32_t Version = 4;
+    static constexpr std::uint32_t Version = 5;
 };
 
 using Observation = std::array<float, ObservationLayout::Size>;
@@ -64,6 +65,7 @@ struct Parameters
     float hardBoundaryScale = 2.F;
     float boundaryPenaltyDepth = 0.25F;
     float minimumThreatBoundaryScale = 0.20F;
+    PatrolGeometry geometry{};
 };
 
 inline bool Valid(Parameters const& p) noexcept
@@ -83,7 +85,13 @@ inline bool Valid(Parameters const& p) noexcept
         && std::isfinite(p.boundaryPenaltyDepth) && p.boundaryPenaltyDepth > 0.F
         && std::isfinite(p.minimumThreatBoundaryScale)
         && p.minimumThreatBoundaryScale >= 0.F
-        && p.minimumThreatBoundaryScale <= 1.F;
+        && p.minimumThreatBoundaryScale <= 1.F
+        && p.geometry.length > p.geometry.width
+        && p.geometry.width > 0.F
+        && p.geometry.separationDistance > p.collisionDistance
+        && p.geometry.separationAngle > 0.F
+        && p.geometry.separationAngle < 0.5F * kPi
+        && std::abs(p.geometry.direction) == 1;
 }
 
 inline float Clamp(float x, float a, float b) noexcept
@@ -114,20 +122,17 @@ struct Reference
 
 inline float Radius(Parameters const& p) noexcept
 {
-    return std::min(p.halfEast * 0.09F, p.halfNorth * 0.13F);
+    return 0.5F * p.geometry.width;
 }
 
 inline float StraightHalfLength(Parameters const& p) noexcept
 {
-    // Patrol almost the complete east/west extent. Two radii are reserved
-    // before each straight endpoint, so the outer half of every U-turn keeps
-    // one full radius of clearance from the world boundary.
-    return p.halfEast - 2.F * Radius(p);
+    return 0.5F * (p.geometry.length - p.geometry.width);
 }
 
 inline float CircuitLength(Parameters const& p) noexcept
 {
-    return 4.F * StraightHalfLength(p) + kTwoPi * Radius(p);
+    return CircuitLength(p.geometry);
 }
 
 /**
@@ -137,8 +142,8 @@ inline float CircuitLength(Parameters const& p) noexcept
  */
 inline float FormationGap(Parameters const& p) noexcept
 {
-    float const straightLength = 2.F * StraightHalfLength(p);
-    return std::max(0.16F * straightLength, 2.5F * p.cautionDistance);
+    return p.geometry.separationDistance
+        * std::cos(p.geometry.separationAngle);
 }
 
 /**
@@ -155,47 +160,10 @@ inline float FormationGap(Parameters const& p) noexcept
 inline Reference PatrolReference(Parameters const& p, int side, std::size_t role,
                                  float distance) noexcept
 {
-    float const half = StraightHalfLength(p);
-    float const radius = Radius(p);
-    float const straight = 2.F * half;
-    float const arc = kPi * radius;
-    float const length = 2.F * (straight + arc);
-    float const offset = role == 0U ? FormationGap(p) : 0.F;
-    float const s = PositiveModulo(distance + offset, length);
-    float const mirror = side >= 0 ? 1.F : -1.F;
-
-    Reference result{};
-    result.phase = s / length;
-    if (s < straight)
-    {
-        result.north = -radius;
-        result.east = mirror * (-half + s);
-        result.heading = mirror * 0.5F * kPi;
-        result.distanceToTurn = straight - s;
-    }
-    else if (s < straight + arc)
-    {
-        float const angle = -0.5F * kPi + (s - straight) / radius;
-        result.north = radius * std::sin(angle);
-        result.east = mirror * (half + radius * std::cos(angle));
-        result.heading = mirror * -angle;
-    }
-    else if (s < 2.F * straight + arc)
-    {
-        float const onLeg = s - straight - arc;
-        result.north = radius;
-        result.east = mirror * (half - onLeg);
-        result.heading = mirror * -0.5F * kPi;
-        result.distanceToTurn = straight - onLeg;
-    }
-    else
-    {
-        float const angle = 0.5F * kPi + (s - 2.F * straight - arc) / radius;
-        result.north = radius * std::sin(angle);
-        result.east = mirror * (-half + radius * std::cos(angle));
-        result.heading = mirror * -angle;
-    }
-    return result;
+    (void)side;
+    PatrolCurvePose const pose = EvaluatePatrolCurve(
+        p.geometry, role % 2U, distance);
+    return {pose.north, pose.east, pose.heading, pose.phase, 0.F};
 }
 
 inline Mobile OnReference(Parameters const& p, Reference const& ref) noexcept

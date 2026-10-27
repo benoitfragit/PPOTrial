@@ -128,6 +128,15 @@ Parameters PatrolMappoAgent::ReadParameters() const
         result.halfEast = 0.5F * world.m_maxEast;
         result.dt = world.m_dt;
     }
+    if (registry_ != nullptr
+        && registry_->ctx().contains<
+            ppo::examples::twovstwo::InitializerContext>())
+    {
+        auto const& context = registry_->ctx().get<
+            ppo::examples::twovstwo::InitializerContext>();
+        if (context.patrolGeometryReady)
+            result.geometry = context.patrolGeometry;
+    }
     ppo::model::BaseEntity first{registry_, guardIds_[0]};
     if (first.has<ppo::model::sFlightModelState>())
     {

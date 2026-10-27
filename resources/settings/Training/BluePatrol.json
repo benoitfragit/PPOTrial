@@ -1,5 +1,42 @@
 {
   "formatVersion": 2,
+  "patrol": {
+    "racetrack": {
+      "lengthMeters": {
+        "min": 50000.0,
+        "max": 60000.0
+      },
+      "widthMeters": {
+        "min": 9000.0,
+        "max": 13000.0
+      },
+      "headingDegrees": {
+        "min": 80.0,
+        "max": 100.0
+      },
+      "anchorNorthMeters": {
+        "min": -1500.0,
+        "max": 1500.0
+      },
+      "anchorEastMeters": {
+        "min": -2000.0,
+        "max": 2000.0
+      },
+      "clockwise": false,
+      "boundaryMarginMeters": 2000.0,
+      "maximumSamplingAttempts": 128
+    },
+    "formation": {
+      "separationDistanceMeters": {
+        "min": 6000.0,
+        "max": 9000.0
+      },
+      "separationAngleDegrees": {
+        "min": 10.0,
+        "max": 25.0
+      }
+    }
+  },
   "training": {
     "rolloutSteps": 2048,
     "maxUpdates": 300,

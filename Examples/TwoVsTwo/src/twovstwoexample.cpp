@@ -175,10 +175,13 @@ bool LoadScenario(std::filesystem::path const& path,
 
     auto const settingsRoot = path.parent_path().parent_path();
     defenders::Parameters patrolParameters{};
+    defenders::PatrolGeometrySettings patrolGeometrySettings{};
     defenders::PatrolTrainingSettings patrolTraining{};
     try
     {
         patrolParameters = defenders::LoadPatrolParameters(settingsRoot);
+        patrolGeometrySettings =
+            defenders::LoadPatrolGeometrySettings(settingsRoot);
         patrolTraining = defenders::LoadPatrolTrainingSettings(settingsRoot);
     }
     catch (std::exception const& error)
@@ -189,19 +192,23 @@ bool LoadScenario(std::filesystem::path const& path,
     }
 
     auto& context = registry->ctx().emplace<InitializerContext>();
+    context.rng.seed(patrolTraining.seed);
     context.count = entities.size();
     context.spawnSettings = *spawnSettings;
     context.patrolOnly = patrolOnly;
     context.patrolCruiseSpeed = patrolParameters.cruiseSpeed;
+    context.patrolMaximumRotationRate = patrolParameters.maxRotationRate;
+    context.patrolCollisionDistance = patrolParameters.collisionDistance;
+    context.patrolGeometrySettings = patrolGeometrySettings;
     std::shared_ptr<defenders::PatrolPolicy> bluePolicy;
     auto const modelRoot = std::filesystem::path{RESOURCE_PATH}.parent_path()
         / "model" / "BluePatrol";
     auto const latestCheckpoint = modelRoot / "latest"
-        / "blue_patrol_mappo_v4.txt";
+        / "blue_patrol_mappo_v5.txt";
     auto const trainingCheckpoint = modelRoot / "latest"
-        / "blue_patrol_training_v1.txt";
+        / "blue_patrol_training_v2.txt";
     auto const productionCheckpoint = modelRoot / "prod"
-        / "blue_patrol_mappo_v4.txt";
+        / "blue_patrol_mappo_v5.txt";
     std::filesystem::path const warmStartCheckpoint =
         std::filesystem::exists(latestCheckpoint)
         ? latestCheckpoint : productionCheckpoint;
@@ -222,7 +229,8 @@ bool LoadScenario(std::filesystem::path const& path,
     {
         try
         {
-            bluePolicy = defenders::CreateUntrainedPatrolPolicy(42U);
+            bluePolicy = defenders::CreateUntrainedPatrolPolicy(
+                patrolTraining.seed);
         }
         catch (std::exception const& error)
         {
@@ -231,7 +239,7 @@ bool LoadScenario(std::filesystem::path const& path,
             return false;
         }
         std::cout << "[BLUE MAPPO] Actor initialized; Play starts embedded "
-                     "RLtools training.\n";
+                     "RLtools v5 training from new weights.\n";
     }
     auto& world = registry->ctx().get<ppo::model::sEnvironmentState>();
     world.m_maxNorth = worldNorth;
@@ -247,6 +255,9 @@ bool LoadScenario(std::filesystem::path const& path,
         if (it != entities.end())
             it->second->Init();
     }
+    if (context.patrolGeometrySamplingFailed || !context.patrolGeometryReady)
+        return false;
+    patrolParameters.geometry = context.patrolGeometry;
     try
     {
         auto& first = *entities.at("blue_guard_1");

@@ -22,10 +22,16 @@ inline Action PatrolReferenceAction(Parameters const& p,
         || !std::isfinite(arclength))
         return {};
 
-    // Pure pursuit: geometric lookahead and bicycle-like yaw-rate guidance.
-    // At cruise speed the lookahead stays close to 3 seconds of travel.
+    // Pure pursuit for the optional non-PPO demonstration only. The target is
+    // derived from the vehicle's analytical projection, never from a clock.
+    // The MAPPO actor does not call this controller.
+    (void)side;
+    (void)arclength;
     float const lookahead = 3.F * std::max(mobile.speed, p.cruiseSpeed);
-    auto const target = PatrolReference(p, side, role, arclength + lookahead);
+    auto const projection = ProjectOnPatrolCurve(
+        p.geometry, role, mobile.north, mobile.east);
+    auto const target = PatrolReference(
+        p, 1, role, projection.pose.arclength + lookahead);
     float const north = target.north - mobile.north;
     float const east = target.east - mobile.east;
     float const distance = std::max(std::hypot(north, east), 1.F);

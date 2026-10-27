@@ -1,7 +1,9 @@
 #pragma once
 #include "entity.hpp"
+#include "patrol_geometry.hpp"
 #include "spawn.hpp"
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <random>
 
@@ -21,6 +23,20 @@ struct InitializerContext {
     bool patrolOnly{false};
     /** @brief Configured initial/reference speed of both blue guards. */
     float patrolCruiseSpeed{300.F};
+    /** @brief Maximum blue yaw rate used to reject infeasible turns. */
+    float patrolMaximumRotationRate{0.7000006F};
+    /** @brief Blue collision radius used to validate the sampled wedge. */
+    float patrolCollisionDistance{1000.F};
+    /** @brief Configured family sampled exactly once per episode. */
+    defenders::PatrolGeometrySettings patrolGeometrySettings{};
+    /** @brief Immutable continuous racetrack used by the current episode. */
+    defenders::PatrolGeometry patrolGeometry{};
+    /** @brief True after a feasible geometry has been sampled for the reset. */
+    bool patrolGeometryReady{false};
+    /** @brief Signals an exhausted bounded sampling attempt sequence. */
+    bool patrolGeometrySamplingFailed{false};
+    /** @brief Monotonic episode number used by diagnostics. */
+    std::uint64_t episodeIndex{};
     float arclength{0.F};
     bool evaluationOverride{false};
     int evaluationSide{1};
