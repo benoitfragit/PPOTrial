@@ -12,7 +12,7 @@
         "SNA": {
             "MaxMissile": 8,
             "MaxNoEscapeZoneRange": 5000,
-            "MaxShootAngle": 1.0471980571746826
+            "MaxShootAngle": 3.1471980571746827
         },
         "SNAControl": {
             "Available": true

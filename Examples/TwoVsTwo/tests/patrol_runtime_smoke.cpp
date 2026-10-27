@@ -69,7 +69,7 @@ Sample Capture(ppo::model::Environment const& environment)
                         && std::abs(sna->m_maxNoescapeZone - 5000.F) < 1e-3F
                         && std::abs(sna->m_noescapezone - 5000.F) < 1e-3F
                         && std::abs(sna->m_escapezone - 10000.F) < 1e-3F
-                        && std::abs(sna->m_maxShootAngle - 1.047198F) < 1e-5F;
+                        && std::abs(sna->m_maxShootAngle - 3.147198F) < 1e-5F;
                 }
                 if (metadata.m_name == "red_1" || metadata.m_name == "red_2")
                 {
