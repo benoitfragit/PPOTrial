@@ -58,13 +58,13 @@ struct ThreatCurriculumSettings final
     /** @brief Enables variable threat counts and delayed activations. */
     bool enabled{false};
     /** @brief Probability that an episode contains no hostile activation. */
-    float noThreatProbability{0.20F};
+    float noThreatProbability{0.10F};
     /** @brief Probability that exactly one hostile is activated. */
-    float singleThreatProbability{0.35F};
+    float singleThreatProbability{0.30F};
     /** @brief Probability that the first hostile activation is delayed. */
-    float delayedFirstThreatProbability{0.35F};
+    float delayedFirstThreatProbability{0.20F};
     /** @brief Probability that a second hostile appears after the first. */
-    float delayedSecondThreatProbability{0.70F};
+    float delayedSecondThreatProbability{0.45F};
     /** @brief Inclusive delay range for the first hostile. */
     std::array<std::size_t, 2> firstDelaySteps{256U, 768U};
     /** @brief Inclusive additional delay range for the second hostile. */

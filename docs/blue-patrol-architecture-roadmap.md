@@ -105,11 +105,11 @@ planifiée, l'épisode continue et le bonus de victoire n'est pas accordé trop 
 
 La configuration distribuée produit :
 
-- 20 % d'épisodes sans menace ;
-- 35 % avec une menace ;
-- 45 % avec deux menaces ;
-- 35 % de probabilité de retarder la première menace ;
-- 70 % de probabilité de décaler la seconde lorsqu'elle existe.
+- 10 % d'épisodes sans menace ;
+- 30 % avec une menace ;
+- 60 % avec deux menaces ;
+- 20 % de probabilité de retarder la première menace ;
+- 45 % de probabilité de décaler la seconde lorsqu'elle existe.
 
 Avec le pas ECS actuel de 0,2 seconde :
 
