@@ -110,11 +110,21 @@ int main()
         || !std::isfinite(blue::TeamReward(p, state, {0.F, 0.F}, next)))
         return 8;
     // A stopped agent must not score the same progression as the reference.
-    auto stopped = next;
+    auto stopped = state;
     stopped.guards[0].speed = 0.F;
-    if (!(blue::TrackingReward(p, stopped, 0U)
-        < blue::TrackingReward(p, next, 0U)))
+    if (!(blue::TrackingReward(p, state, stopped, 0U)
+        < blue::TrackingReward(p, state, next, 0U)))
         return 9;
+    auto projectionJump = next;
+    projectionJump.patrolProgress[0] += 0.5F * length;
+    if (blue::TrackingReward(p, state, projectionJump, 0U) > 0.F)
+        return 33;
+    auto backward = state;
+    backward.guards[0] = blue::OnReference(
+        p, blue::PatrolReference(p, 1, 0U, length - 60.F));
+    blue::UpdatePatrolProgress(p, backward);
+    if (blue::TrackingReward(p, state, backward, 0U) >= 0.F)
+        return 34;
     auto outside = state;
     outside.guards[0].north = 1.10F * p.halfNorth;
     auto const allowedOutside = blue::Advance(p, outside, {0.F, 0.F});
@@ -189,9 +199,20 @@ int main()
     if (oneAssignment.activeThreats != 1U
         || oneAssignment.attackerForGuard[0] != 0U
         || oneAssignment.attackerForGuard[1] < oneThreat.attackers.size()
-        || std::abs(blue::MissionPatrolReward(p, oneThreat, oneAssignment)
-                    - blue::TrackingReward(p, oneThreat, 1U)) > 1.e-6F)
+        || std::abs(blue::MissionPatrolReward(
+                        p, oneThreat, oneThreat, oneAssignment)
+                    - blue::TrackingReward(
+                        p, oneThreat, oneThreat, 1U)) > 1.e-6F)
         return 22;
+    auto dangerousDefense = oneThreat;
+    dangerousDefense.guards[1] = dangerousDefense.guards[0];
+    dangerousDefense.guards[1].north += 1500.F;
+    auto const dangerousDefenseReward = blue::TeamRewardBreakdown(
+        p, dangerousDefense, std::array<blue::Action, 2>{},
+        dangerousDefense);
+    if (dangerousDefenseReward.values[static_cast<std::size_t>(
+            blue::RewardChannel::FormationSafety)] >= 0.F)
+        return 35;
 
     // Closing an assigned hostile must be better than opening the range.
     auto closing = oneThreat;
@@ -210,7 +231,8 @@ int main()
     auto const twoAssignment = blue::AssignThreats(twoThreats);
     if (twoAssignment.activeThreats != 2U
         || twoAssignment.attackerForGuard[0] == twoAssignment.attackerForGuard[1]
-        || blue::MissionPatrolReward(p, twoThreats, twoAssignment) != 0.F)
+        || blue::MissionPatrolReward(
+            p, twoThreats, twoThreats, twoAssignment) != 0.F)
         return 24;
     auto duplicateCoverage = twoThreats;
     duplicateCoverage.guards[1] = duplicateCoverage.guards[0];

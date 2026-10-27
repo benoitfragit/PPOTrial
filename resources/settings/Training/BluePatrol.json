@@ -51,6 +51,15 @@
   },
   "rewards": {
     "clamp": 100.0,
+    "shaping": {
+      "patrolProgressWeight": 0.5,
+      "patrolCrossTrackWeight": 0.75,
+      "patrolCrossTrackScaleMeters": 4000.0,
+      "formationErrorWeight": 0.4,
+      "formationToleranceFraction": 0.1,
+      "separationPenaltyWeight": 0.5,
+      "controlEffortWeight": 0.002
+    },
     "weights": {
       "Patrol tracking": 1.0,
       "Formation safety": 1.0,
