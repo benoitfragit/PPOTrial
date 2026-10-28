@@ -26,8 +26,8 @@ actuellement x64 ; les builds Debug sont recommandés pour le diagnostic.
 
 Dans le sélecteur, ces entrées sont libellées explicitement `BLUE PATROL ONLY
 - NO RED` et `TWO VS TWO - MAPPO vs RLMission`. Le second scénario conserve
-toujours les deux entités rouges. Le curriculum active deux rouges dans 80 %
-des épisodes, un rouge dans 15 % et aucun dans 5 %. Tous sont actifs dès le
+toujours les deux entités rouges. Le curriculum active deux rouges dans 77,5 %
+des épisodes, un rouge dans 15 % et aucun dans 7,5 %. Tous sont actifs dès le
 début de l'épisode. Les évaluations restent des cas déterministes 2v1/2v2.
 
 À chaque épisode 2v2, les rouges sont tirés sur un arc allant de l'avant aux
@@ -49,13 +49,13 @@ La configuration livrée conserve une longueur de 50 à 60 km et échantillonne
 une largeur de 16 à 20 km. Ces rayons progressifs facilitent l'exploration
 initiale du leader et la tenue du wedge dans les demi-tours.
 
-La plateforme bleue dispose d'un avantage d'entraînement : vitesse de croisière
-et vitesse maximale de 800 m/s, accélération de 600 m/s² et rotation maximale
-alignée sur `trainingaircraft` à 0,7000006 rad/s. Sa zone SNA sans
+La plateforme bleue dispose d'un léger avantage d'entraînement : vitesse de
+croisière et vitesse maximale de 420 m/s, contre 400 m/s pour les rouges,
+accélération de 600 m/s² et rotation maximale de 0,42 rad/s, contre 0,40.
+Sa zone SNA sans
 échappement vaut 5 km et sa zone d'engagement atteint 10 km, contre 4 et 8 km
-pour les rouges. Son domaine angulaire reprend aussi celui de
-`trainingaircraft` (`MaxShootAngle` = 3,147198 rad). Les rouges restent
-inchangés.
+pour les rouges. Son domaine angulaire de destruction vaut 1,10 rad, contre
+1,047198 rad pour les rouges. Les rouges restent inchangés.
 
 ## Configuration bleue
 

@@ -31,14 +31,13 @@ attribue exactement un rôle à chacune des deux voitures physiques.
 La référence est recalculée depuis `Environment.json` : elle reste donc dans le
 monde si ses dimensions changent.
 
-Les bleus disposent d'un avantage cinématique pendant l'entraînement :
-600 m/s² d'accélération et 800 m/s en vitesse maximale. La rotation maximale
-reste alignée sur `trainingaircraft` à 0,7000006 rad/s. La patrouille démarre à une vitesse de croisière configurable de
-800 m/s. Leur domaine SNA
-est supérieur à celui des
-rouges : zone sans échappement de 5 km, zone d'engagement maximale de 10 km et
-angle de tir de 3,147198 rad. Les rouges RLMission conservent leurs paramètres
-existants (4 km, 8 km et 1,047198 rad).
+Les bleus disposent d'un léger avantage cinématique pendant l'entraînement :
+600 m/s² d'accélération, 420 m/s en vitesse maximale et 0,42 rad/s en
+rotation maximale, contre 400 m/s et 0,40 rad/s pour les rouges. La patrouille
+démarre à une vitesse de croisière configurable de 420 m/s. Leur domaine SNA
+reste supérieur à celui des rouges : zone sans échappement de 5 km, zone
+d'engagement maximale de 10 km et angle de tir de 1,10 rad. Les rouges
+RLMission conservent leurs paramètres existants (4 km, 8 km et 1,047198 rad).
 
 Ces valeurs se règlent dans
 `resources/settings/Platforms/Mobile/defender_car.json`. `CruiseSpeed` est lu
@@ -182,8 +181,8 @@ récompensent notamment l'éloignement des menaces de l'objectif et leur
 interception ; la perte de l'objectif ou d'un défenseur est terminale.
 
 Le scénario `two-vs-two` applique pendant l'entraînement un curriculum défini
-dans `Scenarios/TwoVsTwo.json`. Le profil courant active deux rouges dans 80 %
-des épisodes, un rouge dans 15 % et aucun dans 5 %. Toutes les menaces sont
+dans `Scenarios/TwoVsTwo.json`. Le profil courant active deux rouges dans 77,5 %
+des épisodes, un rouge dans 15 % et aucun dans 7,5 %. Toutes les menaces sont
 actives dès le début de l'épisode, sans activation retardée. La destruction de
 la première ne termine pas l'épisode tant
 qu'une autre activation est planifiée. Le canal `Formation safety`, propre à
