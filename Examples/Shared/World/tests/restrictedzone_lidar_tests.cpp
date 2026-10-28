@@ -1,4 +1,5 @@
 #include "restrictedzonelidar.hpp"
+#include "restrictedzonegeometry.hpp"
 #include "snasystem.hpp"
 #include "entitytypes.hpp"
 
@@ -29,6 +30,7 @@ int main()
     auto& ownState = registry.emplace<sEntityState>(ownId);
     ownState.m_entityId = ownId;
     ownState.m_side = eEntitySide::Friend;
+    ownState.m_type = eEntityType::Mobile;
     ownState.m_rotation = 0.F;
 
     auto const zoneId = registry.create();
@@ -47,6 +49,21 @@ int main()
     BuildRestrictedZonePseudoLidar(registry, own, ownState, ranges, distances);
     RequireNear(distances[30], 78.F, "Near intersection changed");
     RequireNear(ranges[30], 78.F / (78.F + 22.F), "Legacy normalization changed");
+    RequireNear(RestrictedZoneWarningRadius(20.F), 22.F,
+                "warning radius no longer differs explicitly from lethal radius");
+    if (IsInsideRestrictedZone({0.F, 0.F}, {30.F, 0.F}, 20.F)
+        || !IsInsideRestrictedZone({10.F, 0.F}, {30.F, 0.F}, 20.F)
+        || !CrossesRestrictedZone({0.F, 0.F}, {60.F, 0.F},
+                                  {30.F, 0.F}, 5.F))
+        throw std::runtime_error("pure restricted-zone geometry changed");
+
+    auto& environment = registry.ctx().emplace<sEnvironmentState>();
+    environment.m_maxNorth = 400.F;
+    environment.m_maxEast = 400.F;
+    auto& published = registry.emplace<sPseudoLidarState>(ownId);
+    UpdateRestrictedZonePseudoLidars(registry, eEntitySide::Friend);
+    RequireNear(published.m_nearestCollisionDistances[30], 78.F,
+                "ECS pseudo-lidar publication changed");
 
     zoneState.m_side = eEntitySide::Friend;
     BuildRestrictedZonePseudoLidar(registry, own, ownState, ranges, distances);

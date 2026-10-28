@@ -1,4 +1,5 @@
 #include "restrictedzonelidar.hpp"
+#include "restrictedzonegeometry.hpp"
 #include "utils.hpp"
 
 #include <algorithm>
@@ -15,7 +16,8 @@ constexpr float kPseudoLidarAngleSpan = static_cast<float>(ppo::model::TWOPI);
 constexpr float kPseudoLidarHalfAngleSpan = 0.5F * kPseudoLidarAngleSpan;
 constexpr float kPseudoLidarStepAngle =
     kPseudoLidarAngleSpan / static_cast<float>(kPseudoLidarBinCount - 1U);
-constexpr float kRestrictedZoneDangerMultiplier = 1.10F;
+constexpr float kRestrictedZoneDangerMultiplier =
+    kRestrictedZoneWarningRadiusScale;
 constexpr float kNoEscapeEpsilon = 1.0e-4F;
 constexpr float kRayEpsilon = 1.0e-5F;
 
@@ -126,7 +128,8 @@ BuildRestrictedZonePseudoLidar(entt::registry& registry,
             continue;
         }
 
-        float const dangerRadius = kRestrictedZoneDangerMultiplier * otherSnaState.m_noescapezone;
+        float const dangerRadius = kRestrictedZoneDangerMultiplier
+            * otherSnaState.m_noescapezone;
         float const mx = ownState.m_x - otherState.m_x;
         float const my = ownState.m_y - otherState.m_y;
         float const distanceToCenter = std::sqrt(mx * mx + my * my);
@@ -197,6 +200,33 @@ BuildZoneBoundaryPseudoLidar(ppo::model::sEntityState const& ownState,
             zoneRangeReference,
             nearestCollisionRanges[iang],
             nearestCollisionDistances[iang]);
+    }
+}
+
+void UpdateRestrictedZonePseudoLidars(entt::registry& registry,
+                                      eEntitySide mobileSide) noexcept
+{
+    if (!registry.ctx().contains<ppo::model::sEnvironmentState>())
+        return;
+    auto const& environment =
+        registry.ctx().get<ppo::model::sEnvironmentState>();
+    auto view = registry.view<ppo::model::sEntityState,
+                              ppo::model::sPseudoLidarState>();
+    for (auto entity : view)
+    {
+        auto const& state = view.get<ppo::model::sEntityState>(entity);
+        if (state.m_type != ppo::model::eEntityType::Mobile
+            || state.m_side != mobileSide
+            || state.m_destroyed)
+            continue;
+        auto& sensor = view.get<ppo::model::sPseudoLidarState>(entity);
+        ppo::model::BaseEntity own{&registry, entity};
+        BuildRestrictedZonePseudoLidar(
+            registry, own, state, sensor.m_nearestCollisionRanges,
+            sensor.m_nearestCollisionDistances);
+        BuildZoneBoundaryPseudoLidar(
+            state, environment, sensor.m_nearestCollisionRanges,
+            sensor.m_nearestCollisionDistances);
     }
 }
 

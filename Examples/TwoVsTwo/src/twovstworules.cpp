@@ -5,6 +5,7 @@
 #include "entity.hpp"
 #include "components.hpp"
 #include "restrictedzonelidar.hpp"
+#include "restrictedzonegeometry.hpp"
 #include "sharedworldcomponents.hpp"
 #include "patrol_core.hpp"
 
@@ -49,6 +50,13 @@ void TwoVsTwoWorldRules::BeforeStep(ppo::model::WorldEntities& entities)
 {
     ActivateScheduledThreats(entities);
     original_.BeforeStep(entities);
+    for (auto const& entity : entities)
+        if (entity && entity->registry() != nullptr)
+        {
+            ppo::model::UpdateRestrictedZonePseudoLidars(
+                *entity->registry(), ppo::model::eEntitySide::Friend);
+            break;
+        }
 }
 
 void TwoVsTwoWorldRules::Resolve(ppo::model::WorldEntities& entities)
@@ -57,28 +65,15 @@ void TwoVsTwoWorldRules::Resolve(ppo::model::WorldEntities& entities)
     // events. This makes both wrecks and explosions visible in the same ECS
     // snapshot consumed by the MAPPO feedback.
     ResolveFriendlyMobileCollisions(entities);
+    ResolveRestrictedZonePenetrations(entities);
     original_.Resolve(entities);
-    // RLMission already computes the same sensor for red during observation
-    // construction. This also publishes readings for agent-free blue cars.
     for (auto const& entity : entities)
-    {
-        if (!entity || !entity->has<ppo::model::sEntityState, ppo::model::sPseudoLidarState>())
-            continue;
-        auto const& [state] = entity->get<ppo::model::sEntityState>();
-        if (state.m_type != ppo::model::eEntityType::Mobile || state.m_destroyed)
-            continue;
-        auto* registry = entity->registry();
-        if (!registry || !registry->ctx().contains<ppo::model::sEnvironmentState>())
-            continue;
-        auto [sensor] = entity->get<ppo::model::sPseudoLidarState>();
-        ppo::model::BaseEntity own{registry, entity->uniqid()};
-        ppo::model::BuildRestrictedZonePseudoLidar(
-            *registry, own, state, sensor.m_nearestCollisionRanges,
-            sensor.m_nearestCollisionDistances);
-        ppo::model::BuildZoneBoundaryPseudoLidar(
-            state, registry->ctx().get<ppo::model::sEnvironmentState>(),
-            sensor.m_nearestCollisionRanges, sensor.m_nearestCollisionDistances);
-    }
+        if (entity && entity->registry() != nullptr)
+        {
+            ppo::model::UpdateRestrictedZonePseudoLidars(
+                *entity->registry(), ppo::model::eEntitySide::Friend);
+            break;
+        }
 
     if (!entities.empty() && entities.front()
         && entities.front()->registry() != nullptr)
@@ -86,6 +81,63 @@ void TwoVsTwoWorldRules::Resolve(ppo::model::WorldEntities& entities)
         auto* registry = entities.front()->registry();
         if (registry->ctx().contains<InitializerContext>())
             ++registry->ctx().get<InitializerContext>().elapsedSteps;
+    }
+}
+
+void TwoVsTwoWorldRules::ResolveRestrictedZonePenetrations(
+    ppo::model::WorldEntities& entities)
+{
+    entt::registry* registry = nullptr;
+    for (auto const& entity : entities)
+        if (entity && entity->registry() != nullptr)
+        {
+            registry = entity->registry();
+            break;
+        }
+    if (registry == nullptr
+        || !registry->ctx().contains<ppo::model::sEnvironmentState>())
+        return;
+    float const timeStep = registry->ctx().get<
+        ppo::model::sEnvironmentState>().m_dt;
+    if (!std::isfinite(timeStep) || timeStep <= 0.F)
+        return;
+
+    for (auto& mobile : entities)
+    {
+        if (!mobile || !mobile->has<ppo::model::sEntityState>())
+            continue;
+        auto [mobileState] = mobile->get<ppo::model::sEntityState>();
+        if (mobileState.m_destroyed
+            || mobileState.m_type != ppo::model::eEntityType::Mobile
+            || mobileState.m_side != ppo::model::eEntitySide::Friend)
+            continue;
+        ppo::model::PlanarPosition const current{
+            mobileState.m_x, mobileState.m_y};
+        ppo::model::PlanarPosition const previous{
+            mobileState.m_x - mobileState.m_dx * timeStep,
+            mobileState.m_y - mobileState.m_dy * timeStep};
+        for (auto const& zone : entities)
+        {
+            if (!zone || !zone->has<ppo::model::sEntityState,
+                                    ppo::model::sSNAState>())
+                continue;
+            auto const [zoneState, zoneSna] =
+                zone->get<ppo::model::sEntityState, ppo::model::sSNAState>();
+            if (zoneState.m_destroyed
+                || zoneState.m_type
+                    != ppo::model::eEntityType::RestrictedZone
+                || zoneState.m_side == mobileState.m_side)
+                continue;
+            if (!ppo::model::CrossesRestrictedZone(
+                    previous, current,
+                    ppo::model::PlanarPosition{
+                        zoneState.m_x, zoneState.m_y},
+                    zoneSna.m_noescapezone))
+                continue;
+            mobileState.m_destroyed = true;
+            mobileState.m_destroyedById = zone->uniqid();
+            break;
+        }
     }
 }
 

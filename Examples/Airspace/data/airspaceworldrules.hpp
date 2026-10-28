@@ -13,6 +13,19 @@ namespace ppo::examples::airspace {
 class AirspaceWorldRules final : public ppo::model::IWorldRules
 {
 public:
+    /**
+     * @brief Creates the legacy rule adapter.
+     * @param resolveHostileRestrictedZoneWeapons True to retain probabilistic
+     * legacy hostile RestrictedZone weapons; false when a scenario owns their
+     * deterministic resolution. Friendly zones remain unchanged.
+     */
+    explicit AirspaceWorldRules(
+        bool resolveHostileRestrictedZoneWeapons = true) noexcept
+        : m_resolveHostileRestrictedZoneWeapons(
+            resolveHostileRestrictedZoneWeapons)
+    {
+    }
+
     void BeforeStep(ppo::model::WorldEntities& entities) override;
     void Resolve(ppo::model::WorldEntities& entities) override;
     void AfterStep() override;
@@ -24,6 +37,7 @@ private:
 
     std::vector<ppo::model::sExplosionEvent> m_explosionEvents{};
     unsigned long long m_nextExplosionEventId{1};
+    bool m_resolveHostileRestrictedZoneWeapons{true};
 };
 
 } // namespace ppo::examples::airspace

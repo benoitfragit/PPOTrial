@@ -27,6 +27,14 @@ private:
     static void ResolveFriendlyMobileCollisions(
         ppo::model::WorldEntities& entities);
 
-    ppo::examples::airspace::AirspaceWorldRules original_{};
+    /**
+     * @brief Applies deterministic swept hostile-zone penetration rules.
+     * @param entities Scenario entities after the current physics step.
+     */
+    static void ResolveRestrictedZonePenetrations(
+        ppo::model::WorldEntities& entities);
+
+    /** @brief Legacy rules with probabilistic zone weapons disabled here. */
+    ppo::examples::airspace::AirspaceWorldRules original_{false};
 };
 }

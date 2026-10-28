@@ -58,8 +58,15 @@ bool LoadScenario(std::filesystem::path const& path,
     bool const useMappo = blueController == "mappo";
     if (!useMappo && blueController != "reference")
         return false;
-    auto const spawnSettings = ParseSpawnSettings(settings);
-    if (!spawnSettings || !document.contains("entities")
+    std::string spawnDiagnostic;
+    auto const spawnSettings = ParseSpawnSettings(settings, &spawnDiagnostic);
+    if (!spawnSettings)
+    {
+        std::cerr << "[TWO_VS_TWO] Invalid spawn configuration: "
+                  << spawnDiagnostic << '\n';
+        return false;
+    }
+    if (!document.contains("entities")
         || !document["entities"].is_object())
         return false;
 
@@ -155,11 +162,30 @@ bool LoadScenario(std::filesystem::path const& path,
             return false;
     }
 
+    // Restricted zones are discovered from their dedicated typed collection;
+    // no scenario identifier is hard-coded in the loader.
+    for (auto const& zone : spawnSettings->restrictedZones.items)
+    {
+        if (entities.count(zone.id) != 0U)
+            return false;
+        auto entity = ppo::reflection::CreateEntity(
+            "RestrictedZone", environment, zone.platform,
+            ppo::model::eEntitySide::Hostile);
+        if (!entity)
+            return false;
+        entity->add<ppo::model::sEntityMetadata>(
+            ppo::model::sEntityMetadata{zone.id, zone.platform});
+        if (!entities.emplace(zone.id, std::move(entity)).second)
+            return false;
+    }
+
     if (!entities.count("blue_guard_1") || !entities.count("blue_guard_2")
-        || !entities.count("blue_objective") || !entities.count("blue_restricted_zone")
+        || !entities.count("blue_objective")
+        || !entities.count("blue_restricted_zone")
         || (!patrolOnly && !entities.count("red_1"))
         || entities.size() != (patrolOnly ? 4U :
-            5U + static_cast<std::size_t>(entities.count("red_2") != 0)))
+            5U + static_cast<std::size_t>(entities.count("red_2") != 0))
+                + spawnSettings->restrictedZones.items.size())
         return false;
 
     for (auto const& item : scenario.m_entities)
@@ -257,11 +283,10 @@ bool LoadScenario(std::filesystem::path const& path,
     // The legacy desktop does not initialize the very first episode in Run.
     // Initialize this standalone scenario once; subsequent resets use the
     // registered initializer via Environment::Run.
-    for (auto const& item : scenario.m_entities)
+    for (auto const& [name, entity] : entities)
     {
-        auto it = entities.find(item.m_name);
-        if (it != entities.end())
-            it->second->Init();
+        (void)name;
+        entity->Init();
     }
     if (context.patrolGeometrySamplingFailed || !context.patrolGeometryReady)
         return false;

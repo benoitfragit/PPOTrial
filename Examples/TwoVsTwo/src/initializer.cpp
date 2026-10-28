@@ -2,6 +2,7 @@
 #include "spawn.hpp"
 #include "components.hpp"
 #include "sharedworldcomponents.hpp"
+#include "restrictedzonelidar.hpp"
 #include "patrol_core.hpp"
 #include <iostream>
 #include <random>
@@ -168,5 +169,8 @@ void InitializeEntity(ppo::model::Entity& entity)
         }
     }
     config.next = (config.next + 1U) % config.count;
+    if (config.next == 0U)
+        ppo::model::UpdateRestrictedZonePseudoLidars(
+            *registry, ppo::model::eEntitySide::Friend);
 }
 } // namespace ppo::examples::twovstwo

@@ -6,7 +6,9 @@
 #include <limits>
 #include <optional>
 #include <random>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace ppo::examples::twovstwo {
 
@@ -35,15 +37,58 @@ struct RedSpawnSettings final
     float minimumSeparation{10000.F};
 };
 
-/** @brief Configurable position and activation of the restricted zone. */
-struct RestrictedZoneSpawnSettings final
+/**
+ * @brief Historical friendly zone configuration consumed by red RLMission.
+ *
+ * Fractions and RNG sampling remain unchanged to preserve red behaviour.
+ */
+struct FriendlyRestrictedZoneSpawnSettings final
 {
-    /** @brief Probability that the zone is active in an episode. */
+    /** @brief Probability that the friendly zone is active in an episode. */
     float enabledProbability{0.75F};
     /** @brief North coordinate divided by the world's north half extent. */
     SpawnRange northFraction{-0.45F, 0.45F};
     /** @brief Side-relative east coordinate divided by the east half extent. */
     SpawnRange eastFraction{0.15F, 0.65F};
+};
+
+/** @brief Supported mutually exclusive restricted-zone placement modes. */
+enum class RestrictedZonePositionMode
+{
+    /** @brief Use the exact configured north/east coordinates. */
+    Fixed,
+    /** @brief Sample north/east independently from configured ranges. */
+    Random
+};
+
+/** @brief Typed configuration of one hostile circular restricted zone. */
+struct RestrictedZoneSpawnSettings final
+{
+    /** @brief Stable scenario identifier, unique inside the collection. */
+    std::string id{};
+    /** @brief RestrictedZone platform profile used to obtain its radii. */
+    std::string platform{};
+    /** @brief Static per-zone switch applied before probability sampling. */
+    bool enabled{true};
+    /** @brief Probability that the zone is active in an episode. */
+    float enabledProbability{1.F};
+    /** @brief Selected fixed or random placement contract. */
+    RestrictedZonePositionMode positionMode{RestrictedZonePositionMode::Fixed};
+    /** @brief Fixed north/east position in metres. */
+    std::array<float, 2> fixedPosition{};
+    /** @brief Random north interval in metres. */
+    SpawnRange randomNorth{};
+    /** @brief Random east interval in metres. */
+    SpawnRange randomEast{};
+};
+
+/** @brief Global switch and bounded-at-load collection of hostile zones. */
+struct RestrictedZonesSpawnSettings final
+{
+    /** @brief Global collection switch evaluated before per-zone settings. */
+    bool enabled{true};
+    /** @brief Validated zone definitions in deterministic JSON order. */
+    std::vector<RestrictedZoneSpawnSettings> items{};
 };
 
 /**
@@ -77,7 +122,10 @@ struct SpawnSettings final
     /** @brief Probability that red_2 starts destroyed while remaining present. */
     float red2DestroyedProbability{0.15F};
     RedSpawnSettings red{};
-    RestrictedZoneSpawnSettings restrictedZone{};
+    /** @brief Historical blue zone retained unchanged for red RLMission. */
+    FriendlyRestrictedZoneSpawnSettings friendlyRestrictedZone{};
+    /** @brief Independently configured hostile restricted zones. */
+    RestrictedZonesSpawnSettings restrictedZones{};
     ThreatCurriculumSettings threatCurriculum{};
 };
 
@@ -89,6 +137,15 @@ struct Spawn final
     float heading{};
     float speed{};
     bool destroyed{};
+};
+
+/** @brief Episode pose associated with one stable restricted-zone id. */
+struct RestrictedZoneEpisodeSpawn final
+{
+    /** @brief Stable scenario identifier copied from configuration. */
+    std::string id{};
+    /** @brief Sampled pose and active state for this episode. */
+    Spawn spawn{};
 };
 
 /**
@@ -107,7 +164,10 @@ struct EpisodeSpawnLayout final
     std::array<Spawn, 2> red{};
     /** @brief ECS step at which each red becomes alive, or NeverActivate. */
     std::array<std::size_t, 2> redActivationSteps{0U, 0U};
-    Spawn restrictedZone{};
+    /** @brief Historical friendly zone pose used by the red pseudo-LiDAR. */
+    Spawn friendlyRestrictedZone{};
+    /** @brief Zone poses sampled once and retained for the whole episode. */
+    std::vector<RestrictedZoneEpisodeSpawn> restrictedZones{};
 };
 
 /**

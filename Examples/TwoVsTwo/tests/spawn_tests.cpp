@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <random>
+#include <string>
 
 namespace {
 using ppo::examples::twovstwo::EpisodeSpawnLayout;
@@ -58,10 +59,19 @@ bool Same(Spawn const& first, Spawn const& second) noexcept
 bool Same(EpisodeSpawnLayout const& first,
           EpisodeSpawnLayout const& second) noexcept
 {
-    return first.side == second.side && Same(first.red[0], second.red[0])
-        && Same(first.red[1], second.red[1])
-        && first.redActivationSteps == second.redActivationSteps
-        && Same(first.restrictedZone, second.restrictedZone);
+    if (first.side != second.side || !Same(first.red[0], second.red[0])
+        || !Same(first.red[1], second.red[1])
+        || first.redActivationSteps != second.redActivationSteps
+        || !Same(first.friendlyRestrictedZone,
+                 second.friendlyRestrictedZone)
+        || first.restrictedZones.size() != second.restrictedZones.size())
+        return false;
+    for (std::size_t i = 0U; i < first.restrictedZones.size(); ++i)
+        if (first.restrictedZones[i].id != second.restrictedZones[i].id
+            || !Same(first.restrictedZones[i].spawn,
+                     second.restrictedZones[i].spawn))
+            return false;
+    return true;
 }
 } // namespace
 
@@ -74,7 +84,14 @@ int main()
     using ppo::examples::twovstwo::ParseSpawnSettings;
     using ppo::examples::twovstwo::Valid;
 
-    SpawnSettings const settings{};
+    SpawnSettings settings{};
+    settings.restrictedZones.items = {
+        {"zone_fixed", "restrictedzone", true, 1.F,
+         ppo::examples::twovstwo::RestrictedZonePositionMode::Fixed,
+         {1250.F, -2500.F}, {}, {}},
+        {"zone_random", "restrictedzone", true, 0.75F,
+         ppo::examples::twovstwo::RestrictedZonePositionMode::Random,
+         {}, {-5000.F, 5000.F}, {-7000.F, 7000.F}}};
     if (!Valid(settings))
         return 1;
 
@@ -105,14 +122,22 @@ int main()
                     "blue_guard_1", *layout, world, rng);
                 auto const blue2 = MakeSpawn(
                     "blue_guard_2", *layout, world, rng);
-                auto const zone = MakeSpawn(
+                auto const friendlyZone = MakeSpawn(
                     "blue_restricted_zone", *layout, world, rng);
+                auto const fixedZone = MakeSpawn(
+                    "zone_fixed", *layout, world, rng);
+                auto const randomZone = MakeSpawn(
+                    "zone_random", *layout, world, rng);
                 auto const red1 = MakeSpawn("red_1", *layout, world, rng);
                 auto const red2 = MakeSpawn("red_2", *layout, world, rng);
-                if (!objective || !blue1 || !blue2 || !zone || !red1 || !red2)
+                if (!objective || !blue1 || !blue2 || !friendlyZone
+                    || !fixedZone
+                    || !randomZone || !red1 || !red2)
                     return 3;
                 if (!InWorld(*objective, world) || !InWorld(*blue1, world)
-                    || !InWorld(*blue2, world) || !InWorld(*zone, world))
+                    || !InWorld(*blue2, world) || !InWorld(*fixedZone, world)
+                    || !InWorld(*randomZone, world)
+                    || !InWorld(*friendlyZone, world))
                     return 4;
                 if (objective->east * side <= blue1->east * side
                     || objective->east * side <= blue2->east * side
@@ -147,15 +172,17 @@ int main()
                 }
                 if (red1->destroyed || !Same(*red1, layout->red[0])
                     || !Same(*red2, layout->red[1])
-                    || !Same(*zone, layout->restrictedZone))
+                    || !Same(*friendlyZone,
+                             layout->friendlyRestrictedZone)
+                    || !Same(*fixedZone, layout->restrictedZones[0].spawn)
+                    || !Same(*randomZone, layout->restrictedZones[1].spawn))
                     return 9;
 
-                float const northFraction = zone->north / world.halfNorth;
-                float const eastFraction = side * zone->east / world.halfEast;
-                if (northFraction < settings.restrictedZone.northFraction.minimum
-                    || northFraction > settings.restrictedZone.northFraction.maximum
-                    || eastFraction < settings.restrictedZone.eastFraction.minimum
-                    || eastFraction > settings.restrictedZone.eastFraction.maximum)
+                if (fixedZone->north != 1250.F || fixedZone->east != -2500.F
+                    || randomZone->north < -5000.F
+                    || randomZone->north > 5000.F
+                    || randomZone->east < -7000.F
+                    || randomZone->east > 7000.F)
                     return 10;
             }
             if (!sawFront || !sawLateral || !sawNorth || !sawSouth)
@@ -186,7 +213,7 @@ int main()
         if (!layout)
             return 15;
         destroyedRed2 += layout->red[1].destroyed ? 1U : 0U;
-        disabledZones += layout->restrictedZone.destroyed ? 1U : 0U;
+        disabledZones += layout->restrictedZones[1].spawn.destroyed ? 1U : 0U;
     }
     if (destroyedRed2 < 240U || destroyedRed2 > 360U
         || disabledZones < 400U || disabledZones > 600U)
@@ -258,6 +285,12 @@ int main()
             {"minimumBearingDegrees", -90.0},
             {"maximumBearingDegrees", 90.0},
             {"minimumSeparation", 10000.0}}},
+        {"restrictedZoneSpawn", {
+            {"enabledProbability", 0.75},
+            {"minimumNorthFraction", -0.45},
+            {"maximumNorthFraction", 0.45},
+            {"minimumEastFraction", 0.15},
+            {"maximumEastFraction", 0.65}}},
         {"threatCurriculum", {
             {"enabled", true},
             {"noThreatProbability", 0.10},
@@ -268,21 +301,77 @@ int main()
             {"maximumFirstDelaySteps", 768U},
             {"minimumSecondDelaySteps", 384U},
             {"maximumSecondDelaySteps", 1024U}}},
-        {"restrictedZoneSpawn", {
-            {"enabledProbability", 0.75},
-            {"minimumNorthFraction", -0.45},
-            {"maximumNorthFraction", 0.45},
-            {"minimumEastFraction", 0.15},
-            {"maximumEastFraction", 0.65}}}
+        {"restrictedZones", {
+            {"enabled", true},
+            {"items", nlohmann::json::array({
+                {
+                    {"id", "fixed_zone"},
+                    {"type", "RestrictedZone"},
+                    {"platform", "restrictedzone"},
+                    {"side", "Hostile"},
+                    {"enabled", true},
+                    {"enabledProbability", 1.0},
+                    {"fixedPosition", {{"north", 10.0}, {"east", 20.0}}}
+                },
+                {
+                    {"id", "random_zone"},
+                    {"type", "RestrictedZone"},
+                    {"platform", "restrictedzone"},
+                    {"side", "Hostile"},
+                    {"enabled", false},
+                    {"enabledProbability", 0.0},
+                    {"randomPosition", {
+                        {"north", {{"minimum", -4.0}, {"maximum", 5.0}}},
+                        {"east", {{"minimum", 6.0}, {"maximum", 7.0}}}}}
+                }
+            })}
+        }}
     };
-    auto const parsed = ParseSpawnSettings(json);
+    std::string diagnostic;
+    auto const parsed = ParseSpawnSettings(json, &diagnostic);
     if (!parsed
         || std::fabs(parsed->red.bearingRadians.minimum + kHalfPi) > 1.e-6F
         || std::fabs(parsed->red.bearingRadians.maximum - kHalfPi) > 1.e-6F
         || !parsed->threatCurriculum.enabled
         || parsed->threatCurriculum.firstDelaySteps[0] != 256U
+        || parsed->restrictedZones.items.size() != 2U
         || ParseSpawnSettings(nlohmann::json::object()))
         return 17;
+    std::mt19937 parsedRng{11U};
+    auto const parsedLayout = GenerateEpisodeSpawnLayout(
+        1, *parsed, world, parsedRng);
+    if (!parsedLayout || parsedLayout->restrictedZones.size() != 2U
+        || parsedLayout->restrictedZones[0].spawn.north != 10.F
+        || parsedLayout->restrictedZones[0].spawn.east != 20.F
+        || parsedLayout->restrictedZones[0].spawn.destroyed
+        || !parsedLayout->restrictedZones[1].spawn.destroyed)
+        return 25;
+    auto globallyDisabled = *parsed;
+    globallyDisabled.restrictedZones.enabled = false;
+    std::mt19937 disabledRng{11U};
+    auto const disabledLayout = GenerateEpisodeSpawnLayout(
+        1, globallyDisabled, world, disabledRng);
+    if (!disabledLayout || std::any_of(
+            disabledLayout->restrictedZones.begin(),
+            disabledLayout->restrictedZones.end(),
+            [](auto const& zone) { return !zone.spawn.destroyed; }))
+        return 26;
+
+    auto invalidZoneJson = json;
+    invalidZoneJson["restrictedZones"]["items"][0]["randomPosition"] = {
+        {"north", {{"minimum", 0.0}, {"maximum", 1.0}}},
+        {"east", {{"minimum", 0.0}, {"maximum", 1.0}}}};
+    if (ParseSpawnSettings(invalidZoneJson, &diagnostic)
+        || diagnostic.find("exactly one") == std::string::npos)
+        return 23;
+
+    SpawnSettings noZones{};
+    std::mt19937 noZoneRng{8U};
+    auto const noZoneLayout = GenerateEpisodeSpawnLayout(
+        1, noZones, world, noZoneRng);
+    if (!noZoneLayout || !noZoneLayout->restrictedZones.empty()
+        || MakeSpawn("zone_fixed", *noZoneLayout, world, noZoneRng))
+        return 24;
 
     std::mt19937 unknownRng{7U};
     auto const layout = GenerateEpisodeSpawnLayout(1, settings, world, unknownRng);

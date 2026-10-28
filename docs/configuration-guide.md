@@ -247,12 +247,28 @@ Une entité non encore activée reste détruite et sa piste est masquée dans
 l'attention. Les campagnes d'évaluation désactivent le curriculum stochastique
 et conservent les cas immédiats 2v1/2v2.
 
-`restrictedZoneSpawn.enabledProbability` contrôle la présence de la zone. Ses
-quatre fractions définissent une boîte de tirage relative aux demi-dimensions
-du monde ; les fractions est sont orientées vers le côté défendu. Avec les
-valeurs distribuées, la zone est active dans 75 % des épisodes. Une même
-graine reproduit les positions et le calendrier d'entraînement ; les campagnes
-d'évaluation utilisent leur propre calendrier déterministe.
+Le bloc historique `restrictedZoneSpawn` continue à positionner
+`blue_restricted_zone` avec les mêmes fractions et le même ordre de tirage RNG.
+Cette zone reste consommée par RLMission et n'est pas incluse dans la nouvelle
+collection.
+
+`restrictedZones` est une collection dédiée, indépendante de `entities`. Son
+booléen `enabled` désactive toutes les zones. Chaque élément fournit un `id`
+unique, `type="RestrictedZone"`, un `platform`, `side="Hostile"`, `enabled`,
+une `enabledProbability` dans `[0,1]` et exactement un mode de position :
+`fixedPosition` ou `randomPosition`. Toutes les coordonnées sont en mètres.
+Le mode aléatoire exige deux intervalles nord/est ordonnés et finis. Un champ
+inconnu dans ce contrat, un doublon, un mode ambigu ou une valeur invalide fait
+échouer explicitement le chargement. Une même graine reproduit positions et
+activations.
+
+Le profil de plateforme reste la source du rayon létal
+`SNA.MaxNoEscapeZoneRange`. Le rayon LiDAR vaut 110 % de ce rayon. Dans
+TwoVsTwo, seul le capteur ECS des `Mobile/Friend` est rafraîchi par ces règles;
+le contrôleur, l'observation 152 et les checkpoints RLMission rouges ne sont
+pas modifiés. La règle SNA probabiliste de la zone bleue historique reste elle
+aussi active contre les rouges ; seule l'arme des nouvelles zones hostiles est
+remplacée par la pénétration déterministe exacte pour les bleus.
 
 ## Scénarios et cas d'évaluation
 

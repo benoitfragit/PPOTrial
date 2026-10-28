@@ -227,6 +227,10 @@ struct State
 {
     std::array<Mobile, 2> guards;
     std::array<Mobile, 2> attackers{};
+    /** @brief ECS pseudo-LiDAR ranges for each semantic blue role. */
+    std::array<std::array<float, ObservationLayout::Lidar>, 2> lidarRanges{};
+    /** @brief True when the matching range array came from the ECS sensor. */
+    std::array<bool, 2> lidarAvailable{};
     std::size_t controlledRole;
     int side;
     /** @brief Nearest continuous leader arclength on the unique racetrack. */
@@ -559,10 +563,17 @@ inline Observation Observe(Parameters const& p, State const& state) noexcept
     float const diag = std::hypot(p.halfNorth, p.halfEast);
     for (std::size_t i = 0; i < ObservationLayout::Lidar; ++i)
     {
-        float const angle = own.heading - kPi +
-            static_cast<float>(i) * (kTwoPi / 60.F);
-        float const distance = RayDistanceToBounds(p, own, angle);
-        obs[k++] = distance < 0.F ? 1.F : distance / (distance + diag);
+        if (state.lidarAvailable[state.controlledRole])
+            obs[k++] = Clamp(
+                state.lidarRanges[state.controlledRole][i], 0.F, 1.F);
+        else
+        {
+            float const angle = own.heading - kPi
+                + static_cast<float>(i) * (kTwoPi / 60.F);
+            float const distance = RayDistanceToBounds(p, own, angle);
+            obs[k++] = distance < 0.F ? 1.F
+                                      : distance / (distance + diag);
+        }
     }
     k = ObservationLayout::RedOffset;
     for (Mobile const& target : state.attackers)

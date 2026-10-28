@@ -8,6 +8,7 @@
 #include "components.hpp"
 #include "sharedworldcomponents.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
@@ -186,6 +187,21 @@ State PatrolMappoAgent::ReadState(Parameters const& parameters) const
     {
         ppo::model::BaseEntity guard{registry_, GuardIdForRole(role)};
         result.guards[role] = FromEcs(guard);
+        if (guard.has<ppo::model::sPseudoLidarState>())
+        {
+            auto const [sensor] =
+                guard.get<ppo::model::sPseudoLidarState>();
+            bool const finite = std::all_of(
+                sensor.m_nearestCollisionRanges.begin(),
+                sensor.m_nearestCollisionRanges.end(),
+                [](float value) { return std::isfinite(value); });
+            if (finite)
+            {
+                result.lidarRanges[role] =
+                    sensor.m_nearestCollisionRanges;
+                result.lidarAvailable[role] = true;
+            }
+        }
         Mobile const& mobile = result.guards[role];
         result.failed |= !mobile.available || !std::isfinite(mobile.north)
             || !std::isfinite(mobile.east) || !std::isfinite(mobile.heading)

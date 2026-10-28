@@ -5,6 +5,7 @@ add_library(SharedWorld STATIC
     data/restrictedzone.hpp
     data/objective.hpp
     data/sharedworldcomponents.hpp
+    data/restrictedzonegeometry.hpp
     data/restrictedzonelidar.hpp
     data/snasystem.hpp
     data/snacontrolsystem.hpp
@@ -12,6 +13,7 @@ add_library(SharedWorld STATIC
     src/mobile.cpp
     src/restrictedzone.cpp
     src/snasystem.cpp
+    src/restrictedzonegeometry.cpp
     src/restrictedzonelidar.cpp
     src/snacontrolsystem.cpp
     src/flightmodelsystem.cpp)

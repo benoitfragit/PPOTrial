@@ -84,6 +84,13 @@ critique. La partie locale contient notamment :
 - le coéquipier et l'objectif sous forme de pistes typées ;
 - les erreurs de suivi de patrouille et les données globales locales.
 
+Les 61 valeurs ne sont plus recalculées dans le domaine MAPPO lorsque le
+runtime ECS est utilisé : `PatrolMappoAgent` copie le `sPseudoLidarState` du
+bleu correspondant. Le composant fusionne la frontière rectangulaire et les
+zones hostiles actives en conservant l'impact le plus proche. Les outils
+headless sans ECS gardent le calcul de frontière historique comme repli, ce
+qui préserve les tests et la dimension de l'acteur v7.
+
 Une piste rouge encode la position et la vitesse relatives, la distance, le
 relèvement, la vitesse, le type hostile, la position monde normalisée,
 l'appartenance à la zone défendue et, en dernière valeur, le masque

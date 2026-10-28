@@ -12,6 +12,17 @@ namespace ppo::model {
 
 inline constexpr std::size_t kRestrictedZoneLidarBins = 61U;
 
+/**
+ * @brief Refreshes pseudo-LiDAR components for every living mobile.
+ * @param registry ECS registry containing mobiles, zones and world bounds.
+ * @param mobileSide Only mobiles owned by this side are refreshed.
+ *
+ * Each beam keeps the nearest hit between hostile active restricted zones and
+ * the rectangular world boundary. No heap allocation occurs in this update.
+ */
+void UpdateRestrictedZonePseudoLidars(entt::registry& registry,
+                                      eEntitySide mobileSide) noexcept;
+
 void BuildRestrictedZonePseudoLidar(
     entt::registry& registry,
     BaseEntity& ownEntity,

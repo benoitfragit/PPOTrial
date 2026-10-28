@@ -50,6 +50,18 @@ bool ValidDelayRange(std::array<std::size_t, 2> const& range) noexcept
         && range[1] < EpisodeSpawnLayout::NeverActivate / 2U;
 }
 
+bool ValidRestrictedZone(RestrictedZoneSpawnSettings const& zone) noexcept
+{
+    if (zone.id.empty() || zone.platform.empty()
+        || !Probability(zone.enabledProbability))
+        return false;
+    if (zone.positionMode == RestrictedZonePositionMode::Fixed)
+        return std::isfinite(zone.fixedPosition[0])
+            && std::isfinite(zone.fixedPosition[1]);
+    return zone.positionMode == RestrictedZonePositionMode::Random
+        && FiniteRange(zone.randomNorth) && FiniteRange(zone.randomEast);
+}
+
 void GenerateThreatSchedule(ThreatCurriculumSettings const& settings,
                             EpisodeSpawnLayout& layout, std::mt19937& rng)
 {
@@ -173,7 +185,7 @@ bool Valid(SpawnSettings const& settings) noexcept
             && range.minimum >= -1.F && range.maximum <= 1.F;
     };
     auto const& curriculum = settings.threatCurriculum;
-    return Probability(settings.red2DestroyedProbability)
+    bool const baseValid = Probability(settings.red2DestroyedProbability)
         && FiniteRange(settings.red.worldScale)
         && settings.red.worldScale.minimum > 1.F
         && FiniteRange(settings.red.bearingRadians)
@@ -181,9 +193,9 @@ bool Valid(SpawnSettings const& settings) noexcept
         && settings.red.bearingRadians.maximum <= kHalfPi
         && std::isfinite(settings.red.minimumSeparation)
         && settings.red.minimumSeparation > 0.F
-        && Probability(settings.restrictedZone.enabledProbability)
-        && fractionRange(settings.restrictedZone.northFraction)
-        && fractionRange(settings.restrictedZone.eastFraction)
+        && Probability(settings.friendlyRestrictedZone.enabledProbability)
+        && fractionRange(settings.friendlyRestrictedZone.northFraction)
+        && fractionRange(settings.friendlyRestrictedZone.eastFraction)
         && Probability(curriculum.noThreatProbability)
         && Probability(curriculum.singleThreatProbability)
         && curriculum.noThreatProbability
@@ -192,6 +204,18 @@ bool Valid(SpawnSettings const& settings) noexcept
         && Probability(curriculum.delayedSecondThreatProbability)
         && ValidDelayRange(curriculum.firstDelaySteps)
         && ValidDelayRange(curriculum.secondDelaySteps);
+    if (!baseValid)
+        return false;
+    auto const& zones = settings.restrictedZones.items;
+    for (std::size_t i = 0U; i < zones.size(); ++i)
+    {
+        if (!ValidRestrictedZone(zones[i]))
+            return false;
+        for (std::size_t j = i + 1U; j < zones.size(); ++j)
+            if (zones[i].id == zones[j].id)
+                return false;
+    }
+    return true;
 }
 
 std::optional<EpisodeSpawnLayout> GenerateEpisodeSpawnLayout(
@@ -237,14 +261,35 @@ std::optional<EpisodeSpawnLayout> GenerateEpisodeSpawnLayout(
     for (std::size_t red = 0U; red < result.red.size(); ++red)
         result.red[red].destroyed = result.redActivationSteps[red] != 0U;
 
-    bool const zoneEnabled = std::bernoulli_distribution{
-        static_cast<double>(settings.restrictedZone.enabledProbability)}(rng);
-    result.restrictedZone = {
-        Sample(settings.restrictedZone.northFraction, rng) * world.halfNorth,
-        normalizedSide * Sample(settings.restrictedZone.eastFraction, rng)
+    bool const friendlyZoneEnabled = std::bernoulli_distribution{
+        static_cast<double>(
+            settings.friendlyRestrictedZone.enabledProbability)}(rng);
+    result.friendlyRestrictedZone = {
+        Sample(settings.friendlyRestrictedZone.northFraction, rng)
+            * world.halfNorth,
+        normalizedSide
+            * Sample(settings.friendlyRestrictedZone.eastFraction, rng)
             * world.halfEast,
-        0.F, 0.F, !zoneEnabled
+        0.F, 0.F, !friendlyZoneEnabled
     };
+
+    result.restrictedZones.reserve(settings.restrictedZones.items.size());
+    for (auto const& zone : settings.restrictedZones.items)
+    {
+        bool const active = settings.restrictedZones.enabled && zone.enabled
+            && std::bernoulli_distribution{
+                static_cast<double>(zone.enabledProbability)}(rng);
+        float north = zone.fixedPosition[0];
+        float east = zone.fixedPosition[1];
+        if (zone.positionMode == RestrictedZonePositionMode::Random)
+        {
+            north = Sample(zone.randomNorth, rng);
+            east = Sample(zone.randomEast, rng);
+        }
+        result.restrictedZones.push_back(
+            RestrictedZoneEpisodeSpawn{zone.id,
+                Spawn{north, east, 0.F, 0.F, !active}});
+    }
     return result;
 }
 
@@ -275,11 +320,18 @@ std::optional<Spawn> MakeSpawn(std::string_view name,
                      side * (guardEast + offset(guardEastJitter)),
                      -side * kHalfPi, 0.F, false};
     if (name == "blue_restricted_zone")
-        return layout.restrictedZone;
+        return layout.friendlyRestrictedZone;
     if (name == "red_1")
         return layout.red[0];
     if (name == "red_2")
         return layout.red[1];
+    auto const zone = std::find_if(
+        layout.restrictedZones.begin(), layout.restrictedZones.end(),
+        [name](RestrictedZoneEpisodeSpawn const& item) {
+            return item.id == name;
+        });
+    if (zone != layout.restrictedZones.end())
+        return zone->spawn;
     return std::nullopt;
 }
 

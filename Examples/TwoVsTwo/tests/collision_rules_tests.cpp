@@ -3,6 +3,7 @@
 
 #include "components.hpp"
 #include "entity.hpp"
+#include "sharedworldcomponents.hpp"
 
 #include <entt/entt.hpp>
 #include <iostream>
@@ -91,6 +92,92 @@ void TestBlueNearMiss()
 
     Require(!firstState.m_destroyed && !secondState.m_destroyed,
             "1.2 km blue near miss was treated as a collision");
+}
+
+void TestDeterministicRestrictedZonePenetration()
+{
+    using namespace ppo::model;
+
+    entt::registry world;
+    world.ctx().emplace<sEnvironmentState>().m_dt = 0.2F;
+    auto blue = std::make_shared<Entity>(
+        &world, eEntitySide::Friend, eEntityType::Mobile);
+    auto red = std::make_shared<Entity>(
+        &world, eEntitySide::Hostile, eEntityType::Mobile);
+    auto zone = std::make_shared<Entity>(
+        &world, eEntitySide::Hostile, eEntityType::RestrictedZone);
+    zone->add<sSNAState>().m_noescapezone = 25.F;
+    auto [blueState] = blue->get<sEntityState>();
+    auto [redState] = red->get<sEntityState>();
+    auto [zoneState] = zone->get<sEntityState>();
+    blueState.m_x = -100.F;
+    blueState.m_dx = 1000.F;
+    redState.m_x = 0.F;
+    zoneState.m_x = 0.F;
+    zoneState.m_y = 0.F;
+
+    WorldEntities entities{blue, red, zone};
+    ppo::examples::twovstwo::TwoVsTwoWorldRules rules;
+    rules.BeforeStep(entities);
+    blueState.m_x += blueState.m_dx * 0.2F;
+    rules.Resolve(entities);
+
+    Require(blueState.m_destroyed,
+            "a swept blue trajectory crossed a zone without destruction");
+    Require(blueState.m_destroyedById == zone->uniqid(),
+            "restricted-zone destruction attribution is incorrect");
+    Require(!redState.m_destroyed,
+            "a hostile mobile was destroyed by its own restricted zone");
+
+    entt::registry disabledWorld;
+    disabledWorld.ctx().emplace<sEnvironmentState>().m_dt = 0.2F;
+    auto survivor = std::make_shared<Entity>(
+        &disabledWorld, eEntitySide::Friend, eEntityType::Mobile);
+    auto disabledZone = std::make_shared<Entity>(
+        &disabledWorld, eEntitySide::Hostile, eEntityType::RestrictedZone);
+    disabledZone->add<sSNAState>().m_noescapezone = 25.F;
+    auto [survivorState] = survivor->get<sEntityState>();
+    auto [disabledState] = disabledZone->get<sEntityState>();
+    survivorState.m_x = 0.F;
+    disabledState.m_destroyed = true;
+    disabledState.m_prevDestroyed = true;
+    WorldEntities disabledEntities{survivor, disabledZone};
+    ppo::examples::twovstwo::TwoVsTwoWorldRules disabledRules;
+    disabledRules.BeforeStep(disabledEntities);
+    disabledRules.Resolve(disabledEntities);
+    Require(!survivorState.m_destroyed,
+            "a disabled restricted zone destroyed a blue mobile");
+}
+
+void TestFriendlyRestrictedZoneStillAffectsRed()
+{
+    using namespace ppo::model;
+
+    entt::registry world;
+    world.ctx().emplace<sEnvironmentState>().m_dt = 0.2F;
+    auto red = std::make_shared<Entity>(
+        &world, eEntitySide::Hostile, eEntityType::Mobile);
+    auto friendlyZone = std::make_shared<Entity>(
+        &world, eEntitySide::Friend, eEntityType::RestrictedZone);
+    auto& weapon = friendlyZone->add<sSNAState>();
+    weapon.m_noescapezone = 25.F;
+    weapon.m_escapezone = 50.F;
+    auto [redState] = red->get<sEntityState>();
+    auto [zoneState] = friendlyZone->get<sEntityState>();
+    redState.m_x = 0.F;
+    redState.m_y = 0.F;
+    zoneState.m_x = 0.F;
+    zoneState.m_y = 0.F;
+
+    WorldEntities entities{red, friendlyZone};
+    ppo::examples::twovstwo::TwoVsTwoWorldRules rules;
+    rules.BeforeStep(entities);
+    rules.Resolve(entities);
+
+    Require(redState.m_destroyed,
+            "the historical friendly zone no longer affects hostile mobiles");
+    Require(redState.m_destroyedById == friendlyZone->uniqid(),
+            "historical friendly-zone attribution changed");
 }
 
 void TestDelayedThreatActivation()
@@ -201,6 +288,8 @@ int main()
     {
         TestSweptBlueCollision();
         TestBlueNearMiss();
+        TestDeterministicRestrictedZonePenetration();
+        TestFriendlyRestrictedZoneStillAffectsRed();
         TestDelayedThreatActivation();
         TestPatrolOverlaySnapshot();
         TestBlueRolePermutationContract();

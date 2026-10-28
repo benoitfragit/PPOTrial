@@ -1,9 +1,12 @@
 #include "spawn_config.hpp"
 
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 
 namespace ppo::examples::twovstwo {
 namespace {
@@ -29,35 +32,201 @@ std::optional<std::size_t> Step(nlohmann::json const& object,
     return item->get<std::size_t>();
 }
 
+bool OnlyKeys(nlohmann::json const& object,
+              std::initializer_list<std::string_view> allowed,
+              std::string_view path,
+              std::string& diagnostic)
+{
+    for (auto const& [key, value] : object.items())
+    {
+        (void)value;
+        if (std::find(allowed.begin(), allowed.end(), std::string_view{key})
+            == allowed.end())
+        {
+            diagnostic = std::string{path} + ": unknown field '" + key + "'";
+            return false;
+        }
+    }
+    return true;
+}
+
+std::optional<SpawnRange> ParseRange(nlohmann::json const& object,
+                                     std::string_view path,
+                                     std::string& diagnostic)
+{
+    if (!object.is_object()
+        || !OnlyKeys(object, {"minimum", "maximum"}, path, diagnostic))
+        return std::nullopt;
+    auto const minimum = Number(object, "minimum");
+    auto const maximum = Number(object, "maximum");
+    if (!minimum || !maximum || *minimum > *maximum)
+    {
+        diagnostic = std::string{path}
+            + ": minimum and maximum must be finite and ordered";
+        return std::nullopt;
+    }
+    return SpawnRange{*minimum, *maximum};
+}
+
+bool ParseRestrictedZones(nlohmann::json const& settings,
+                          SpawnSettings& result,
+                          std::string& diagnostic)
+{
+    auto const collection = settings.find("restrictedZones");
+    if (collection == settings.end())
+        return true;
+    if (!collection->is_object()
+        || !OnlyKeys(*collection, {"enabled", "items"},
+                     "restrictedZones", diagnostic))
+        return false;
+    auto const globalEnabled = collection->find("enabled");
+    auto const items = collection->find("items");
+    if (globalEnabled == collection->end() || !globalEnabled->is_boolean()
+        || items == collection->end() || !items->is_array())
+    {
+        diagnostic = "restrictedZones: enabled(bool) and items(array) are required";
+        return false;
+    }
+
+    result.restrictedZones.enabled = globalEnabled->get<bool>();
+    result.restrictedZones.items.reserve(items->size());
+    std::unordered_set<std::string> ids;
+    std::size_t index = 0U;
+    for (auto const& item : *items)
+    {
+        std::string const path = "restrictedZones.items["
+            + std::to_string(index) + "]";
+        ++index;
+        if (!item.is_object()
+            || !OnlyKeys(item,
+                {"id", "type", "platform", "side", "enabled",
+                 "enabledProbability", "fixedPosition", "randomPosition"},
+                path, diagnostic))
+            return false;
+        auto const id = item.find("id");
+        auto const type = item.find("type");
+        auto const platform = item.find("platform");
+        auto const side = item.find("side");
+        auto const enabled = item.find("enabled");
+        auto const probability = Number(item, "enabledProbability");
+        if (id == item.end() || !id->is_string() || id->get<std::string>().empty()
+            || type == item.end() || !type->is_string()
+            || type->get<std::string>() != "RestrictedZone"
+            || platform == item.end() || !platform->is_string()
+            || platform->get<std::string>().empty()
+            || side == item.end() || !side->is_string()
+            || side->get<std::string>() != "Hostile"
+            || enabled == item.end() || !enabled->is_boolean()
+            || !probability || *probability < 0.F || *probability > 1.F)
+        {
+            diagnostic = path
+                + ": invalid id/type/platform/side/enabled/enabledProbability";
+            return false;
+        }
+        std::string const zoneId = id->get<std::string>();
+        if (!ids.emplace(zoneId).second)
+        {
+            diagnostic = path + ": duplicate id '" + zoneId + "'";
+            return false;
+        }
+
+        auto const fixed = item.find("fixedPosition");
+        auto const random = item.find("randomPosition");
+        if ((fixed == item.end()) == (random == item.end()))
+        {
+            diagnostic = path
+                + ": exactly one of fixedPosition or randomPosition is required";
+            return false;
+        }
+
+        RestrictedZoneSpawnSettings zone{};
+        zone.id = zoneId;
+        zone.platform = platform->get<std::string>();
+        zone.enabled = enabled->get<bool>();
+        zone.enabledProbability = *probability;
+        if (fixed != item.end())
+        {
+            if (!fixed->is_object()
+                || !OnlyKeys(*fixed, {"north", "east"},
+                             path + ".fixedPosition", diagnostic))
+                return false;
+            auto const north = Number(*fixed, "north");
+            auto const east = Number(*fixed, "east");
+            if (!north || !east)
+            {
+                diagnostic = path
+                    + ".fixedPosition: finite north/east values are required";
+                return false;
+            }
+            zone.positionMode = RestrictedZonePositionMode::Fixed;
+            zone.fixedPosition = {*north, *east};
+        }
+        else
+        {
+            if (!random->is_object()
+                || !OnlyKeys(*random, {"north", "east"},
+                             path + ".randomPosition", diagnostic)
+                || !random->contains("north") || !random->contains("east"))
+                return false;
+            auto const north = ParseRange(
+                random->at("north"), path + ".randomPosition.north",
+                diagnostic);
+            auto const east = ParseRange(
+                random->at("east"), path + ".randomPosition.east",
+                diagnostic);
+            if (!north || !east)
+                return false;
+            zone.positionMode = RestrictedZonePositionMode::Random;
+            zone.randomNorth = *north;
+            zone.randomEast = *east;
+        }
+        result.restrictedZones.items.push_back(std::move(zone));
+    }
+    return true;
+}
+
 } // namespace
 
 std::optional<SpawnSettings> ParseSpawnSettings(
-    nlohmann::json const& settings)
+    nlohmann::json const& settings,
+    std::string* diagnostic)
 {
-    if (!settings.is_object())
+    std::string error;
+    auto fail = [&](std::string message) -> std::optional<SpawnSettings> {
+        if (diagnostic != nullptr)
+            *diagnostic = std::move(message);
         return std::nullopt;
+    };
+    if (!settings.is_object())
+        return fail("twoVsTwo must be an object");
     auto const red2Probability = Number(
         settings, "red2InitiallyDestroyedProbability");
     auto const redItem = settings.find("redSpawn");
-    auto const zoneItem = settings.find("restrictedZoneSpawn");
+    auto const friendlyZoneItem = settings.find("restrictedZoneSpawn");
     if (!red2Probability || redItem == settings.end() || !redItem->is_object()
-        || zoneItem == settings.end() || !zoneItem->is_object())
-        return std::nullopt;
+        || friendlyZoneItem == settings.end()
+        || !friendlyZoneItem->is_object())
+        return fail("twoVsTwo requires red2InitiallyDestroyedProbability, redSpawn and restrictedZoneSpawn");
 
     auto const minimumScale = Number(*redItem, "minimumWorldScale");
     auto const maximumScale = Number(*redItem, "maximumWorldScale");
     auto const minimumBearing = Number(*redItem, "minimumBearingDegrees");
     auto const maximumBearing = Number(*redItem, "maximumBearingDegrees");
     auto const minimumSeparation = Number(*redItem, "minimumSeparation");
-    auto const zoneProbability = Number(*zoneItem, "enabledProbability");
-    auto const minimumNorth = Number(*zoneItem, "minimumNorthFraction");
-    auto const maximumNorth = Number(*zoneItem, "maximumNorthFraction");
-    auto const minimumEast = Number(*zoneItem, "minimumEastFraction");
-    auto const maximumEast = Number(*zoneItem, "maximumEastFraction");
+    auto const zoneProbability = Number(
+        *friendlyZoneItem, "enabledProbability");
+    auto const minimumNorth = Number(
+        *friendlyZoneItem, "minimumNorthFraction");
+    auto const maximumNorth = Number(
+        *friendlyZoneItem, "maximumNorthFraction");
+    auto const minimumEast = Number(
+        *friendlyZoneItem, "minimumEastFraction");
+    auto const maximumEast = Number(
+        *friendlyZoneItem, "maximumEastFraction");
     if (!minimumScale || !maximumScale || !minimumBearing || !maximumBearing
         || !minimumSeparation || !zoneProbability || !minimumNorth
         || !maximumNorth || !minimumEast || !maximumEast)
-        return std::nullopt;
+        return fail("redSpawn or restrictedZoneSpawn contains a missing or non-finite numeric value");
 
     SpawnSettings result{};
     result.red2DestroyedProbability = *red2Probability;
@@ -67,15 +236,19 @@ std::optional<SpawnSettings> ParseSpawnSettings(
         *maximumBearing * kDegreesToRadians
     };
     result.red.minimumSeparation = *minimumSeparation;
-    result.restrictedZone.enabledProbability = *zoneProbability;
-    result.restrictedZone.northFraction = {*minimumNorth, *maximumNorth};
-    result.restrictedZone.eastFraction = {*minimumEast, *maximumEast};
+    result.friendlyRestrictedZone.enabledProbability = *zoneProbability;
+    result.friendlyRestrictedZone.northFraction = {
+        *minimumNorth, *maximumNorth};
+    result.friendlyRestrictedZone.eastFraction = {
+        *minimumEast, *maximumEast};
+    if (!ParseRestrictedZones(settings, result, error))
+        return fail(error);
 
     auto const curriculumItem = settings.find("threatCurriculum");
     if (curriculumItem != settings.end())
     {
         if (!curriculumItem->is_object())
-            return std::nullopt;
+            return fail("threatCurriculum must be an object");
         auto const enabled = curriculumItem->find("enabled");
         auto const noThreat = Number(*curriculumItem, "noThreatProbability");
         auto const singleThreat = Number(
@@ -96,7 +269,7 @@ std::optional<SpawnSettings> ParseSpawnSettings(
             || !noThreat || !singleThreat || !delayedFirst || !delayedSecond
             || !minimumFirst || !maximumFirst
             || !minimumSecond || !maximumSecond)
-            return std::nullopt;
+            return fail("threatCurriculum contains a missing or invalid field");
 
         auto& curriculum = result.threatCurriculum;
         curriculum.enabled = enabled->get<bool>();
@@ -107,7 +280,11 @@ std::optional<SpawnSettings> ParseSpawnSettings(
         curriculum.firstDelaySteps = {*minimumFirst, *maximumFirst};
         curriculum.secondDelaySteps = {*minimumSecond, *maximumSecond};
     }
-    return Valid(result) ? std::optional<SpawnSettings>{result} : std::nullopt;
+    if (!Valid(result))
+        return fail("twoVsTwo spawn settings are internally inconsistent");
+    if (diagnostic != nullptr)
+        diagnostic->clear();
+    return result;
 }
 
 } // namespace ppo::examples::twovstwo

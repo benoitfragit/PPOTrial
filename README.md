@@ -34,8 +34,12 @@ début de l'épisode. Les évaluations restent des cas déterministes 2v1/2v2.
 deux côtés de la zone défendue. Ils commencent entre 1,05 et 1,35 fois la
 limite du monde et à au moins 10 km l'un de l'autre. La limite est un repère de
 zone, pas un mur : RLMission continue normalement à piloter les rouges vers
-l'objectif. La zone restreinte est déplacée dans la moitié défendue et n'est
-active que dans 75 % des épisodes.
+l'objectif. Les zones rouges sont décrites par la collection typée
+`twoVsTwo.restrictedZones`. Elles sont tirées une fois par épisode, puis vues
+par les 61 rayons pseudo-LiDAR des bleus. Le chemin RLMission des rouges, son
+observation 152 et ses checkpoints restent inchangés. La zone bleue historique
+`blue_restricted_zone`, son tirage `restrictedZoneSpawn` et sa règle SNA sont
+conservés à l'identique pour ne pas modifier le comportement des rouges.
 
 La patrouille est un unique hippodrome analytique continu, sans waypoint. Sa
 longueur, sa largeur, son orientation, son ancrage et le wedge sont tirés une
@@ -87,11 +91,24 @@ et le critique centralisé. Il n'existe aucun coordinateur ni cible imposée.
 Le pooling et l'attention sont inchangés. Deux menaces simultanées peuvent
 relâcher le wedge ; la séparation de sécurité reste toujours active.
 
+Les 61 entrées LiDAR de l'acteur v7 consomment désormais directement le
+`sPseudoLidarState` ECS partagé avec RLMission. Chaque rayon conserve le plus
+proche impact entre frontière du monde et zone hostile active. Une zone utilise
+le rayon létal du profil (`MaxNoEscapeZoneRange`, 7 km dans l'exemple) et un
+rayon d'avertissement LiDAR distinct de 110 % (7,7 km). Seuls les mobiles bleus
+sont publiés par l'adaptateur TwoVsTwo; les rouges gardent strictement leur
+pipeline RLMission historique.
+
 Le contrat bleu v7 démarre un nouvel apprentissage : les anciens poids bleus
 conditionnés par les affectations v6 ne sont pas repris. Les nouveaux fichiers
 sont `blue_patrol_mappo_v7.txt` et `blue_patrol_training_v4.txt`.
 Les anciens fichiers restent sur disque mais sont ignorés. Aucun modèle rouge
 n'est concerné.
+
+L'ajout des zones ne change ni la dimension ni le layout v7 : il ne faut pas
+supprimer `blue_patrol_mappo_v7.txt` ni `blue_patrol_training_v4.txt`. La
+reprise reste possible avec ces fichiers; un nouvel entraînement sert seulement
+à apprendre progressivement l'évitement des zones.
 
 Dans le scénario TwoVsTwo, la barre de la vue tactique propose `Show patrol
 track`. Cette option dessine l'unique piste du leader et son sens dans la vue 3D et la

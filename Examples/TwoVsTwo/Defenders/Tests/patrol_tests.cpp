@@ -62,6 +62,15 @@ int main()
             || obs[blue::ObservationLayout::Own + i] > 1.F)
             return 5;
     }
+    static_assert(blue::ObservationLayout::Lidar == 61U,
+                  "the v7 Actor requires exactly 61 pseudo-LiDAR values");
+    auto sensedState = state;
+    sensedState.lidarRanges[0].fill(0.25F);
+    sensedState.lidarAvailable[0] = true;
+    auto const sensedObservation = blue::Observe(p, sensedState);
+    for (std::size_t i = 0U; i < blue::ObservationLayout::Lidar; ++i)
+        if (sensedObservation[blue::ObservationLayout::Own + i] != 0.25F)
+            return 39; // Runtime observations must consume the ECS sensor.
     auto const observation = blue::Observe(p, state);
     auto clockShifted = state;
     clockShifted.arclength += 0.25F * length;
