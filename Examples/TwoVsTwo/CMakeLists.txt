@@ -1,25 +1,25 @@
-add_subdirectory(Defenders)
+add_subdirectory(Agents/BluePatrol Defenders)
 
 add_library(PPOTwoVsTwoSpawn STATIC
-    data/spawn.hpp
-    src/spawn.cpp
-    data/spawn_config.hpp
-    src/spawn_config.cpp)
+    Scenario/spawn.hpp
+    Scenario/spawn.cpp
+    Scenario/spawn_config.hpp
+    Scenario/spawn_config.cpp)
 target_compile_features(PPOTwoVsTwoSpawn PUBLIC cxx_std_17)
 target_include_directories(PPOTwoVsTwoSpawn PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    "${CMAKE_CURRENT_SOURCE_DIR}/Scenario")
 target_link_libraries(PPOTwoVsTwoSpawn PUBLIC nlohmann_json::nlohmann_json)
 
 add_library(PPOTwoVsTwoExample STATIC
-    data/twovstwoexample.hpp
-    src/twovstwoexample.cpp
-    data/initializer.hpp
-    src/initializer.cpp
-    data/twovstworules.hpp
-    src/twovstworules.cpp)
+    Scenario/twovstwoexample.hpp
+    Scenario/twovstwoexample.cpp
+    Scenario/initializer.hpp
+    Scenario/initializer.cpp
+    Scenario/twovstworules.hpp
+    Scenario/twovstworules.cpp)
 target_compile_features(PPOTwoVsTwoExample PUBLIC cxx_std_17)
 target_include_directories(PPOTwoVsTwoExample PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    "${CMAKE_CURRENT_SOURCE_DIR}/Scenario")
 target_link_libraries(PPOTwoVsTwoExample PUBLIC
     PPOAirspaceExample PPOTwoVsTwoSpawn
     TwoVsTwoDefenderBackend TwoVsTwoPatrolRuntime)
@@ -27,7 +27,7 @@ target_link_libraries(PPOTwoVsTwoExample PUBLIC
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_executable(TwoVsTwoSpawnTests tests/spawn_tests.cpp)
     target_compile_features(TwoVsTwoSpawnTests PRIVATE cxx_std_17)
-    target_include_directories(TwoVsTwoSpawnTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    target_include_directories(TwoVsTwoSpawnTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Scenario")
     target_link_libraries(TwoVsTwoSpawnTests PRIVATE
         PPOTwoVsTwoSpawn TwoVsTwoDefenderBackend)
     add_test(NAME TwoVsTwoSpawnTests COMMAND TwoVsTwoSpawnTests)
