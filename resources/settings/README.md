@@ -37,8 +37,8 @@ par pas d'équipe. Le mini-batch interne de 128 n'est pas la longueur du
 rollout. `checkpointEvery` déclenche les cas déterministes 2v1/2v2 ; le
 checkpoint de production n'est remplacé qu'après un meilleur score.
 
-Après une mise à jour PPO, `model/BluePatrol/latest/` contient l'acteur v6 et
-`blue_patrol_training_v3.txt`. Ce dernier permet une vraie reprise de l'acteur,
+Après une mise à jour PPO, `model/BluePatrol/latest/` contient l'acteur v7 et
+`blue_patrol_training_v4.txt`. Ce dernier permet une vraie reprise de l'acteur,
 du critique, d'Adam, du compteur et du RNG ; le buffer de rollout repart vide.
 `model/BluePatrol/prod/` ne contient que le meilleur acteur évalué.
 
@@ -47,8 +47,8 @@ Les capacités propres aux défenseurs bleus sont dans
 vitesse initiale et leur référence de patrouille ; les autres champs
 `FlightModel` règlent leurs limites physiques et `SNA` leur domaine
 d'engagement. `MaxRotAcceleration` est exprimé en rad/s ; la valeur bleue
-`0.70000059604645` correspond à environ 40,1°/s et aligne les bleus sur le
-profil `trainingaircraft`. Ces paramètres ne modifient pas
+`0.70000059604645` reste alignée sur `trainingaircraft`. `CruiseSpeed` et
+`MaxSpeed` à 800 m/s conservent l'avantage d'entraînement. Ces paramètres ne modifient pas
 `attacker_car` ni RLMission.
 
 `Scenarios/TwoVsTwo.json` contient aussi `redSpawn`, `threatCurriculum` et

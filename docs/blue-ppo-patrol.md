@@ -31,10 +31,10 @@ attribue exactement un rôle à chacune des deux voitures physiques.
 La référence est recalculée depuis `Environment.json` : elle reste donc dans le
 monde si ses dimensions changent.
 
-Les capacités initiales des bleus sont alignées sur la plateforme historique
-`trainingaircraft` : 600 m/s² d'accélération, 700 m/s en vitesse maximale et
-0,7000006 rad/s en rotation maximale, soit environ 40,1°/s. La patrouille
-démarre à une vitesse de croisière configurable de 300 m/s. Leur domaine SNA
+Les bleus disposent d'un avantage cinématique pendant l'entraînement :
+600 m/s² d'accélération et 800 m/s en vitesse maximale. La rotation maximale
+reste alignée sur `trainingaircraft` à 0,7000006 rad/s. La patrouille démarre à une vitesse de croisière configurable de
+800 m/s. Leur domaine SNA
 est supérieur à celui des
 rouges : zone sans échappement de 5 km, zone d'engagement maximale de 10 km et
 angle de tir de 3,147198 rad. Les rouges RLMission conservent leurs paramètres
@@ -68,8 +68,12 @@ execution) :
 - le suffixe centralisé est explicitement mis à zéro avant chaque passage dans
   l'acteur, y compris pendant l'entraînement.
 
-Les deux acteurs partagent strictement les mêmes poids. La récompense d'équipe
-est fournie aux deux trajectoires.
+Les deux acteurs partagent strictement les mêmes poids. La défense, les
+interceptions et les résultats de mission sont récompensés en commun. Le suivi
+d'hippodrome ne récompense que le leader et le wedge que l'équipier ; le
+critique partagé reçoit donc aussi le rôle dans l'observation. Il évalue les
+retours pendant l'apprentissage et n'intervient pas dans les commandes en
+inférence. Aucun coordinateur ne fournit de cible imposée aux acteurs.
 
 ## Observation locale et attention masquée
 
@@ -141,22 +145,25 @@ collecte reprend ensuite jusqu'à `maxUpdates`.
 
 ## Récompenses visibles dans l'IHM
 
-La fonction de récompense change explicitement de mission selon les menaces :
+La récompense sépare les tâches de rôle et la défense coopérative :
 
-- sans rouge actif, le leader est récompensé pour suivre le circuit et
-  l'équipier pour tenir le wedge ;
-- avec un rouge, le bleu au meilleur coût d'interception peut l'intercepter.
-  Si c'est le leader, l'équipier continue le mutual support en wedge ; si c'est
-  l'équipier, son shaping de formation est suspendu ;
-- avec deux rouges, une affectation un-à-un de distance totale minimale libère
-  les deux bleus de la référence de patrouille ;
-- l'intercepteur affecté est récompensé lorsqu'il devient plus proche de sa
-  cible que son équipier ; avec deux menaces, l'écartement de l'équipe est
-  également récompensé pour éviter que les voitures suivent le même danger ;
-- le rapprochement de chaque intercepteur vers sa cible fournit un signal dense,
-  puis la destruction et la victoire fournissent les bonus terminaux ;
+- le suivi du seul hippodrome concerne uniquement le leader et diminue avec la
+  pression des menaces ;
+- le wedge concerne uniquement l'équipier, relativement au cap physique du
+  leader. La pénalité `erreur / (1 + erreur)` conserve une variation même loin
+  de la pose souhaitée, au lieu d'un plateau au-delà d'une séparation ;
+- avec un seul rouge, le mutual support reste actif ; avec deux rouges, la
+  pression de menace peut relâcher le wedge, jamais la sécurité de séparation ;
+- les deux bleus reçoivent la même récompense de poursuite, d'interception et
+  de résultat de mission. Aucun numéro de cible n'est envoyé à un acteur ;
+- le coût de couverture partagé évalue les deux appariements possibles sous
+  deux menaces, sans en imposer un à l'exécution. Son amélioration d'un pas au
+  suivant récompense le rapprochement et l'effort de mise en cap. Une position
+  immobile face au rouge ne produit pas de bonus permanent ;
+- toutes les pistes actives participent immédiatement au signal de défense,
+  indépendamment du seuil de risque. Le pooling et l'attention restent inchangés ;
 - atteindre l'horizon sans menace n'est pas pénalisé ; `Timeout` vaut -15
-  uniquement lorsqu'une menace reste active.
+  lorsqu'une menace reste active.
 
 Le panneau de l'agent `Blue MAPPO (RLTools)` expose la valeur instantanée et le
 coefficient de chaque canal :
@@ -175,12 +182,14 @@ récompensent notamment l'éloignement des menaces de l'objectif et leur
 interception ; la perte de l'objectif ou d'un défenseur est terminale.
 
 Le scénario `two-vs-two` applique pendant l'entraînement un curriculum défini
-dans `Scenarios/TwoVsTwo.json`. Par défaut, 10 % des épisodes n'activent aucun
-rouge, 30 % en activent un et 60 % en activent deux. La première activation est
-retardée dans 20 % des cas ; lorsqu'une seconde menace existe, elle est décalée
-dans 45 % des cas. La destruction de la première ne termine pas l'épisode tant
-qu'une autre activation est planifiée. Ce mécanisme ne change ni le réseau ni
-le contrôleur RLMission.
+dans `Scenarios/TwoVsTwo.json`. Le profil courant active deux rouges dans 80 %
+des épisodes, un rouge dans 15 % et aucun dans 5 %. Toutes les menaces sont
+actives dès le début de l'épisode, sans activation retardée. La destruction de
+la première ne termine pas l'épisode tant
+qu'une autre activation est planifiée. Le canal `Formation safety`, propre à
+l'équipier, utilise un poids global de 4, une pénalité d'erreur de 2 et une
+tolérance de 3 %. Ce mécanisme ne change ni le réseau ni le contrôleur
+RLMission.
 
 ## Évaluation automatique et promotion
 
@@ -218,14 +227,14 @@ complet, il indique explicitement qu'aucune mise à jour n'est encore disponible
 - le clamp de récompense ;
 - les sept coefficients nommés.
 
-Le contrat d'acteur courant est v6. Le candidat acteur est écrit dans
-`resources/model/BluePatrol/latest/blue_patrol_mappo_v6.txt` ; seul le meilleur
+Le contrat d'acteur courant est v7. Le candidat acteur est écrit dans
+`resources/model/BluePatrol/latest/blue_patrol_mappo_v7.txt` ; seul le meilleur
 acteur évalué est écrit dans
-`resources/model/BluePatrol/prod/blue_patrol_mappo_v6.txt`. Au redémarrage,
+`resources/model/BluePatrol/prod/blue_patrol_mappo_v7.txt`. Au redémarrage,
 `latest` est chargé en priorité, puis `prod` si aucun candidat n'existe.
 
 La reprise d'entraînement complète utilise en plus
-`resources/model/BluePatrol/latest/blue_patrol_training_v3.txt`. Ce fichier
+`resources/model/BluePatrol/latest/blue_patrol_training_v4.txt`. Ce fichier
 atomique contient l'acteur partagé, le critique centralisé, les moments et les
 compteurs Adam des deux optimiseurs, le nombre de mises à jour et le RNG
 RLTools. Le buffer de rollout et une éventuelle transition en attente ne sont
@@ -233,8 +242,9 @@ volontairement pas sérialisés : la reprise ouvre un rollout vide avec le même
 niveau d'entraînement. Cela permet aussi de changer `rolloutSteps` entre deux
 exécutions sans invalider le modèle ni les optimiseurs.
 
-Les contrats antérieurs sont incompatibles et refusés explicitement afin que
-le changement de sémantique des rôles ne réutilise aucun poids bleu obsolète.
+Les contrats antérieurs sont incompatibles et refusés explicitement : les
+poids conditionnés par les anciennes affectations ne sont pas réutilisés.
+Les anciens fichiers sont conservés sur disque et ignorés par les chemins v7/v4.
 Les fichiers `.pt` de RLMission ne sont jamais écrits par ce contrôleur.
 
 ## Build et validation

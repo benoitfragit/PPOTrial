@@ -22,7 +22,7 @@ if (PPO_BUILD_PATROL_TOOLS)
     target_compile_definitions(PPOBlueTrain PRIVATE
         PPO_BLUE_SETTINGS_DIR=\"${CMAKE_SOURCE_DIR}/resources/settings\")
     target_compile_definitions(PPOBlueTrain PRIVATE
-        PPO_BLUE_MODEL_PATH=\"${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/latest/blue_patrol_mappo_v6.txt\")
+        PPO_BLUE_MODEL_PATH=\"${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/latest/blue_patrol_mappo_v7.txt\")
     target_compile_features(PPOBlueTrain PRIVATE cxx_std_17)
 
 endif()
@@ -88,7 +88,7 @@ target_link_libraries(PPOPatrolEvaluate PRIVATE TwoVsTwoDefenderBackend nlohmann
 target_compile_features(PPOPatrolEvaluate PRIVATE cxx_std_17)
 target_compile_definitions(PPOPatrolEvaluate PRIVATE
     PPO_BLUE_SETTINGS_DIR=\"${CMAKE_SOURCE_DIR}/resources/settings\"
-    PPO_BLUE_MODEL_PATH=\"${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/prod/blue_patrol_mappo_v6.txt\")
+    PPO_BLUE_MODEL_PATH=\"${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/prod/blue_patrol_mappo_v7.txt\")
 
 endif()
 

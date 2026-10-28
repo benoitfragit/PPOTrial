@@ -52,7 +52,7 @@ int main()
     patrol::PatrolGeometrySettings const settings =
         patrol::ParsePatrolGeometrySettings(ValidDocument());
     patrol::PatrolSamplingConstraints const constraints{
-        22329.375F, 35727.F, 300.F, 0.7000006F, 1000.F};
+        22329.375F, 35727.F, 800.F, 0.7000006F, 1000.F};
 
     std::mt19937 firstRng{17U};
     std::mt19937 repeatRng{17U};
@@ -107,7 +107,7 @@ int main()
 
     auto impossible = settings;
     impossible.widthMeters = {500.F, 500.F};
-    impossible.lengthMeters = {1000.F, 1000.F};
+    impossible.lengthMeters = {100000.F, 100000.F};
     impossible.maximumSamplingAttempts = 2U;
     std::mt19937 impossibleRng{0U};
     if (patrol::SamplePatrolGeometry(

@@ -41,10 +41,12 @@ int main()
         }
         patrol::RewardValues weights{};
         weights.fill(1.F);
-        float const reward = patrol::TeamRewardBreakdown(
-            params, state, actions, after).Total(weights, 100.F);
+        auto const roleBreakdowns = patrol::TrainingRoleRewardBreakdowns(
+            params, state, actions, after);
+        auto const rewards = patrol::TotalRoleRewards(
+            roleBreakdowns, weights, 100.F);
         bool const truncated = after.step >= params.episodeSteps;
-        bool const updated = trainer.Observe(nextObservations, reward,
+        bool const updated = trainer.Observe(nextObservations, rewards,
                                              after.failed, truncated);
         if (trainer.HasPendingAction() ||
             updated != (step + 1U == trainer.RolloutSize()))

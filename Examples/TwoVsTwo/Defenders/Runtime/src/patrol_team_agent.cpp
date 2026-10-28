@@ -44,11 +44,6 @@ Mobile FromEcs(ppo::model::BaseEntity& entity)
             turnRate, !state.m_destroyed};
 }
 
-DefenseTrack ToDefenseTrack(Mobile const& mobile) noexcept
-{
-    return {mobile.north, mobile.east, mobile.heading,
-            mobile.speed, mobile.available};
-}
 
 } // namespace
 
@@ -100,9 +95,7 @@ void PatrolMappoAgent::Init()
     episodeStep_ = 0U;
     currentReward_ = 0.F;
     rewardValues_.fill(0.F);
-    defenseCoordinator_.Reset();
-    defenseDecision_ = DefenseDecision{};
-    hasDefenseDecision_ = false;
+
     hasBeforeStep_ = false;
     episodeDone_ = false;
     if (evaluation_.InProgress())
@@ -225,29 +218,6 @@ State PatrolMappoAgent::ReadState(Parameters const& parameters) const
     return result;
 }
 
-void PatrolMappoAgent::UpdateDefenseState(Parameters const& parameters,
-                                          State& state)
-{
-    std::array<DefenseTrack, 2> guards{
-        ToDefenseTrack(state.guards[0]), ToDefenseTrack(state.guards[1])};
-    std::array<DefenseTrack, 2> attackers{
-        ToDefenseTrack(state.attackers[0]), ToDefenseTrack(state.attackers[1])};
-    DefenseTrack const objective{
-        0.F,
-        static_cast<float>(state.side >= 0 ? 1 : -1)
-            * 0.92F * parameters.halfEast,
-        0.F, 0.F, state.objectiveAvailable};
-    defenseDecision_ = defenseCoordinator_.Update(
-        parameters.defense, parameters.dt, guards, attackers, objective);
-    hasDefenseDecision_ = true;
-    ApplyDefenseDecision(state, defenseDecision_);
-}
-
-void PatrolMappoAgent::ApplyCurrentDefenseState(State& state) const noexcept
-{
-    if (hasDefenseDecision_)
-        ApplyDefenseDecision(state, defenseDecision_);
-}
 
 std::array<Observation, 2> PatrolMappoAgent::BuildObservations(
     Parameters const& parameters, State const& state) const
@@ -280,10 +250,7 @@ void PatrolMappoAgent::ChooseAction()
     try
     {
         beforeStep_ = ReadState(parameters);
-        if (hasDefenseDecision_)
-            ApplyCurrentDefenseState(beforeStep_);
-        else
-            UpdateDefenseState(parameters, beforeStep_);
+
         hasBeforeStep_ = true;
         auto const observations = BuildObservations(parameters, beforeStep_);
         if (!finished_ && !evaluation_.InProgress())
@@ -362,7 +329,7 @@ bool PatrolMappoAgent::SetNewState()
             throw std::runtime_error("Invalid ECS parameters for MAPPO feedback");
 
         State after = ReadState(parameters);
-        UpdateDefenseState(parameters, after);
+
         after.collided = GuardsCollided(parameters, beforeStep_, after);
         after.failed |= after.collided;
         bool pendingThreats = false;
@@ -388,8 +355,12 @@ bool PatrolMappoAgent::SetNewState()
             parameters, beforeStep_, lastActions_, after, pendingThreats);
         for (std::size_t i = 0; i < rewardValues_.size(); ++i)
             rewardValues_[i] = breakdown.values[i] * training_.rewardWeights[i];
-        currentReward_ = breakdown.Total(training_.rewardWeights,
-                                         training_.rewardClamp);
+        RoleRewardBreakdowns const roleBreakdowns =
+            TrainingRoleRewardBreakdowns(
+                parameters, beforeStep_, lastActions_, after, pendingThreats);
+        RoleRewards const roleRewards = TotalRoleRewards(
+            roleBreakdowns, training_.rewardWeights, training_.rewardClamp);
+        currentReward_ = 0.5F * (roleRewards[0] + roleRewards[1]);
 
         if (evaluation_.InProgress())
         {
@@ -421,7 +392,7 @@ bool PatrolMappoAgent::SetNewState()
         else if (!finished_ && learner_ && learner_->HasPendingAction())
         {
             bool const updated = learner_->Observe(
-                BuildObservations(parameters, after), currentReward_,
+                BuildObservations(parameters, after), roleRewards,
                 terminated, truncated);
             if (updated)
             {

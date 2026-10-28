@@ -45,7 +45,7 @@ struct ObservationLayout final
         CentralEntities * CentralEntityFeatures + CentralObjective + CentralPatrol;
     static constexpr std::size_t Size = LocalSize + CentralSize;
     static constexpr std::size_t ActionSize = 2;
-    static constexpr std::uint32_t Version = 6;
+    static constexpr std::uint32_t Version = 7;
 };
 
 using Observation = std::array<float, ObservationLayout::Size>;
@@ -56,8 +56,8 @@ struct Parameters
     float halfNorth = 22329.375F;
     float halfEast = 35727.F;
     float dt = 0.2F;
-    float cruiseSpeed = 300.F;
-    float maxSpeed = 700.F;
+    float cruiseSpeed = 800.F;
+    float maxSpeed = 800.F;
     float maxAcceleration = 600.F;
     float maxRotationRate = 0.7000006F;
     std::size_t episodeSteps = 4096;
@@ -231,17 +231,7 @@ struct State
     int side;
     /** @brief Nearest continuous leader arclength on the unique racetrack. */
     float patrolProgress{};
-    /** @brief Per-guard blend from patrol (0) to defence (1). */
-    std::array<float, 2> defenseWeight{};
-    /** @brief Stable hostile assignment for each guard. */
-    std::array<std::size_t, 2> assignedThreat{
-        DefenseDecision::Unassigned, DefenseDecision::Unassigned};
-    /** @brief Instantaneous credibility score of each hostile track. */
-    std::array<float, 2> threatRisk{};
-    /** @brief Number of hostile tracks latched as credible. */
-    std::size_t credibleThreats{};
-    /** @brief True when a stateful coordinator produced the tactical state. */
-    bool defenseDecisionValid{};
+
     /** @brief Initial team phase retained for deterministic evaluation cases. */
     float arclength;
     std::size_t step;
@@ -249,6 +239,64 @@ struct State
     bool collided;
     bool objectiveAvailable{true};
 };
+
+/**
+ * @brief Counts active hostile tracks independently of their slot order.
+ * @param state Current team state.
+ * @return Number of living reds visible to both blue Actors.
+ */
+inline std::size_t ActiveThreatCount(State const& state) noexcept
+{
+    return static_cast<std::size_t>(std::count_if(
+        state.attackers.begin(), state.attackers.end(),
+        [](Mobile const& attacker) { return attacker.available; }));
+}
+
+/**
+ * @brief Measures shared threat pressure without assigning a target or role.
+ * @param p Valid threat assessment parameters.
+ * @param state Physical team state.
+ * @return Pressure in [0, 1]; every active red contributes immediately.
+ */
+inline float DefensePressure(Parameters const& p, State const& state) noexcept
+{
+    std::array<DefenseTrack, 2> guards{};
+    for (std::size_t i = 0U; i < guards.size(); ++i)
+    {
+        Mobile const& guard = state.guards[i];
+        guards[i] = {guard.north, guard.east, guard.heading,
+                     guard.speed, guard.available};
+    }
+    DefenseTrack const objective{
+        0.F, (state.side >= 0 ? 1.F : -1.F) * 0.92F * p.halfEast,
+        0.F, 0.F, state.objectiveAvailable};
+    float pressure = 0.F;
+    for (Mobile const& attacker : state.attackers)
+    {
+        if (!attacker.available)
+            continue;
+        DefenseTrack const track{
+            attacker.north, attacker.east, attacker.heading,
+            attacker.speed, true};
+        pressure = std::max(pressure, std::max(0.25F,
+            ThreatRisk(p.defense, track, objective, guards)
+                / p.defense.activationRisk));
+    }
+    return Clamp(pressure, 0.F, 1.F);
+}
+
+/**
+ * @brief Releases mutual support only under multiple simultaneous threats.
+ * @param p Valid threat assessment parameters.
+ * @param state Current physical state.
+ * @return Wedge weight; separation safety remains active independently.
+ */
+inline float MutualSupportWeight(Parameters const& p,
+                                 State const& state) noexcept
+{
+    return ActiveThreatCount(state) > 1U ? 1.F - DefensePressure(p, state)
+                                        : 1.F;
+}
 
 /**
  * @brief Signed longitudinal and inward formation errors in leader coordinates.
@@ -268,10 +316,8 @@ struct FormationErrors final
 inline FormationErrors MeasureFormationErrors(Parameters const& p,
                                               State const& state) noexcept
 {
-    PatrolProjection const leaderProjection = ProjectOnPatrolCurve(
-        p.geometry, state.guards[0].north, state.guards[0].east);
-    float const tangentNorth = std::cos(leaderProjection.pose.heading);
-    float const tangentEast = std::sin(leaderProjection.pose.heading);
+    float const tangentNorth = std::cos(state.guards[0].heading);
+    float const tangentEast = std::sin(state.guards[0].heading);
     float const inwardNorth = static_cast<float>(p.geometry.direction)
         * -tangentEast;
     float const inwardEast = static_cast<float>(p.geometry.direction)
@@ -366,7 +412,7 @@ inline float SeparationPenalty(Parameters const& p,
  * @brief Rewards the wingman's ordered pose relative to the leader.
  * @param p Valid patrol geometry and safety distances.
  * @param state Current team state.
- * @param maintainFormation False while one or both cars are intercepting.
+ * @param maintainFormation False when simultaneous threats release the wedge.
  * @return Dense relative-pose shaping plus the close-range safety penalty.
  */
 inline float FormationReward(Parameters const& p, State const& state,
@@ -382,7 +428,7 @@ inline float FormationReward(Parameters const& p, State const& state,
     float const inward = std::max(
         std::abs(errors.inward) - p.formationTolerance, 0.F);
     float const relativeError = std::hypot(longitudinal, inward);
-    reward -= p.formationErrorWeight * Clamp(relativeError, 0.F, 1.F);
+    reward -= p.formationErrorWeight * relativeError / (1.F + relativeError);
     return reward;
 }
 
@@ -404,7 +450,7 @@ inline float FormationReward(Parameters const& p, State const& state,
         std::abs(errors.inward) - p.formationTolerance, 0.F);
     float const relativeError = std::hypot(longitudinal, inward);
     return safety - Clamp(formationWeight, 0.F, 1.F)
-        * p.formationErrorWeight * Clamp(relativeError, 0.F, 1.F);
+        * p.formationErrorWeight * relativeError / (1.F + relativeError);
 }
 
 static_assert(std::is_trivially_copyable_v<State>,
@@ -598,14 +644,10 @@ inline Observation Observe(Parameters const& p, State const& state) noexcept
         obs[k++] = Clamp(formation.inward, -2.F, 2.F);
     }
     obs[k++] = state.controlledRole == 0U ? -1.F : 1.F;
-    obs[k++] = Clamp(state.defenseWeight[state.controlledRole], 0.F, 1.F);
+    obs[k++] = DefensePressure(p, state);
     obs[ObservationLayout::GlobalOffset] = 1.F; // Initial ammunition ratio.
-    std::size_t const assignedThreat =
-        state.assignedThreat[state.controlledRole];
-    // Zero means patrol/recovery, 0.5 hostile slot 0, and 1 hostile slot 1.
-    obs[ObservationLayout::GlobalOffset + 1] =
-        assignedThreat < state.attackers.size()
-        ? 0.5F * static_cast<float>(assignedThreat + 1U) : 0.F;
+    // Reserved: a target-slot index is incompatible with invariant pooling.
+    obs[ObservationLayout::GlobalOffset + 1] = 0.F;
 
     // CTDE contract: the actor masks this suffix in AttentionActor, while the
     // critic receives the complete team state during MAPPO optimization.
@@ -685,6 +727,7 @@ constexpr std::array<char const*, kRewardChannelCount> kRewardChannelNames{
 };
 
 using RewardValues = std::array<float, kRewardChannelCount>;
+using RoleRewards = std::array<float, 2>;
 
 /**
  * @brief Stores the unweighted team reward decomposition for one ECS step.
@@ -707,6 +750,8 @@ struct RewardBreakdown final
         return Clamp(total, -clampMagnitude, clampMagnitude);
     }
 };
+
+using RoleRewardBreakdowns = std::array<RewardBreakdown, 2>;
 
 inline bool HasActiveThreat(State const& state) noexcept
 {
@@ -734,220 +779,101 @@ inline float DistanceBetween(Mobile const& first, Mobile const& second) noexcept
 }
 
 /**
- * @brief One-to-one defensive assignment computed from the pre-step state.
- *
- * `ThreatAssignment::Unassigned` denotes a reserve guard. With one threat,
- * the closest guard intercepts and its teammate keeps patrolling. With two
- * threats, the minimum-total-distance one-to-one assignment is used.
- */
-struct ThreatAssignment final
-{
-    /** @brief Sentinel stored for a guard kept in patrol reserve. */
-    static constexpr std::size_t Unassigned =
-        std::numeric_limits<std::size_t>::max();
-
-    /** @brief Attacker index for each guard, or Unassigned for a reserve. */
-    std::array<std::size_t, 2> attackerForGuard{Unassigned, Unassigned};
-    /** @brief Number of available hostile tracks in the assignment state. */
-    std::size_t activeThreats{};
-};
-
-/**
- * @brief Copies a coordinator decision into the trivially-copyable team state.
- * @param state State consumed by observations and reward functions.
- * @param decision Stateful tactical decision for the same physical state.
- */
-inline void ApplyDefenseDecision(State& state,
-                                 DefenseDecision const& decision) noexcept
-{
-    state.assignedThreat = decision.attackerForGuard;
-    state.threatRisk = decision.threatRisk;
-    state.defenseWeight = decision.defenseWeight;
-    state.credibleThreats = decision.credibleThreats;
-    state.defenseDecisionValid = true;
-}
-
-/**
- * @brief Returns the stateful assignment stored in a physical team state.
- * @param state State previously updated by DefenseCoordinator.
- * @return Stable one-to-one assignment and credible threat count.
- */
-inline ThreatAssignment CoordinatedThreatAssignment(
-    State const& state) noexcept
-{
-    ThreatAssignment result{};
-    result.attackerForGuard = state.assignedThreat;
-    result.activeThreats = state.credibleThreats;
-    return result;
-}
-
-/**
- * @brief Assigns active attackers to guards without allocating memory.
- * @param state Team state used to select the stable pre-step assignment.
- * @return Assignment and number of active attackers.
- */
-inline ThreatAssignment AssignThreats(State const& state) noexcept
-{
-    ThreatAssignment result{};
-    std::array<std::size_t, 2> active{ThreatAssignment::Unassigned,
-                                      ThreatAssignment::Unassigned};
-    for (std::size_t attacker = 0U; attacker < state.attackers.size();
-         ++attacker)
-        if (state.attackers[attacker].available)
-            active[result.activeThreats++] = attacker;
-
-    if (result.activeThreats == 1U)
-    {
-        std::size_t const attacker = active[0];
-        std::size_t const guard =
-            DistanceBetween(state.guards[0], state.attackers[attacker])
-                <= DistanceBetween(state.guards[1], state.attackers[attacker])
-            ? 0U : 1U;
-        result.attackerForGuard[guard] = attacker;
-    }
-    else if (result.activeThreats == 2U)
-    {
-        float const direct =
-            DistanceBetween(state.guards[0], state.attackers[active[0]])
-            + DistanceBetween(state.guards[1], state.attackers[active[1]]);
-        float const crossed =
-            DistanceBetween(state.guards[0], state.attackers[active[1]])
-            + DistanceBetween(state.guards[1], state.attackers[active[0]]);
-        bool const useDirect = direct <= crossed;
-        result.attackerForGuard[0] = active[useDirect ? 0U : 1U];
-        result.attackerForGuard[1] = active[useDirect ? 1U : 0U];
-    }
-    return result;
-}
-
-/**
- * @brief Returns a guard's continuous defence blend or a legacy fallback.
- * @param state Tactical state.
- * @param assignment Assignment used for backward-compatible pure-domain tests.
- * @param guard Guard role in [0, 1].
- * @return Defence contribution in [0, 1].
- */
-inline float DefenseBlend(State const& state,
-                          ThreatAssignment const& assignment,
-                          std::size_t guard) noexcept
-{
-    if (state.defenseDecisionValid)
-        return Clamp(state.defenseWeight[guard], 0.F, 1.F);
-    return assignment.attackerForGuard[guard] < state.attackers.size()
-        ? 1.F : 0.F;
-}
-
-/**
- * @brief Computes mission-aware patrol shaping for the blue team.
+ * @brief Scores the leader's racetrack while patrol remains relevant.
  * @param p Valid patrol parameters.
- * @param before Pre-step team state used for signed progress.
- * @param after Post-step team state used for cross-track error.
- * @param assignment Threat assignment selected before the step.
- * @return Leader tracking reward, faded only while the leader defends.
- *
- * The wingman is never projected onto the racetrack. It is trained through the
- * formation channel and may leave the wedge when assigned to an interception.
+ * @param before Pre-step team state.
+ * @param after Post-step team state.
+ * @return Leader-only tracking reward faded by shared hostile pressure.
  */
 inline float MissionPatrolReward(Parameters const& p,
                                  State const& before,
-                                 State const& after,
-                                 ThreatAssignment const& assignment) noexcept
+                                 State const& after) noexcept
 {
-    float const leaderWeight = 1.F - DefenseBlend(before, assignment, 0U);
-    return leaderWeight * TrackingReward(p, before, after);
+    return (1.F - DefensePressure(p, before))
+        * TrackingReward(p, before, after);
+}
+
+namespace patrol_reward_detail {
+
+/**
+ * @brief Measures interception distance including immediate heading effort.
+ * @param p Valid world and vehicle parameters.
+ * @param guard Candidate blue physical state.
+ * @param attacker Candidate red physical state.
+ * @return Finite pursuit cost; no target selection is exposed to an Actor.
+ */
+inline float PursuitCost(Parameters const& p, Mobile const& guard,
+                         Mobile const& attacker) noexcept
+{
+    if (!guard.available)
+        return 4.F * std::hypot(p.halfNorth, p.halfEast);
+    float const bearing = std::atan2(attacker.east - guard.east,
+                                     attacker.north - guard.north);
+    float const headingEffort = 1.F - std::cos(bearing - guard.heading);
+    return DistanceBetween(guard, attacker)
+        + 4.F * p.maxSpeed * p.dt * headingEffort;
 }
 
 /**
- * @brief Computes dense progress towards assigned active threats.
- * @param p Valid patrol parameters.
- * @param before Team state before ECS physics.
- * @param after Team state after ECS physics and destruction resolution.
- * @param assignment Stable assignment selected from `before`.
- * @return Engagement shaping; larger when interceptors close their targets.
+ * @brief Evaluates joint coverage without publishing an assignment.
+ * @param p Valid world and vehicle parameters.
+ * @param state Physical state being scored.
+ * @param threats Identical red indices for both ends of a transition.
+ * @param count Number of surviving threats, at most two.
+ * @return Minimum joint coverage cost over interchangeable defenders.
  *
- * The range-rate term gives immediate credit to blue actions. The small
- * distance cost prevents an agent from being indifferent while matching a
- * threat's velocity far from weapon range. Destruction itself is scored by the
- * separate Interception channel.
+ * Both pairings are scored only inside the cooperative reward. Neither Actor
+ * receives a target index or a prescribed vehicle command.
+ */
+inline float CoverageCost(Parameters const& p, State const& state,
+                          std::array<std::size_t, 2> const& threats,
+                          std::size_t count) noexcept
+{
+    if (count == 0U)
+        return 0.F;
+    auto cost = [&](std::size_t guard, std::size_t threat) {
+        return PursuitCost(p, state.guards[guard],
+                           state.attackers[threats[threat]]);
+    };
+    if (count == 1U)
+        return std::min(cost(0U, 0U), cost(1U, 0U));
+    return std::min(cost(0U, 0U) + cost(1U, 1U),
+                    cost(0U, 1U) + cost(1U, 0U));
+}
+
+} // namespace patrol_reward_detail
+
+/**
+ * @brief Rewards joint progress towards all living reds from their first step.
+ * @param p Valid world and vehicle parameters.
+ * @param before Team state before physics.
+ * @param after Team state after physics and destruction resolution.
+ * @return Shared pursuit reward used by both blue trajectories.
+ *
+ * The same surviving threats are scored before/after. Destruction is rewarded
+ * by the sparse Interception channel. Stationary heading alignment alone
+ * cannot generate a permanent positive pursuit reward.
  */
 inline float EngagementReward(Parameters const& p, State const& before,
-                              State const& after,
-                              ThreatAssignment const& assignment) noexcept
+                              State const& after) noexcept
 {
-    float reward = 0.F;
-    float defenseWeight = 0.F;
-    float const diagonal = std::hypot(p.halfNorth, p.halfEast);
-    float const distancePerStep = std::max(p.maxSpeed * p.dt, 1.F);
-    for (std::size_t guard = 0U; guard < before.guards.size(); ++guard)
-    {
-        std::size_t const attacker = assignment.attackerForGuard[guard];
-        if (attacker >= before.attackers.size()
-            || !before.guards[guard].available || !after.guards[guard].available
-            || !before.attackers[attacker].available
-            || !after.attackers[attacker].available)
-            continue;
-
-        float const beforeRange = DistanceBetween(
-            before.guards[guard], before.attackers[attacker]);
-        float const afterRange = DistanceBetween(
-            after.guards[guard], after.attackers[attacker]);
-        float const closingProgress = Clamp(
-            (beforeRange - afterRange) / distancePerStep, -1.F, 1.F);
-        float const normalizedRange = Clamp(afterRange / diagonal, 0.F, 1.F);
-        float const weight = DefenseBlend(before, assignment, guard);
-        reward += weight
-            * (0.35F * closingProgress - 0.10F * normalizedRange);
-        defenseWeight += weight;
-    }
-    return defenseWeight > 0.F ? reward / defenseWeight : 0.F;
-}
-
-/**
- * @brief Rewards distinct tactical roles for assigned hostile tracks.
- * @param p Valid world parameters.
- * @param state Post-step team state.
- * @param assignment Stable assignment selected before the step.
- * @return Dense specialization and, for two threats, team-spread shaping.
- *
- * Each assigned guard is rewarded for being closer to its own target than its
- * teammate. With two simultaneous targets, an additional bounded term favors
- * enough physical spread to cover both approaches instead of tailing the same
- * hostile.
- */
-inline float ThreatCoverageReward(Parameters const& p, State const& state,
-                                  ThreatAssignment const& assignment) noexcept
-{
-    if (assignment.activeThreats == 0U)
+    std::array<std::size_t, 2> threats{};
+    std::size_t count = 0U;
+    for (std::size_t i = 0U; i < before.attackers.size(); ++i)
+        if (before.attackers[i].available && after.attackers[i].available)
+            threats[count++] = i;
+    if (count == 0U)
         return 0.F;
-
-    float const diagonal = std::hypot(p.halfNorth, p.halfEast);
-    float specialization = 0.F;
-    std::size_t assignedGuards = 0U;
-    for (std::size_t guard = 0U; guard < state.guards.size(); ++guard)
-    {
-        std::size_t const attacker = assignment.attackerForGuard[guard];
-        if (attacker >= state.attackers.size()
-            || !state.attackers[attacker].available)
-            continue;
-        float const assignedRange = DistanceBetween(
-            state.guards[guard], state.attackers[attacker]);
-        float const teammateRange = DistanceBetween(
-            state.guards[1U - guard], state.attackers[attacker]);
-        specialization += Clamp(
-            (teammateRange - assignedRange) / diagonal, -1.F, 1.F);
-        ++assignedGuards;
-    }
-
-    float reward = assignedGuards > 0U
-        ? 0.25F * specialization / static_cast<float>(assignedGuards) : 0.F;
-    if (assignment.activeThreats == 2U)
-    {
-        float const desiredSpread = std::max(
-            2.F * p.cautionDistance, FormationGap(p));
-        reward += 0.15F * Clamp(
-            GuardSeparation(state) / desiredSpread, 0.F, 1.F);
-    }
-    return reward;
+    float const beforeCost = patrol_reward_detail::CoverageCost(
+        p, before, threats, count);
+    float const afterCost = patrol_reward_detail::CoverageCost(
+        p, after, threats, count);
+    float const scale = static_cast<float>(count);
+    float const progress = Clamp((beforeCost - afterCost)
+        / std::max(scale * p.maxSpeed * p.dt, 1.F), -1.F, 1.F);
+    float const remaining = Clamp(afterCost
+        / (scale * std::hypot(p.halfNorth, p.halfEast)), 0.F, 2.F);
+    return 0.8F * progress - 0.1F * remaining;
 }
 
 /**
@@ -997,6 +923,39 @@ inline float SoftBoundaryPenalty(Parameters const& p,
 }
 
 /**
+ * @brief Scores the shared evolution of hostile ranges to the objective.
+ * @param p Valid world and vehicle parameters.
+ * @param before State before the physical step.
+ * @param after State after the physical step.
+ * @return Shared dense protected-zone reward independent of target allocation.
+ */
+inline float ObjectiveProtectionReward(Parameters const& p,
+                                       State const& before,
+                                       State const& after) noexcept
+{
+    float reward = 0.F;
+    for (std::size_t i = 0; i < after.attackers.size(); ++i)
+    {
+        Mobile const& previous = before.attackers[i];
+        Mobile const& current = after.attackers[i];
+        if (!previous.available || !current.available)
+            continue;
+        float const beforeRange = DistanceToObjective(p, before, previous);
+        float const afterRange = DistanceToObjective(p, after, current);
+        float const normalizedProgress = Clamp(
+            (afterRange - beforeRange) / std::max(p.cruiseSpeed * p.dt, 1.F),
+            -1.F, 1.F);
+        float const defendedRadius =
+            0.25F * std::hypot(p.halfNorth, p.halfEast);
+        float const penetration = Clamp(
+            (defendedRadius - afterRange) / defendedRadius, 0.F, 1.F);
+        reward += 0.15F * normalizedProgress - 0.5F * penetration;
+    }
+    return reward;
+}
+
+
+/**
  * @brief Computes every explainable MAPPO reward channel for one team step.
  * @param p Valid patrol parameters.
  * @param before Team state before ECS physics.
@@ -1012,12 +971,9 @@ inline RewardBreakdown TeamRewardBreakdown(
 {
     RewardBreakdown result{};
     auto& values = result.values;
-    ThreatAssignment const assignment = before.defenseDecisionValid
-        ? CoordinatedThreatAssignment(before) : AssignThreats(before);
     values[static_cast<std::size_t>(RewardChannel::PatrolTracking)] =
-        MissionPatrolReward(p, before, after, assignment);
-    float const wingmanFormationWeight =
-        1.F - DefenseBlend(before, assignment, 1U);
+        MissionPatrolReward(p, before, after);
+    float const wingmanFormationWeight = MutualSupportWeight(p, before);
     values[static_cast<std::size_t>(RewardChannel::FormationSafety)] =
         FormationReward(p, after, wingmanFormationWeight);
     values[static_cast<std::size_t>(RewardChannel::ControlEffort)] =
@@ -1025,7 +981,8 @@ inline RewardBreakdown TeamRewardBreakdown(
         * (std::abs(actions[0][0]) + std::abs(actions[0][1])
            + std::abs(actions[1][0]) + std::abs(actions[1][1]));
 
-    float protection = EngagementReward(p, before, after, assignment);
+    float const protection = EngagementReward(p, before, after)
+        + ObjectiveProtectionReward(p, before, after);
     float interception = 0.F;
     bool hadThreat = false;
     for (std::size_t i = 0; i < after.attackers.size(); ++i)
@@ -1038,21 +995,9 @@ inline RewardBreakdown TeamRewardBreakdown(
             interception += 10.F;
             continue;
         }
-        if (!previous.available || !current.available)
-            continue;
-        float const beforeRange = DistanceToObjective(p, before, previous);
-        float const afterRange = DistanceToObjective(p, after, current);
-        float const normalizedProgress = Clamp(
-            (afterRange - beforeRange) / std::max(p.cruiseSpeed * p.dt, 1.F),
-            -1.F, 1.F);
-        float const defendedRadius = 0.25F * std::hypot(p.halfNorth, p.halfEast);
-        float const penetration = Clamp(
-            (defendedRadius - afterRange) / defendedRadius, 0.F, 1.F);
-        protection += 0.15F * normalizedProgress - 0.5F * penetration;
     }
     values[static_cast<std::size_t>(RewardChannel::ZoneProtection)] =
-        protection + ThreatCoverageReward(p, after, assignment)
-        + SoftBoundaryPenalty(p, after);
+        protection + SoftBoundaryPenalty(p, after);
     values[static_cast<std::size_t>(RewardChannel::Interception)] = interception;
 
     float outcome = 0.F;
@@ -1064,6 +1009,55 @@ inline RewardBreakdown TeamRewardBreakdown(
     values[static_cast<std::size_t>(RewardChannel::Timeout)] =
         after.step >= p.episodeSteps
             && (HasActiveThreat(after) || pendingThreats) ? -15.F : 0.F;
+    return result;
+}
+
+/**
+ * @brief Combines role-specific patrol tasks with shared defensive rewards.
+ * @param p Valid patrol and vehicle parameters.
+ * @param before Team state before physics.
+ * @param actions Commands selected by leader and wingman.
+ * @param after Team state after physics and destruction resolution.
+ * @param pendingThreats True while a delayed hostile remains scheduled.
+ * @return Per-role channel breakdowns consumed by MAPPO.
+ *
+ * Racetrack credit belongs only to the leader, wedge credit to the wingman.
+ * Pursuit, interception and mission outcomes are cooperative. The centralized
+ * Critic trains coordination without assigning targets to either Actor.
+ */
+inline RoleRewardBreakdowns TrainingRoleRewardBreakdowns(
+    Parameters const& p, State const& before,
+    std::array<Action, 2> const& actions, State const& after,
+    bool pendingThreats = false) noexcept
+{
+    RewardBreakdown const team = TeamRewardBreakdown(
+        p, before, actions, after, pendingThreats);
+    RoleRewardBreakdowns result{team, team};
+    result[1].values[static_cast<std::size_t>(
+        RewardChannel::PatrolTracking)] = 0.F;
+    result[0].values[static_cast<std::size_t>(
+        RewardChannel::FormationSafety)] = SeparationPenalty(p, after);
+    for (std::size_t role = 0U; role < result.size(); ++role)
+        result[role].values[static_cast<std::size_t>(
+            RewardChannel::ControlEffort)] = -p.controlEffortWeight
+            * (std::abs(actions[role][0]) + std::abs(actions[role][1]));
+    return result;
+}
+
+/**
+ * @brief Applies configured channel weights to per-role training rewards.
+ * @param breakdowns Per-role channel values.
+ * @param weights Runtime reward multipliers.
+ * @param clampMagnitude Symmetric reward clamp.
+ * @return Scalar reward for each blue trajectory.
+ */
+inline RoleRewards TotalRoleRewards(
+    RoleRewardBreakdowns const& breakdowns, RewardValues const& weights,
+    float clampMagnitude) noexcept
+{
+    RoleRewards result{};
+    for (std::size_t role = 0U; role < result.size(); ++role)
+        result[role] = breakdowns[role].Total(weights, clampMagnitude);
     return result;
 }
 

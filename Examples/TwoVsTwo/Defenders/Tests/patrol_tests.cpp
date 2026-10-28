@@ -118,6 +118,24 @@ int main()
         || next.guards[0].east <= state.guards[0].east
         || !std::isfinite(blue::TeamReward(p, state, {0.F, 0.F}, next)))
         return 8;
+    auto const nominalRoleRewards = blue::TrainingRoleRewardBreakdowns(
+        p, state, std::array<blue::Action, 2>{}, next);
+    if (nominalRoleRewards[0].values[static_cast<std::size_t>(
+            blue::RewardChannel::PatrolTracking)] == 0.F
+        || nominalRoleRewards[1].values[static_cast<std::size_t>(
+            blue::RewardChannel::PatrolTracking)] != 0.F)
+        return 38; // Racetrack credit belongs only to the semantic leader.
+
+    auto displacedWingman = state;
+    displacedWingman.guards[1].north += 3000.F;
+    auto const displacedRoleRewards = blue::TrainingRoleRewardBreakdowns(
+        p, displacedWingman, std::array<blue::Action, 2>{},
+        displacedWingman);
+    if (displacedRoleRewards[0].values[static_cast<std::size_t>(
+            blue::RewardChannel::FormationSafety)] != 0.F
+        || displacedRoleRewards[1].values[static_cast<std::size_t>(
+            blue::RewardChannel::FormationSafety)] >= 0.F)
+        return 39; // Wedge error belongs only to the semantic wingman.
     // A stopped agent must not score the same progression as the reference.
     auto stopped = state;
     stopped.guards[0].speed = 0.F;
@@ -204,12 +222,9 @@ int main()
     oneThreat.guards[1].north = 10000.F;
     oneThreat.guards[1].east = 0.F;
     oneThreat.attackers[0] = blue::Mobile{1000.F, 0.F, 0.F, 220.F, 0.F, true};
-    auto const oneAssignment = blue::AssignThreats(oneThreat);
-    if (oneAssignment.activeThreats != 1U
-        || oneAssignment.attackerForGuard[0] != 0U
-        || oneAssignment.attackerForGuard[1] < oneThreat.attackers.size()
-        || blue::MissionPatrolReward(
-            p, oneThreat, oneThreat, oneAssignment) != 0.F)
+    if (blue::ActiveThreatCount(oneThreat) != 1U
+        || blue::MissionPatrolReward(p, oneThreat, oneThreat) != 0.F
+        || blue::MutualSupportWeight(p, oneThreat) != 1.F)
         return 22;
     auto dangerousDefense = oneThreat;
     dangerousDefense.guards[1] = dangerousDefense.guards[0];
@@ -221,30 +236,27 @@ int main()
             blue::RewardChannel::FormationSafety)] >= 0.F)
         return 35;
 
-    // Closing an assigned hostile must be better than opening the range.
+    // Joint interception progress must beat opening the range.
     auto closing = oneThreat;
     auto retreating = oneThreat;
     closing.guards[0].north = 100.F;
     retreating.guards[0].north = -100.F;
-    if (!(blue::EngagementReward(p, oneThreat, closing, oneAssignment)
-          > blue::EngagementReward(p, oneThreat, retreating, oneAssignment)))
+    if (!(blue::EngagementReward(p, oneThreat, closing)
+          > blue::EngagementReward(p, oneThreat, retreating)))
         return 23;
 
-    // Two threats release both guards from the patrol path and create a stable
-    // one-to-one assignment instead of rewarding both cars for circling.
+    // Joint coverage scores both reds without assigning an Actor target.
     auto twoThreats = oneThreat;
     twoThreats.attackers[1] = blue::Mobile{
         9000.F, 0.F, 0.F, 220.F, 0.F, true};
-    auto const twoAssignment = blue::AssignThreats(twoThreats);
-    if (twoAssignment.activeThreats != 2U
-        || twoAssignment.attackerForGuard[0] == twoAssignment.attackerForGuard[1]
-        || blue::MissionPatrolReward(
-            p, twoThreats, twoThreats, twoAssignment) != 0.F)
+    if (blue::ActiveThreatCount(twoThreats) != 2U
+        || blue::MissionPatrolReward(p, twoThreats, twoThreats) != 0.F
+        || blue::MutualSupportWeight(p, twoThreats) != 0.F)
         return 24;
     auto duplicateCoverage = twoThreats;
     duplicateCoverage.guards[1] = duplicateCoverage.guards[0];
-    if (!(blue::ThreatCoverageReward(p, twoThreats, twoAssignment)
-          > blue::ThreatCoverageReward(p, duplicateCoverage, twoAssignment)))
+    if (!(blue::EngagementReward(p, twoThreats, twoThreats)
+          > blue::EngagementReward(p, duplicateCoverage, duplicateCoverage)))
         return 28;
 
     // A remaining threat at the finite horizon is an explicit mission failure
@@ -302,7 +314,9 @@ int main()
                     + std::abs(patrol.guards[0].east - previous.guards[0].east)) < 1.F)
                 return 13;
         }
-        if (maxError > 0.25F * p.geometry.separationDistance
+        // The 800 m/s training advantage increases pure-pursuit lag; the
+        // reference remains bounded to half the requested wedge separation.
+        if (maxError > 0.5F * p.geometry.separationDistance
             || accumulatedTurn < blue::kTwoPi)
         {
             std::cerr << "reference max error=" << maxError

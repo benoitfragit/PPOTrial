@@ -21,7 +21,7 @@ class PatrolPolicy;
 /**
  * @brief One cooperative MAPPO controller for both blue defenders.
  *
- * A single IAgent guarantees that both actions and the shared reward belong to
+ * A single IAgent guarantees that both actions and their rewards belong to
  * the same ECS transition. RLtools owns one parameter-shared Actor and one
  * centralized Critic; no red controller is modified or replaced.
  */
@@ -69,8 +69,7 @@ private:
      */
     entt::entity GuardIdForRole(std::size_t role) const noexcept;
     State ReadState(Parameters const& parameters) const;
-    void UpdateDefenseState(Parameters const& parameters, State& state);
-    void ApplyCurrentDefenseState(State& state) const noexcept;
+
     std::array<Observation, 2> BuildObservations(Parameters const& parameters,
                                                 State const& state) const;
     void SaveLatest() noexcept;
@@ -96,8 +95,7 @@ private:
     std::filesystem::path productionCheckpoint_;
     PatrolEvaluationCampaign evaluation_;
     std::mt19937 trainingRng_{};
-    DefenseCoordinator defenseCoordinator_{};
-    DefenseDecision defenseDecision_{};
+
     State beforeStep_{};
     std::array<Action, 2> lastActions_{};
     RewardValues rewardValues_{};
@@ -107,7 +105,7 @@ private:
     unsigned long long id_{ppo::model::GetNewUniqId()};
     float currentReward_{0.F};
     bool hasBeforeStep_{false};
-    bool hasDefenseDecision_{false};
+
     bool episodeDone_{false};
     bool finished_{false};
     bool trainingRngSaved_{false};

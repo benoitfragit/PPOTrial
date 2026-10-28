@@ -1,7 +1,7 @@
 #pragma once
 // Canonical checkpoint serialization shared by GUI learning and the
-// optional headless utility. Version 6 separates leader racetrack inputs from
-// wingman wedge inputs and deliberately rejects older policy semantics.
+// optional headless utility. Version 7 removes external target assignments
+// and deliberately rejects policies trained under the previous semantics.
 #include "patrol_rltools.hpp"
 #include <cmath>
 #include <filesystem>
@@ -56,7 +56,7 @@ void ReadPatrolPolicyParameters(std::istream& stream, ACTOR& actor)
     unsigned version = 0U;
     unsigned input = 0U, output = 0U, hidden = 0U, layers = 0U;
     if (!(stream >> magic >> version >> input >> output >> hidden >> layers)
-        || magic != "BLUE_PATROL_MAPPO_V6"
+        || magic != "BLUE_PATROL_MAPPO_V7"
         || version != ObservationLayout::Version
         || input != ObservationLayout::Size
         || output != ObservationLayout::ActionSize
@@ -108,7 +108,7 @@ template<typename BLOCK> void WritePatrolAttention(std::ostream& os,BLOCK const&
 }
 template<typename ACTOR> void WritePatrolPolicy(std::ostream& os,ACTOR const& actor)
 {
-    os << "BLUE_PATROL_MAPPO_V6 " << ObservationLayout::Version << ' '
+    os << "BLUE_PATROL_MAPPO_V7 " << ObservationLayout::Version << ' '
        << ObservationLayout::Size << ' ' << ObservationLayout::ActionSize << ' '
        << TrainingParameters::ACTOR_HIDDEN_DIM << ' '
        << TrainingParameters::ACTOR_NUM_LAYERS << '\n'
