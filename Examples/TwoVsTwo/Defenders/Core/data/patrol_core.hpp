@@ -59,7 +59,7 @@ struct Parameters
     float cruiseSpeed = 420.F;
     float maxSpeed = 420.F;
     float maxAcceleration = 600.F;
-    float maxRotationRate = 0.42F;
+    float maxRotationRate = 0.50F;
     std::size_t episodeSteps = 4096;
     float collisionDistance = 1000.F;
     float cautionDistance = 2000.F;

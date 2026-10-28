@@ -5,7 +5,7 @@
             "CruiseSpeed": 420,
             "MaxAcceleration": 600,
             "MaxFuel": 2000000,
-            "MaxRotAcceleration": 0.42,
+            "MaxRotAcceleration": 0.5,
             "MaxSpeed": 420,
             "MinSpeed": 10
         },

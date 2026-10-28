@@ -51,7 +51,7 @@ initiale du leader et la tenue du wedge dans les demi-tours.
 
 La plateforme bleue dispose d'un léger avantage d'entraînement : vitesse de
 croisière et vitesse maximale de 420 m/s, contre 400 m/s pour les rouges,
-accélération de 600 m/s² et rotation maximale de 0,42 rad/s, contre 0,40.
+accélération de 600 m/s² et rotation maximale de 0,50 rad/s, contre 0,40.
 Sa zone SNA sans
 échappement vaut 5 km et sa zone d'engagement atteint 10 km, contre 4 et 8 km
 pour les rouges. Son domaine angulaire de destruction vaut 1,10 rad, contre

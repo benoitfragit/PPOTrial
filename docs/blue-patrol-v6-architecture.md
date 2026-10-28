@@ -96,7 +96,7 @@ aucun dans 7,5 %. Toutes les menaces sont immédiates. Les rouges utilisent
 toujours leurs modèles RLMission de production.
 
 L'avantage bleu reste local et léger : croisière et maximum à 420 m/s,
-accélération de 600 m/s², rotation à 0,42 rad/s et domaine angulaire de
+accélération de 600 m/s², rotation à 0,50 rad/s et domaine angulaire de
 destruction à 1,10 rad, contre 400 m/s, 0,40 rad/s et 1,047198 rad pour les
 rouges.
 Il ne fait l'objet d'aucun nouveau commit.
