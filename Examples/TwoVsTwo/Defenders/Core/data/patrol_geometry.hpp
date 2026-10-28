@@ -1,5 +1,7 @@
 #pragma once
 
+#include "blue_team_roles.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -332,6 +334,135 @@ inline PatrolCurvePose EvaluateWedgePose(
         leader.east - backward * tangentEast + inward * inwardEast,
         leader.heading, leader.arclength, leader.phase, leader.curvature
     };
+}
+
+/**
+ * @brief Builds one generalized teammate pose from its stable formation slot.
+ * @param geometry Episode patrol and V-formation geometry.
+ * @param leader Current leader reference pose.
+ * @param formationSlot Zero-based teammate slot in `[0, 7]`.
+ * @return Leader-relative teammate pose, or the leader pose for an invalid
+ * slot or invalid formation geometry.
+ */
+inline PatrolCurvePose EvaluateFormationPose(
+    PatrolGeometry const& geometry,
+    PatrolCurvePose const& leader,
+    std::size_t const formationSlot) noexcept
+{
+    FormationOffset const offset = EvaluateFormationOffset(
+        formationSlot, geometry.separationDistance,
+        geometry.separationAngle);
+    if (formationSlot >= TeamCapacity::MaximumBlueMobiles - 1U
+        || (offset.longitudinalMeters == 0.F
+            && offset.inwardMeters == 0.F))
+    {
+        return leader;
+    }
+
+    float const tangentNorth = std::cos(leader.heading);
+    float const tangentEast = std::sin(leader.heading);
+    float const inward = static_cast<float>(geometry.direction)
+        * offset.inwardMeters;
+    PatrolCurvePose result = leader;
+    result.north += offset.longitudinalMeters * tangentNorth
+        - inward * tangentEast;
+    result.east += offset.longitudinalMeters * tangentEast
+        + inward * tangentNorth;
+    return result;
+}
+
+/**
+ * @brief Checks every active generalized blue spawn against world bounds.
+ * @param geometry Episode patrol and formation geometry.
+ * @param settings Boundary margin configured for the patrol.
+ * @param constraints Current world and vehicle constraints.
+ * @param activeBlueCount Number of active blue mobiles in `[1, 9]`.
+ * @param arclength Candidate leader arclength on the patrol circuit.
+ * @return True when the leader and all active teammate slots are finite and
+ * remain inside the configured world margin.
+ */
+inline bool GeneralizedFormationFitsBounds(
+    PatrolGeometry const& geometry,
+    PatrolGeometrySettings const& settings,
+    PatrolSamplingConstraints const& constraints,
+    std::size_t const activeBlueCount,
+    float const arclength) noexcept
+{
+    if (activeBlueCount < TeamCapacity::MinimumBlueMobiles
+        || activeBlueCount > TeamCapacity::MaximumBlueMobiles
+        || !std::isfinite(arclength)
+        || !std::isfinite(settings.boundaryMarginMeters)
+        || settings.boundaryMarginMeters < 0.F
+        || !std::isfinite(constraints.halfNorth)
+        || !std::isfinite(constraints.halfEast)
+        || constraints.halfNorth <= 0.F || constraints.halfEast <= 0.F)
+    {
+        return false;
+    }
+
+    auto const insideBounds = [&](PatrolCurvePose const& pose) noexcept {
+        return std::isfinite(pose.north) && std::isfinite(pose.east)
+            && std::abs(pose.north) + settings.boundaryMarginMeters
+                <= constraints.halfNorth
+            && std::abs(pose.east) + settings.boundaryMarginMeters
+                <= constraints.halfEast;
+    };
+
+    PatrolCurvePose const leader = EvaluatePatrolCurve(
+        geometry, arclength);
+    if (!insideBounds(leader))
+        return false;
+    for (std::size_t formationSlot = 0U;
+         formationSlot + 1U < activeBlueCount; ++formationSlot)
+    {
+        if (!insideBounds(EvaluateFormationPose(
+                geometry, leader, formationSlot)))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * @brief Samples a bounded generalized-team spawn phase reproducibly.
+ * @param geometry Already validated episode patrol geometry.
+ * @param settings Patrol settings and bounded-attempt budget.
+ * @param constraints Current world and vehicle constraints.
+ * @param activeBlueCount Number of active blue mobiles in `[1, 9]`.
+ * @param rng Explicit episode generator.
+ * @return A phase for which all active blue poses fit, or `std::nullopt` when
+ * the bounded attempt sequence is exhausted.
+ */
+inline std::optional<float> SampleGeneralizedFormationArclength(
+    PatrolGeometry const& geometry,
+    PatrolGeometrySettings const& settings,
+    PatrolSamplingConstraints const& constraints,
+    std::size_t const activeBlueCount,
+    std::mt19937& rng)
+{
+    if (activeBlueCount < TeamCapacity::MinimumBlueMobiles
+        || activeBlueCount > TeamCapacity::MaximumBlueMobiles
+        || settings.maximumSamplingAttempts == 0U)
+    {
+        return std::nullopt;
+    }
+
+    float const circuit = CircuitLength(geometry);
+    if (!std::isfinite(circuit) || circuit <= 0.F)
+        return std::nullopt;
+    std::uniform_real_distribution<float> phaseDistribution{0.F, circuit};
+    for (std::size_t attempt = 0U;
+         attempt < settings.maximumSamplingAttempts; ++attempt)
+    {
+        float const candidate = phaseDistribution(rng);
+        if (GeneralizedFormationFitsBounds(
+                geometry, settings, constraints, activeBlueCount, candidate))
+        {
+            return candidate;
+        }
+    }
+    return std::nullopt;
 }
 
 /**

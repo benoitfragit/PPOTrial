@@ -94,6 +94,50 @@ void TestBlueNearMiss()
             "1.2 km blue near miss was treated as a collision");
 }
 
+void TestGeneralizedBluePairCoverage()
+{
+    using namespace ppo::model;
+
+    entt::registry world;
+    world.ctx().emplace<sEnvironmentState>().m_dt = 0.2F;
+    WorldEntities entities;
+    entities.reserve(9U);
+    for (std::size_t index = 0U; index < 9U; ++index)
+    {
+        auto blue = std::make_shared<Entity>(
+            &world, eEntitySide::Friend, eEntityType::Mobile);
+        auto [state] = blue->get<sEntityState>();
+        state.m_x = 100000.F + 10000.F * static_cast<float>(index);
+        state.m_y = 100000.F + 10000.F * static_cast<float>(index);
+        entities.push_back(std::move(blue));
+    }
+    auto [first] = entities[3U]->get<sEntityState>();
+    auto [second] = entities[8U]->get<sEntityState>();
+    first.m_x = -40.F;
+    first.m_y = 0.F;
+    first.m_dx = 400.F;
+    second.m_x = 40.F;
+    second.m_y = 0.F;
+    second.m_dx = -400.F;
+
+    ppo::examples::twovstwo::TwoVsTwoWorldRules rules;
+    rules.BeforeStep(entities);
+    first.m_x += first.m_dx * 0.2F;
+    second.m_x += second.m_dx * 0.2F;
+    rules.Resolve(entities);
+
+    Require(first.m_destroyed && second.m_destroyed,
+            "runtime collision scan omitted a non-leading generalized pair");
+    for (std::size_t index = 0U; index < entities.size(); ++index)
+    {
+        if (index == 3U || index == 8U)
+            continue;
+        auto const [state] = entities[index]->get<sEntityState>();
+        Require(!state.m_destroyed,
+                "runtime generalized pair scan destroyed an unrelated blue");
+    }
+}
+
 void TestDeterministicRestrictedZonePenetration()
 {
     using namespace ppo::model;
@@ -211,14 +255,76 @@ void TestDelayedThreatActivation()
     rules.BeforeStep(entities);
     Require(delayedState.m_destroyed && disabledState.m_destroyed,
             "a delayed threat activated before its scheduled step");
+    Require(ppo::examples::twovstwo::HasPendingThreats(
+                *context.episodeLayout, context.elapsedSteps),
+            "the delayed threat was not reported pending before its step");
     rules.Resolve(entities);
     Require(context.elapsedSteps == 1U,
             "the threat curriculum clock did not follow the ECS step");
+    Require(ppo::examples::twovstwo::HasPendingThreats(
+                *context.episodeLayout, context.elapsedSteps),
+            "the runtime would terminate before the delayed threat activates");
     rules.BeforeStep(entities);
     Require(!delayedState.m_destroyed && !delayedState.m_prevDestroyed,
             "the delayed threat was not activated on schedule");
     Require(disabledState.m_destroyed,
             "a never-scheduled threat was activated");
+    rules.Resolve(entities);
+    Require(!ppo::examples::twovstwo::HasPendingThreats(
+                *context.episodeLayout, context.elapsedSteps),
+            "an activated threat remained pending after its ECS step");
+}
+
+void TestGeneralizedThreatActivationByMetadataIndex()
+{
+    using namespace ppo::model;
+    using ppo::examples::twovstwo::EpisodeSpawnLayout;
+    using ppo::examples::twovstwo::InitializerContext;
+
+    entt::registry world;
+    world.ctx().emplace<sEnvironmentState>().m_dt = 0.2F;
+    auto& context = world.ctx().emplace<InitializerContext>();
+    context.episodeLayout.emplace();
+    context.episodeLayout->redActivationSteps.assign(
+        10U, EpisodeSpawnLayout::NeverActivate);
+    context.episodeLayout->redActivationSteps[2U] = 7U;
+    context.episodeLayout->redActivationSteps[9U] = 7U;
+    context.elapsedSteps = 7U;
+
+    auto red3 = std::make_shared<Entity>(
+        &world, eEntitySide::Hostile, eEntityType::Mobile);
+    red3->add<sEntityMetadata>(sEntityMetadata{"red_3", "attacker_car"});
+    auto red10 = std::make_shared<Entity>(
+        &world, eEntitySide::Hostile, eEntityType::Mobile);
+    red10->add<sEntityMetadata>(sEntityMetadata{"red_10", "attacker_car"});
+    auto malformed = std::make_shared<Entity>(
+        &world, eEntitySide::Hostile, eEntityType::Mobile);
+    malformed->add<sEntityMetadata>(
+        sEntityMetadata{"red_03", "attacker_car"});
+    auto wrongSide = std::make_shared<Entity>(
+        &world, eEntitySide::Friend, eEntityType::Mobile);
+    wrongSide->add<sEntityMetadata>(
+        sEntityMetadata{"red_3", "defender_car"});
+
+    auto [red3State] = red3->get<sEntityState>();
+    auto [red10State] = red10->get<sEntityState>();
+    auto [malformedState] = malformed->get<sEntityState>();
+    auto [wrongSideState] = wrongSide->get<sEntityState>();
+    red3State.m_destroyed = red3State.m_prevDestroyed = true;
+    red10State.m_destroyed = red10State.m_prevDestroyed = true;
+    malformedState.m_destroyed = malformedState.m_prevDestroyed = true;
+    wrongSideState.m_destroyed = wrongSideState.m_prevDestroyed = true;
+
+    WorldEntities entities{red3, red10, malformed, wrongSide};
+    ppo::examples::twovstwo::TwoVsTwoWorldRules rules;
+    rules.BeforeStep(entities);
+
+    Require(!red3State.m_destroyed && !red10State.m_destroyed,
+            "generalized delayed threats did not activate by metadata index");
+    Require(malformedState.m_destroyed,
+            "a non-canonical red metadata name was activated");
+    Require(wrongSideState.m_destroyed,
+            "a friendly mobile consumed a red activation slot");
 }
 
 void TestPatrolOverlaySnapshot()
@@ -288,9 +394,11 @@ int main()
     {
         TestSweptBlueCollision();
         TestBlueNearMiss();
+        TestGeneralizedBluePairCoverage();
         TestDeterministicRestrictedZonePenetration();
         TestFriendlyRestrictedZoneStillAffectsRed();
         TestDelayedThreatActivation();
+        TestGeneralizedThreatActivationByMetadataIndex();
         TestPatrolOverlaySnapshot();
         TestBlueRolePermutationContract();
         return 0;

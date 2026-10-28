@@ -9,7 +9,8 @@ ExampleCatalog CreateExampleCatalog()
     // Keep Airspace first so the existing no-argument startup is unchanged.
     return ExampleCatalog{ppo::examples::airspace::Definition(),
                           ppo::examples::twovstwo::Definition(),
-                          ppo::examples::twovstwo::BluePatrolDefinition()};
+                          ppo::examples::twovstwo::BluePatrolDefinition(),
+                          ppo::examples::twovstwo::GeneralizedPvsNDefinition()};
 }
 
 } // namespace ppo::app

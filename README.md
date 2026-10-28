@@ -1,8 +1,10 @@
 # PPOTrial
 
 PPOTrial est un simulateur C++17 d'apprentissage par renforcement multi-agent.
-La branche courante ajoute une équipe de deux défenseurs bleus entraînée avec
-MAPPO/RLTools face aux attaquants rouges RLMission existants.
+Le scénario distribué conserve son chemin historique à deux défenseurs bleus
+MAPPO/RLTools face aux attaquants rouges RLMission. Un contrat optionnel permet
+en plus d'instancier de 1 à 9 bleus face à 0 à 10 rouges sans modifier ce chemin
+legacy lorsque les nouveaux champs sont absents.
 
 ## Démarrage rapide
 
@@ -12,6 +14,7 @@ Depuis un terminal Visual Studio configuré pour C++ :
 cmake --build out/build/x64-Debug --config Debug --target PPO
 out/build/x64-Debug/Main/Debug/PPO.exe --example blue-patrol
 out/build/x64-Debug/Main/Debug/PPO.exe --example two-vs-two
+out/build/x64-Debug/Main/Debug/PPO.exe --example p-vs-n
 ~~~
 
 Le chemin exact de l'exécutable dépend du générateur CMake. Le projet impose
@@ -23,6 +26,18 @@ actuellement x64 ; les builds Debug sont recommandés pour le diagnostic.
 - `blue-patrol` : deux bleus MAPPO apprennent la patrouille sans ennemi ;
 - `two-vs-two` : deux bleus MAPPO protègent l'objectif dans un curriculum à
   zéro, un ou deux rouges pilotés par RLMission.
+- `p-vs-n` : scénario généralisé isolé, configuré initialement en `P=2, N=2`,
+  qui entraîne l'acteur v8 et l'état complet v5 sans écrire dans les fichiers
+  historiques v7/v4.
+
+Le scénario `p-vs-n` matérialise `blue_1..blue_P` et `red_1..red_N` depuis les
+templates typés du JSON. `blueTeam.activeCount` accepte 1 à 9 et
+`redTeam.activeCount` 0 à 10. L'absence de `blueTeam` conserve strictement le
+chemin historique à deux gardes. Les sorties généralisées sont exclusivement
+`blue_patrol_generalized_v8.txt` et
+`blue_patrol_generalized_training_v5.txt` dans `BluePatrol/latest` ; les
+checkpoints `blue_patrol_mappo_v7.txt` et `blue_patrol_training_v4.txt` restent
+des sources de migration en lecture seule.
 
 Dans le sélecteur, ces entrées sont libellées explicitement `BLUE PATROL ONLY
 - NO RED` et `TWO VS TWO - MAPPO vs RLMission`. Le second scénario conserve
@@ -113,8 +128,70 @@ reprise reste possible avec ces fichiers; un nouvel entraînement sert seulement
 Dans le scénario TwoVsTwo, la barre de la vue tactique propose `Show patrol
 track`. Cette option dessine l'unique piste du leader et son sens dans la vue 3D et la
 minimap ; elle n'existe pas dans Airspace et n'influence jamais la simulation.
-Le champ de scénario `blueController` accepte `mappo` ou `reference`, ce qui
-permet le même affichage avec ou sans PPO.
+Sur les scénarios historiques, le champ `blueController` accepte `mappo` ou
+`reference`, ce qui permet le même affichage avec ou sans PPO. La présence de
+`blueTeam` exige le contrôleur MAPPO généralisé.
+
+## Équipes P contre N optionnelles
+
+Les champs `twoVsTwo.blueTeam` et `twoVsTwo.redTeam` sont additifs. Leur
+absence sélectionne exactement le chargement 2v2 historique, ses noms
+`blue_guard_1`, `blue_guard_2`, `red_1`, `red_2`, son curriculum et ses
+checkpoints v7/v4. Les deux scénarios historiques continuent donc à les
+omettre ; l'entrée séparée `Scenarios/PvsN.json` les fournit explicitement.
+`blueTeam` sélectionne le runtime bleu généralisé et `redTeam` y dimensionne
+les attaquants.
+
+~~~json
+"blueTeam": {
+  "activeCount": 5
+},
+"redTeam": {
+  "activeCount": 7,
+  "maximumPlacementAttempts": 512,
+  "delayedActivationProbability": 0.25,
+  "minimumActivationDelaySteps": 256,
+  "maximumActivationDelaySteps": 768
+}
+~~~
+
+`blueTeam.activeCount` accepte `[1,9]` et `redTeam.activeCount` accepte
+`[0,10]`. Le chargeur génère alors `blue_1..blue_P` à partir d'un unique
+template bleu et `red_1..red_N` à partir d'un unique template RLMission de
+production. Le placement rouge est borné par `maximumPlacementAttempts`
+(`[1,4096]`) et échoue avec un diagnostic si `minimumSeparation` est
+impossible ; les délais sont positifs, finis et ordonnés.
+
+À chaque reset, `BlueTeamRoles` choisit exactement un leader. Les autres bleus
+reçoivent des slots stables et distincts sur une formation en V, avec un index
+normalisé dans `[-1,1]`. `GeneralizedPatrolMappoAgent` échantillonne les P
+actions avant la physique puis remet exactement P transitions du même pas
+d'équipe à `GeneralizedPatrolLearner`; une voiture détruite conserve son slot
+mais son masque d'apprentissage devient nul.
+
+L'observation généralisée v8 sépare le stockage brut de 295 valeurs du tronc
+MLP compact de 156 valeurs. Elle réserve dix pistes rouges, huit autres bleus,
+un objectif distinct, des masques explicites, le rôle/slot, P/N normalisés et
+exactement 61 rayons issus du `sPseudoLidarState` ECS. L'attention et les
+poolings masqués sont invariants à l'ordre des pistes. Les zones restreintes
+restent dans le LiDAR/SAM et ne consomment jamais l'une des dix pistes classées
+de RLMission.
+
+Le chemin généralisé écrit `blue_patrol_generalized_v8.txt` et
+`blue_patrol_generalized_training_v5.txt`. Un acteur v7 peut amorcer l'acteur
+v8 avec une sortie 2v2 équivalente à `1e-6`. La migration explicite d'un état
+v4 ne reprend que l'acteur et ses moments Adam compatibles : critique, états
+d'optimiseur non compatibles, RNG, compteur et rollout repartent à neuf. Les
+fichiers v7/v4 restent la source de repli du chemin legacy et ne doivent jamais
+être supprimés ou écrasés par cette migration.
+
+À chaque frontière d'update configurée, le runtime P/N suspend la collecte et
+évalue les moyennes déterministes de l'acteur dans le vrai ECS. Les resets sont
+reproductibles par seed et miroir. Survie bleue, neutralisation rouge, survie
+de l'objectif et succès sont normalisés épisode par épisode par P et N avant
+agrégation. Seul un meilleur candidat est promu séparément dans
+`BluePatrol/prod/blue_patrol_generalized_v8.txt` ; cette campagne ne modifie ni
+le rollout, ni le RNG d'apprentissage, ni les artefacts legacy v7/v4.
 
 ## Documentation
 
@@ -126,10 +203,20 @@ permet le même affichage avec ou sans PPO.
 
 ## Validation
 
+Boucle rapide pendant le développement :
+
 ~~~powershell
-ctest --test-dir out/build/x64-Debug -C Debug -R "TwoVsTwo|BluePatrol" --output-on-failure
+cmake --build out/build/x64-Debug --config Debug --target TwoVsTwoSpawnTests TwoVsTwoTeamDomainTests TwoVsTwoTeamDynamicsTests TwoVsTwoGeneralizedActorTests TwoVsTwoGeneralizedRuntimeStateTests TwoVsTwoGeneralizedLearnerTests TwoVsTwoGeneralizedRewardEvaluationTests MissionTrackSelectionTests --parallel 4
+ctest --test-dir out/build/x64-Debug -C Debug -R "^(TwoVsTwoSpawnTests|TwoVsTwoTeamDomainTests|TwoVsTwoTeamDynamicsTests|TwoVsTwoGeneralized.*|MissionTrackSelectionTests)$" --output-on-failure
+~~~
+
+Validation finale, plus lourde, avant fusion :
+
+~~~powershell
+ctest --test-dir out/build/x64-Debug -C Debug -R "TwoVsTwoPatrolRuntimeSmoke|TwoVsTwoCombatRuntimeSmoke|TwoVsTwoEmbeddedLearnerSmoke" --output-on-failure
 out/build/x64-Debug/Main/Debug/PPO.exe --example blue-patrol --check-example
 out/build/x64-Debug/Main/Debug/PPO.exe --example two-vs-two --check-example
+out/build/x64-Debug/Main/Debug/PPO.exe --example p-vs-n --check-example
 ~~~
 
 Les modèles rouges `resources/model/RLMission/**/*.pt` et leur contrat réseau

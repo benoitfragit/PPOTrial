@@ -2,18 +2,21 @@
 
 ## Objectif
 
-Les deux défenseurs bleus apprennent une politique coopérative pour tenir une
-patrouille et protéger l'objectif contre les attaquants rouges. Un unique
-`PatrolMappoAgent` pilote les deux bleus avec un acteur partagé et un critique
-centralisé. Les rouges du scénario `two-vs-two` restent pilotés par le
+Les défenseurs bleus apprennent une politique coopérative pour tenir une
+patrouille et protéger l'objectif contre les attaquants rouges. Le chemin
+historique emploie `PatrolMappoAgent` pour deux bleus ; le chemin P/N optionnel
+emploie `GeneralizedPatrolMappoAgent` pour 1 à 9 bleus. Les rouges restent
+pilotés individuellement par le
 `RLMission` de production existant ; son code, ses observations et ses modèles
 ne sont pas modifiés.
 
-Deux scénarios sont disponibles dans `PPO.exe` :
+Trois scénarios sont disponibles dans `PPO.exe` :
 
 - `blue-patrol` entraîne la tenue de patrouille sans attaquant ;
 - `two-vs-two` entraîne la protection face à zéro, un ou deux rouges RLMission,
-  éventuellement activés en cours d'épisode.
+  éventuellement activés en cours d'épisode, sur le chemin v7/v4 historique ;
+- `p-vs-n` active le runtime généralisé v8/v5, configurable de P=1..9 et
+  N=0..10 dans `Scenarios/PvsN.json`.
 
 `Play` démarre la simulation et la collecte on-policy. `Pause` suspend aussi la
 collecte et `Stop` arrête la boucle d'environnement. RLTools n'ajoute pas de
@@ -21,7 +24,8 @@ thread de simulation caché.
 
 ## Patrouille
 
-Le circuit en hippodrome suit l'axe est/ouest, qui est l'axe long du monde
+Sur le chemin 2v2 historique, le circuit en hippodrome suit l'axe est/ouest,
+qui est l'axe long du monde
 configuré. Les demi-tours se font près des extrémités est et ouest. Il n'existe
 qu'une piste : seul le leader y est projeté. L'équipier suit directement la
 pose du leader avec un décalage arrière/intérieur défini par le wedge ; il ne
@@ -46,7 +50,7 @@ d'éviter des vitesses contradictoires entre entraînement et exécution.
 
 ## MAPPO et CTDE
 
-Le contrôleur applique le cycle ECS normal :
+Le contrôleur 2v2 historique applique le cycle ECS normal :
 
 1. lire les deux observations locales et l'état d'équipe ;
 2. échantillonner les deux actions avec l'acteur partagé ;
@@ -76,8 +80,8 @@ inférence. Aucun coordinateur ne fournit de cible imposée aux acteurs.
 
 ## Observation locale et attention masquée
 
-L'observation complète contient 156 flottants : 124 locaux et 32 réservés au
-critique. La partie locale contient notamment :
+L'observation v7 du chemin historique contient 156 flottants : 124 locaux et
+32 réservés au critique. La partie locale contient notamment :
 
 - l'état propre et 61 rayons pseudo-LiDAR ;
 - deux pistes rouges de 13 valeurs ;
@@ -108,8 +112,60 @@ Les pistes invalides ne contribuent ni au contexte, ni au pooling, ni aux
 gradients. Les pistes amies utilisent une branche séparée construite sur le
 même principe.
 
-Les règles du monde testent aussi les trajectoires balayées des deux voitures
-bleues entre deux pas ECS. Une distance minimale inférieure ou égale à 1 km
+## Contrat généralisé P/N
+
+Le runtime bleu généralisé est activé par la présence de `blueTeam` dans
+l'objet `twoVsTwo`; `redTeam` dimensionne les attaquants sur ce chemin.
+L'absence des deux blocs garde le chemin 2v2 legacy inchangé.
+`blueTeam.activeCount` accepte `[1,9]` et `redTeam.activeCount` `[0,10]`.
+L'entrée `p-vs-n` renseigne les deux blocs explicitement, alors que les
+scénarios historiques continuent à les omettre.
+
+`BlueTeamRoles` tire exactement un leader par épisode. Les autres indices
+physiques obtiennent des slots de formation uniques `0..P-2`, stables pendant
+l'épisode, alternés de chaque côté puis reculés par rangées pour former le V.
+Le rôle et le slot normalisé dans `[-1,1]` font partie de l'observation.
+
+Le cycle d'un pas reste strictement synchronisé :
+
+1. construire les P observations depuis le même état ECS ;
+2. évaluer une seule fois l'acteur partagé et produire P actions ;
+3. laisser la physique et les règles résoudre le pas ;
+4. enregistrer exactement P transitions avec le même index de pas d'équipe.
+
+Une voiture détruite garde son indice stable mais son masque d'apprentissage
+vaut zéro. Le learner préalloue son rollout et l'acteur ses matrices de travail
+RLTools : ses chemins critiques `evaluate`, `forward` et `backward` ne font pas
+d'allocation dynamique par appel.
+
+`GeneralizedObservationLayout` définit une représentation brute v8 de 295
+valeurs. Elle contient 7 valeurs propres, exactement 61 rayons LiDAR ECS, le
+rôle/slot, 10 pistes rouges de 13 valeurs, 8 autres bleus de 9 valeurs,
+l'objectif séparé sur 9 valeurs, puis patrouille, données globales et P/N
+normalisés. Le dernier champ de chaque piste est son masque.
+
+Cette représentation brute n'est pas injectée directement dans les couches
+denses. `GeneralizedAttentionActor` applique aux ensembles rouges et amis une
+attention, une moyenne et un maximum masqués, invariants à leur ordre, puis
+construit un tronc compact de 156 valeurs. Les P/N et le slot utilisent des
+colonnes historiquement nulles ; le suffixe central privilégié reste masqué.
+Le runtime copie les 61 rayons depuis `sPseudoLidarState`, exactement comme le
+chemin bleu v7.
+
+Les `RestrictedZone` ne sont jamais des pistes mobiles : elles restent dans le
+LiDAR/SAM dédié et ne consomment aucune des dix pistes classées de RLMission.
+Seuls les `Mobile` et `Objective` opposés peuvent occuper ces dix slots, ce qui
+préserve l'observation rouge de 152 valeurs.
+
+Le spawn P/N est borné. Chaque rouge teste au plus
+`redTeam.maximumPlacementAttempts` candidats, configuration limitée à 4096,
+en respectant `redSpawn.minimumSeparation`. Une géométrie impossible produit
+un diagnostic. Les délais d'activation sont positifs, finis et ordonnés ; un
+`redTeam` généralisé ne peut pas être combiné avec le curriculum 2v2 actif.
+
+Sur le chemin historique, les règles du monde testent aussi les trajectoires
+balayées des deux voitures bleues entre deux pas ECS. Une distance minimale
+inférieure ou égale à 1 km
 détruit les deux véhicules, publie les deux explosions et termine l'épisode
 avec la pénalité de mission, même si les voitures se sont croisées entre deux
 positions échantillonnées. Le canal `Formation safety` applique une pénalité
@@ -233,7 +289,7 @@ complet, il indique explicitement qu'aucune mise à jour n'est encore disponible
 - le clamp de récompense ;
 - les sept coefficients nommés.
 
-Le contrat d'acteur courant est v7. Le candidat acteur est écrit dans
+Le contrat d'acteur du chemin historique est v7. Le candidat acteur est écrit dans
 `resources/model/BluePatrol/latest/blue_patrol_mappo_v7.txt` ; seul le meilleur
 acteur évalué est écrit dans
 `resources/model/BluePatrol/prod/blue_patrol_mappo_v7.txt`. Au redémarrage,
@@ -253,16 +309,52 @@ poids conditionnés par les anciennes affectations ne sont pas réutilisés.
 Les anciens fichiers sont conservés sur disque et ignorés par les chemins v7/v4.
 Les fichiers `.pt` de RLMission ne sont jamais écrits par ce contrôleur.
 
+Le chemin P/N possède des noms séparés :
+
+- `latest/blue_patrol_generalized_v8.txt` pour l'acteur d'inférence ;
+- `latest/blue_patrol_generalized_training_v5.txt` pour l'état complet.
+- `prod/blue_patrol_generalized_v8.txt` pour le meilleur acteur évalué.
+
+L'évaluation P/N démarre uniquement à une frontière d'update (première update,
+cadence `checkpointEvery`, puis fin). Elle emploie les moyennes déterministes
+du même acteur partagé : aucun tirage gaussien, aucune transition de rollout et
+aucune avancée du RNG RLTools. Le seed de campagne et les phases miroir rendent
+les resets ECS reproductibles, tout en conservant les vrais contrôleurs rouges
+RLMission et les zones du scénario. Les taux de survie bleue et de
+neutralisation rouge sont d'abord divisés par P et N pour chaque épisode
+(`N=0` vaut neutralisation complète), puis moyennés avec la survie de
+l'objectif, la qualité leader/slots, le succès et les timeouts. La promotion
+v8 et son `.score` P/N sont séparés de la promotion historique v7.
+
+Au premier démarrage sans v8/v5, `GeneralizedPatrolMappoAgent` peut charger un
+acteur v7 et migrer les encodeurs, requêtes, tronc, sortie et écart-type
+compatibles. Les trois nouvelles colonnes ont poids et moments nuls ; la sortie
+2v2 est vérifiée à `1e-6`. La méthode explicite
+`GeneralizedPatrolLearner::MigrateV4TrainingState` sait aussi lire un état v4,
+mais ne reprend que l'acteur et ses moments Adam compatibles. Le critique fixe
+2v2, les états scalaires des optimiseurs, le RNG, le compteur et le rollout
+sont réinitialisés. Ce n'est pas une reprise bit-à-bit de l'entraînement.
+
+Ne jamais supprimer `blue_patrol_mappo_v7.txt` ni
+`blue_patrol_training_v4.txt` : ils restent utilisés par le scénario legacy et
+servent de sources de migration. Les écritures v8/v5 sont atomiques et portent
+P, N et les capacités compilées ; une version incorrecte ou un fichier tronqué
+est refusé.
+
 ## Build et validation
 
-Le code est en C++17. Exemple de build Visual Studio Debug :
+Le code est en C++17. Boucle rapide de développement Visual Studio Debug :
 
 ~~~powershell
-cmake --build out/build/x64-Debug --config Debug --target PPO
-ctest --test-dir out/build/x64-Debug -C Debug -R "TwoVsTwo|BluePatrol" --output-on-failure
+cmake --build out/build/x64-Debug --config Debug --target TwoVsTwoSpawnTests TwoVsTwoTeamDomainTests TwoVsTwoTeamDynamicsTests TwoVsTwoGeneralizedActorTests TwoVsTwoGeneralizedRuntimeStateTests TwoVsTwoGeneralizedLearnerTests TwoVsTwoGeneralizedRewardEvaluationTests MissionTrackSelectionTests --parallel 4
+ctest --test-dir out/build/x64-Debug -C Debug -R "^(TwoVsTwoSpawnTests|TwoVsTwoTeamDomainTests|TwoVsTwoTeamDynamicsTests|TwoVsTwoGeneralized.*|MissionTrackSelectionTests)$" --output-on-failure
 ~~~
 
-Le projet impose actuellement la plateforme x64 dans sa configuration CMake.
-Les smoke tests valident les scénarios avec et sans rouges, les observations
-masquées, l'attention, le rollout MAPPO, la physique et l'évaluation. Ils
+La validation finale ajoute le build `PPO`, les smoke tests
+`TwoVsTwoPatrolRuntimeSmoke`, `TwoVsTwoCombatRuntimeSmoke` et
+`TwoVsTwoEmbeddedLearnerSmoke`, puis `PPO.exe --example p-vs-n
+--check-example`. Le projet impose actuellement la plateforme x64 dans sa
+configuration CMake. Les smoke tests valident les scénarios avec et sans
+rouges, les observations masquées, l'attention, le rollout MAPPO, la physique
+et l'évaluation. Ils
 valident le chemin logiciel, pas la convergence finale de la politique.

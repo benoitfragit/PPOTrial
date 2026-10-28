@@ -7,7 +7,8 @@ add_library(PPOTwoVsTwoSpawn STATIC
     src/spawn_config.cpp)
 target_compile_features(PPOTwoVsTwoSpawn PUBLIC cxx_std_17)
 target_include_directories(PPOTwoVsTwoSpawn PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    "${CMAKE_CURRENT_SOURCE_DIR}/data"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Defenders/Core/data")
 target_link_libraries(PPOTwoVsTwoSpawn PUBLIC nlohmann_json::nlohmann_json)
 
 add_library(PPOTwoVsTwoExample STATIC
@@ -36,6 +37,15 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     target_compile_features(TwoVsTwoCollisionRulesTests PRIVATE cxx_std_17)
     target_link_libraries(TwoVsTwoCollisionRulesTests PRIVATE PPOTwoVsTwoExample)
     add_test(NAME TwoVsTwoCollisionRulesTests COMMAND TwoVsTwoCollisionRulesTests)
+
+    add_executable(TwoVsTwoGeneralizedInitializerTests
+        tests/generalized_initializer_tests.cpp)
+    target_compile_features(TwoVsTwoGeneralizedInitializerTests
+        PRIVATE cxx_std_17)
+    target_link_libraries(TwoVsTwoGeneralizedInitializerTests
+        PRIVATE PPOTwoVsTwoExample)
+    add_test(NAME TwoVsTwoGeneralizedInitializerTests
+        COMMAND TwoVsTwoGeneralizedInitializerTests)
 
     # Regression: Play must advance both guards in the GUI ECS even when
     # neither one has a trained PPO checkpoint available.

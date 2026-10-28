@@ -16,7 +16,8 @@ resources/settings/
 ├── Scenarios/
 │   ├── BluePatrol.json           curriculum de patrouille sans rouge
 │   ├── Playground.json           composition du monde principal
-│   ├── TwoVsTwo.json             défense MAPPO face à RLMission
+│   ├── TwoVsTwo.json             défense MAPPO 2v2 historique
+│   ├── PvsN.json                 défense MAPPO P/N généralisée
 │   └── Evaluation/
 │       ├── RLMission.json        composition et limites des tests
 │       └── RLSNA.json
@@ -185,8 +186,10 @@ les profils LibTorch historiques :
 }
 ~~~
 
-Ici, `rolloutSteps` compte les pas ECS de l'équipe. Chaque pas fournit deux
-transitions au buffer, une par défenseur. Les valeurs applicatives proposées
+Ici, `rolloutSteps` compte les pas ECS de l'équipe. Sur le chemin 2v2 legacy,
+chaque pas fournit deux transitions au buffer, une par défenseur. Sur le chemin
+P/N optionnel décrit plus bas, il fournit exactement P transitions. Les valeurs
+applicatives proposées
 sont 512, 1024, 2048 et 4096 ; 128 reste la taille interne d'un mini-batch PPO.
 Les modifications faites dans l'IHM s'appliquent à la session en cours. Pour
 un nouveau démarrage reproductible, modifier le JSON lorsque l'application est
@@ -269,6 +272,85 @@ le contrôleur, l'observation 152 et les checkpoints RLMission rouges ne sont
 pas modifiés. La règle SNA probabiliste de la zone bleue historique reste elle
 aussi active contre les rouges ; seule l'arme des nouvelles zones hostiles est
 remplacée par la pénétration déterministe exacte pour les bleus.
+
+### Équipes P/N optionnelles
+
+`Scenarios/PvsN.json` fournit une entrée de catalogue séparée `p-vs-n`. Le
+runtime bleu généralisé est sélectionné par `blueTeam`; `redTeam` dimensionne
+ses adversaires. Les deux blocs restent optionnels dans l'objet `twoVsTwo` :
+
+~~~json
+"blueTeam": {
+  "activeCount": 5
+},
+"redTeam": {
+  "activeCount": 7,
+  "maximumPlacementAttempts": 512,
+  "delayedActivationProbability": 0.25,
+  "minimumActivationDelaySteps": 256,
+  "maximumActivationDelaySteps": 768
+}
+~~~
+
+L'absence de `blueTeam` et `redTeam` conserve intégralement le chemin 2v2
+historique, y compris ses noms, son ordre de tirage RNG, son curriculum et ses
+checkpoints v7/v4. `blueTeam.activeCount` est obligatoire lorsqu'un bloc bleu
+est présent et doit être un entier dans `[1,9]`. `redTeam.activeCount` doit être
+dans `[0,10]`. Les champs inconnus sont refusés.
+
+Le scénario P/N utilise un unique `Mobile/Friend` sans agent comme template
+pour `blue_1..blue_P`, et un unique `Mobile/Hostile` avec exactement un profil
+`RLMission/production` comme template de `red_1..red_N`. Le contrôleur bleu
+partagé est `GeneralizedPatrolMappoAgent`; chaque rouge conserve son propre
+RLMission. Un `redTeam` généralisé et un `threatCurriculum` actif sont
+mutuellement exclusifs.
+
+`maximumPlacementAttempts` est borné à `[1,4096]` et limite strictement le coût
+du placement de chaque rouge sous la contrainte `redSpawn.minimumSeparation`.
+Une impossibilité géométrique provoque un diagnostic. La probabilité de délai
+est dans `[0,1]`; `minimumActivationDelaySteps` et
+`maximumActivationDelaySteps` doivent être strictement positifs, finis et
+ordonnés. Les activations sont exprimées en pas ECS d'équipe.
+
+À chaque reset, `BlueTeamRoles` choisit exactement un leader. Chaque autre
+indice physique reçoit un slot unique en V et une valeur normalisée dans
+`[-1,1]`. Les P actions sont échantillonnées ensemble avant la physique et les
+P transitions du même instant sont enregistrées ensemble après la résolution.
+
+Le contrat d'observation v8 contient 295 valeurs brutes : état propre,
+exactement 61 rayons LiDAR issus de `sPseudoLidarState`, rôle/slot, dix pistes
+rouges, huit autres pistes bleues, objectif séparé, masques et P/N. L'acteur
+transforme cette représentation par attention/moyenne/maximum masqués vers un
+tronc compact de 156 valeurs. Les zones ne consomment aucune des dix pistes
+RLMission : elles restent dans le canal SAM/pseudo-LiDAR dédié.
+
+Le chemin P/N écrit `blue_patrol_generalized_v8.txt` et
+`blue_patrol_generalized_training_v5.txt`. Un v7 peut amorcer l'acteur v8. La
+migration v4 explicite ne copie que l'acteur et ses moments Adam compatibles ;
+le critique fixe 2v2, les états scalaires des optimiseurs, le RNG, le compteur
+et le rollout sont réinitialisés. Conserver impérativement
+`blue_patrol_mappo_v7.txt` et `blue_patrol_training_v4.txt` : ils restent les
+checkpoints du chemin historique et les sources de migration, jamais des
+fichiers à supprimer.
+
+La section `evaluation` est aussi appliquée au runtime P/N, sans nouveau champ
+JSON : `episodes`, `maxSteps` et `seed` pilotent une campagne déterministe à la
+première update puis toutes les `checkpointEvery` updates. Les actions sont les
+moyennes de l'acteur v8 et ne créent aucune transition d'apprentissage. Les
+métriques sont normalisées par P et N avant leur moyenne ; une amélioration
+écrit exclusivement `prod/blue_patrol_generalized_v8.txt` et son `.score`
+portant les cardinalités. Les fichiers de production v7 restent indépendants.
+
+Tests rapides de configuration et du cœur P/N :
+
+~~~powershell
+cmake --build out/build/x64-Debug --config Debug --target TwoVsTwoSpawnTests TwoVsTwoTeamDomainTests TwoVsTwoTeamDynamicsTests TwoVsTwoGeneralizedActorTests TwoVsTwoGeneralizedRuntimeStateTests TwoVsTwoGeneralizedLearnerTests TwoVsTwoGeneralizedRewardEvaluationTests MissionTrackSelectionTests --parallel 4
+ctest --test-dir out/build/x64-Debug -C Debug -R "^(TwoVsTwoSpawnTests|TwoVsTwoTeamDomainTests|TwoVsTwoTeamDynamicsTests|TwoVsTwoGeneralized.*|MissionTrackSelectionTests)$" --output-on-failure
+~~~
+
+Les smoke tests runtime/learner et `PPO.exe --example p-vs-n --check-example`
+sont une validation finale plus lourde, à exécuter avant fusion plutôt qu'à
+chaque petite modification.
 
 ## Scénarios et cas d'évaluation
 

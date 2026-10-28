@@ -87,6 +87,41 @@ int main()
     if (!fixedA || !fixedB || !Same(*fixedA, *fixedB))
         return 3;
 
+    if (patrol::GeneralizedFormationFitsBounds(
+            *fixedA, fixed, constraints, 9U, 0.F))
+    {
+        return 8;
+    }
+    std::mt19937 formationRng{71U};
+    auto const boundedFormation =
+        patrol::SampleGeneralizedFormationArclength(
+            *fixedA, fixed, constraints, 9U, formationRng);
+    if (!boundedFormation
+        || !patrol::GeneralizedFormationFitsBounds(
+            *fixedA, fixed, constraints, 9U, *boundedFormation)
+        || patrol::GeneralizedFormationFitsBounds(
+            *fixedA, fixed, constraints, 0U, *boundedFormation)
+        || patrol::GeneralizedFormationFitsBounds(
+            *fixedA, fixed, constraints, 10U, *boundedFormation))
+    {
+        return 9;
+    }
+
+    auto const leader = patrol::EvaluatePatrolCurve(
+        *fixedA, *boundedFormation);
+    for (std::size_t slot = 0U; slot < 8U; ++slot)
+    {
+        auto const teammate = patrol::EvaluateFormationPose(
+            *fixedA, leader, slot);
+        if (std::abs(teammate.north) + fixed.boundaryMarginMeters
+                > constraints.halfNorth
+            || std::abs(teammate.east) + fixed.boundaryMarginMeters
+                > constraints.halfEast)
+        {
+            return 10;
+        }
+    }
+
     float const circuit = patrol::CircuitLength(*first);
     for (std::size_t sample = 0U; sample < 128U; ++sample)
     {

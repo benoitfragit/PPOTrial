@@ -185,6 +185,101 @@ bool ParseRestrictedZones(nlohmann::json const& settings,
     return true;
 }
 
+bool ParseRedTeam(nlohmann::json const& settings,
+                  SpawnSettings& result,
+                  std::string& diagnostic)
+{
+    auto const item = settings.find("redTeam");
+    if (item == settings.end())
+        return true;
+    if (!item->is_object())
+    {
+        diagnostic = "redTeam must be an object";
+        return false;
+    }
+    if (!OnlyKeys(*item,
+            {"activeCount", "maximumPlacementAttempts",
+             "delayedActivationProbability",
+             "minimumActivationDelaySteps",
+             "maximumActivationDelaySteps"},
+            "redTeam", diagnostic))
+        return false;
+
+    auto const count = Step(*item, "activeCount");
+    auto const attempts = Step(*item, "maximumPlacementAttempts");
+    auto const delayed = Number(*item, "delayedActivationProbability");
+    auto const minimumDelay = Step(*item, "minimumActivationDelaySteps");
+    auto const maximumDelay = Step(*item, "maximumActivationDelaySteps");
+    if (!count)
+    {
+        diagnostic = "redTeam.activeCount must be an unsigned integer in [0, "
+            + std::to_string(defenders::TeamCapacity::MaximumRedMobiles)
+            + "]";
+        return false;
+    }
+    if (*count > defenders::TeamCapacity::MaximumRedMobiles)
+    {
+        diagnostic = "redTeam.activeCount exceeds MaximumRedMobiles="
+            + std::to_string(defenders::TeamCapacity::MaximumRedMobiles);
+        return false;
+    }
+    if (!attempts || *attempts == 0U
+        || *attempts > RedTeamSpawnSettings::MaximumPlacementAttempts)
+    {
+        diagnostic = "redTeam.maximumPlacementAttempts must be in [1, "
+            + std::to_string(
+                RedTeamSpawnSettings::MaximumPlacementAttempts) + "]";
+        return false;
+    }
+    if (!delayed || *delayed < 0.F || *delayed > 1.F)
+    {
+        diagnostic = "redTeam.delayedActivationProbability must be in [0, 1]";
+        return false;
+    }
+    if (!minimumDelay || !maximumDelay || *minimumDelay == 0U
+        || *minimumDelay > *maximumDelay
+        || *maximumDelay >= EpisodeSpawnLayout::NeverActivate / 2U)
+    {
+        diagnostic = "redTeam activation delay steps must be positive, finite and ordered";
+        return false;
+    }
+
+    result.redTeam = RedTeamSpawnSettings{
+        *count, *attempts, *delayed, {*minimumDelay, *maximumDelay}};
+    return true;
+}
+
+bool ParseBlueTeam(nlohmann::json const& settings,
+                   SpawnSettings& result,
+                   std::string& diagnostic)
+{
+    auto const item = settings.find("blueTeam");
+    if (item == settings.end())
+        return true;
+    if (!item->is_object()
+        || !OnlyKeys(*item, {"activeCount"}, "blueTeam", diagnostic))
+    {
+        if (diagnostic.empty())
+            diagnostic = "blueTeam must be an object";
+        return false;
+    }
+
+    auto const count = Step(*item, "activeCount");
+    if (!count
+        || *count < defenders::TeamCapacity::MinimumBlueMobiles
+        || *count > defenders::TeamCapacity::MaximumBlueMobiles)
+    {
+        diagnostic = "blueTeam.activeCount must be an unsigned integer in ["
+            + std::to_string(defenders::TeamCapacity::MinimumBlueMobiles)
+            + ", "
+            + std::to_string(defenders::TeamCapacity::MaximumBlueMobiles)
+            + "]";
+        return false;
+    }
+    result.blueTeam = BlueTeamSpawnSettings{*count};
+    return true;
+}
+
 } // namespace
 
 std::optional<SpawnSettings> ParseSpawnSettings(
@@ -201,12 +296,20 @@ std::optional<SpawnSettings> ParseSpawnSettings(
         return fail("twoVsTwo must be an object");
     auto const red2Probability = Number(
         settings, "red2InitiallyDestroyedProbability");
+    auto const red2Item = settings.find(
+        "red2InitiallyDestroyedProbability");
     auto const redItem = settings.find("redSpawn");
     auto const friendlyZoneItem = settings.find("restrictedZoneSpawn");
-    if (!red2Probability || redItem == settings.end() || !redItem->is_object()
+    bool const hasGeneralizedRedTeam = settings.contains("redTeam");
+    if (red2Item != settings.end() && !red2Probability)
+        return fail("red2InitiallyDestroyedProbability must be finite and numeric");
+    if ((!hasGeneralizedRedTeam && !red2Probability)
+        || redItem == settings.end() || !redItem->is_object()
         || friendlyZoneItem == settings.end()
         || !friendlyZoneItem->is_object())
-        return fail("twoVsTwo requires red2InitiallyDestroyedProbability, redSpawn and restrictedZoneSpawn");
+        return fail(hasGeneralizedRedTeam
+            ? "twoVsTwo requires redSpawn and restrictedZoneSpawn"
+            : "archived 2-vs-2 requires red2InitiallyDestroyedProbability, redSpawn and restrictedZoneSpawn");
 
     auto const minimumScale = Number(*redItem, "minimumWorldScale");
     auto const maximumScale = Number(*redItem, "maximumWorldScale");
@@ -229,7 +332,7 @@ std::optional<SpawnSettings> ParseSpawnSettings(
         return fail("redSpawn or restrictedZoneSpawn contains a missing or non-finite numeric value");
 
     SpawnSettings result{};
-    result.red2DestroyedProbability = *red2Probability;
+    result.red2DestroyedProbability = red2Probability.value_or(0.F);
     result.red.worldScale = {*minimumScale, *maximumScale};
     result.red.bearingRadians = {
         *minimumBearing * kDegreesToRadians,
@@ -241,6 +344,10 @@ std::optional<SpawnSettings> ParseSpawnSettings(
         *minimumNorth, *maximumNorth};
     result.friendlyRestrictedZone.eastFraction = {
         *minimumEast, *maximumEast};
+    if (!ParseRedTeam(settings, result, error))
+        return fail(error);
+    if (!ParseBlueTeam(settings, result, error))
+        return fail(error);
     if (!ParseRestrictedZones(settings, result, error))
         return fail(error);
 
@@ -280,6 +387,8 @@ std::optional<SpawnSettings> ParseSpawnSettings(
         curriculum.firstDelaySteps = {*minimumFirst, *maximumFirst};
         curriculum.secondDelaySteps = {*minimumSecond, *maximumSecond};
     }
+    if (result.redTeam && result.threatCurriculum.enabled)
+        return fail("redTeam and enabled threatCurriculum are mutually exclusive");
     if (!Valid(result))
         return fail("twoVsTwo spawn settings are internally inconsistent");
     if (diagnostic != nullptr)

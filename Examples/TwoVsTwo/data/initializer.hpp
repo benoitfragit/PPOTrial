@@ -1,5 +1,6 @@
 #pragma once
 #include "entity.hpp"
+#include "blue_team_roles.hpp"
 #include "patrol_geometry.hpp"
 #include "sharedworldcomponents.hpp"
 #include "spawn.hpp"
@@ -38,10 +39,14 @@ struct InitializerContext {
     bool patrolGeometryReady{false};
     /** @brief Signals an exhausted bounded sampling attempt sequence. */
     bool patrolGeometrySamplingFailed{false};
+    /** @brief Signals that bounded red-team placement failed for the episode. */
+    bool episodeLayoutGenerationFailed{false};
     /** @brief Monotonic episode number used by diagnostics. */
     std::uint64_t episodeIndex{};
     /** @brief Physical blue-guard index assigned leader role for this episode. */
     std::size_t leaderGuardIndex{};
+    /** @brief Generalized exactly-one-leader assignment, absent on legacy 2v2. */
+    std::optional<defenders::BlueTeamRoles> blueTeamRoles{};
     float arclength{0.F};
     bool evaluationOverride{false};
     int evaluationSide{1};

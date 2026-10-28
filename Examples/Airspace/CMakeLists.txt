@@ -34,6 +34,15 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     target_compile_features(AirspaceWorldRulesTests PRIVATE cxx_std_17)
     target_link_libraries(AirspaceWorldRulesTests PRIVATE PPOAirspaceExample)
     add_test(NAME AirspaceWorldRulesTests COMMAND AirspaceWorldRulesTests)
+
+    add_executable(MissionTrackSelectionTests
+        tests/mission_track_selection_tests.cpp)
+    target_compile_features(MissionTrackSelectionTests PRIVATE cxx_std_17)
+    target_include_directories(MissionTrackSelectionTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/Agents/mission/data"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Agents/mission/src")
+    target_link_libraries(MissionTrackSelectionTests PRIVATE GenericEntities)
+    add_test(NAME MissionTrackSelectionTests COMMAND MissionTrackSelectionTests)
 endif()
 
 # Registration must preserve the same concrete factory and reflection names.

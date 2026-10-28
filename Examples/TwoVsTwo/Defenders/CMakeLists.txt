@@ -28,6 +28,22 @@ if (PPO_BUILD_PATROL_TOOLS)
 endif()
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
+    add_executable(TwoVsTwoTeamDomainTests Tests/team_domain_tests.cpp)
+    target_link_libraries(TwoVsTwoTeamDomainTests PRIVATE
+        TwoVsTwoDefenderBackend)
+    add_test(NAME TwoVsTwoTeamDomainTests COMMAND TwoVsTwoTeamDomainTests)
+    add_executable(TwoVsTwoTeamDynamicsTests Tests/team_dynamics_tests.cpp)
+    target_link_libraries(TwoVsTwoTeamDynamicsTests PRIVATE
+        TwoVsTwoDefenderBackend)
+    add_test(NAME TwoVsTwoTeamDynamicsTests COMMAND TwoVsTwoTeamDynamicsTests)
+    add_executable(TwoVsTwoGeneralizedRewardEvaluationTests
+        Tests/generalized_reward_evaluation_tests.cpp)
+    target_link_libraries(TwoVsTwoGeneralizedRewardEvaluationTests PRIVATE
+        TwoVsTwoDefenderBackend)
+    target_compile_features(TwoVsTwoGeneralizedRewardEvaluationTests PRIVATE
+        cxx_std_17)
+    add_test(NAME TwoVsTwoGeneralizedRewardEvaluationTests
+        COMMAND TwoVsTwoGeneralizedRewardEvaluationTests)
     add_executable(TwoVsTwoPatrolDefenseTests Tests/patrol_defense_tests.cpp)
     target_link_libraries(TwoVsTwoPatrolDefenseTests PRIVATE
         TwoVsTwoDefenderBackend)
@@ -43,6 +59,28 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     target_link_libraries(TwoVsTwoAttentionTests PRIVATE TwoVsTwoDefenderBackend)
     target_compile_features(TwoVsTwoAttentionTests PRIVATE cxx_std_17)
     add_test(NAME TwoVsTwoAttentionTests COMMAND TwoVsTwoAttentionTests)
+    add_executable(TwoVsTwoGeneralizedActorTests
+        Tests/generalized_actor_tests.cpp)
+    target_link_libraries(TwoVsTwoGeneralizedActorTests PRIVATE
+        TwoVsTwoDefenderBackend)
+    target_compile_features(TwoVsTwoGeneralizedActorTests PRIVATE cxx_std_17)
+    add_test(NAME TwoVsTwoGeneralizedActorTests
+        COMMAND TwoVsTwoGeneralizedActorTests)
+    add_executable(TwoVsTwoGeneralizedRuntimeStateTests
+        Tests/generalized_runtime_state_tests.cpp)
+    target_link_libraries(TwoVsTwoGeneralizedRuntimeStateTests PRIVATE
+        TwoVsTwoDefenderBackend)
+    target_compile_features(TwoVsTwoGeneralizedRuntimeStateTests PRIVATE
+        cxx_std_17)
+    add_test(NAME TwoVsTwoGeneralizedRuntimeStateTests
+        COMMAND TwoVsTwoGeneralizedRuntimeStateTests)
+    add_executable(TwoVsTwoGeneralizedLearnerTests
+        Tests/generalized_learner_tests.cpp)
+    target_link_libraries(TwoVsTwoGeneralizedLearnerTests PRIVATE
+        TwoVsTwoDefenderBackend)
+    target_compile_features(TwoVsTwoGeneralizedLearnerTests PRIVATE cxx_std_17)
+    add_test(NAME TwoVsTwoGeneralizedLearnerTests
+        COMMAND TwoVsTwoGeneralizedLearnerTests)
     add_executable(TwoVsTwoEmbeddedLearnerSmoke Tests/patrol_training_smoke.cpp)
     target_link_libraries(TwoVsTwoEmbeddedLearnerSmoke PRIVATE TwoVsTwoDefenderBackend)
     add_test(NAME TwoVsTwoEmbeddedLearnerSmoke COMMAND TwoVsTwoEmbeddedLearnerSmoke)
@@ -55,24 +93,49 @@ endif()
 
 # One cooperative MAPPO IAgent controls both blue defenders in one ECS step.
 add_library(TwoVsTwoPatrolRuntime STATIC
+    Core/data/blue_team_roles.hpp
+    Core/data/generalized_observation.hpp
+    Core/data/generalized_cooperative_reward.hpp
+    Core/data/generalized_team_dynamics.hpp
     Core/data/patrol_agent.hpp
     Core/data/patrol_config.hpp
     Core/data/patrol_defense.hpp
     Core/data/patrol_geometry.hpp
+    Core/data/team_capacity.hpp
+    Evaluation/data/generalized_evaluation_campaign.hpp
+    Evaluation/data/generalized_evaluation_metrics.hpp
     Evaluation/data/patrol_evaluation_campaign.hpp
     Evaluation/data/patrol_evaluation_settings.hpp
     Runtime/data/patrol_policy.hpp
+    Runtime/data/generalized_patrol_team_agent.hpp
+    Runtime/data/generalized_runtime_state.hpp
     Runtime/data/patrol_reference_agent.hpp
     Runtime/data/patrol_reference_controller.hpp
     Runtime/data/patrol_team_agent.hpp
     Runtime/src/patrol_reference_agent.cpp
+    Runtime/src/generalized_patrol_team_agent.cpp
     Runtime/src/patrol_team_agent.cpp
     Training/data/attention_actor.hpp
+    Training/data/generalized_attention_actor.hpp
+    Training/data/generalized_checkpoint.hpp
+    Training/data/generalized_patrol_learner.hpp
+    Training/data/generalized_training_checkpoint.hpp
     Training/data/patrol_checkpoint.hpp
     Training/data/patrol_learner.hpp
     Training/data/patrol_training_checkpoint.hpp
     Training/data/patrol_training_settings.hpp)
 target_compile_features(TwoVsTwoPatrolRuntime PUBLIC cxx_std_17)
+# RLTools' CPU backend currently defines two non-inline helper functions in
+# public headers. Keep both MAPPO implementations in one generated unity unit
+# so those definitions are emitted exactly once, while the reference agent
+# remains an ordinary, independently compiled source file.
+set_target_properties(TwoVsTwoPatrolRuntime PROPERTIES
+    UNITY_BUILD ON
+    UNITY_BUILD_MODE GROUP)
+set_source_files_properties(
+    Runtime/src/patrol_team_agent.cpp
+    Runtime/src/generalized_patrol_team_agent.cpp
+    PROPERTIES UNITY_GROUP PatrolRlTools)
 target_include_directories(TwoVsTwoPatrolRuntime PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../data")
 target_link_libraries(TwoVsTwoPatrolRuntime PUBLIC

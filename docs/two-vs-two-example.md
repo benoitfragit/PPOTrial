@@ -22,7 +22,7 @@ Le monde est le rectangle centré défini par `Environment.json`. Avec les
 valeurs distribuées, l'axe est/ouest est plus long que l'axe nord/sud. La
 patrouille bleue suit donc l'axe est/ouest.
 
-Le scénario contient :
+Sans contrat P/N optionnel, le scénario contient :
 
 - deux défenseurs bleus pilotés ensemble par `PatrolMappoAgent` et RLTools ;
 - un objectif bleu à protéger ;
@@ -119,6 +119,11 @@ sont jamais concernés par ces zones rouges. Le pseudo-LiDAR bleu réutilise san
 rayons RLMission/SAM et son rayon d'avertissement de 110 %; les zones détruites,
 désactivées ou du même camp sont ignorées.
 
+Les zones restent hors des dix pistes classées de RLMission : seuls les
+`Mobile` et `Objective` opposés peuvent consommer ces slots. Les zones restent
+observables par le chemin SAM/pseudo-LiDAR dédié ; l'observation RLMission de
+152 valeurs et ses checkpoints ne dépendent donc jamais du nombre de zones.
+
 ## Responsabilités des modules
 
 `Examples/Shared/World` fournit les entités 2D, la cinématique, les commandes
@@ -133,8 +138,9 @@ masquée et les poolings moyen/max masqués agrègent ces pistes. Le détail du
 contrat se trouve dans [blue-ppo-patrol.md](blue-ppo-patrol.md).
 
 Le format, le réseau, le LiDAR et les checkpoints RLMission ne changent pas.
-Les modèles rouges restent sous `resources/model/RLMission/`. L'acteur bleu
-reste en v7 avec exactement 156 valeurs, dont les mêmes 61 emplacements LiDAR.
+Les modèles rouges restent sous `resources/model/RLMission/`. Le chemin bleu
+legacy reste en v7 avec exactement 156 valeurs, dont les mêmes 61 emplacements
+LiDAR. Le chemin P/N est décrit ci-dessous.
 
 ## Affichage et entraînement
 
@@ -165,3 +171,93 @@ rouges. La validation principale couvre :
 - la présence des observations rouges et des récompenses dans les snapshots ;
 - une mise à jour MAPPO complète en smoke test ;
 - la patrouille sur l'axe long et les règles de terminaison.
+
+## Runtime généralisé séparé
+
+L'entrée de catalogue `p-vs-n` utilise `Scenarios/PvsN.json`. Elle est séparée
+de `two-vs-two` afin que le scénario, les checkpoints v7/v4 et le comportement
+historique restent disponibles sans conversion implicite. Le JSON livré
+démarre à P=2/N=2 ; les valeurs `blueTeam.activeCount` et
+`redTeam.activeCount` dimensionnent les équipes dans les capacités 1..9 et
+0..10.
+
+À chaque reset, un unique leader est tiré avec le seed d'entraînement. Les
+autres bleus gardent un slot distinct et stable en formation V. Les rouges
+restent chacun pilotés par leur agent RLMission de production.
+
+Les objets `blueTeam` et `redTeam` restent néanmoins optionnels dans le parseur
+TwoVsTwo. `blueTeam` sélectionne le runtime bleu généralisé et `redTeam` y
+dimensionne les attaquants. Leur absence sélectionne strictement le chemin 2v2
+historique, son ordre RNG, son curriculum et ses checkpoints v7/v4. Dans
+`PvsN.json`, le bloc est de la forme :
+
+~~~json
+"blueTeam": {
+  "activeCount": 5
+},
+"redTeam": {
+  "activeCount": 7,
+  "maximumPlacementAttempts": 512,
+  "delayedActivationProbability": 0.25,
+  "minimumActivationDelaySteps": 256,
+  "maximumActivationDelaySteps": 768
+}
+~~~
+
+`blueTeam.activeCount` accepte les entiers `[1,9]`. Le chargeur clone un seul
+template `Mobile/Friend` sans agent sous les noms `blue_1..blue_P`, puis crée
+un `GeneralizedPatrolMappoAgent` partagé. `redTeam.activeCount` accepte
+`[0,10]`; un seul template `Mobile/Hostile` ciblant `blue_objective` et portant
+exactement `RLMission/production` produit `red_1..red_N`. N=0 ne crée aucun
+rouge. `redTeam` et le `threatCurriculum` legacy actif sont mutuellement
+exclusifs.
+
+Le placement de chaque rouge respecte `redSpawn.minimumSeparation`. Il essaie
+au plus `maximumPlacementAttempts` candidats, valeur elle-même bornée à
+`[1,4096]`, puis échoue avec un diagnostic si la géométrie est impossible. La
+probabilité de délai reste dans `[0,1]`; les bornes d'activation sont des pas
+d'équipe strictement positifs, finis et ordonnés. Aucun de ces contrôles
+n'introduit une boucle non bornée.
+
+`BlueTeamRoles` choisit exactement un leader à chaque reset. Les P-1 autres
+indices physiques obtiennent des slots uniques `0..P-2`, alternés
+intérieur/extérieur puis reculés par rangées pour former le V. Leur slot
+normalisé se trouve dans `[-1,1]`. Le contrôleur lit P observations d'un même
+instant, produit P actions avant la physique et enregistre exactement P
+transitions portant le même numéro de pas après la résolution ECS. Une entité
+détruite conserve son slot stable mais son masque d'apprentissage devient nul.
+
+L'observation brute v8 contient 295 flottants : état propre, exactement 61
+rayons `sPseudoLidarState` ECS, rôle/slot, dix pistes rouges, huit autres bleus,
+un objectif séparé, patrouille, données globales et P/N normalisés. Le dernier
+champ de chaque piste est un masque explicite. L'attention, la moyenne et le
+maximum masqués produisent ensuite le tronc compact de 156 valeurs consommé
+par le MLP ; le padding n'est jamais interprété comme une entité.
+
+Le runtime P/N écrit `blue_patrol_generalized_v8.txt` et
+`blue_patrol_generalized_training_v5.txt`. Sans v8/v5, il peut migrer un acteur
+v7. L'API explicite `MigrateV4TrainingState` reprend depuis v4 uniquement
+l'acteur et les premiers/deuxièmes moments Adam compatibles : le critique 2v2,
+les états scalaires des optimiseurs, le RNG, le compteur et le rollout sont
+réinitialisés. Les fichiers `blue_patrol_mappo_v7.txt` et
+`blue_patrol_training_v4.txt` restent nécessaires au chemin legacy et ne
+doivent jamais être supprimés.
+
+Aux frontières d'update, une campagne P/N distincte joue des actions
+déterministes dans le vrai ECS sans alimenter le rollout. Ses resets seedés et
+miroirs sont reproductibles. Elle publie un score composé de métriques
+normalisées par P/N (survie bleue, neutralisation rouge, objectif, succès,
+leader et slots) et promeut uniquement un meilleur acteur vers
+`prod/blue_patrol_generalized_v8.txt`. Le scénario `two-vs-two` et sa promotion
+v7 restent sur leur chemin historique.
+
+Boucle rapide pendant le développement :
+
+~~~powershell
+cmake --build out/build/x64-Debug --config Debug --target TwoVsTwoSpawnTests TwoVsTwoTeamDomainTests TwoVsTwoTeamDynamicsTests TwoVsTwoGeneralizedActorTests TwoVsTwoGeneralizedRuntimeStateTests TwoVsTwoGeneralizedLearnerTests TwoVsTwoGeneralizedRewardEvaluationTests MissionTrackSelectionTests --parallel 4
+ctest --test-dir out/build/x64-Debug -C Debug -R "^(TwoVsTwoSpawnTests|TwoVsTwoTeamDomainTests|TwoVsTwoTeamDynamicsTests|TwoVsTwoGeneralized.*|MissionTrackSelectionTests)$" --output-on-failure
+~~~
+
+Les smoke tests `TwoVsTwoPatrolRuntimeSmoke`, `TwoVsTwoCombatRuntimeSmoke` et
+`TwoVsTwoEmbeddedLearnerSmoke`, puis `--check-example`, sont réservés à la
+validation finale plus lourde avant fusion.

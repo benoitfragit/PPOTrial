@@ -10,7 +10,10 @@
 #include "patrol_core.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
+#include <optional>
+#include <string_view>
 
 namespace {
 
@@ -41,6 +44,31 @@ float MinimumStepSeparation(ppo::model::sEntityState const& first,
         : 0.F;
     return std::hypot(previousNorth + closestTime * deltaNorth,
                       previousEast + closestTime * deltaEast);
+}
+
+/**
+ * @brief Decodes the stable one-based `red_<index>` runtime metadata.
+ * @param name Entity metadata name.
+ * @return Zero-based red-team index, or no value for malformed metadata.
+ */
+std::optional<std::size_t> RedEntityIndex(std::string_view name) noexcept
+{
+    constexpr std::string_view prefix{"red_"};
+    if (name.size() <= prefix.size()
+        || name.substr(0U, prefix.size()) != prefix)
+        return std::nullopt;
+
+    std::string_view const suffix = name.substr(prefix.size());
+    if (suffix.front() == '0')
+        return std::nullopt;
+    std::size_t oneBasedIndex = 0U;
+    auto const result = std::from_chars(
+        suffix.data(), suffix.data() + suffix.size(), oneBasedIndex);
+    if (result.ec != std::errc{}
+        || result.ptr != suffix.data() + suffix.size()
+        || oneBasedIndex == 0U)
+        return std::nullopt;
+    return oneBasedIndex - 1U;
 }
 
 } // namespace
@@ -164,15 +192,17 @@ void TwoVsTwoWorldRules::ActivateScheduledThreats(
                                     ppo::model::sEntityMetadata>())
             continue;
         auto const& [metadata] = entity->get<ppo::model::sEntityMetadata>();
-        std::size_t red = metadata.m_name == "red_1" ? 0U
-            : metadata.m_name == "red_2" ? 1U
-            : context.episodeLayout->redActivationSteps.size();
-        if (red >= context.episodeLayout->redActivationSteps.size()
-            || context.episodeLayout->redActivationSteps[red]
+        auto [state] = entity->get<ppo::model::sEntityState>();
+        if (state.m_type != ppo::model::eEntityType::Mobile
+            || state.m_side != ppo::model::eEntitySide::Hostile)
+            continue;
+        auto const red = RedEntityIndex(metadata.m_name);
+        if (!red
+            || *red >= context.episodeLayout->redActivationSteps.size()
+            || context.episodeLayout->redActivationSteps[*red]
                 != context.elapsedSteps)
             continue;
 
-        auto [state] = entity->get<ppo::model::sEntityState>();
         state.m_destroyed = false;
         state.m_prevDestroyed = false;
         state.m_destroyedById = entt::null;

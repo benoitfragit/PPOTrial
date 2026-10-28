@@ -59,13 +59,15 @@ bool Same(Spawn const& first, Spawn const& second) noexcept
 bool Same(EpisodeSpawnLayout const& first,
           EpisodeSpawnLayout const& second) noexcept
 {
-    if (first.side != second.side || !Same(first.red[0], second.red[0])
-        || !Same(first.red[1], second.red[1])
+    if (first.side != second.side || first.red.size() != second.red.size()
         || first.redActivationSteps != second.redActivationSteps
         || !Same(first.friendlyRestrictedZone,
                  second.friendlyRestrictedZone)
         || first.restrictedZones.size() != second.restrictedZones.size())
         return false;
+    for (std::size_t i = 0U; i < first.red.size(); ++i)
+        if (!Same(first.red[i], second.red[i]))
+            return false;
     for (std::size_t i = 0U; i < first.restrictedZones.size(); ++i)
         if (first.restrictedZones[i].id != second.restrictedZones[i].id
             || !Same(first.restrictedZones[i].spawn,
@@ -248,7 +250,8 @@ int main()
                       single->redActivationSteps.end(),
                       EpisodeSpawnLayout::NeverActivate) != 1
         || !HasPendingThreats(*single, 0U)
-        || HasPendingThreats(*single, 10U))
+        || !HasPendingThreats(*single, 10U)
+        || HasPendingThreats(*single, 11U))
         return 20;
 
     auto staggeredSettings = settings;
@@ -268,7 +271,8 @@ int main()
         || std::count(pair->redActivationSteps.begin(),
                       pair->redActivationSteps.end(), 20U) != 1
         || !HasPendingThreats(*pair, 0U)
-        || HasPendingThreats(*pair, 20U))
+        || !HasPendingThreats(*pair, 20U)
+        || HasPendingThreats(*pair, 21U))
         return 21;
 
     auto invalidCurriculum = settings;
@@ -372,6 +376,135 @@ int main()
     if (!noZoneLayout || !noZoneLayout->restrictedZones.empty()
         || MakeSpawn("zone_fixed", *noZoneLayout, world, noZoneRng))
         return 24;
+
+    auto noRedSettings = settings;
+    noRedSettings.redTeam =
+        ppo::examples::twovstwo::RedTeamSpawnSettings{};
+    noRedSettings.redTeam->activeCount = 0U;
+    std::mt19937 noRedRng{31U};
+    auto const noRed = GenerateEpisodeSpawnLayout(
+        1, noRedSettings, world, noRedRng, &diagnostic);
+    if (!noRed || !diagnostic.empty() || !noRed->red.empty()
+        || !noRed->redActivationSteps.empty()
+        || MakeSpawn("red_1", *noRed, world, noRedRng))
+        return 27;
+
+    auto maximumRedSettings = settings;
+    maximumRedSettings.red.minimumSeparation = 1000.F;
+    maximumRedSettings.redTeam =
+        ppo::examples::twovstwo::RedTeamSpawnSettings{};
+    auto& maximumTeam = *maximumRedSettings.redTeam;
+    maximumTeam.activeCount =
+        ppo::examples::twovstwo::defenders::TeamCapacity::MaximumRedMobiles;
+    maximumTeam.maximumPlacementAttempts = 4096U;
+    maximumTeam.delayedActivationProbability = 1.F;
+    maximumTeam.activationDelaySteps = {17U, 17U};
+    std::mt19937 maximumRng{32U};
+    auto const maximum = GenerateEpisodeSpawnLayout(
+        -1, maximumRedSettings, world, maximumRng, &diagnostic);
+    std::mt19937 maximumRepeatRng{32U};
+    auto const maximumRepeated = GenerateEpisodeSpawnLayout(
+        -1, maximumRedSettings, world, maximumRepeatRng);
+    if (!maximum || !maximumRepeated || !diagnostic.empty()
+        || !Same(*maximum, *maximumRepeated)
+        || maximum->red.size() != maximumTeam.activeCount
+        || maximum->redActivationSteps.size() != maximumTeam.activeCount)
+        return 28;
+    for (std::size_t red = 0U; red < maximum->red.size(); ++red)
+    {
+        if (!maximum->red[red].destroyed
+            || maximum->redActivationSteps[red] != 17U)
+            return 29;
+        for (std::size_t other = red + 1U;
+             other < maximum->red.size(); ++other)
+            if (std::hypot(
+                    maximum->red[red].north - maximum->red[other].north,
+                    maximum->red[red].east - maximum->red[other].east)
+                + 1.e-3F < maximumRedSettings.red.minimumSeparation)
+                return 30;
+    }
+    if (!MakeSpawn("red_10", *maximum, world, maximumRng)
+        || MakeSpawn("red_11", *maximum, world, maximumRng)
+        || MakeSpawn("red_01", *maximum, world, maximumRng))
+        return 31;
+
+    auto immediateSettings = maximumRedSettings;
+    immediateSettings.redTeam->delayedActivationProbability = 0.F;
+    std::mt19937 immediateRng{33U};
+    auto const immediate = GenerateEpisodeSpawnLayout(
+        1, immediateSettings, world, immediateRng);
+    if (!immediate
+        || std::any_of(immediate->red.begin(), immediate->red.end(),
+                       [](Spawn const& red) { return red.destroyed; })
+        || std::any_of(immediate->redActivationSteps.begin(),
+                       immediate->redActivationSteps.end(),
+                       [](std::size_t step) { return step != 0U; }))
+        return 32;
+
+    auto impossibleGeneralized = maximumRedSettings;
+    impossibleGeneralized.red.minimumSeparation = 1.e9F;
+    impossibleGeneralized.redTeam->maximumPlacementAttempts = 3U;
+    std::mt19937 impossibleRng{34U};
+    if (GenerateEpisodeSpawnLayout(
+            1, impossibleGeneralized, world, impossibleRng, &diagnostic)
+        || diagnostic.find("red_2") == std::string::npos
+        || diagnostic.find("3 attempts") == std::string::npos)
+        return 33;
+
+    auto generalizedJson = json;
+    generalizedJson.erase("red2InitiallyDestroyedProbability");
+    generalizedJson.erase("threatCurriculum");
+    generalizedJson["redTeam"] = {
+        {"activeCount", 10U},
+        {"maximumPlacementAttempts", 512U},
+        {"delayedActivationProbability", 0.25},
+        {"minimumActivationDelaySteps", 12U},
+        {"maximumActivationDelaySteps", 24U}};
+    auto const parsedGeneralized = ParseSpawnSettings(
+        generalizedJson, &diagnostic);
+    if (!parsedGeneralized || !parsedGeneralized->redTeam
+        || parsedGeneralized->redTeam->activeCount != 10U
+        || parsedGeneralized->red2DestroyedProbability != 0.F
+        || !diagnostic.empty())
+        return 34;
+    generalizedJson["redTeam"]["activeCount"] = 11U;
+    if (ParseSpawnSettings(generalizedJson, &diagnostic)
+        || diagnostic.find("MaximumRedMobiles") == std::string::npos)
+        return 35;
+
+    generalizedJson["redTeam"]["activeCount"] = 2U;
+    generalizedJson["threatCurriculum"] = json["threatCurriculum"];
+    if (ParseSpawnSettings(generalizedJson, &diagnostic)
+        || diagnostic.find("mutually exclusive") == std::string::npos)
+        return 36;
+
+    generalizedJson.erase("threatCurriculum");
+    generalizedJson["redTeam"] = "invalid";
+    if (ParseSpawnSettings(generalizedJson, &diagnostic)
+        || diagnostic.find("must be an object") == std::string::npos)
+        return 37;
+
+    auto blueTeamJson = json;
+    blueTeamJson["blueTeam"] = {{"activeCount", 1U}};
+    auto parsedBlueTeam = ParseSpawnSettings(blueTeamJson, &diagnostic);
+    if (!parsedBlueTeam || !parsedBlueTeam->blueTeam
+        || parsedBlueTeam->blueTeam->activeCount != 1U
+        || !diagnostic.empty())
+        return 38;
+    blueTeamJson["blueTeam"]["activeCount"] = 9U;
+    parsedBlueTeam = ParseSpawnSettings(blueTeamJson, &diagnostic);
+    if (!parsedBlueTeam || !parsedBlueTeam->blueTeam
+        || parsedBlueTeam->blueTeam->activeCount != 9U)
+        return 39;
+    blueTeamJson["blueTeam"]["activeCount"] = 0U;
+    if (ParseSpawnSettings(blueTeamJson, &diagnostic)
+        || diagnostic.find("[1, 9]") == std::string::npos)
+        return 40;
+    blueTeamJson["blueTeam"] = {
+        {"activeCount", 2U}, {"unexpected", true}};
+    if (ParseSpawnSettings(blueTeamJson, &diagnostic)
+        || diagnostic.find("unknown field") == std::string::npos)
+        return 41;
 
     std::mt19937 unknownRng{7U};
     auto const layout = GenerateEpisodeSpawnLayout(1, settings, world, unknownRng);

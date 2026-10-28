@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <limits>
+#include <string>
 
 namespace ppo::examples::twovstwo {
 namespace {
@@ -68,7 +70,9 @@ void GenerateThreatSchedule(ThreatCurriculumSettings const& settings,
     if (!settings.enabled)
         return;
 
-    layout.redActivationSteps.fill(EpisodeSpawnLayout::NeverActivate);
+    std::fill(layout.redActivationSteps.begin(),
+              layout.redActivationSteps.end(),
+              EpisodeSpawnLayout::NeverActivate);
     float const countSample = std::uniform_real_distribution<float>{0.F, 1.F}(rng);
     std::size_t const threatCount = countSample < settings.noThreatProbability
         ? 0U
@@ -126,6 +130,36 @@ float Separation(Position const& first, Position const& second) noexcept
 {
     return std::hypot(first.north - second.north,
                       first.east - second.east);
+}
+
+bool IsSeparatedFromAll(Position const& candidate,
+                        std::vector<Position> const& accepted,
+                        float minimumSeparation) noexcept
+{
+    return std::all_of(
+        accepted.begin(), accepted.end(),
+        [&](Position const& other) {
+            return Separation(candidate, other) >= minimumSeparation;
+        });
+}
+
+std::optional<std::size_t> RedIndex(std::string_view name) noexcept
+{
+    constexpr std::string_view prefix{"red_"};
+    if (name.size() <= prefix.size()
+        || name.substr(0U, prefix.size()) != prefix)
+        return std::nullopt;
+
+    std::string_view const suffix = name.substr(prefix.size());
+    if (suffix.front() == '0')
+        return std::nullopt;
+    std::size_t oneBasedIndex = 0U;
+    auto const result = std::from_chars(
+        suffix.data(), suffix.data() + suffix.size(), oneBasedIndex);
+    if (result.ec != std::errc{} || result.ptr != suffix.data() + suffix.size()
+        || oneBasedIndex == 0U)
+        return std::nullopt;
+    return oneBasedIndex - 1U;
 }
 
 std::optional<std::array<Position, 2>> FallbackRedPair(
@@ -206,6 +240,26 @@ bool Valid(SpawnSettings const& settings) noexcept
         && ValidDelayRange(curriculum.secondDelaySteps);
     if (!baseValid)
         return false;
+    if (settings.blueTeam
+        && !defenders::Valid(defenders::ActiveTeamCounts{
+            settings.blueTeam->activeCount,
+            defenders::TeamCapacity::MinimumRedMobiles}))
+    {
+        return false;
+    }
+    if (settings.redTeam)
+    {
+        auto const& team = *settings.redTeam;
+        if (team.activeCount
+                > defenders::TeamCapacity::MaximumRedMobiles
+            || team.maximumPlacementAttempts == 0U
+            || team.maximumPlacementAttempts
+                > RedTeamSpawnSettings::MaximumPlacementAttempts
+            || !Probability(team.delayedActivationProbability)
+            || !ValidDelayRange(team.activationDelaySteps)
+            || curriculum.enabled)
+            return false;
+    }
     auto const& zones = settings.restrictedZones.items;
     for (std::size_t i = 0U; i < zones.size(); ++i)
     {
@@ -220,46 +274,102 @@ bool Valid(SpawnSettings const& settings) noexcept
 
 std::optional<EpisodeSpawnLayout> GenerateEpisodeSpawnLayout(
     int side, SpawnSettings const& settings, WorldBounds const& world,
-    std::mt19937& rng)
+    std::mt19937& rng, std::string* diagnostic)
 {
-    if (!Valid(settings) || !ValidWorld(world))
+    auto const fail = [diagnostic](std::string message)
+        -> std::optional<EpisodeSpawnLayout> {
+        if (diagnostic != nullptr)
+            *diagnostic = std::move(message);
         return std::nullopt;
+    };
+    if (!Valid(settings))
+        return fail("twoVsTwo spawn settings are internally inconsistent");
+    if (!ValidWorld(world))
+        return fail("world half extents must be finite and strictly positive");
 
     float const normalizedSide = side < 0 ? -1.F : 1.F;
-    auto const fallback = FallbackRedPair(
-        settings.red, normalizedSide, world);
-    if (!fallback)
-        return std::nullopt;
-    std::optional<std::array<Position, 2>> positions;
-    for (unsigned attempt = 0U; attempt < kPairSamplingAttempts; ++attempt)
-    {
-        std::array<Position, 2> const candidate{
-            SampleRedPosition(settings.red, normalizedSide, world, rng),
-            SampleRedPosition(settings.red, normalizedSide, world, rng)
-        };
-        if (Separation(candidate[0], candidate[1])
-            >= settings.red.minimumSeparation)
-        {
-            positions = candidate;
-            break;
-        }
-    }
-    if (!positions)
-        positions = fallback;
-
     EpisodeSpawnLayout result{};
     result.side = normalizedSide < 0.F ? -1 : 1;
     float const objectiveEast = normalizedSide * 0.92F * world.halfEast;
-    result.red[0] = MakeRedSpawn((*positions)[0], objectiveEast, rng, false);
-    result.red[1] = MakeRedSpawn((*positions)[1], objectiveEast, rng, false);
+    if (settings.redTeam)
+    {
+        auto const& team = *settings.redTeam;
+        std::vector<Position> positions;
+        positions.reserve(team.activeCount);
+        for (std::size_t red = 0U; red < team.activeCount; ++red)
+        {
+            bool placed = false;
+            for (std::size_t attempt = 0U;
+                 attempt < team.maximumPlacementAttempts; ++attempt)
+            {
+                Position const candidate = SampleRedPosition(
+                    settings.red, normalizedSide, world, rng);
+                if (!IsSeparatedFromAll(candidate, positions,
+                                        settings.red.minimumSeparation))
+                    continue;
+                positions.push_back(candidate);
+                placed = true;
+                break;
+            }
+            if (!placed)
+                return fail("redTeam: unable to place red_"
+                    + std::to_string(red + 1U) + " after "
+                    + std::to_string(team.maximumPlacementAttempts)
+                    + " attempts while enforcing minimumSeparation="
+                    + std::to_string(settings.red.minimumSeparation));
+        }
 
-    if (settings.threatCurriculum.enabled)
-        GenerateThreatSchedule(settings.threatCurriculum, result, rng);
-    else if (std::bernoulli_distribution{
-                 static_cast<double>(settings.red2DestroyedProbability)}(rng))
-        result.redActivationSteps[1] = EpisodeSpawnLayout::NeverActivate;
-    for (std::size_t red = 0U; red < result.red.size(); ++red)
-        result.red[red].destroyed = result.redActivationSteps[red] != 0U;
+        result.red.reserve(team.activeCount);
+        result.redActivationSteps.reserve(team.activeCount);
+        for (Position const& position : positions)
+        {
+            std::size_t const activationStep = std::bernoulli_distribution{
+                static_cast<double>(team.delayedActivationProbability)}(rng)
+                ? SampleStep(team.activationDelaySteps, rng) : 0U;
+            result.red.push_back(MakeRedSpawn(
+                position, objectiveEast, rng, activationStep != 0U));
+            result.redActivationSteps.push_back(activationStep);
+        }
+    }
+    else
+    {
+        auto const fallback = FallbackRedPair(
+            settings.red, normalizedSide, world);
+        if (!fallback)
+            return fail("archived 2-vs-2 red pair cannot satisfy minimumSeparation");
+        std::optional<std::array<Position, 2>> positions;
+        for (unsigned attempt = 0U; attempt < kPairSamplingAttempts; ++attempt)
+        {
+            std::array<Position, 2> const candidate{
+                SampleRedPosition(settings.red, normalizedSide, world, rng),
+                SampleRedPosition(settings.red, normalizedSide, world, rng)
+            };
+            if (Separation(candidate[0], candidate[1])
+                >= settings.red.minimumSeparation)
+            {
+                positions = candidate;
+                break;
+            }
+        }
+        if (!positions)
+            positions = fallback;
+
+        result.red.reserve(2U);
+        result.red.push_back(MakeRedSpawn(
+            (*positions)[0], objectiveEast, rng, false));
+        result.red.push_back(MakeRedSpawn(
+            (*positions)[1], objectiveEast, rng, false));
+        result.redActivationSteps.assign(2U, 0U);
+
+        if (settings.threatCurriculum.enabled)
+            GenerateThreatSchedule(settings.threatCurriculum, result, rng);
+        else if (std::bernoulli_distribution{
+                    static_cast<double>(
+                        settings.red2DestroyedProbability)}(rng))
+            result.redActivationSteps[1] = EpisodeSpawnLayout::NeverActivate;
+        for (std::size_t red = 0U; red < result.red.size(); ++red)
+            result.red[red].destroyed = result.redActivationSteps[red] != 0U;
+    }
 
     bool const friendlyZoneEnabled = std::bernoulli_distribution{
         static_cast<double>(
@@ -290,6 +400,8 @@ std::optional<EpisodeSpawnLayout> GenerateEpisodeSpawnLayout(
             RestrictedZoneEpisodeSpawn{zone.id,
                 Spawn{north, east, 0.F, 0.F, !active}});
     }
+    if (diagnostic != nullptr)
+        diagnostic->clear();
     return result;
 }
 
@@ -321,10 +433,8 @@ std::optional<Spawn> MakeSpawn(std::string_view name,
                      -side * kHalfPi, 0.F, false};
     if (name == "blue_restricted_zone")
         return layout.friendlyRestrictedZone;
-    if (name == "red_1")
-        return layout.red[0];
-    if (name == "red_2")
-        return layout.red[1];
+    if (auto const red = RedIndex(name); red && *red < layout.red.size())
+        return layout.red[*red];
     auto const zone = std::find_if(
         layout.restrictedZones.begin(), layout.restrictedZones.end(),
         [name](RestrictedZoneEpisodeSpawn const& item) {

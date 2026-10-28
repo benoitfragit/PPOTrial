@@ -1,5 +1,7 @@
 #pragma once
 
+#include "team_capacity.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -35,6 +37,43 @@ struct RedSpawnSettings final
     SpawnRange bearingRadians{-1.5707963267948966F, 1.5707963267948966F};
     /** @brief Required initial Euclidean separation between attackers. */
     float minimumSeparation{10000.F};
+};
+
+/**
+ * @brief Generalized bounded red-team spawn and activation contract.
+ *
+ * `activeCount` is the number of red entities created for the episode. Each
+ * entry receives either activation step zero (initially active) or one finite
+ * positive delayed activation step. No generalized entry uses
+ * EpisodeSpawnLayout::NeverActivate; that sentinel remains available only to
+ * the archived 2-vs-2 curriculum.
+ */
+struct RedTeamSpawnSettings final
+{
+    /** @brief Hard CPU bound accepted for candidates tested per red mobile. */
+    static constexpr std::size_t MaximumPlacementAttempts{4096U};
+    /** @brief Number of red mobiles, in [0, TeamCapacity::MaximumRedMobiles]. */
+    std::size_t activeCount{2U};
+    /** @brief Maximum random candidates tested for each red mobile. */
+    std::size_t maximumPlacementAttempts{512U};
+    /** @brief Independent probability that a red activation is delayed. */
+    float delayedActivationProbability{0.F};
+    /** @brief Inclusive positive delay range, in ECS team steps. */
+    std::array<std::size_t, 2> activationDelaySteps{256U, 768U};
+};
+
+/**
+ * @brief Additive generalized blue-team contract.
+ *
+ * The optional contract only selects the bounded number of blue mobiles.
+ * Leader identity and formation slots are sampled reproducibly by the episode
+ * initializer. When the contract is absent, the archived two-guard reset and
+ * its random-number sequence remain unchanged.
+ */
+struct BlueTeamSpawnSettings final
+{
+    /** @brief Number of blue mobiles, in [1, TeamCapacity::MaximumBlueMobiles]. */
+    std::size_t activeCount{2U};
 };
 
 /**
@@ -122,6 +161,15 @@ struct SpawnSettings final
     /** @brief Probability that red_2 starts destroyed while remaining present. */
     float red2DestroyedProbability{0.15F};
     RedSpawnSettings red{};
+    /**
+     * @brief Generalized team contract, or null for archived 2-vs-2 sampling.
+     *
+     * Absence deliberately selects the historical RNG sequence, two red
+     * names and threat curriculum without changing their checkpoint path.
+     */
+    std::optional<RedTeamSpawnSettings> redTeam{};
+    /** @brief Generalized blue contract, or null for archived two-guard reset. */
+    std::optional<BlueTeamSpawnSettings> blueTeam{};
     /** @brief Historical blue zone retained unchanged for red RLMission. */
     FriendlyRestrictedZoneSpawnSettings friendlyRestrictedZone{};
     /** @brief Independently configured hostile restricted zones. */
@@ -161,9 +209,16 @@ struct EpisodeSpawnLayout final
         std::numeric_limits<std::size_t>::max();
 
     int side{1};
-    std::array<Spawn, 2> red{};
-    /** @brief ECS step at which each red becomes alive, or NeverActivate. */
-    std::array<std::size_t, 2> redActivationSteps{0U, 0U};
+    /** @brief Red poses in stable red_1..red_N order. */
+    std::vector<Spawn> red{};
+    /**
+     * @brief Activation step for each red pose at the same index.
+     *
+     * At reset, `red[i].destroyed` is true exactly when this value is not
+     * zero. Generalized teams use finite delayed steps; NeverActivate is
+     * reserved for the archived curriculum.
+     */
+    std::vector<std::size_t> redActivationSteps{};
     /** @brief Historical friendly zone pose used by the red pseudo-LiDAR. */
     Spawn friendlyRestrictedZone{};
     /** @brief Zone poses sampled once and retained for the whole episode. */
@@ -174,7 +229,11 @@ struct EpisodeSpawnLayout final
  * @brief Reports whether a non-activated hostile is scheduled for later.
  * @param layout Current episode layout and activation schedule.
  * @param elapsedSteps Number of already resolved ECS team steps.
- * @return True while at least one finite activation step remains in the future.
+ * @return True while at least one finite delayed activation is still pending.
+ *
+ * A threat scheduled for the current elapsed step is pending until the next
+ * `BeforeStep` call activates it. Step zero denotes an immediately active
+ * threat and is therefore never pending.
  */
 inline bool HasPendingThreats(EpisodeSpawnLayout const& layout,
                               std::size_t elapsedSteps) noexcept
@@ -182,8 +241,9 @@ inline bool HasPendingThreats(EpisodeSpawnLayout const& layout,
     return std::any_of(
         layout.redActivationSteps.begin(), layout.redActivationSteps.end(),
         [elapsedSteps](std::size_t activationStep) {
-            return activationStep != EpisodeSpawnLayout::NeverActivate
-                && activationStep > elapsedSteps;
+            return activationStep != 0U
+                && activationStep != EpisodeSpawnLayout::NeverActivate
+                && activationStep >= elapsedSteps;
         });
 }
 
@@ -200,11 +260,12 @@ bool Valid(SpawnSettings const& settings) noexcept;
  * @param settings Validated attacker and restricted-zone settings.
  * @param world Rectangular world half extents.
  * @param rng Episode random-number generator.
+ * @param diagnostic Optional destination for validation or placement failure.
  * @return Generated layout, or std::nullopt for invalid/impossible geometry.
  */
 std::optional<EpisodeSpawnLayout> GenerateEpisodeSpawnLayout(
     int side, SpawnSettings const& settings, WorldBounds const& world,
-    std::mt19937& rng);
+    std::mt19937& rng, std::string* diagnostic = nullptr);
 
 /**
  * @brief Builds the initial pose of one TwoVsTwo entity.
