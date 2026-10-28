@@ -1,8 +1,61 @@
 #include "patrol_defense.hpp"
+#include "patrol_core.hpp"
+#include "patrol_rltools.hpp"
 
 #include <array>
+#include <cstddef>
 
 namespace blue = ppo::examples::twovstwo::defenders;
+
+namespace {
+
+/**
+ * @brief Verifies the MAPPO outcome produced after a hostile zone destroys a guard.
+ * @return True when the failure, terminal flag, and role rewards stay consistent.
+ *
+ * The ECS bridge maps a destroyed blue entity to an unavailable guard. Zone
+ * attribution itself is covered by the TwoVsTwo collision-rule tests; this
+ * test owns the downstream MAPPO contract without duplicating world rules.
+ */
+bool RestrictedZoneDestructionTerminatesMappo()
+{
+    blue::Parameters const parameters{};
+    blue::State const before = blue::InitialState(parameters, 1, 0U, 0.F);
+    blue::State destroyedByRestrictedZone = before;
+    destroyedByRestrictedZone.guards[0].available = false;
+
+    std::array<blue::Action, 2> const actions{};
+    blue::State const after = blue::AdvanceBoth(
+        parameters, destroyedByRestrictedZone, actions);
+    if (!after.failed || after.collided)
+        return false;
+
+    std::size_t constexpr outcome = static_cast<std::size_t>(
+        blue::RewardChannel::MissionOutcome);
+    blue::RoleRewardBreakdowns const breakdowns =
+        blue::TrainingRoleRewardBreakdowns(
+            parameters, before, actions, after);
+    if (breakdowns[0].values[outcome] != -100.F
+        || breakdowns[1].values[outcome] != -100.F)
+        return false;
+
+    blue::RewardValues weights{};
+    weights[outcome] = 1.F;
+    blue::RoleRewards const rewards = blue::TotalRoleRewards(
+        breakdowns, weights, 100.F);
+    if (rewards[0] != -100.F || rewards[1] != -100.F)
+        return false;
+
+    struct TestContext final {};
+    TestContext device{};
+    TestContext rng{};
+    rl_tools::rl::environments::BluePatrol<float, std::size_t> environment{};
+    environment.parameters = parameters;
+    return !rl_tools::terminated(device, environment, before, rng)
+        && rl_tools::terminated(device, environment, after, rng);
+}
+
+} // namespace
 
 int main()
 {
@@ -40,5 +93,7 @@ int main()
     if (blue::ThreatRisk(settings, attacker, farObjective, pursued)
             < settings.activationRisk)
         return 5;
+    if (!RestrictedZoneDestructionTerminatesMappo())
+        return 6;
     return 0;
 }

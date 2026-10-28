@@ -54,4 +54,14 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_test(NAME TwoVsTwoPatrolRuntimeSmoke COMMAND TwoVsTwoPatrolRuntimeSmokeTest)
     add_test(NAME TwoVsTwoCombatRuntimeSmoke
         COMMAND TwoVsTwoPatrolRuntimeSmokeTest two-vs-two)
+
+    # Renderer contract: both enabled and disabled hostile zones must remain
+    # identifiable through the public ECS snapshot and m_destroyed flag.
+    add_executable(TwoVsTwoRestrictedZoneSnapshotTests
+        tests/restricted_zone_snapshot_tests.cpp)
+    target_compile_features(TwoVsTwoRestrictedZoneSnapshotTests PRIVATE cxx_std_17)
+    target_link_libraries(TwoVsTwoRestrictedZoneSnapshotTests PRIVATE
+        PPOTwoVsTwoExample GenericEnv)
+    add_test(NAME TwoVsTwoRestrictedZoneSnapshotTests
+        COMMAND TwoVsTwoRestrictedZoneSnapshotTests)
 endif()
