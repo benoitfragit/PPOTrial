@@ -13,7 +13,7 @@
     },
     "threatCurriculum": {
       "enabled": true,
-      "noThreatProbability": 0.05,
+      "noThreatProbability": 0.075,
       "singleThreatProbability": 0.15,
       "delayedFirstThreatProbability": 0.0,
       "delayedSecondThreatProbability": 0.0,

@@ -5,14 +5,14 @@
         "camera": {
             "fovy": 45.0,
             "position": [
-                -33.08011245727539,
-                19.83399200439453,
-                -3.0963940620422363
+                -27.495540618896484,
+                24.686992645263672,
+                36.20620346069336
             ],
             "target": [
-                3.374650478363037,
+                -36.99950408935547,
                 0.34999987483024597,
-                -6.592440128326416
+                -9.570600509643555
             ],
             "up": [
                 0.0,
@@ -20,9 +20,9 @@
                 0.0
             ]
         },
-        "cameraDistance": 35.22200012207031,
-        "cameraHeight": 19.833999633789063,
-        "domainHeight": 1.5369999408721924,
+        "cameraDistance": 45.35300064086914,
+        "cameraHeight": 24.687000274658203,
+        "domainHeight": 2.318000078201294,
         "focusSelectionInMinimap": false,
         "minimapZoom": 1.0,
         "scaleLevel": 1,
@@ -34,7 +34,7 @@
         "showMetaCatalog": false,
         "showMinimap": false,
         "showPatrolTrack": true,
-        "showPseudoLidar": false,
+        "showPseudoLidar": true,
         "showSimulation": true,
         "trailDuration": 3.0999999046325684
     }

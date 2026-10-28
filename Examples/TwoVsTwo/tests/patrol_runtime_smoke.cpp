@@ -63,13 +63,13 @@ Sample Capture(ppo::model::Environment const& environment)
                     auto const* sna = world.try_get<ppo::model::sSNAState>(entity);
                     result.alignedBluePlatform[i] = flight && sna
                         && std::abs(flight->m_maxAcc - 600.F) < 1e-3F
-                        && std::abs(flight->m_maxAccRot - 0.7000006F) < 1e-5F
-                        && std::abs(flight->m_maxSpeed - 800.F) < 1e-3F
+                        && std::abs(flight->m_maxAccRot - 0.42F) < 1e-5F
+                        && std::abs(flight->m_maxSpeed - 420.F) < 1e-3F
                         && std::abs(flight->m_minSpeed - 10.F) < 1e-3F
                         && std::abs(sna->m_maxNoescapeZone - 5000.F) < 1e-3F
                         && std::abs(sna->m_noescapezone - 5000.F) < 1e-3F
                         && std::abs(sna->m_escapezone - 10000.F) < 1e-3F
-                        && std::abs(sna->m_maxShootAngle - 3.147198F) < 1e-5F;
+                        && std::abs(sna->m_maxShootAngle - 1.1F) < 1e-5F;
                 }
                 if (metadata.m_name == "red_1" || metadata.m_name == "red_2")
                 {
@@ -141,10 +141,10 @@ int main(int argc, char** argv)
         return 3;
     auto const patrolParameters =
         ppo::examples::twovstwo::defenders::LoadPatrolParameters(RESOURCE_PATH);
-    if (std::abs(patrolParameters.cruiseSpeed - 800.F) >= 1e-3F
+    if (std::abs(patrolParameters.cruiseSpeed - 420.F) >= 1e-3F
         || std::abs(patrolParameters.maxAcceleration - 600.F) >= 1e-3F
-        || std::abs(patrolParameters.maxRotationRate - 0.7000006F) >= 1e-5F
-        || std::abs(patrolParameters.maxSpeed - 800.F) >= 1e-3F)
+        || std::abs(patrolParameters.maxRotationRate - 0.42F) >= 1e-5F
+        || std::abs(patrolParameters.maxSpeed - 420.F) >= 1e-3F)
         return 5;
     auto const definition = combat
         ? ppo::examples::twovstwo::Definition()
