@@ -1,22 +1,22 @@
-add_subdirectory(Entities)
-add_subdirectory(Initializer)
+add_subdirectory(Scenario/Entities Entities)
+add_subdirectory(Scenario/Initialization Initializer)
 add_subdirectory(Evaluation)
 add_subdirectory(Agents/Interception)
-add_subdirectory(Agents/mission)
+add_subdirectory(Agents/Mission Agents/mission)
 add_subdirectory(Renderer)
 
 add_library(PPOAirspaceExample STATIC
-    data/airspaceexample.hpp
-    src/airspaceexample.cpp
-    data/airspaceworldrules.hpp
-    src/airspaceworldrules.cpp
-    data/airspacemeta.hpp
-    src/airspacemeta.cpp)
+    Scenario/airspaceexample.hpp
+    Scenario/airspaceexample.cpp
+    Scenario/airspaceworldrules.hpp
+    Scenario/airspaceworldrules.cpp
+    Scenario/airspacemeta.hpp
+    Scenario/airspacemeta.cpp)
 
 target_compile_features(PPOAirspaceExample PUBLIC cxx_std_17)
 target_include_directories(PPOAirspaceExample PUBLIC
     "${CMAKE_SOURCE_DIR}/Examples/data"
-    "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    "${CMAKE_CURRENT_SOURCE_DIR}/Scenario")
 target_link_libraries(PPOAirspaceExample PUBLIC
     GenericEntities
     AirspaceEntities
