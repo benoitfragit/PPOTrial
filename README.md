@@ -26,11 +26,9 @@ actuellement x64 ; les builds Debug sont recommandés pour le diagnostic.
 
 Dans le sélecteur, ces entrées sont libellées explicitement `BLUE PATROL ONLY
 - NO RED` et `TWO VS TWO - MAPPO vs RLMission`. Le second scénario conserve
-toujours les deux entités rouges, mais son curriculum d'entraînement tire 10 %
-d'épisodes sans menace, 30 % avec une menace et 60 % avec deux menaces. La
-première menace peut être retardée et, dans un épisode à deux menaces, la
-seconde peut apparaître plus tard. Les campagnes d'évaluation restent des cas
-immédiats et déterministes 2v1/2v2.
+toujours les deux entités rouges. Le curriculum active deux rouges dans 80 %
+des épisodes, un rouge dans 15 % et aucun dans 5 %. Tous sont actifs dès le
+début de l'épisode. Les évaluations restent des cas déterministes 2v1/2v2.
 
 À chaque épisode 2v2, les rouges sont tirés sur un arc allant de l'avant aux
 deux côtés de la zone défendue. Ils commencent entre 1,05 et 1,35 fois la
@@ -51,9 +49,9 @@ La configuration livrée conserve une longueur de 50 à 60 km et échantillonne
 une largeur de 16 à 20 km. Ces rayons progressifs facilitent l'exploration
 initiale du leader et la tenue du wedge dans les demi-tours.
 
-La plateforme bleue reprend la dynamique de `trainingaircraft` : vitesse de
-croisière initiale 300 m/s, vitesse maximale 700 m/s, accélération 600 m/s² et
-rotation maximale d'environ 40,1°/s (0,7000006 rad/s). Sa zone SNA sans
+La plateforme bleue dispose d'un avantage d'entraînement : vitesse de croisière
+et vitesse maximale de 800 m/s, accélération de 600 m/s² et rotation maximale
+alignée sur `trainingaircraft` à 0,7000006 rad/s. Sa zone SNA sans
 échappement vaut 5 km et sa zone d'engagement atteint 10 km, contre 4 et 8 km
 pour les rouges. Son domaine angulaire reprend aussi celui de
 `trainingaircraft` (`MaxShootAngle` = 3,147198 rad). Les rouges restent
@@ -75,26 +73,25 @@ Une évaluation déterministe intégrée est lancée à chaque checkpoint : elle
 utilise les vrais rouges RLMission dans le 2v2, publie ses mesures dans l'IHM et
 ne promeut dans `resources/model/BluePatrol/prod` que le meilleur acteur. Les
 acteurs non encore validés restent dans `BluePatrol/latest`. Le même dossier
-contient `blue_patrol_training_v3.txt`, qui restaure l'acteur, le critique,
+contient `blue_patrol_training_v4.txt`, qui restaure l'acteur, le critique,
 les deux états Adam, le compteur de mises à jour et le RNG. Le buffer de rollout
 n'est volontairement pas sauvegardé : une reprise commence un rollout vide au
 même niveau d'optimisation.
 
 La collision entre les deux bleus est terminale à 1 km, avec une pénalité de
-sécurité progressive à partir de 2 km. Sans menace crédible, le canal de
-formation entraîne uniquement l'équipier à tenir le wedge tiré entre 6 et
-9 km. Le suivi d'hippodrome entraîne uniquement le leader. Un coordinateur avec
-hystérésis attribue au plus une menace crédible à chaque bleu ; il s'active dès
-32 km avec un horizon d'intrusion de 90 s, mais ne produit aucune commande. Les
-deux acteurs conservent leurs pistes rouges, leur pooling et leur attention, et
-peuvent donc tous deux intercepter. Avec deux menaces, l'affectation un-à-un
-reste inchangée.
+sécurité progressive à partir de 2 km. Le leader reçoit seul le suivi de
+l'unique hippodrome ; l'équipier reçoit seul le wedge de 6 à 9 km, mesuré dans
+le repère du cap physique du leader. Les deux bleus voient toutes les pistes
+rouges actives et apprennent à les couvrir par une récompense défensive commune
+et le critique centralisé. Il n'existe aucun coordinateur ni cible imposée.
+Le pooling et l'attention sont inchangés. Deux menaces simultanées peuvent
+relâcher le wedge ; la séparation de sécurité reste toujours active.
 
-Le contrat bleu est désormais v6. Il faut donc entraîner un nouveau modèle :
-les anciens acteurs et états d'entraînement bleus sont volontairement ignorés,
-car les 10 entrées locales de patrouille ont changé de sens. Les nouveaux
-fichiers sont `blue_patrol_mappo_v6.txt` et
-`blue_patrol_training_v3.txt`. Aucun checkpoint rouge n'est concerné.
+Le contrat bleu v7 démarre un nouvel apprentissage : les anciens poids bleus
+conditionnés par les affectations v6 ne sont pas repris. Les nouveaux fichiers
+sont `blue_patrol_mappo_v7.txt` et `blue_patrol_training_v4.txt`.
+Les anciens fichiers restent sur disque mais sont ignorés. Aucun modèle rouge
+n'est concerné.
 
 Dans le scénario TwoVsTwo, la barre de la vue tactique propose `Show patrol
 track`. Cette option dessine l'unique piste du leader et son sens dans la vue 3D et la
@@ -106,7 +103,7 @@ permet le même affichage avec ou sans PPO.
 
 - [Architecture de la patrouille MAPPO](docs/blue-ppo-patrol.md)
 - [Architecture et feuille de route de la patrouille](docs/blue-patrol-architecture-roadmap.md)
-- [Architecture v6 : rôles leader/équipier et défense](docs/blue-patrol-v6-architecture.md)
+- [Architecture v7 : rôles leader/équipier et défense apprise](docs/blue-patrol-v6-architecture.md)
 - [Scénario TwoVsTwo](docs/two-vs-two-example.md)
 - [Guide de configuration](docs/configuration-guide.md)
 

@@ -108,10 +108,14 @@ Pour ajouter un profil, déclarer le nouvel adaptateur C++ dans la couche applic
       "separationAngleDegrees": { "min": 10.0, "max": 25.0 }
     },
     "defense": {
-      "activationRisk": 0.55,
-      "deactivationRisk": 0.35,
-      "minimumAssignmentSeconds": 8.0,
-      "recoverySeconds": 15.0
+      "activationRisk": 0.25,
+      "deactivationRisk": 0.10,
+      "activationDistanceMeters": 90000.0,
+      "deactivationDistanceMeters": 110000.0,
+      "protectedRadiusMeters": 12000.0,
+      "timeToIntrusionSeconds": 300.0,
+      "teammateThreatDistanceMeters": 30000.0,
+      "teammateVulnerabilityWeight": 0.75
     }
   },
   "training": {
@@ -208,18 +212,20 @@ et phases. Le score et sa progression sont visibles dans l'IHM ; seul un
 candidat meilleur remplace le checkpoint de production.
 
 Le dossier `resources/model/BluePatrol/latest/` reçoit deux fichiers après la
-première mise à jour : `blue_patrol_mappo_v6.txt` destiné à l'inférence et
-`blue_patrol_training_v3.txt` destiné à la reprise. Ce second fichier conserve
+première mise à jour : `blue_patrol_mappo_v7.txt` destiné à l'inférence et
+`blue_patrol_training_v4.txt` destiné à la reprise. Ce second fichier conserve
 le critique, les états Adam, le compteur de mises à jour et le RNG. Les données
 du rollout ne sont pas conservées ; le buffer repart vide au redémarrage. Le
 dossier `prod/` reste volontairement limité au meilleur acteur évalué et à son
 score.
 
-La version v6 doit être entraînée depuis des poids neufs : la dimension de
-l'observation reste identique, mais les entrées 0–5 ne décrivent la piste que
-pour le leader et les entrées 6–7 ne décrivent le wedge que pour l'équipier.
-Les noms et signatures v6/v3 empêchent le chargement silencieux des anciens
-fichiers bleus.
+Le contrat v7 doit être entraîné depuis des poids neufs : le coordinateur et
+l'index de cible imposé ont été retirés. Le dernier champ global local est
+réservé à zéro ; la pression défensive est commune aux deux rôles. Les noms et
+signatures v7/v4 empêchent de reprendre les anciens poids bleus. Les paramètres
+de défense décrivent uniquement le risque : ils ne masquent aucune piste rouge
+et ne distribuent aucune cible. Les anciennes temporisations d'affectation
+n'existent plus.
 
 ### Géométrie aléatoire du 2v2
 
@@ -311,7 +317,9 @@ Pour les défenseurs MAPPO, `Platforms/Mobile/defender_car.json` contient aussi
 la référence de patrouille ; `MaxSpeed`, `MaxAcceleration` et
 `MaxRotAcceleration` restent les limites physiques. La section `SNA` règle la
 zone sans échappement et l'angle d'engagement des bleus indépendamment de la
-plateforme rouge `attacker_car`.
+plateforme rouge `attacker_car`. La configuration d'entraînement actuelle fixe
+`CruiseSpeed` et `MaxSpeed` à 800 m/s. `MaxRotAcceleration` reste aligné sur
+`trainingaircraft` à 0,70000059604645 rad/s.
 
 **Evaluation/InitialStates.json** contient des collections de points initiaux nommés, au format **presets.blueeval[]** et **presets.redeval[]**, avec les coordonnées et commandes dans des champs explicites **north**, **east**, **heading**, **speed**, **turnAcceleration**, **acceleration**. L'initialiseur C++ peut les utiliser comme auparavant, sans liste opaque de six nombres ni ancien chemin. Le champ **evaluationSettings** conserve les paramètres numériques associés à ces jeux d'initialisation.
 

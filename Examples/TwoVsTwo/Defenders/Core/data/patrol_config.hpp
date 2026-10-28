@@ -172,17 +172,7 @@ inline Parameters LoadPatrolParameters(std::filesystem::path const& settings)
     parameters.defense.teammateVulnerabilityWeight =
         patrol_config_detail::FiniteNumber(
             defense, "teammateVulnerabilityWeight");
-    parameters.defense.minimumAssignmentSeconds =
-        patrol_config_detail::FiniteNumber(
-            defense, "minimumAssignmentSeconds");
-    parameters.defense.deactivationHoldSeconds =
-        patrol_config_detail::FiniteNumber(
-            defense, "deactivationHoldSeconds");
-    parameters.defense.recoverySeconds = patrol_config_detail::FiniteNumber(
-        defense, "recoverySeconds");
-    parameters.defense.switchImprovementFraction =
-        patrol_config_detail::FiniteNumber(
-            defense, "switchImprovementFraction");
+
     PatrolGeometrySettings const geometrySettings =
         LoadPatrolGeometrySettings(settings);
     PatrolSamplingConstraints const constraints{

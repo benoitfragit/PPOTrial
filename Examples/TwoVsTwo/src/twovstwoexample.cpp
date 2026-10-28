@@ -209,11 +209,11 @@ bool LoadScenario(std::filesystem::path const& path,
     auto const modelRoot = std::filesystem::path{RESOURCE_PATH}.parent_path()
         / "model" / "BluePatrol";
     auto const latestCheckpoint = modelRoot / "latest"
-        / "blue_patrol_mappo_v6.txt";
+        / "blue_patrol_mappo_v7.txt";
     auto const trainingCheckpoint = modelRoot / "latest"
-        / "blue_patrol_training_v3.txt";
+        / "blue_patrol_training_v4.txt";
     auto const productionCheckpoint = modelRoot / "prod"
-        / "blue_patrol_mappo_v6.txt";
+        / "blue_patrol_mappo_v7.txt";
     if (useMappo)
     {
         std::filesystem::path const warmStartCheckpoint =

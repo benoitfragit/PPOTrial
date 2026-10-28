@@ -37,18 +37,14 @@
       }
     },
     "defense": {
-      "activationRisk": 0.45,
-      "deactivationRisk": 0.25,
-      "activationDistanceMeters": 32000.0,
-      "deactivationDistanceMeters": 42000.0,
+      "activationRisk": 0.25,
+      "deactivationRisk": 0.10,
+      "activationDistanceMeters": 90000.0,
+      "deactivationDistanceMeters": 110000.0,
       "protectedRadiusMeters": 12000.0,
-      "timeToIntrusionSeconds": 90.0,
-      "teammateThreatDistanceMeters": 12000.0,
-      "teammateVulnerabilityWeight": 0.75,
-      "minimumAssignmentSeconds": 8.0,
-      "deactivationHoldSeconds": 5.0,
-      "recoverySeconds": 15.0,
-      "switchImprovementFraction": 0.15
+      "timeToIntrusionSeconds": 300.0,
+      "teammateThreatDistanceMeters": 30000.0,
+      "teammateVulnerabilityWeight": 0.75
     }
   },
   "training": {
@@ -69,19 +65,19 @@
       "patrolProgressWeight": 0.5,
       "patrolCrossTrackWeight": 0.75,
       "patrolCrossTrackScaleMeters": 4000.0,
-      "formationErrorWeight": 0.4,
-      "formationToleranceFraction": 0.1,
-      "separationPenaltyWeight": 0.5,
+      "formationErrorWeight": 2.0,
+      "formationToleranceFraction": 0.03,
+      "separationPenaltyWeight": 0.75,
       "controlEffortWeight": 0.002
     },
     "weights": {
       "Patrol tracking": 1.0,
-      "Formation safety": 1.0,
+      "Formation safety": 4.0,
       "Control effort": 1.0,
-      "Zone protection": 1.0,
-      "Interception": 1.0,
-      "Mission outcome": 1.0,
-      "Timeout": 1.0
+      "Zone protection": 2.0,
+      "Interception": 2.0,
+      "Mission outcome": 1.5,
+      "Timeout": 1.5
     }
   }
 }

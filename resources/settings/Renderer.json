@@ -5,14 +5,14 @@
         "camera": {
             "fovy": 45.0,
             "position": [
-                4.741185188293457,
+                -33.08011245727539,
                 19.83399200439453,
-                42.31181335449219
+                -3.0963940620422363
             ],
             "target": [
-                -8.857440948486328,
+                3.374650478363037,
                 0.34999987483024597,
-                8.30815601348877
+                -6.592440128326416
             ],
             "up": [
                 0.0,
@@ -33,7 +33,8 @@
         "showInspection": false,
         "showMetaCatalog": false,
         "showMinimap": false,
-        "showPseudoLidar": true,
+        "showPatrolTrack": true,
+        "showPseudoLidar": false,
         "showSimulation": true,
         "trailDuration": 3.0999999046325684
     }

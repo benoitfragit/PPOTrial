@@ -2,11 +2,11 @@
     "formatVersion": 2,
     "parameters": {
         "FlightModel": {
-            "CruiseSpeed": 300,
+            "CruiseSpeed": 800,
             "MaxAcceleration": 600,
             "MaxFuel": 2000000,
             "MaxRotAcceleration": 0.70000059604645,
-            "MaxSpeed": 700,
+            "MaxSpeed": 800,
             "MinSpeed": 10
         },
         "SNA": {

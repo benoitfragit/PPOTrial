@@ -7,6 +7,7 @@
 #include "patrol_training_checkpoint.hpp"
 #include "patrol_training_settings.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -43,6 +44,7 @@ class PatrolLearner final
 public:
     using Observations = std::array<Observation, 2>;
     using Actions = std::array<Action, 2>;
+    using Rewards = RoleRewards;
 
     /**
      * @brief Creates the MAPPO learner.
@@ -88,16 +90,16 @@ public:
     /**
      * @brief Records joint feedback and runs one RLtools update when full.
      * @param nextObservations Role-specific observations after ECS resolution.
-     * @param teamReward Shared cooperative reward supplied to both trajectories.
+     * @param rewards Credit-assigned reward for each semantic blue role.
      * @param terminated True for a terminal mission outcome.
      * @param truncated True for a finite-horizon time boundary.
      * @return True when an optimization update completed.
      */
-    bool Observe(Observations const& nextObservations, float teamReward,
+    bool Observe(Observations const& nextObservations, Rewards const& rewards,
                  bool terminated, bool truncated)
     {
         return std::visit([&](auto& learner) {
-            return learner->Observe(nextObservations, teamReward,
+            return learner->Observe(nextObservations, rewards,
                                     terminated, truncated);
         }, learner_);
     }
@@ -286,13 +288,15 @@ private:
             return actions;
         }
 
-        bool Observe(Observations const& nextObservations, float teamReward,
+        bool Observe(Observations const& nextObservations,
+                     Rewards const& rewards,
                      bool terminated, bool truncated)
         {
             if (!pending_)
                 throw std::logic_error("Patrol MAPPO: actions required before feedback");
-            if (!std::isfinite(teamReward))
-                throw std::invalid_argument("Nonfinite patrol team reward");
+            if (!std::all_of(rewards.begin(), rewards.end(),
+                    [](float reward) { return std::isfinite(reward); }))
+                throw std::invalid_argument("Nonfinite patrol role reward");
 
             auto& dataset = state_->on_policy_runner_dataset;
             for (Index role = 0; role < 2; ++role)
@@ -307,7 +311,7 @@ private:
                     rlt::set(dataset.all_observations_normalized, row, i, value);
                 }
                 Index const transition = static_cast<Index>(samples_ * 2U) + role;
-                rlt::set(dataset.rewards, transition, 0, teamReward);
+                rlt::set(dataset.rewards, transition, 0, rewards[role]);
                 // RLtools v1 discards the TD error at a non-terminal
                 // truncation. This task has a genuine finite horizon, so its
                 // final reward (notably an unresolved-threat penalty) must be

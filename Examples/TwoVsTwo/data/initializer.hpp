@@ -23,7 +23,7 @@ struct InitializerContext {
     std::optional<EpisodeSpawnLayout> episodeLayout{};
     bool patrolOnly{false};
     /** @brief Configured initial/reference speed of both blue guards. */
-    float patrolCruiseSpeed{300.F};
+    float patrolCruiseSpeed{800.F};
     /** @brief Maximum blue yaw rate used to reject infeasible turns. */
     float patrolMaximumRotationRate{0.7000006F};
     /** @brief Blue collision radius used to validate the sampled wedge. */
