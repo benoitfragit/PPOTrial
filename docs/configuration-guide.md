@@ -318,7 +318,7 @@ la référence de patrouille ; `MaxSpeed`, `MaxAcceleration` et
 `MaxRotAcceleration` restent les limites physiques. La section `SNA` règle la
 zone sans échappement et l'angle d'engagement des bleus indépendamment de la
 plateforme rouge `attacker_car`. La configuration d'entraînement actuelle fixe
-`CruiseSpeed` et `MaxSpeed` à 420 m/s. `MaxRotAcceleration` vaut 0,42 rad/s
+`CruiseSpeed` et `MaxSpeed` à 420 m/s. `MaxRotAcceleration` vaut 0,50 rad/s
 et `SNA.MaxShootAngle` 1,10 rad. Ces valeurs restent légèrement supérieures
 aux 400 m/s, 0,40 rad/s et 1,047198 rad d'`attacker_car`.
 

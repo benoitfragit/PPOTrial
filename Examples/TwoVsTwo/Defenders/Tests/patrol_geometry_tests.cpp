@@ -52,7 +52,7 @@ int main()
     patrol::PatrolGeometrySettings const settings =
         patrol::ParsePatrolGeometrySettings(ValidDocument());
     patrol::PatrolSamplingConstraints const constraints{
-        22329.375F, 35727.F, 420.F, 0.42F, 1000.F};
+        22329.375F, 35727.F, 420.F, 0.50F, 1000.F};
 
     std::mt19937 firstRng{17U};
     std::mt19937 repeatRng{17U};

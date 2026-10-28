@@ -25,7 +25,7 @@ struct InitializerContext {
     /** @brief Configured initial/reference speed of both blue guards. */
     float patrolCruiseSpeed{420.F};
     /** @brief Maximum blue yaw rate used to reject infeasible turns. */
-    float patrolMaximumRotationRate{0.42F};
+    float patrolMaximumRotationRate{0.50F};
     /** @brief Blue collision radius used to validate the sampled wedge. */
     float patrolCollisionDistance{1000.F};
     /** @brief Configured family sampled exactly once per episode. */

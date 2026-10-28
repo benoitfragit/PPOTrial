@@ -32,7 +32,7 @@ La référence est recalculée depuis `Environment.json` : elle reste donc dans 
 monde si ses dimensions changent.
 
 Les bleus disposent d'un léger avantage cinématique pendant l'entraînement :
-600 m/s² d'accélération, 420 m/s en vitesse maximale et 0,42 rad/s en
+600 m/s² d'accélération, 420 m/s en vitesse maximale et 0,50 rad/s en
 rotation maximale, contre 400 m/s et 0,40 rad/s pour les rouges. La patrouille
 démarre à une vitesse de croisière configurable de 420 m/s. Leur domaine SNA
 reste supérieur à celui des rouges : zone sans échappement de 5 km, zone

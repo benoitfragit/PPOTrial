@@ -47,7 +47,7 @@ Les capacités propres aux défenseurs bleus sont dans
 vitesse initiale et leur référence de patrouille ; les autres champs
 `FlightModel` règlent leurs limites physiques et `SNA` leur domaine
 d'engagement. `MaxRotAcceleration` est exprimé en rad/s. Les valeurs bleues
-restent légèrement supérieures à celles d'`attacker_car` : 0,42 contre
+restent supérieures à celles d'`attacker_car` : 0,50 contre
 0,40 rad/s, `CruiseSpeed` et `MaxSpeed` à 420 contre 400 m/s, et
 `MaxShootAngle` à 1,10 contre 1,047198 rad. Ces paramètres ne modifient pas
 `attacker_car` ni RLMission.

@@ -52,8 +52,8 @@ Ces valeurs sont configurables dans `Scenarios/TwoVsTwo.json` :
 
 ~~~json
 "redSpawn": {
-  "minimumWorldScale": 1.05,
-  "maximumWorldScale": 1.35,
+  "minimumWorldScale": 1.15,
+  "maximumWorldScale": 1.45,
   "minimumBearingDegrees": -90.0,
   "maximumBearingDegrees": 90.0,
   "minimumSeparation": 10000.0
