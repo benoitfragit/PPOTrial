@@ -471,7 +471,7 @@ Environment::Play(void)
 }
 
 /**
-* @brief Requests the paused state.
+* @brief Enables the unthrottled simulation mode before worker startup.
 */
 void
 Environment::SetHeadlessMode(bool const enabled)
@@ -481,6 +481,9 @@ Environment::SetHeadlessMode(bool const enabled)
         p_impl->m_headless = enabled;
 }
 
+/**
+* @brief Requests the paused state.
+*/
 void
 Environment::Pause(void)
 {
