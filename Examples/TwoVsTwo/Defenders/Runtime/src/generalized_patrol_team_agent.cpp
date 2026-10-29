@@ -116,6 +116,9 @@ GeneralizedRewardValues MapGeneralizedRewardWeights(
         GeneralizedRewardChannel::RedNeutralization)] = legacy[
             static_cast<std::size_t>(RewardChannel::Interception)];
     result[static_cast<std::size_t>(
+        GeneralizedRewardChannel::ThreatContainment)] = legacy[
+            static_cast<std::size_t>(RewardChannel::ZoneProtection)];
+    result[static_cast<std::size_t>(
         GeneralizedRewardChannel::ObjectiveSurvival)] = legacy[
             static_cast<std::size_t>(RewardChannel::ZoneProtection)];
     result[static_cast<std::size_t>(
@@ -532,6 +535,11 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         transition.missionFailed = after.failed || !after.objectiveAvailable;
         transition.pendingThreats = pendingThreats;
         transition.timeout = truncated;
+        // Dense shared signal: interception of an imminent attacker reduces
+        // objective danger more than neutralizing a distant attacker.
+        transition.responsibilities.threatContainment = Clamp(
+            ObjectiveThreatLevel(beforeStep_, parameters)
+                - ObjectiveThreatLevel(after, parameters), -1.F, 1.F);
         BlueTeamRoles const& roles = Roles();
         std::size_t const leaderIndex = roles.LeaderPhysicalIndex();
         PatrolProjection const beforeProjection = ProjectOnPatrolCurve(
