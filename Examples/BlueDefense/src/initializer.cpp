@@ -10,7 +10,7 @@
 #include <random>
 #include <string_view>
 
-namespace ppo::examples::twovstwo {
+namespace ppo::examples::bluedefense {
 
 namespace {
 
@@ -216,7 +216,7 @@ void InitializeEntity(ppo::model::Entity& entity)
         if (!config.episodeLayout)
         {
             config.episodeLayoutGenerationFailed = true;
-            std::cerr << "[TWO_VS_TWO] Cannot generate episode spawns: "
+            std::cerr << "[BLUE_DEFENSE] Cannot generate episode spawns: "
                       << spawnDiagnostic << '\n';
         }
     }
@@ -309,4 +309,4 @@ void InitializeEntity(ppo::model::Entity& entity)
         ppo::model::UpdateRestrictedZonePseudoLidars(
             *registry, ppo::model::eEntitySide::Friend);
 }
-} // namespace ppo::examples::twovstwo
+} // namespace ppo::examples::bluedefense

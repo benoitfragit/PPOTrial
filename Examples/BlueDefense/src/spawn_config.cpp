@@ -8,7 +8,7 @@
 #include <string_view>
 #include <unordered_set>
 
-namespace ppo::examples::twovstwo {
+namespace ppo::examples::bluedefense {
 namespace {
 
 constexpr float kDegreesToRadians = 0.017453292519943295F;
@@ -299,7 +299,7 @@ std::optional<SpawnSettings> ParseSpawnSettings(
         return std::nullopt;
     };
     if (!settings.is_object())
-        return fail("twoVsTwo must be an object");
+        return fail("blueDefense must be an object");
     auto const red2Probability = Number(
         settings, "red2InitiallyDestroyedProbability");
     auto const red2Item = settings.find(
@@ -314,7 +314,7 @@ std::optional<SpawnSettings> ParseSpawnSettings(
         || friendlyZoneItem == settings.end()
         || !friendlyZoneItem->is_object())
         return fail(hasGeneralizedRedTeam
-            ? "twoVsTwo requires redSpawn and restrictedZoneSpawn"
+            ? "blueDefense requires redSpawn and restrictedZoneSpawn"
             : "archived 2-vs-2 requires red2InitiallyDestroyedProbability, redSpawn and restrictedZoneSpawn");
 
     auto const minimumScale = Number(*redItem, "minimumWorldScale");
@@ -396,10 +396,10 @@ std::optional<SpawnSettings> ParseSpawnSettings(
     if (result.redTeam && result.threatCurriculum.enabled)
         return fail("redTeam and enabled threatCurriculum are mutually exclusive");
     if (!Valid(result))
-        return fail("twoVsTwo spawn settings are internally inconsistent");
+        return fail("blueDefense spawn settings are internally inconsistent");
     if (diagnostic != nullptr)
         diagnostic->clear();
     return result;
 }
 
-} // namespace ppo::examples::twovstwo
+} // namespace ppo::examples::bluedefense
