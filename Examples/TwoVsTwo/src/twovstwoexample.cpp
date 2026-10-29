@@ -2,10 +2,7 @@
 #include "initializer.hpp"
 #include "spawn_config.hpp"
 #include "twovstworules.hpp"
-#include "patrol_agent.hpp"
-#include "patrol_team_agent.hpp"
 #include "generalized_patrol_team_agent.hpp"
-#include "patrol_reference_agent.hpp"
 #include "patrol_config.hpp"
 
 #include "airspacecomponents.hpp"
@@ -472,7 +469,6 @@ bool LoadScenario(std::filesystem::path const& path,
     context.patrolMaximumRotationRate = patrolParameters.maxRotationRate;
     context.patrolCollisionDistance = patrolParameters.collisionDistance;
     context.patrolGeometrySettings = patrolGeometrySettings;
-    std::shared_ptr<defenders::PatrolPolicy> bluePolicy;
     auto const modelRoot = std::filesystem::path{RESOURCE_PATH}.parent_path()
         / "model" / "BluePatrol";
     auto const latestCheckpoint = modelRoot / "latest"
@@ -481,41 +477,6 @@ bool LoadScenario(std::filesystem::path const& path,
         / "blue_patrol_training_v4.txt";
     auto const productionCheckpoint = modelRoot / "prod"
         / "blue_patrol_mappo_v7.txt";
-    if (useMappo && !generalizedBlueTeam)
-    {
-        std::filesystem::path const warmStartCheckpoint =
-            std::filesystem::exists(latestCheckpoint)
-            ? latestCheckpoint : productionCheckpoint;
-        if (std::filesystem::exists(warmStartCheckpoint))
-        {
-            try
-            {
-                bluePolicy = defenders::LoadPatrolPolicy(warmStartCheckpoint);
-            }
-            catch (std::exception const& error)
-            {
-                std::cerr << "[BLUE MAPPO] Incompatible checkpoint: "
-                          << error.what() << ". Starting a new Actor.\n";
-                bluePolicy.reset();
-            }
-        }
-        if (!bluePolicy)
-        {
-            try
-            {
-                bluePolicy = defenders::CreateUntrainedPatrolPolicy(
-                    patrolTraining.seed);
-            }
-            catch (std::exception const& error)
-            {
-                std::cerr << "[BLUE MAPPO] Cannot initialize Actor: "
-                          << error.what() << '\n';
-                return false;
-            }
-            std::cout << "[BLUE MAPPO] Actor initialized; Play starts embedded "
-                         "RLtools v6 training from new weights.\n";
-        }
-    }
     auto& world = registry->ctx().get<ppo::model::sEnvironmentState>();
     world.m_maxNorth = worldNorth;
     world.m_maxEast = worldEast;
@@ -536,8 +497,6 @@ bool LoadScenario(std::filesystem::path const& path,
     patrolParameters.geometry = context.patrolGeometry;
     try
     {
-        if (generalizedBlueTeam)
-        {
             std::array<ppo::model::BaseEntity*,
                        defenders::TeamCapacity::MaximumBlueMobiles> guards{};
             std::array<ppo::model::BaseEntity*,
@@ -571,51 +530,6 @@ bool LoadScenario(std::filesystem::path const& path,
             if (!controller)
                 return false;
             agents.push_back(std::move(controller));
-        }
-        else
-        {
-            auto& first = *entities.at("blue_guard_1");
-            auto& second = *entities.at("blue_guard_2");
-            if (useMappo)
-            {
-                std::array<ppo::model::BaseEntity*, 2> guards{&first, &second};
-                std::vector<ppo::model::BaseEntity*> attackers;
-                // Patrol-only scenarios have no red entities. The archived
-                // two-vs-two scenario still requires exactly two attackers.
-                std::size_t const redCount = patrolOnly ? 0U
-                    : generalizedRedTeam ? configuredRedCount : 2U;
-                attackers.reserve(redCount);
-                for (std::size_t index = 0U; index < redCount; ++index)
-                {
-                    auto const red = entities.find(
-                        "red_" + std::to_string(index + 1U));
-                    if (red != entities.end())
-                        attackers.push_back(red->second.get());
-                }
-                if (attackers.size() != redCount)
-                    return false;
-                auto controller = environment.CreateAgent<
-                    defenders::PatrolMappoAgent>(
-                        guards, attackers, *entities.at("blue_objective"),
-                        bluePolicy, patrolParameters, patrolTraining,
-                        latestCheckpoint, trainingCheckpoint,
-                        productionCheckpoint);
-                if (!controller)
-                    return false;
-                agents.push_back(std::move(controller));
-            }
-            else
-            {
-                auto leader = environment.CreateAgent<
-                    defenders::PatrolReferenceAgent>(first, second, 0U);
-                auto follower = environment.CreateAgent<
-                    defenders::PatrolReferenceAgent>(second, first, 1U);
-                if (!leader || !follower)
-                    return false;
-                agents.push_back(std::move(leader));
-                agents.push_back(std::move(follower));
-            }
-        }
     }
     catch (std::exception const& error)
     {
@@ -634,12 +548,12 @@ bool LoadScenario(std::filesystem::path const& path,
 ppo::app::ExampleDefinition Definition()
 {
     return {
-        "two-vs-two",
-        "TWO VS TWO - MAPPO vs RLMission",
-        std::filesystem::path("Scenarios") / "TwoVsTwo.json",
+        "blue-defense",
+        "BLUE DEFENSE - MAPPO P/N vs RLMission",
+        std::filesystem::path("Scenarios") / "BlueDefense.json",
         &ppo::examples::airspace::RegisterAirspaceMeta,
         &LoadScenario,
-        "Two blue defenders protect a fixed objective against RL-controlled red cars."
+        "P blue defenders protect an objective against N RLMission attackers."
     };
 }
 
@@ -651,7 +565,7 @@ ppo::app::ExampleDefinition BluePatrolDefinition()
         std::filesystem::path("Scenarios") / "BluePatrol.json",
         &ppo::examples::airspace::RegisterAirspaceMeta,
         &LoadScenario,
-        "Two blue defenders train a cooperative RLtools MAPPO patrol without attackers."
+        "P blue defenders learn the racetrack and formation without attackers."
     };
 }
 
