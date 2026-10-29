@@ -36,6 +36,8 @@ bool MaximumBlueTeamFitsWorld()
     context.spawnSettings.blueTeam = bluedefense::BlueTeamSpawnSettings{};
     context.spawnSettings.blueTeam->activeCount =
         defenders::TeamCapacity::MaximumBlueMobiles;
+    context.spawnSettings.redTeam = bluedefense::RedTeamSpawnSettings{};
+    context.spawnSettings.redTeam->activeCount = 0U;
 
     std::vector<std::shared_ptr<Entity>> blues;
     blues.reserve(context.count);
