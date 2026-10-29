@@ -57,7 +57,8 @@ inline bool Valid(GeneralizedRuntimeState const& state) noexcept
     auto const finiteMobile = [](Mobile const& mobile) {
         return std::isfinite(mobile.north) && std::isfinite(mobile.east)
             && std::isfinite(mobile.heading) && std::isfinite(mobile.speed)
-            && std::isfinite(mobile.turnRate) && mobile.speed >= 0.F;
+            && std::isfinite(mobile.turnRate)
+            && (!mobile.available || mobile.speed >= 0.F);
     };
     for (std::size_t index = 0U; index < state.counts.blueMobiles; ++index)
     {
