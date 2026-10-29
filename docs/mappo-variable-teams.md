@@ -115,3 +115,38 @@ Games*, NeurIPS 2022 (MAPPO); Zaheer et al., *Deep Sets*, NeurIPS 2017
 for Multi-Agent Reinforcement Learning*, ICML 2019 (agent-dependent value
 context). The specific mean/max pooling and 256 hidden size here are
 engineering choices, not a claim of an optimal published architecture.
+
+
+## Role-specific reward corrections (2026-10-29)
+
+The generalized runtime (not legacy 2v2 or RLMission) uses ten explainable
+channels: Patrol tracking, Formation keeping, Pursuit progress, Control effort,
+Blue survival, Red neutralization, Threat containment, Objective survival,
+Mission outcome, Timeout. The old seven-key JSON remains accepted, with
+independent mappings: `Patrol tracking` controls only leader tracking;
+`Formation safety` controls formation error; `Mission outcome` controls
+single-blue loss; `Interception` controls both pursuit progress and sparse
+neutralization. The GUI now publishes ten names and values.
+
+Leader tracking includes progress, cross-track error and heading error, using
+existing `patrolProgressWeight`, `patrolCrossTrackWeight` and
+`patrolCrossTrackScaleMeters` settings. Teammates observe and receive rewards
+in the **physical leader-heading** frame. Formation gives **zero** reward
+when within tolerance; deviation is a penalty rather than a constant positive
+per-step survival bonus. This fixes cumulative reward imbalance.
+
+Distant threats reduce patrol/formation priority, allowing individual pursuit.
+As hostile mobiles approach the team, the relative formation preference grows;
+imminent objective danger can still relax it. The transition is continuous,
+using the configured `teammateThreatDistanceMeters` and objective pressure;
+there is no external waypoint or target assignment. Pursuit progress measures
+the **blues' displacement** toward each living red with red positions frozen
+at the beginning of the step, and uses objective risk as a weighting. Red-only
+movement cannot generate pursuit reward. It is a shared team coverage signal,
+not proof of optimal multi-target assignment.
+
+These reward semantics change the optimization objective even though the v8
+actor and v6 critic/checkpoint dimensions are unchanged. Continue training
+only with deliberate reward migration; a fresh training run and multi-seed
+evaluation are recommended. Unit tests cover good/off-track tracking,
+leader-heading wedge consistency, blue-motion pursuit and proximity blending.

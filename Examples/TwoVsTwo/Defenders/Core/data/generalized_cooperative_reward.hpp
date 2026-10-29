@@ -76,7 +76,9 @@ inline GeneralizedCombatStateMask MakeGeneralizedCombatStateMask(
 /** @brief Explainable channels of a generalized cooperative reward. */
 enum class GeneralizedRewardChannel : std::size_t
 {
-    RoleResponsibility,
+    PatrolTracking,
+    FormationKeeping,
+    PursuitProgress,
     ControlEffort,
     BlueSurvival,
     RedNeutralization,
@@ -101,7 +103,7 @@ using GeneralizedRewardValues =
 struct GeneralizedRewardSettings final
 {
     /** @brief Per-channel multipliers in enum order. */
-    GeneralizedRewardValues weights{1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F};
+    GeneralizedRewardValues weights{};
     /** @brief Symmetric scalar reward limit. */
     float clampMagnitude{100.F};
 };
@@ -118,6 +120,8 @@ struct GeneralizedResponsibilitySignals final
     float leaderPatrol{};
     /** @brief Team-average reduction of objective danger, in [-1, 1]. */
     float threatContainment{};
+    /** @brief Blue-motion-only progress towards the living red set. */
+    float pursuitProgress{};
     /** @brief Teammate contributions indexed by unique formation slot. */
     std::array<float, kMaximumFormationSlots> formationSlots{};
     /** @brief Non-negative normalized control effort by physical blue index. */
@@ -244,7 +248,9 @@ inline bool ValidSignals(GeneralizedResponsibilitySignals const& signals,
 {
     if (!std::isfinite(signals.leaderPatrol)
         || !std::isfinite(signals.threatContainment)
-        || std::abs(signals.threatContainment) > 1.F)
+        || std::abs(signals.threatContainment) > 1.F
+        || !std::isfinite(signals.pursuitProgress)
+        || std::abs(signals.pursuitProgress) > 1.F)
         return false;
     for (std::size_t slot = 0U; slot + 1U < blueCount; ++slot)
         if (!std::isfinite(signals.formationSlots[slot]))
@@ -276,8 +282,8 @@ inline bool ValidSettings(GeneralizedRewardSettings const& settings) noexcept
  *
  * Red neutralization is divided by active N and blue loss by active P. Every
  * active blue receives the same cooperative event channels. Only the leader
- * receives patrol responsibility; each teammate receives only its unique slot
- * responsibility. The team decomposition averages role/control contributions
+ * receives patrol tracking; each teammate receives only its unique formation
+ * penalty. The team decomposition averages role/control contributions
  * over P, making its scale independent of team size.
  *
  * @param roles Stable leader and formation-slot assignment for the episode.
@@ -352,6 +358,9 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
             GeneralizedRewardChannel::ThreatContainment)] =
                 transition.responsibilities.threatContainment;
         breakdown.values[static_cast<std::size_t>(
+            GeneralizedRewardChannel::PursuitProgress)] =
+                transition.responsibilities.pursuitProgress;
+        breakdown.values[static_cast<std::size_t>(
             GeneralizedRewardChannel::ObjectiveSurvival)] = objectiveSurvival;
         breakdown.values[static_cast<std::size_t>(
             GeneralizedRewardChannel::MissionOutcome)] = outcome;
@@ -360,7 +369,8 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
     };
     shared(result.team);
 
-    float responsibilitySum = 0.F;
+    float patrolSum = 0.F;
+    float formationSum = 0.F;
     float effortSum = 0.F;
     for (std::size_t physicalIndex = 0U;
          physicalIndex < blueCount; ++physicalIndex)
@@ -371,23 +381,35 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
         GeneralizedRewardBreakdown& breakdown = result.perBlue[physicalIndex];
         shared(breakdown);
         BlueRoleAssignment const assignment = *roles.Assignment(physicalIndex);
-        float responsibility = transition.responsibilities.leaderPatrol;
-        if (assignment.role == BlueRole::Teammate)
-            responsibility = transition.responsibilities.formationSlots[
-                assignment.formationSlot];
-        responsibility = std::clamp(responsibility, -1.F, 1.F);
+        if (assignment.role == BlueRole::Leader)
+        {
+            float const patrol = std::clamp(
+                transition.responsibilities.leaderPatrol, -1.F, 1.F);
+            breakdown.values[static_cast<std::size_t>(
+                GeneralizedRewardChannel::PatrolTracking)] = patrol;
+            patrolSum += patrol;
+        }
+        else
+        {
+            float const formation = std::clamp(
+                transition.responsibilities.formationSlots[
+                    assignment.formationSlot], -1.F, 1.F);
+            breakdown.values[static_cast<std::size_t>(
+                GeneralizedRewardChannel::FormationKeeping)] = formation;
+            formationSum += formation;
+        }
         float const effort = std::clamp(
             transition.responsibilities.controlEffort[physicalIndex], 0.F, 1.F);
         breakdown.values[static_cast<std::size_t>(
-            GeneralizedRewardChannel::RoleResponsibility)] = responsibility;
-        breakdown.values[static_cast<std::size_t>(
             GeneralizedRewardChannel::ControlEffort)] = -effort;
-        responsibilitySum += responsibility;
         effortSum += effort;
     }
     result.team.values[static_cast<std::size_t>(
-        GeneralizedRewardChannel::RoleResponsibility)] =
-            responsibilitySum / static_cast<float>(blueCount);
+        GeneralizedRewardChannel::PatrolTracking)] =
+            patrolSum / static_cast<float>(blueCount);
+    result.team.values[static_cast<std::size_t>(
+        GeneralizedRewardChannel::FormationKeeping)] =
+            formationSum / static_cast<float>(blueCount);
     result.team.values[static_cast<std::size_t>(
         GeneralizedRewardChannel::ControlEffort)] =
             -effortSum / static_cast<float>(blueCount);

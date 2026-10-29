@@ -68,6 +68,13 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         COMMAND TwoVsTwoGeneralizedActorTests)
     add_executable(TwoVsTwoGeneralizedRuntimeStateTests
         Tests/generalized_runtime_state_tests.cpp)
+    add_executable(TwoVsTwoGeneralizedRewardShapingTests
+        Tests/generalized_reward_shaping_tests.cpp)
+    target_link_libraries(TwoVsTwoGeneralizedRewardShapingTests PRIVATE
+        TwoVsTwoDefenderBackend)
+    target_compile_features(TwoVsTwoGeneralizedRewardShapingTests PRIVATE cxx_std_17)
+    add_test(NAME TwoVsTwoGeneralizedRewardShapingTests
+        COMMAND TwoVsTwoGeneralizedRewardShapingTests)
     target_link_libraries(TwoVsTwoGeneralizedRuntimeStateTests PRIVATE
         TwoVsTwoDefenderBackend)
     target_compile_features(TwoVsTwoGeneralizedRuntimeStateTests PRIVATE
@@ -109,6 +116,7 @@ add_library(TwoVsTwoPatrolRuntime STATIC
     Runtime/data/patrol_policy.hpp
     Runtime/data/generalized_patrol_team_agent.hpp
     Runtime/data/generalized_runtime_state.hpp
+    Runtime/data/generalized_reward_shaping.hpp
     Runtime/data/patrol_reference_agent.hpp
     Runtime/data/patrol_reference_controller.hpp
     Runtime/data/patrol_team_agent.hpp
