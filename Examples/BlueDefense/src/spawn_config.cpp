@@ -300,22 +300,17 @@ std::optional<SpawnSettings> ParseSpawnSettings(
     };
     if (!settings.is_object())
         return fail("blueDefense must be an object");
-    auto const red2Probability = Number(
-        settings, "red2InitiallyDestroyedProbability");
-    auto const red2Item = settings.find(
-        "red2InitiallyDestroyedProbability");
+    if (settings.contains("red2InitiallyDestroyedProbability")
+        || settings.contains("threatCurriculum"))
+        return fail("Legacy fixed-two spawn fields are unsupported");
+    if (!settings.contains("blueTeam") || !settings.contains("redTeam"))
+        return fail("blueDefense requires blueTeam and redTeam");
     auto const redItem = settings.find("redSpawn");
     auto const friendlyZoneItem = settings.find("restrictedZoneSpawn");
-    bool const hasGeneralizedRedTeam = settings.contains("redTeam");
-    if (red2Item != settings.end() && !red2Probability)
-        return fail("red2InitiallyDestroyedProbability must be finite and numeric");
-    if ((!hasGeneralizedRedTeam && !red2Probability)
-        || redItem == settings.end() || !redItem->is_object()
+    if (redItem == settings.end() || !redItem->is_object()
         || friendlyZoneItem == settings.end()
         || !friendlyZoneItem->is_object())
-        return fail(hasGeneralizedRedTeam
-            ? "blueDefense requires redSpawn and restrictedZoneSpawn"
-            : "archived 2-vs-2 requires red2InitiallyDestroyedProbability, redSpawn and restrictedZoneSpawn");
+        return fail("blueDefense requires redSpawn and restrictedZoneSpawn");
 
     auto const minimumScale = Number(*redItem, "minimumWorldScale");
     auto const maximumScale = Number(*redItem, "maximumWorldScale");
@@ -338,7 +333,6 @@ std::optional<SpawnSettings> ParseSpawnSettings(
         return fail("redSpawn or restrictedZoneSpawn contains a missing or non-finite numeric value");
 
     SpawnSettings result{};
-    result.red2DestroyedProbability = red2Probability.value_or(0.F);
     result.red.worldScale = {*minimumScale, *maximumScale};
     result.red.bearingRadians = {
         *minimumBearing * kDegreesToRadians,
@@ -357,44 +351,6 @@ std::optional<SpawnSettings> ParseSpawnSettings(
     if (!ParseRestrictedZones(settings, result, error))
         return fail(error);
 
-    auto const curriculumItem = settings.find("threatCurriculum");
-    if (curriculumItem != settings.end())
-    {
-        if (!curriculumItem->is_object())
-            return fail("threatCurriculum must be an object");
-        auto const enabled = curriculumItem->find("enabled");
-        auto const noThreat = Number(*curriculumItem, "noThreatProbability");
-        auto const singleThreat = Number(
-            *curriculumItem, "singleThreatProbability");
-        auto const delayedFirst = Number(
-            *curriculumItem, "delayedFirstThreatProbability");
-        auto const delayedSecond = Number(
-            *curriculumItem, "delayedSecondThreatProbability");
-        auto const minimumFirst = Step(
-            *curriculumItem, "minimumFirstDelaySteps");
-        auto const maximumFirst = Step(
-            *curriculumItem, "maximumFirstDelaySteps");
-        auto const minimumSecond = Step(
-            *curriculumItem, "minimumSecondDelaySteps");
-        auto const maximumSecond = Step(
-            *curriculumItem, "maximumSecondDelaySteps");
-        if (enabled == curriculumItem->end() || !enabled->is_boolean()
-            || !noThreat || !singleThreat || !delayedFirst || !delayedSecond
-            || !minimumFirst || !maximumFirst
-            || !minimumSecond || !maximumSecond)
-            return fail("threatCurriculum contains a missing or invalid field");
-
-        auto& curriculum = result.threatCurriculum;
-        curriculum.enabled = enabled->get<bool>();
-        curriculum.noThreatProbability = *noThreat;
-        curriculum.singleThreatProbability = *singleThreat;
-        curriculum.delayedFirstThreatProbability = *delayedFirst;
-        curriculum.delayedSecondThreatProbability = *delayedSecond;
-        curriculum.firstDelaySteps = {*minimumFirst, *maximumFirst};
-        curriculum.secondDelaySteps = {*minimumSecond, *maximumSecond};
-    }
-    if (result.redTeam && result.threatCurriculum.enabled)
-        return fail("redTeam and enabled threatCurriculum are mutually exclusive");
     if (!Valid(result))
         return fail("blueDefense spawn settings are internally inconsistent");
     if (diagnostic != nullptr)
