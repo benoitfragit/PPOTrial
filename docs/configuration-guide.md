@@ -10,13 +10,13 @@ resources/settings/
 ├── Environment.json              monde de simulation principal
 ├── Renderer.json                 affichage et caméra
 ├── Training/
-│   ├── BluePatrol.json           MAPPO RLTools des deux défenseurs
+│   ├── BluePatrol.json           MAPPO RLTools P/N partagé
 │   ├── RLMission.json            PPO, récompenses et version du modèle
 │   └── RLSNA.json
 ├── Scenarios/
 │   ├── BluePatrol.json           curriculum de patrouille sans rouge
 │   ├── Playground.json           composition du monde principal
-│   ├── TwoVsTwo.json             défense MAPPO P/N (P=4, N=4 par défaut)
+│   ├── BlueDefense.json           défense MAPPO P/N (P=4, N=4 par défaut)
 │   └── Evaluation/
 │       ├── RLMission.json        composition et limites des tests
 │       └── RLSNA.json
@@ -185,7 +185,7 @@ les profils LibTorch historiques :
 }
 ~~~
 
-Ici, `rolloutSteps` compte les pas ECS de l'équipe. Sur le chemin 2v2 legacy,
+Ici, `rolloutSteps` compte les pas ECS de l'équipe. Dans les anciennes implémentations (non utilisées),
 chaque pas fournit deux transitions au buffer, une par défenseur. Sur le chemin
 P/N optionnel décrit plus bas, il fournit exactement P transitions. Les valeurs
 applicatives proposées
@@ -208,7 +208,7 @@ n'est pas punie pour avoir atteint sa durée normale.
 
 `checkpointEvery` lance réellement l'évaluateur intégré après le nombre de
 mises à jour indiqué. L'acteur agit alors de façon déterministe pendant
-`evaluation.episodes` cas de `evaluation.maxSteps` pas au maximum. En 2v2, ces
+`evaluation.episodes` cas de `evaluation.maxSteps` pas au maximum. Historiquement, ces
 cas conservent les rouges RLMission de production et alternent 2v2/2v1, côtés
 et phases. Le score et sa progression sont visibles dans l'IHM ; seul un
 candidat meilleur remplace le checkpoint de production.
@@ -231,7 +231,7 @@ n'existent plus.
 
 ### Géométrie aléatoire P/N
 
-`Scenarios/TwoVsTwo.json` règle les conditions initiales sans modifier les
+`Scenarios/BlueDefense.json` règle les conditions initiales sans modifier les
 agents RLMission. `redSpawn.minimumWorldScale` et `maximumWorldScale` placent
 les attaquants au-delà de la limite rectangulaire ; cette limite reste un
 repère et ne bloque pas leur mouvement. Les angles, exprimés en degrés, sont
@@ -269,94 +269,61 @@ activations.
 
 Le profil de plateforme reste la source du rayon létal
 `SNA.MaxNoEscapeZoneRange`. Le rayon LiDAR vaut 110 % de ce rayon. Dans
-TwoVsTwo, seul le capteur ECS des `Mobile/Friend` est rafraîchi par ces règles;
+BlueDefense, seul le capteur ECS des `Mobile/Friend` est rafraîchi par ces règles;
 le contrôleur, l'observation 152 et les checkpoints RLMission rouges ne sont
 pas modifiés. La règle SNA probabiliste de la zone bleue historique reste elle
 aussi active contre les rouges ; seule l'arme des nouvelles zones hostiles est
 remplacée par la pénétration déterministe exacte pour les bleus.
 
-### Équipes P/N optionnelles
+### Équipes P/N — contrôleur MAPPO unique
 
-`Scenarios/TwoVsTwo.json` fournit l'unique entrée MAPPO du sélecteur. Le
-runtime bleu généralisé est sélectionné par `blueTeam`; `redTeam` dimensionne
-ses adversaires. Le profil livré utilise P=4/N=4 et deux zones hostiles de
-bordure dont les centres restent hors du monde. Aucune zone rouge n'est centrée
-dans la zone défendue et toutes sont reflétées du côté opposé à l'objectif :
+Les deux scénarios `Scenarios/BluePatrol.json` et
+`Scenarios/BlueDefense.json` utilisent exactement le même moteur
+`GeneralizedPatrolMappoAgent`. Le sélecteur IHM expose
+`blue-patrol` (P=2/N=0 par défaut) et `blue-defense` (P=4/N=4 par défaut).
+Les effectifs sont déclarés sous `blueDefense` :
 
 ~~~json
-"blueTeam": {
-  "activeCount": 5
-},
-"redTeam": {
-  "activeCount": 7,
-  "maximumPlacementAttempts": 512,
-  "delayedActivationProbability": 0.25,
-  "minimumActivationDelaySteps": 256,
-  "maximumActivationDelaySteps": 768
+{
+  "blueTeam": {"activeCount": 5},
+  "redTeam": {
+    "activeCount": 7,
+    "maximumPlacementAttempts": 512,
+    "delayedActivationProbability": 0.25,
+    "minimumActivationDelaySteps": 256,
+    "maximumActivationDelaySteps": 768
+  }
 }
 ~~~
 
-L'absence de `blueTeam` et `redTeam` conserve intégralement le chemin 2v2
-historique, y compris ses noms, son ordre de tirage RNG, son curriculum et ses
-checkpoints v7/v4. `blueTeam.activeCount` est obligatoire lorsqu'un bloc bleu
-est présent et doit être un entier dans `[1,9]`. `redTeam.activeCount` doit être
-dans `[0,10]`. Les champs inconnus sont refusés.
+Les blocs `blueTeam` et `redTeam` sont **obligatoires**.
+P est dans [1,9], N dans [0,10], les tentatives de placement dans
+[1,4096] et les bornes temporelles sont strictement positives et ordonnées.
+Les anciennes clés `red2InitiallyDestroyedProbability` et
+`threatCurriculum` sont refusées.
 
-Le scénario TwoVsTwo utilise un unique `Mobile/Friend` sans agent comme template
-pour `blue_1..blue_P`, et un unique `Mobile/Hostile` avec exactement un profil
-`RLMission/production` comme template de `red_1..red_N`. Le contrôleur bleu
-partagé est `GeneralizedPatrolMappoAgent`; chaque rouge conserve son propre
-RLMission. Un `redTeam` généralisé et un `threatCurriculum` actif sont
-mutuellement exclusifs.
+Le scénario contient un template `blue_template` sans agent et, en
+présence de Rouges, `red_template` avec le profil
+`RLMission/production`. Les entités physiques `blue_i` et `red_i`
+sont instanciées pour les effectifs choisis. Aucun pilote PPO à deux
+Bleus n'est instancié ; les Rouges conservent leur RLMission d'origine.
 
-`maximumPlacementAttempts` est borné à `[1,4096]` et limite strictement le coût
-du placement de chaque rouge sous la contrainte `redSpawn.minimumSeparation`.
-Une impossibilité géométrique provoque un diagnostic. La probabilité de délai
-est dans `[0,1]`; `minimumActivationDelaySteps` et
-`maximumActivationDelaySteps` doivent être strictement positifs, finis et
-ordonnés. Les activations sont exprimées en pas ECS d'équipe.
+L'acteur commun lit les pistes masquées de 0 à 10 Rouges, les équipiers
+et les 61 rayons LiDAR ; les P actions sont exécutées de manière
+synchrone et les P transitions sont agrégées par le critic individualisé.
+Le snapshot de l'IHM expose **10 canaux de récompense**.
 
-À chaque reset, `BlueTeamRoles` choisit exactement un leader. Chaque autre
-indice physique reçoit un slot unique en V et une valeur normalisée dans
-`[-1,1]`. Les P actions sont échantillonnées ensemble avant la physique et les
-P transitions du même instant sont enregistrées ensemble après la résolution.
+Les checkpoints v8 de l'acteur et V6 d'entraînement généralisés restent
+dans `resources/model/BluePatrol/latest`. Les fichiers historiques V4/V7
+ne servent plus qu'aux migrations compatibles ; ils ne définissent pas
+un second chemin d'exécution.
 
-Le contrat d'observation v8 contient 295 valeurs brutes : état propre,
-exactement 61 rayons LiDAR issus de `sPseudoLidarState`, rôle/slot, dix pistes
-rouges, huit autres pistes bleues, objectif séparé, masques et P/N. L'acteur
-transforme cette représentation par attention/moyenne/maximum masqués vers un
-tronc compact de 156 valeurs. Les zones ne consomment aucune des dix pistes
-RLMission : elles restent dans le canal SAM/pseudo-LiDAR dédié.
-
-Le chemin P/N écrit `blue_patrol_generalized_v8.txt` et
-`blue_patrol_generalized_training_v5.txt`. Un v7 peut amorcer l'acteur v8. La
-migration v4 explicite ne copie que l'acteur et ses moments Adam compatibles ;
-le critique fixe 2v2, les états scalaires des optimiseurs, le RNG, le compteur
-et le rollout sont réinitialisés. Conserver impérativement
-`blue_patrol_mappo_v7.txt` et `blue_patrol_training_v4.txt` : ils restent les
-checkpoints du chemin historique et les sources de migration, jamais des
-fichiers à supprimer.
-
-La section `evaluation` est aussi appliquée au runtime P/N, sans nouveau champ
-JSON : `episodes`, `maxSteps` et `seed` pilotent une campagne déterministe à la
-première update puis toutes les `checkpointEvery` updates. Les actions sont les
-moyennes de l'acteur v8 et ne créent aucune transition d'apprentissage. Les
-métriques sont normalisées par P et N avant leur moyenne ; une amélioration
-écrit exclusivement `prod/blue_patrol_generalized_v8.txt` et son `.score`
-portant les cardinalités. Les fichiers de production v7 restent indépendants.
-
-Tests rapides de configuration et du cœur P/N :
-
-~~~powershell
-cmake --build out/build/x64-Debug --config Debug --target TwoVsTwoSpawnTests TwoVsTwoTeamDomainTests TwoVsTwoTeamDynamicsTests TwoVsTwoGeneralizedActorTests TwoVsTwoGeneralizedRuntimeStateTests TwoVsTwoGeneralizedLearnerTests TwoVsTwoGeneralizedRewardEvaluationTests MissionTrackSelectionTests --parallel 4
-ctest --test-dir out/build/x64-Debug -C Debug -R "^(TwoVsTwoSpawnTests|TwoVsTwoTeamDomainTests|TwoVsTwoTeamDynamicsTests|TwoVsTwoGeneralized.*|MissionTrackSelectionTests)$" --output-on-failure
-~~~
-
-Les smoke tests runtime/learner et `PPO.exe --example two-vs-two --check-example`
-sont une validation finale plus lourde, à exécuter avant fusion plutôt qu'à
-chaque petite modification.
+Voir [BlueDefense — MAPPO P/N](blue-defense-example.md) pour le
+démarrage, les tests IHM et les commandes de compilation.
 
 ## Scénarios et cas d'évaluation
+
+
 
 Les scènes de **Scenarios/Evaluation/RLMission.json** et **RLSNA.json** utilisent les mêmes déclarations d'entités que Playground, plus une section d'évaluation :
 
