@@ -7,7 +7,7 @@
 #include <limits>
 #include <string>
 
-namespace ppo::examples::twovstwo {
+namespace ppo::examples::bluedefense {
 namespace {
 
 constexpr float kHalfPi = 1.5707963267948966F;
@@ -283,7 +283,7 @@ std::optional<EpisodeSpawnLayout> GenerateEpisodeSpawnLayout(
         return std::nullopt;
     };
     if (!Valid(settings))
-        return fail("twoVsTwo spawn settings are internally inconsistent");
+        return fail("blueDefense spawn settings are internally inconsistent");
     if (!ValidWorld(world))
         return fail("world half extents must be finite and strictly positive");
 
@@ -447,4 +447,4 @@ std::optional<Spawn> MakeSpawn(std::string_view name,
     return std::nullopt;
 }
 
-} // namespace ppo::examples::twovstwo
+} // namespace ppo::examples::bluedefense

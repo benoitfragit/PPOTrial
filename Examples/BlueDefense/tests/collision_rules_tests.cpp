@@ -1,4 +1,4 @@
-#include "twovstworules.hpp"
+#include "bluedefenserules.hpp"
 #include "initializer.hpp"
 
 #include "components.hpp"
@@ -29,7 +29,7 @@ void TestSweptBlueCollision()
     auto second = std::make_shared<Entity>(
         &world, eEntitySide::Friend, eEntityType::Mobile);
     WorldEntities entities{first, second};
-    ppo::examples::twovstwo::TwoVsTwoWorldRules rules;
+    ppo::examples::bluedefense::BlueDefenseWorldRules rules;
 
     auto [firstState] = first->get<sEntityState>();
     auto [secondState] = second->get<sEntityState>();
@@ -75,7 +75,7 @@ void TestBlueNearMiss()
     auto second = std::make_shared<Entity>(
         &world, eEntitySide::Friend, eEntityType::Mobile);
     WorldEntities entities{first, second};
-    ppo::examples::twovstwo::TwoVsTwoWorldRules rules;
+    ppo::examples::bluedefense::BlueDefenseWorldRules rules;
 
     auto [firstState] = first->get<sEntityState>();
     auto [secondState] = second->get<sEntityState>();
@@ -120,7 +120,7 @@ void TestGeneralizedBluePairCoverage()
     second.m_y = 0.F;
     second.m_dx = -400.F;
 
-    ppo::examples::twovstwo::TwoVsTwoWorldRules rules;
+    ppo::examples::bluedefense::BlueDefenseWorldRules rules;
     rules.BeforeStep(entities);
     first.m_x += first.m_dx * 0.2F;
     second.m_x += second.m_dx * 0.2F;
@@ -161,7 +161,7 @@ void TestDeterministicRestrictedZonePenetration()
     zoneState.m_y = 0.F;
 
     WorldEntities entities{blue, red, zone};
-    ppo::examples::twovstwo::TwoVsTwoWorldRules rules;
+    ppo::examples::bluedefense::BlueDefenseWorldRules rules;
     rules.BeforeStep(entities);
     blueState.m_x += blueState.m_dx * 0.2F;
     rules.Resolve(entities);
@@ -186,7 +186,7 @@ void TestDeterministicRestrictedZonePenetration()
     disabledState.m_destroyed = true;
     disabledState.m_prevDestroyed = true;
     WorldEntities disabledEntities{survivor, disabledZone};
-    ppo::examples::twovstwo::TwoVsTwoWorldRules disabledRules;
+    ppo::examples::bluedefense::BlueDefenseWorldRules disabledRules;
     disabledRules.BeforeStep(disabledEntities);
     disabledRules.Resolve(disabledEntities);
     Require(!survivorState.m_destroyed,
@@ -214,7 +214,7 @@ void TestFriendlyRestrictedZoneStillAffectsRed()
     zoneState.m_y = 0.F;
 
     WorldEntities entities{red, friendlyZone};
-    ppo::examples::twovstwo::TwoVsTwoWorldRules rules;
+    ppo::examples::bluedefense::BlueDefenseWorldRules rules;
     rules.BeforeStep(entities);
     rules.Resolve(entities);
 
@@ -227,8 +227,8 @@ void TestFriendlyRestrictedZoneStillAffectsRed()
 void TestDelayedThreatActivation()
 {
     using namespace ppo::model;
-    using ppo::examples::twovstwo::EpisodeSpawnLayout;
-    using ppo::examples::twovstwo::InitializerContext;
+    using ppo::examples::bluedefense::EpisodeSpawnLayout;
+    using ppo::examples::bluedefense::InitializerContext;
 
     entt::registry world;
     world.ctx().emplace<sEnvironmentState>().m_dt = 0.2F;
@@ -251,17 +251,17 @@ void TestDelayedThreatActivation()
     disabledState.m_prevDestroyed = true;
 
     WorldEntities entities{delayed, disabled};
-    ppo::examples::twovstwo::TwoVsTwoWorldRules rules;
+    ppo::examples::bluedefense::BlueDefenseWorldRules rules;
     rules.BeforeStep(entities);
     Require(delayedState.m_destroyed && disabledState.m_destroyed,
             "a delayed threat activated before its scheduled step");
-    Require(ppo::examples::twovstwo::HasPendingThreats(
+    Require(ppo::examples::bluedefense::HasPendingThreats(
                 *context.episodeLayout, context.elapsedSteps),
             "the delayed threat was not reported pending before its step");
     rules.Resolve(entities);
     Require(context.elapsedSteps == 1U,
             "the threat curriculum clock did not follow the ECS step");
-    Require(ppo::examples::twovstwo::HasPendingThreats(
+    Require(ppo::examples::bluedefense::HasPendingThreats(
                 *context.episodeLayout, context.elapsedSteps),
             "the runtime would terminate before the delayed threat activates");
     rules.BeforeStep(entities);
@@ -270,7 +270,7 @@ void TestDelayedThreatActivation()
     Require(disabledState.m_destroyed,
             "a never-scheduled threat was activated");
     rules.Resolve(entities);
-    Require(!ppo::examples::twovstwo::HasPendingThreats(
+    Require(!ppo::examples::bluedefense::HasPendingThreats(
                 *context.episodeLayout, context.elapsedSteps),
             "an activated threat remained pending after its ECS step");
 }
@@ -278,8 +278,8 @@ void TestDelayedThreatActivation()
 void TestGeneralizedThreatActivationByMetadataIndex()
 {
     using namespace ppo::model;
-    using ppo::examples::twovstwo::EpisodeSpawnLayout;
-    using ppo::examples::twovstwo::InitializerContext;
+    using ppo::examples::bluedefense::EpisodeSpawnLayout;
+    using ppo::examples::bluedefense::InitializerContext;
 
     entt::registry world;
     world.ctx().emplace<sEnvironmentState>().m_dt = 0.2F;
@@ -316,7 +316,7 @@ void TestGeneralizedThreatActivationByMetadataIndex()
     wrongSideState.m_destroyed = wrongSideState.m_prevDestroyed = true;
 
     WorldEntities entities{red3, red10, malformed, wrongSide};
-    ppo::examples::twovstwo::TwoVsTwoWorldRules rules;
+    ppo::examples::bluedefense::BlueDefenseWorldRules rules;
     rules.BeforeStep(entities);
 
     Require(!red3State.m_destroyed && !red10State.m_destroyed,
@@ -330,7 +330,7 @@ void TestGeneralizedThreatActivationByMetadataIndex()
 void TestPatrolOverlaySnapshot()
 {
     using namespace ppo::model;
-    using ppo::examples::twovstwo::InitializerContext;
+    using ppo::examples::bluedefense::InitializerContext;
 
     entt::registry world;
     auto& environment = world.ctx().emplace<sEnvironmentState>();
@@ -342,13 +342,13 @@ void TestPatrolOverlaySnapshot()
     context.patrolGeometry.anchorEast = -340.F;
     auto& sourceOverlay = context.patrolTrackOverlay;
     sourceOverlay.m_sampleCount = sourceOverlay.SampleCapacity;
-    float const circuit = ppo::examples::twovstwo::defenders::CircuitLength(
+    float const circuit = ppo::examples::bluedefense::defenders::CircuitLength(
         context.patrolGeometry);
     for (std::size_t sample = 0U;
          sample < sourceOverlay.m_sampleCount; ++sample)
     {
         auto const pose =
-            ppo::examples::twovstwo::defenders::EvaluatePatrolCurve(
+            ppo::examples::bluedefense::defenders::EvaluatePatrolCurve(
                 context.patrolGeometry,
                 circuit * static_cast<float>(sample)
                     / static_cast<float>(sourceOverlay.m_sampleCount - 1U));
@@ -357,10 +357,10 @@ void TestPatrolOverlaySnapshot()
     }
 
     entt::registry snapshot;
-    ppo::examples::twovstwo::TwoVsTwoWorldRules rules;
+    ppo::examples::bluedefense::BlueDefenseWorldRules rules;
     rules.CopySnapshot(world, snapshot);
     Require(snapshot.ctx().contains<sPatrolTrackOverlay>(),
-            "TwoVsTwo snapshot has no patrol visualization overlay");
+            "BlueDefense snapshot has no patrol visualization overlay");
     auto const& overlay = snapshot.ctx().get<sPatrolTrackOverlay>();
     Require(overlay.m_sampleCount == sPatrolTrackOverlay::SampleCapacity,
             "patrol overlay sample count is invalid");
@@ -373,7 +373,7 @@ void TestPatrolOverlaySnapshot()
 
 void TestBlueRolePermutationContract()
 {
-    using ppo::examples::twovstwo::InitializerContext;
+    using ppo::examples::bluedefense::InitializerContext;
     InitializerContext context{};
     for (std::size_t leader = 0U; leader < 2U; ++leader)
     {
