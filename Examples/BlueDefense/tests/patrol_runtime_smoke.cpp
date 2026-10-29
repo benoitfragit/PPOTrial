@@ -33,6 +33,7 @@ struct Sample
     unsigned redsTargetingObjective = 0U;
     bool trainingPresent = false;
     bool rewardsPresent = false;
+    bool nonzeroRewardChannel = false;
     bool generalizedController = false;
     bool evaluationInProgress = false;
     std::uint64_t completedEvaluations = 0U;
@@ -155,6 +156,12 @@ Sample Capture(
                     result.rewardsPresent |= snapshot.m_rewards.size() == 10U
                         && snapshot.m_rewardnames.size() == 10U
                         && snapshot.m_rewardnames[6] == "Threat containment";
+                    result.nonzeroRewardChannel |= std::any_of(
+                        snapshot.m_rewards.begin(), snapshot.m_rewards.end(),
+                        [](float const value) {
+                            return std::isfinite(value)
+                                && std::abs(value) > 1.e-6F;
+                        });
                     result.evaluationInProgress |=
                         snapshot.m_common.m_evaluationinprogress;
                     result.completedEvaluations = std::max(
@@ -266,6 +273,7 @@ int main(int argc, char** argv)
             moved &= std::hypot(later.north[role] - first.north[role],
                                 later.east[role] - first.east[role]) > 32.F;
         moved &= std::abs(current.formationWeight - 2.5F) < 1.e-4F;
+        moved &= current.nonzeroRewardChannel;
         if (moved)
             break;
     }

@@ -101,6 +101,8 @@ private:
     PatrolTrainingSettings training_{};
     /** @brief Live independent generalized weights for the ten UI channels. */
     GeneralizedRewardValues rewardWeights_{};
+    /** @brief Most recent unweighted team reward channels displayed by the IHM. */
+    GeneralizedRewardValues lastRewardChannels_{};
     std::filesystem::path actorCheckpoint_{};
     std::filesystem::path trainingCheckpoint_{};
     std::filesystem::path productionCheckpoint_{};
