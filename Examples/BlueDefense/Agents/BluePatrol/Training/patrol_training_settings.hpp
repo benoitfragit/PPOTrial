@@ -28,7 +28,8 @@ struct PatrolTrainingSettings final
 {
     std::size_t rolloutSteps{2048U};
     std::uint64_t maxUpdates{300U};
-    std::uint64_t checkpointEvery{10U};
+    std::uint64_t checkpointEvery{10U}; // Deterministic evaluation cadence.
+    std::uint64_t saveEveryUpdates{10U}; // Independent full-state checkpoint cadence.
     std::uint32_t seed{42U};
     float rewardClamp{100.F};
     RewardValues rewardWeights{1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F};
@@ -44,6 +45,7 @@ inline bool Valid(PatrolTrainingSettings const& settings) noexcept
 {
     if (!IsSupportedRolloutSize(settings.rolloutSteps)
         || settings.maxUpdates == 0U || settings.checkpointEvery == 0U
+        || settings.saveEveryUpdates == 0U
         || !std::isfinite(settings.rewardClamp) || settings.rewardClamp <= 0.F
         || !Valid(settings.evaluation))
         return false;
