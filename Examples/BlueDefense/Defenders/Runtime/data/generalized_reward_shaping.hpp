@@ -6,7 +6,7 @@
 #include <cmath>
 #include <limits>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /** @brief Measures a teammate in the physical leader's heading frame. */
 inline float GeneralizedFormationQuality(
@@ -166,4 +166,4 @@ inline float GeneralizedCooperationWeight(
     return close * (1.F - 0.75F * pressure);
 }
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

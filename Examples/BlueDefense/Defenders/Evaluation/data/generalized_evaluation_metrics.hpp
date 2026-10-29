@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <type_traits>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /**
  * @brief Final deterministic sample of one generalized P-versus-N episode.
@@ -220,4 +220,4 @@ static_assert(std::is_trivially_copyable_v<GeneralizedEvaluationSample>,
 static_assert(std::is_trivially_copyable_v<GeneralizedEvaluationAccumulator>,
     "Generalized evaluation metrics must not allocate dynamic storage");
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

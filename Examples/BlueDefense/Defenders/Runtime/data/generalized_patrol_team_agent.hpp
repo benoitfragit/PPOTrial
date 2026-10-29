@@ -13,7 +13,7 @@
 #include <memory>
 #include <random>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 class GeneralizedPatrolLearner;
 
@@ -118,4 +118,4 @@ private:
     bool trainingRngSaved_{};
 };
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders
