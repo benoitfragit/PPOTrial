@@ -1,223 +1,109 @@
 # PPOTrial
 
-PPOTrial est un simulateur C++17 d'apprentissage par renforcement multi-agent.
-Le scénario distribué utilise un unique contrôleur bleu MAPPO/RLTools face aux
-attaquants rouges RLMission. Son contrat permet d'instancier de 1 à 9 bleus
-face à 0 à 10 rouges, sans créer une seconde entrée d'application.
+Simulateur C++17 avec environnement ECS, agents de reinforcement learning et
+interface graphique. Les défenseurs bleus sont pilotés par **un unique
+contrôleur MAPPO P/N**. Les attaquants rouges utilisent RLMission en production.
 
-## Démarrage rapide
+## Démarrage
 
-Depuis un terminal Visual Studio configuré pour C++ :
+```powershell
+cmake -S . -B build/desktop -G "Visual Studio 17 2022" -A x64 -DPPO_BUILD_DESKTOP=ON
+cmake --build build/desktop --config Debug
+build/desktop/Main/Debug/PPO.exe --list-examples
+build/desktop/Main/Debug/PPO.exe --example blue-patrol
+build/desktop/Main/Debug/PPO.exe --example blue-defense
+```
 
-~~~powershell
-cmake --build out/build/x64-Debug --config Debug --target PPO
-out/build/x64-Debug/Main/Debug/PPO.exe --example blue-patrol
-out/build/x64-Debug/Main/Debug/PPO.exe --example blue-defense
-~~~
+Les chemins de l'exécutable dépendent du générateur et du preset sélectionné.
+Sans `--example`, l'application affiche le sélecteur graphique. Avec
+`--check-example`, l'exemple est initialisé sans démarrer la fenêtre.
 
-Le chemin exact de l'exécutable dépend du générateur CMake. Le projet impose
-actuellement x64 ; les builds Debug sont recommandés pour le diagnostic.
+## Exemples
 
-## Scénarios principaux
+| ID CLI / sélection IHM | Description | Configuration |
+|---|---|---|
+| `airspace` | Environnement historique d'agents LibTorch | `Scenarios/Playground.json` |
+| `blue-patrol` | Patrouille MAPPO sans adversaire, P=2/N=0 par défaut | `Scenarios/BluePatrol.json` |
+| `blue-defense` | Défense de l'objectif contre RLMission, P=4/N=4 par défaut | `Scenarios/BlueDefense.json` |
 
-- `airspace` : scénario historique et agents LibTorch ;
-- `blue-patrol` : P bleus MAPPO apprennent la patrouille sans ennemi ;
-- `blue-defense` : l'unique MAPPO bleu généralisé protège l'objectif dans un
-  entraînement livré à P=4/N=4 contre des rouges pilotés par RLMission.
+Les deux scénarios bleus ont **exactement le même agent** :
+`GeneralizedPatrolMappoAgent`. Leur section JSON `blueDefense` exige
+`blueTeam.activeCount` de 1 à 9 et `redTeam.activeCount` de 0 à 10.
+Les entités sont créées dynamiquement depuis les templates
+`blue_template` et `red_template` ; un seul contrôleur distribue toutes
+les actions Bleues.
 
-Le scénario `blue-defense` matérialise `blue_1..blue_P` depuis les templates
-typés du JSON. `blueTeam.activeCount` accepte 1 à 9 et
-`redTeam.activeCount` accepte 0 à 10. La configuration livrée utilise quatre
-rouges, dont chacun a 25 % de probabilité d'être activé avec retard. Les sorties sont
-exclusivement
-`blue_patrol_generalized_v8.txt` et
-`blue_patrol_generalized_training_v5.txt` dans `BluePatrol/latest` ; les
-checkpoints `blue_patrol_mappo_v7.txt` et `blue_patrol_training_v4.txt` restent
-des sources de migration en lecture seule.
+L'ancien scénario `two-vs-two` et le contrôleur spécifique à deux Bleus
+n'existent plus. La patrouille sans Rouge n'utilise pas d'autre moteur.
 
-Dans le sélecteur, ces entrées sont libellées explicitement `BLUE PATROL ONLY
-- NO RED` et `BLUE DEFENSE - MAPPO vs RLMission`. Le second scénario conserve
-une seule entrée GUI mais matérialise quatre entités rouges RLMission. Les
-activations retardées et les positions sont reproductibles avec le seed.
+## Apprentissage MAPPO
 
-À chaque épisode P/N, les rouges sont tirés sur un arc allant de l'avant aux
-deux côtés de la zone défendue. Ils commencent entre 1,05 et 1,35 fois la
-limite du monde et à au moins 10 km l'un de l'autre. La limite est un repère de
-zone, pas un mur : RLMission continue normalement à piloter les rouges vers
-l'objectif. Les zones rouges sont décrites par la collection typée
-`blueDefense.restrictedZones`. Les deux centres rouges sont tirés juste au-delà de
-la bordure du monde, toujours du côté opposé à l'objectif ; aucune zone rouge
-n'est centrée dans la zone défendue. Elles sont vues
-par les 61 rayons pseudo-LiDAR des bleus. Le chemin RLMission des rouges, son
-observation 152 et ses checkpoints restent inchangés. La zone bleue historique
-`blue_restricted_zone`, son tirage `restrictedZoneSpawn` et sa règle SNA sont
-conservés à l'identique pour ne pas modifier le comportement des rouges.
+- Acteur partagé de largeur 128, observation masquée des pistes rouges et
+  amies, pooling et attention à capacité fixe.
+- Critic centralisé individualisé de largeur 256.
+- Un seul hippodrome analytique par épisode : longueur, largeur,
+  orientation, ancrage et wedge échantillonnés dans les plages configurées.
+- Un Bleu leader ; les P−1 autres se positionnent dans leur slot de
+  formation, selon le cap **physique** du leader.
+- Reward du leader fondé sur la progression, l'écart latéral et le cap.
+  Reward des équipiers pénalisant la déviation hors tolérance.
+- Reward partagé de poursuite : progression géométrique des Bleus vers
+  les Rouges, indépendamment du déplacement propre des Rouges ;
+  pondération selon le risque pour l'objectif.
+- Le compromis patrouille/formation/poursuite varie avec la distance et
+  la menace. Aucun ordonnanceur externe n'attribue les cibles.
+- Capteurs : 61 rayons LiDAR ; zones interdites rouges et enveloppes de
+  sécurité autour des Bleus. Les collisions physiques restent terminales.
 
-La patrouille est un unique hippodrome analytique continu, sans waypoint. Sa
-longueur, sa largeur, son orientation, son ancrage et le wedge sont tirés une
-fois par épisode. Les quatre voitures reçoivent alors des rôles bijectifs :
-exactement un leader et trois équipiers avec des slots distincts. Seul le
-leader suit la piste ; chaque équipier tient sa pose relative. Un seul
-contrôleur MAPPO possède l'acteur partagé, le critique centralisé, le buffer
-on-policy et l'optimiseur des quatre bleus.
+Les **10 canaux de récompense** du snapshot IHM sont : Patrol tracking,
+Formation keeping, Pursuit progress, Control effort, Blue survival,
+Red neutralization, Threat containment, Objective survival,
+Mission outcome et Timeout.
 
-La configuration livrée conserve une longueur de 50 à 60 km et échantillonne
-une largeur de 16 à 20 km. Ces rayons progressifs facilitent l'exploration
-initiale du leader et la tenue du wedge dans les demi-tours.
+Les paramètres, le rollout et les poids de récompense sont définis dans
+`resources/settings/Training/BluePatrol.json`.
 
-La plateforme bleue reprend les limites de `trainingaircraft` : vitesse de
-croisière et vitesse maximale de 700 m/s, contre 400 m/s pour les rouges,
-accélération de 600 m/s² et rotation maximale de 0,700000596 rad/s, contre
-0,40.
-Sa zone SNA sans
-échappement vaut 5 km et sa zone d'engagement atteint 10 km, contre 4 et 8 km
-pour les rouges. Son domaine angulaire de destruction vaut 3,147198 rad, contre
-1,047198 rad pour les rouges. Les rouges restent inchangés.
+## Sauvegardes et compatibilité
 
-Une transition ECS invalide annule uniquement l'action MAPPO concernée et
-réinitialise l'épisode. Le rollout déjà collecté est conservé : une erreur
-transitoire ne peut plus figer définitivement l'entraînement.
+Les modèles généralisés se trouvent sous `resources/model/BluePatrol` :
+`latest/blue_patrol_generalized_v8.txt` pour l'acteur et
+`latest/blue_patrol_generalized_training_v5.txt` pour l'état complet
+d'apprentissage. La promotion après évaluation utilise `prod/`.
 
-## Configuration bleue
+Les lecteurs des formats anciens V4/V7 sont conservés **pour migration
+uniquement**. Ils ne réactivent pas d'ancien agent ou entraînement 2v2.
+Les règles RLMission et les modèles des Rouges restent inchangés.
 
-Les réglages sont dans
-`resources/settings/Training/BluePatrol.json`. Le rollout par défaut est de
-2048 pas d'équipe, soit 8192 transitions pour quatre défenseurs. L'IHM permet de
-choisir 512, 1024, 2048 ou 4096 avant le début de la collecte. La valeur 128 du
-backend est la taille d'un mini-batch PPO et non la durée de l'entraînement.
+## IHM
 
-Le panneau `Blue MAPPO (RLTools)` expose les récompenses de patrouille, sécurité
-de formation, effort de contrôle, protection de zone, interception, résultat
-de mission et timeout.
-
-Une évaluation déterministe intégrée est lancée à chaque checkpoint : elle
-utilise les vrais rouges RLMission du scénario P/N, publie ses mesures dans l'IHM et
-ne promeut dans `resources/model/BluePatrol/prod` que le meilleur acteur. Les
-acteurs non encore validés restent dans `BluePatrol/latest`. Le même dossier
-contient `blue_patrol_training_v4.txt`, qui restaure l'acteur, le critique,
-les deux états Adam, le compteur de mises à jour et le RNG. Le buffer de rollout
-n'est volontairement pas sauvegardé : une reprise commence un rollout vide au
-même niveau d'optimisation.
-
-La collision entre deux bleus est terminale à 1 km, avec une pénalité de
-sécurité progressive à partir de 2 km. Le leader reçoit seul le suivi de
-l'unique hippodrome ; l'équipier reçoit seul le wedge de 6 à 9 km, mesuré dans
-le repère du cap physique du leader. Les quatre bleus voient toutes les pistes
-rouges actives et apprennent à les couvrir par une récompense défensive commune
-et le critique centralisé. Il n'existe aucun coordinateur ni cible imposée.
-Le pooling et l'attention sont inchangés. Deux menaces simultanées peuvent
-relâcher le wedge ; la séparation de sécurité reste toujours active.
-
-Les 61 entrées LiDAR de l'acteur v7 consomment désormais directement le
-`sPseudoLidarState` ECS partagé avec RLMission. Chaque rayon conserve le plus
-proche impact entre frontière du monde et zone hostile active. Une zone utilise
-le rayon létal du profil (`MaxNoEscapeZoneRange`, 7 km dans l'exemple) et un
-rayon d'avertissement LiDAR distinct de 110 % (7,7 km). Seuls les mobiles bleus
-sont publiés par l'adaptateur BlueDefense; les rouges gardent strictement leur
-pipeline RLMission historique.
-
-Le contrat bleu v7 démarre un nouvel apprentissage : les anciens poids bleus
-conditionnés par les affectations v6 ne sont pas repris. Les nouveaux fichiers
-sont `blue_patrol_mappo_v7.txt` et `blue_patrol_training_v4.txt`.
-Les anciens fichiers restent sur disque mais sont ignorés. Aucun modèle rouge
-n'est concerné.
-
-L'ajout des zones ne change ni la dimension ni le layout v7 : il ne faut pas
-supprimer `blue_patrol_mappo_v7.txt` ni `blue_patrol_training_v4.txt`. La
-reprise reste possible avec ces fichiers; un nouvel entraînement sert seulement
-à apprendre progressivement l'évitement des zones.
-
-Dans le scénario BlueDefense, la barre de la vue tactique propose `Show patrol
-track`. Cette option dessine l'unique piste du leader et son sens dans la vue 3D et la
-minimap ; elle n'existe pas dans Airspace et n'influence jamais la simulation.
-Sur les scénarios historiques, le champ `blueController` accepte `mappo` ou
-`reference`, ce qui permet le même affichage avec ou sans PPO. La présence de
-`blueTeam` exige le contrôleur MAPPO généralisé.
-
-## Équipes P contre N optionnelles
-
-Les champs `blueDefense.blueTeam` et `blueDefense.redTeam` sont additifs.
-`Scenarios/BlueDefense.json` fournit `blueTeam` directement : l'entrée GUI
-existante `blue-defense` sélectionne donc l'unique runtime MAPPO généralisé.
-`redTeam` est présent dans la configuration livrée avec N=4. Chaque rouge garde
-son propre contrôleur RLMission de production ; seule la cardinalité du monde
-est généralisée.
-
-~~~json
-"blueTeam": {
-  "activeCount": 5
-},
-"redTeam": {
-  "activeCount": 7,
-  "maximumPlacementAttempts": 512,
-  "delayedActivationProbability": 0.25,
-  "minimumActivationDelaySteps": 256,
-  "maximumActivationDelaySteps": 768
-}
-~~~
-
-`blueTeam.activeCount` accepte `[1,9]` et `redTeam.activeCount` accepte
-`[0,10]`. Le chargeur génère alors `blue_1..blue_P` à partir d'un unique
-template bleu et `red_1..red_N` à partir d'un unique template RLMission de
-production. Le placement rouge est borné par `maximumPlacementAttempts`
-(`[1,4096]`) et échoue avec un diagnostic si `minimumSeparation` est
-impossible ; les délais sont positifs, finis et ordonnés.
-
-À chaque reset, `BlueTeamRoles` choisit exactement un leader. Les autres bleus
-reçoivent des slots stables et distincts sur une formation en V, avec un index
-normalisé dans `[-1,1]`. `GeneralizedPatrolMappoAgent` échantillonne les P
-actions avant la physique puis remet exactement P transitions du même pas
-d'équipe à `GeneralizedPatrolLearner`; une voiture détruite conserve son slot
-mais son masque d'apprentissage devient nul.
-
-L'observation généralisée v8 sépare le stockage brut de 295 valeurs du tronc
-MLP compact de 156 valeurs. Elle réserve dix pistes rouges, huit autres bleus,
-un objectif distinct, des masques explicites, le rôle/slot, P/N normalisés et
-exactement 61 rayons issus du `sPseudoLidarState` ECS. L'attention et les
-poolings masqués sont invariants à l'ordre des pistes. Les zones restreintes
-restent dans le LiDAR/SAM et ne consomment jamais l'une des dix pistes classées
-de RLMission.
-
-Le chemin généralisé écrit `blue_patrol_generalized_v8.txt` et
-`blue_patrol_generalized_training_v5.txt`. Un acteur v7 peut amorcer l'acteur
-v8 avec une sortie 2v2 équivalente à `1e-6`. La migration explicite d'un état
-v4 ne reprend que l'acteur et ses moments Adam compatibles : critique, états
-d'optimiseur non compatibles, RNG, compteur et rollout repartent à neuf. Les
-fichiers v7/v4 restent la source de repli du chemin legacy et ne doivent jamais
-être supprimés ou écrasés par cette migration.
-
-À chaque frontière d'update configurée, le runtime P/N suspend la collecte et
-évalue les moyennes déterministes de l'acteur dans le vrai ECS. Les resets sont
-reproductibles par seed et miroir. Survie bleue, neutralisation rouge, survie
-de l'objectif et succès sont normalisés épisode par épisode par P et N avant
-agrégation. Seul un meilleur candidat est promu séparément dans
-`BluePatrol/prod/blue_patrol_generalized_v8.txt` ; cette campagne ne modifie ni
-le rollout, ni le RNG d'apprentissage, ni les artefacts legacy v7/v4.
-
-## Documentation
-
-- [Architecture de la patrouille MAPPO](docs/blue-ppo-patrol.md)
-- [Architecture et feuille de route de la patrouille](docs/blue-patrol-architecture-roadmap.md)
-- [Architecture v7 : rôles leader/équipier et défense apprise](docs/blue-patrol-v6-architecture.md)
-- [Scénario BlueDefense](docs/blue-defense-example.md)
-- [Guide de configuration](docs/configuration-guide.md)
+Le sélecteur lit les exemples depuis `Examples/src/examplecatalog.cpp`,
+sans cardinalité fixe. Après Play, les voitures sont pilotées par l'ECS
+normal. Le panneau d'entraînement exploite le snapshot du contrôleur
+MAPPO partagé : progression, diagnostics, évaluations et dix rewards.
+L'overlay de trajectoire peut afficher l'hippodrome.
 
 ## Validation
 
-Boucle rapide pendant le développement :
+Pour exécuter les tests de base sans interface :
 
-~~~powershell
-cmake --build out/build/x64-Debug --config Debug --target BlueDefenseSpawnTests BlueDefenseTeamDomainTests BlueDefenseTeamDynamicsTests BlueDefenseGeneralizedActorTests BlueDefenseGeneralizedRuntimeStateTests BlueDefenseGeneralizedLearnerTests BlueDefenseGeneralizedRewardEvaluationTests MissionTrackSelectionTests --parallel 4
-ctest --test-dir out/build/x64-Debug -C Debug -R "^(BlueDefenseSpawnTests|BlueDefenseTeamDomainTests|BlueDefenseTeamDynamicsTests|BlueDefenseGeneralized.*|MissionTrackSelectionTests)$" --output-on-failure
-~~~
+```powershell
+cmake -S . -B build/core -DPPO_BUILD_DESKTOP=OFF -DPPO_BUILD_CORE_TESTS=ON
+cmake --build build/core --config Release
+ctest --test-dir build/core -C Release --output-on-failure
+```
 
-Validation finale, plus lourde, avant fusion :
+Pour la régression Desktop, les workflows CI Windows construisent
+Debug et Release, puis lancent CTest : démarrage de l'exemple,
+instanciation P/N, mouvement après Play, rôle leader, collisions,
+LiDAR, checkpoints et format de snapshot.
 
-~~~powershell
-ctest --test-dir out/build/x64-Debug -C Debug -R "BlueDefensePatrolRuntimeSmoke|BlueDefenseCombatRuntimeSmoke|BlueDefenseEmbeddedLearnerSmoke" --output-on-failure
-out/build/x64-Debug/Main/Debug/PPO.exe --example blue-patrol --check-example
-out/build/x64-Debug/Main/Debug/PPO.exe --example blue-defense --check-example
-~~~
+Une CI verte vérifie la compilation et les contrats testés ; la
+**convergence** sur plusieurs seeds et compositions P/N nécessite
+une campagne de validation distincte.
 
-Les modèles rouges `resources/model/RLMission/**/*.pt` et leur contrat réseau
-restent indépendants du backend bleu RLTools.
+## Documentation
+
+- [Guide des scénarios BlueDefense / BluePatrol](docs/blue-defense-example.md)
+- [Architecture MAPPO à effectifs variables](docs/mappo-variable-teams.md)
+- [Configuration JSON et paramètres](docs/configuration-guide.md)
+- [Instructions pour les contributions](AGENTS.md)
