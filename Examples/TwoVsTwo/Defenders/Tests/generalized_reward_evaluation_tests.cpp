@@ -128,6 +128,48 @@ bool TestOneVersusZero()
         && Near(metrics.score, 97.F);
 }
 
+bool TestIndependentRoleAndPursuitWeights()
+{
+    auto const roles = BlueTeamRoles::Create(2U, 0U);
+    if (!roles)
+        return false;
+    GeneralizedRewardTransition transition{};
+    transition.before = MakeState(2U, 1U);
+    transition.after = transition.before;
+    transition.responsibilities.leaderPatrol = 0.5F;
+    transition.responsibilities.formationSlots[0] = -0.25F;
+    transition.responsibilities.pursuitProgress = 0.75F;
+
+    GeneralizedRewardSettings settings{};
+    settings.weights.fill(0.F);
+    settings.weights[static_cast<std::size_t>(
+        GeneralizedRewardChannel::PatrolTracking)] = 1.F;
+    settings.weights[static_cast<std::size_t>(
+        GeneralizedRewardChannel::FormationKeeping)] = 4.F;
+    settings.weights[static_cast<std::size_t>(
+        GeneralizedRewardChannel::PursuitProgress)] = 2.F;
+    GeneralizedCooperativeRewards result{};
+    if (AggregateGeneralizedCooperativeRewards(
+            *roles, transition, settings, result)
+        != GeneralizedRewardStatus::Applied)
+        return false;
+
+    if (!Near(result.perBlue[0].Total(settings), 2.F)
+        || !Near(result.perBlue[1].Total(settings), 0.5F)
+        || !Near(Channel(result.team,
+            GeneralizedRewardChannel::PatrolTracking), 0.25F)
+        || !Near(Channel(result.team,
+            GeneralizedRewardChannel::FormationKeeping), -0.125F)
+        || !Near(Channel(result.team,
+            GeneralizedRewardChannel::PursuitProgress), 0.75F))
+        return false;
+    transition.responsibilities.pursuitProgress =
+        std::numeric_limits<float>::quiet_NaN();
+    return AggregateGeneralizedCooperativeRewards(
+        *roles, transition, settings, result)
+        == GeneralizedRewardStatus::InvalidSignals;
+}
+
 bool TestTwoVersusTwo()
 {
     auto const roles = BlueTeamRoles::Create(2U, 1U);
@@ -455,6 +497,8 @@ int main()
         return 1;
     if (!TestTwoVersusTwo())
         return 2;
+    if (!TestIndependentRoleAndPursuitWeights())
+        return 7;
     if (!TestNineVersusTenAndMaskValidation())
         return 3;
     if (!TestPermutationInvarianceAndInvalidQuality())
