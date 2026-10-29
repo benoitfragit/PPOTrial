@@ -97,15 +97,15 @@ void CheckAdditionalAssets(fs::path const& root)
     // panel visibility, not just a small subset of renderer preferences.
     auto const& camera = renderer.at("camera");
     Require(camera.at("position").size() == 3
-        && camera.at("position").at(0).get<double>() == -54.988040924072266
-        && camera.at("position").at(1).get<double>() == 19.83399200439453
-        && camera.at("position").at(2).get<double>() == 22.86980628967285
-        && camera.at("target").at(0).get<double>() == -28.59817886352539
+        && camera.at("position").at(0).get<double>() == 36.58390808105469
+        && camera.at("position").at(1).get<double>() == 24.686992645263672
+        && camera.at("position").at(2).get<double>() == 23.742538452148438
+        && camera.at("target").at(0).get<double>() == 7.42773962020874
         && camera.at("target").at(1).get<double>() == 0.34999987483024597
-        && camera.at("target").at(2).get<double>() == -2.4605109691619873
-        && renderer.at("cameraDistance").get<double>() == 35.22200012207031
-        && renderer.at("cameraHeight").get<double>() == 19.833999633789062
-        && renderer.at("domainHeight").get<double>() == 1.5369999408721924
+        && camera.at("target").at(2).get<double>() == -12.805513381958008
+        && renderer.at("cameraDistance").get<double>() == 45.35300064086914
+        && renderer.at("cameraHeight").get<double>() == 24.687000274658203
+        && renderer.at("domainHeight").get<double>() == 2.318000078201294
         && renderer.at("trailDuration").get<double>() == 3.0999999046325684,
         "renderer V2 lost original camera precision");
     Require(!renderer.at("showMinimap").get<bool>()
