@@ -15,12 +15,13 @@ namespace ppo::examples::bluedefense::defenders {
 struct GeneralizedCriticConfig final
 {
     static constexpr Index HiddenDim = 256;
+    static constexpr Index Batch = 1024;
     static constexpr Index Layers = 3;
     using Structure = rlt::nn_models::mlp::StructureSpecification<
         float, Index, static_cast<Index>(GeneralizedCriticLayout::Size),
         1, Layers, HiddenDim,
         rlt::nn::activation_functions::ActivationFunction::RELU,
-        rlt::nn::activation_functions::IDENTITY, 128>;
+        rlt::nn::activation_functions::IDENTITY, Batch>;
     using Spec = rlt::nn_models::mlp::AdamSpecification<Structure>;
     using Network = rlt::nn_models::mlp::NeuralNetworkAdam<Spec>;
 };

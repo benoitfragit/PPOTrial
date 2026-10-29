@@ -1,26 +1,26 @@
-add_subdirectory(Defenders)
+add_subdirectory(Agents/BluePatrol Defenders)
 
 add_library(PPOBlueDefenseSpawn STATIC
-    data/spawn.hpp
-    src/spawn.cpp
-    data/spawn_config.hpp
-    src/spawn_config.cpp)
+    Scenario/spawn.hpp
+    Scenario/spawn.cpp
+    Scenario/spawn_config.hpp
+    Scenario/spawn_config.cpp)
 target_compile_features(PPOBlueDefenseSpawn PUBLIC cxx_std_17)
 target_include_directories(PPOBlueDefenseSpawn PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/data"
-    "${CMAKE_CURRENT_SOURCE_DIR}/Defenders/Core/data")
+    "${CMAKE_CURRENT_SOURCE_DIR}/Scenario"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Agents/BluePatrol/Core")
 target_link_libraries(PPOBlueDefenseSpawn PUBLIC nlohmann_json::nlohmann_json)
 
 add_library(PPOBlueDefenseExample STATIC
-    data/bluedefenseexample.hpp
-    src/bluedefenseexample.cpp
-    data/initializer.hpp
-    src/initializer.cpp
-    data/bluedefenserules.hpp
-    src/bluedefenserules.cpp)
+    Scenario/bluedefenseexample.hpp
+    Scenario/bluedefenseexample.cpp
+    Scenario/initializer.hpp
+    Scenario/initializer.cpp
+    Scenario/bluedefenserules.hpp
+    Scenario/bluedefenserules.cpp)
 target_compile_features(PPOBlueDefenseExample PUBLIC cxx_std_17)
 target_include_directories(PPOBlueDefenseExample PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    "${CMAKE_CURRENT_SOURCE_DIR}/Scenario")
 target_link_libraries(PPOBlueDefenseExample PUBLIC
     PPOAirspaceExample PPOBlueDefenseSpawn
     BlueDefenseDefenderBackend BlueDefensePatrolRuntime)
@@ -28,7 +28,7 @@ target_link_libraries(PPOBlueDefenseExample PUBLIC
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_executable(BlueDefenseSpawnTests tests/spawn_tests.cpp)
     target_compile_features(BlueDefenseSpawnTests PRIVATE cxx_std_17)
-    target_include_directories(BlueDefenseSpawnTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/data")
+    target_include_directories(BlueDefenseSpawnTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Scenario")
     target_link_libraries(BlueDefenseSpawnTests PRIVATE
         PPOBlueDefenseSpawn BlueDefenseDefenderBackend)
     add_test(NAME BlueDefenseSpawnTests COMMAND BlueDefenseSpawnTests)
