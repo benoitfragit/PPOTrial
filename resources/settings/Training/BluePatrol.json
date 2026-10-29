@@ -67,7 +67,6 @@
       "patrolCrossTrackScaleMeters": 4000.0,
       "formationErrorWeight": 2.0,
       "formationToleranceFraction": 0.03,
-      "separationPenaltyWeight": 0.75,
       "controlEffortWeight": 0.002
     },
     "weights": {

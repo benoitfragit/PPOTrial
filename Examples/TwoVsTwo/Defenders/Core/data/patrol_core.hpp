@@ -71,7 +71,6 @@ struct Parameters
     float patrolCrossTrackScale = 4000.F;
     float formationErrorWeight = 0.40F;
     float formationTolerance = 0.10F;
-    float separationPenaltyWeight = 0.50F;
     float controlEffortWeight = 0.002F;
     DefenseSettings defense{};
     PatrolGeometry geometry{};
@@ -105,8 +104,6 @@ inline bool Valid(Parameters const& p) noexcept
         && p.formationErrorWeight >= 0.F
         && std::isfinite(p.formationTolerance)
         && p.formationTolerance >= 0.F
-        && std::isfinite(p.separationPenaltyWeight)
-        && p.separationPenaltyWeight >= 0.F
         && std::isfinite(p.controlEffortWeight)
         && p.controlEffortWeight >= 0.F
         && Valid(p.defense)
@@ -401,30 +398,19 @@ inline bool GuardsCollided(Parameters const& p, State const& before,
     return MinimumGuardSeparation(before, after) <= p.collisionDistance;
 }
 
-// Smooth dense shaping: an agent learns to maintain separation before
-// collision, without penalizing nominal staggered patrol formations.
-inline float SeparationPenalty(Parameters const& p,
-                               State const& state) noexcept
-{
-    float const fraction = Clamp(
-        (p.cautionDistance - GuardSeparation(state)) /
-        (p.cautionDistance - p.collisionDistance), 0.F, 1.F);
-    return -p.separationPenaltyWeight * fraction;
-}
-
 /**
  * @brief Rewards the wingman's ordered pose relative to the leader.
  * @param p Valid patrol geometry and safety distances.
  * @param state Current team state.
  * @param maintainFormation False when simultaneous threats release the wedge.
- * @return Dense relative-pose shaping plus the close-range safety penalty.
+ * @return Dense relative-pose shaping; collisions remain physical failures.
  */
 inline float FormationReward(Parameters const& p, State const& state,
                              bool maintainFormation) noexcept
 {
-    float reward = SeparationPenalty(p, state);
     if (!maintainFormation)
-        return reward;
+        return 0.F;
+    float reward = 0.F;
 
     FormationErrors const errors = MeasureFormationErrors(p, state);
     float const longitudinal = std::max(
@@ -441,19 +427,18 @@ inline float FormationReward(Parameters const& p, State const& state,
  * @param p Valid patrol geometry and safety distances.
  * @param state Current team state.
  * @param formationWeight Wingman formation contribution in [0, 1].
- * @return Blended wedge shaping plus the always-active separation penalty.
+ * @return Blended relative-pose shaping; collision is resolved by world rules.
  */
 inline float FormationReward(Parameters const& p, State const& state,
                              float formationWeight) noexcept
 {
-    float const safety = SeparationPenalty(p, state);
     FormationErrors const errors = MeasureFormationErrors(p, state);
     float const longitudinal = std::max(
         std::abs(errors.longitudinal) - p.formationTolerance, 0.F);
     float const inward = std::max(
         std::abs(errors.inward) - p.formationTolerance, 0.F);
     float const relativeError = std::hypot(longitudinal, inward);
-    return safety - Clamp(formationWeight, 0.F, 1.F)
+    return -Clamp(formationWeight, 0.F, 1.F)
         * p.formationErrorWeight * relativeError / (1.F + relativeError);
 }
 
@@ -1047,7 +1032,7 @@ inline RoleRewardBreakdowns TrainingRoleRewardBreakdowns(
     result[1].values[static_cast<std::size_t>(
         RewardChannel::PatrolTracking)] = 0.F;
     result[0].values[static_cast<std::size_t>(
-        RewardChannel::FormationSafety)] = SeparationPenalty(p, after);
+        RewardChannel::FormationSafety)] = 0.F;
     for (std::size_t role = 0U; role < result.size(); ++role)
         result[role].values[static_cast<std::size_t>(
             RewardChannel::ControlEffort)] = -p.controlEffortWeight

@@ -147,8 +147,6 @@ inline Parameters LoadPatrolParameters(std::filesystem::path const& settings)
         shaping, "formationErrorWeight");
     parameters.formationTolerance = patrol_config_detail::FiniteNumber(
         shaping, "formationToleranceFraction");
-    parameters.separationPenaltyWeight = patrol_config_detail::FiniteNumber(
-        shaping, "separationPenaltyWeight");
     parameters.controlEffortWeight = patrol_config_detail::FiniteNumber(
         shaping, "controlEffortWeight");
     auto const& defense = patrolDocument.at("patrol").at("defense");

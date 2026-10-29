@@ -53,7 +53,7 @@ int main()
     if (!(blue::FormationReward(p, state, true)
           > blue::FormationReward(p, compressedFormation, true))
         || blue::FormationReward(p, state, false)
-            != blue::SeparationPenalty(p, state))
+            != 0.F)
         return 27;
     for (std::size_t i = 0; i < 61; ++i)
     {
