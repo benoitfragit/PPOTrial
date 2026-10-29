@@ -203,7 +203,7 @@ int main()
     static_assert(RawLayout::ObjectiveTracks == 1U);
     static_assert(RawLayout::Version != LegacyLayout::Version);
     static_assert(blue::kGeneralizedPolicyCheckpointVersion == 8U);
-    static_assert(blue::kGeneralizedTrainingCheckpointVersion == 5U);
+    static_assert(blue::kGeneralizedTrainingCheckpointVersion == 6U);
 
     blue::Observation legacyObservation{};
     for (std::size_t index = 0; index < LegacyLayout::Own; ++index)
@@ -491,7 +491,7 @@ int main()
     }
     std::filesystem::remove(atomicPath, ignored);
 
-    using Critic = blue::TrainingConfig::NN::CRITIC_TYPE;
+    using Critic = blue::GeneralizedCriticConfig::Network;
     Critic critic{};
     Critic loadedCritic{};
     rlt::malloc(device, critic);
@@ -526,11 +526,11 @@ int main()
 
     std::string wrongTrainingVersion = serializedTraining;
     auto const trainingVersion =
-        wrongTrainingVersion.find("BLUE_TEAM_TRAINING_V5 5");
+        wrongTrainingVersion.find("BLUE_TEAM_TRAINING_V6 6");
     if (trainingVersion == std::string::npos)
         return 18;
     wrongTrainingVersion[
-        trainingVersion + std::string{"BLUE_TEAM_TRAINING_V5 "}.size()] = '6';
+        trainingVersion + std::string{"BLUE_TEAM_TRAINING_V6 "}.size()] = '5';
     if (!ThrowsRuntimeError([&] {
             std::stringstream input{wrongTrainingVersion};
             blue::ReadGeneralizedTrainingState(
