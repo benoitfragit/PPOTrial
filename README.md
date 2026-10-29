@@ -12,7 +12,7 @@ Depuis un terminal Visual Studio configuré pour C++ :
 ~~~powershell
 cmake --build out/build/x64-Debug --config Debug --target PPO
 out/build/x64-Debug/Main/Debug/PPO.exe --example blue-patrol
-out/build/x64-Debug/Main/Debug/PPO.exe --example two-vs-two
+out/build/x64-Debug/Main/Debug/PPO.exe --example blue-defense
 ~~~
 
 Le chemin exact de l'exécutable dépend du générateur CMake. Le projet impose
@@ -21,11 +21,11 @@ actuellement x64 ; les builds Debug sont recommandés pour le diagnostic.
 ## Scénarios principaux
 
 - `airspace` : scénario historique et agents LibTorch ;
-- `blue-patrol` : deux bleus MAPPO apprennent la patrouille sans ennemi ;
-- `two-vs-two` : l'unique MAPPO bleu généralisé protège l'objectif dans un
+- `blue-patrol` : P bleus MAPPO apprennent la patrouille sans ennemi ;
+- `blue-defense` : l'unique MAPPO bleu généralisé protège l'objectif dans un
   entraînement livré à P=4/N=4 contre des rouges pilotés par RLMission.
 
-Le scénario `two-vs-two` matérialise `blue_1..blue_P` depuis les templates
+Le scénario `blue-defense` matérialise `blue_1..blue_P` depuis les templates
 typés du JSON. `blueTeam.activeCount` accepte 1 à 9 et
 `redTeam.activeCount` accepte 0 à 10. La configuration livrée utilise quatre
 rouges, dont chacun a 25 % de probabilité d'être activé avec retard. Les sorties sont
@@ -36,7 +36,7 @@ checkpoints `blue_patrol_mappo_v7.txt` et `blue_patrol_training_v4.txt` restent
 des sources de migration en lecture seule.
 
 Dans le sélecteur, ces entrées sont libellées explicitement `BLUE PATROL ONLY
-- NO RED` et `TWO VS TWO - MAPPO vs RLMission`. Le second scénario conserve
+- NO RED` et `BLUE DEFENSE - MAPPO vs RLMission`. Le second scénario conserve
 une seule entrée GUI mais matérialise quatre entités rouges RLMission. Les
 activations retardées et les positions sont reproductibles avec le seed.
 
@@ -45,7 +45,7 @@ deux côtés de la zone défendue. Ils commencent entre 1,05 et 1,35 fois la
 limite du monde et à au moins 10 km l'un de l'autre. La limite est un repère de
 zone, pas un mur : RLMission continue normalement à piloter les rouges vers
 l'objectif. Les zones rouges sont décrites par la collection typée
-`twoVsTwo.restrictedZones`. Les deux centres rouges sont tirés juste au-delà de
+`blueDefense.restrictedZones`. Les deux centres rouges sont tirés juste au-delà de
 la bordure du monde, toujours du côté opposé à l'objectif ; aucune zone rouge
 n'est centrée dans la zone défendue. Elles sont vues
 par les 61 rayons pseudo-LiDAR des bleus. Le chemin RLMission des rouges, son
@@ -113,7 +113,7 @@ Les 61 entrées LiDAR de l'acteur v7 consomment désormais directement le
 proche impact entre frontière du monde et zone hostile active. Une zone utilise
 le rayon létal du profil (`MaxNoEscapeZoneRange`, 7 km dans l'exemple) et un
 rayon d'avertissement LiDAR distinct de 110 % (7,7 km). Seuls les mobiles bleus
-sont publiés par l'adaptateur TwoVsTwo; les rouges gardent strictement leur
+sont publiés par l'adaptateur BlueDefense; les rouges gardent strictement leur
 pipeline RLMission historique.
 
 Le contrat bleu v7 démarre un nouvel apprentissage : les anciens poids bleus
@@ -127,7 +127,7 @@ supprimer `blue_patrol_mappo_v7.txt` ni `blue_patrol_training_v4.txt`. La
 reprise reste possible avec ces fichiers; un nouvel entraînement sert seulement
 à apprendre progressivement l'évitement des zones.
 
-Dans le scénario TwoVsTwo, la barre de la vue tactique propose `Show patrol
+Dans le scénario BlueDefense, la barre de la vue tactique propose `Show patrol
 track`. Cette option dessine l'unique piste du leader et son sens dans la vue 3D et la
 minimap ; elle n'existe pas dans Airspace et n'influence jamais la simulation.
 Sur les scénarios historiques, le champ `blueController` accepte `mappo` ou
@@ -136,9 +136,9 @@ Sur les scénarios historiques, le champ `blueController` accepte `mappo` ou
 
 ## Équipes P contre N optionnelles
 
-Les champs `twoVsTwo.blueTeam` et `twoVsTwo.redTeam` sont additifs.
-`Scenarios/TwoVsTwo.json` fournit `blueTeam` directement : l'entrée GUI
-existante `two-vs-two` sélectionne donc l'unique runtime MAPPO généralisé.
+Les champs `blueDefense.blueTeam` et `blueDefense.redTeam` sont additifs.
+`Scenarios/BlueDefense.json` fournit `blueTeam` directement : l'entrée GUI
+existante `blue-defense` sélectionne donc l'unique runtime MAPPO généralisé.
 `redTeam` est présent dans la configuration livrée avec N=4. Chaque rouge garde
 son propre contrôleur RLMission de production ; seule la cardinalité du monde
 est généralisée.
@@ -199,7 +199,7 @@ le rollout, ni le RNG d'apprentissage, ni les artefacts legacy v7/v4.
 - [Architecture de la patrouille MAPPO](docs/blue-ppo-patrol.md)
 - [Architecture et feuille de route de la patrouille](docs/blue-patrol-architecture-roadmap.md)
 - [Architecture v7 : rôles leader/équipier et défense apprise](docs/blue-patrol-v6-architecture.md)
-- [Scénario TwoVsTwo](docs/two-vs-two-example.md)
+- [Scénario BlueDefense](docs/blue-defense-example.md)
 - [Guide de configuration](docs/configuration-guide.md)
 
 ## Validation
@@ -207,16 +207,16 @@ le rollout, ni le RNG d'apprentissage, ni les artefacts legacy v7/v4.
 Boucle rapide pendant le développement :
 
 ~~~powershell
-cmake --build out/build/x64-Debug --config Debug --target TwoVsTwoSpawnTests TwoVsTwoTeamDomainTests TwoVsTwoTeamDynamicsTests TwoVsTwoGeneralizedActorTests TwoVsTwoGeneralizedRuntimeStateTests TwoVsTwoGeneralizedLearnerTests TwoVsTwoGeneralizedRewardEvaluationTests MissionTrackSelectionTests --parallel 4
-ctest --test-dir out/build/x64-Debug -C Debug -R "^(TwoVsTwoSpawnTests|TwoVsTwoTeamDomainTests|TwoVsTwoTeamDynamicsTests|TwoVsTwoGeneralized.*|MissionTrackSelectionTests)$" --output-on-failure
+cmake --build out/build/x64-Debug --config Debug --target BlueDefenseSpawnTests BlueDefenseTeamDomainTests BlueDefenseTeamDynamicsTests BlueDefenseGeneralizedActorTests BlueDefenseGeneralizedRuntimeStateTests BlueDefenseGeneralizedLearnerTests BlueDefenseGeneralizedRewardEvaluationTests MissionTrackSelectionTests --parallel 4
+ctest --test-dir out/build/x64-Debug -C Debug -R "^(BlueDefenseSpawnTests|BlueDefenseTeamDomainTests|BlueDefenseTeamDynamicsTests|BlueDefenseGeneralized.*|MissionTrackSelectionTests)$" --output-on-failure
 ~~~
 
 Validation finale, plus lourde, avant fusion :
 
 ~~~powershell
-ctest --test-dir out/build/x64-Debug -C Debug -R "TwoVsTwoPatrolRuntimeSmoke|TwoVsTwoCombatRuntimeSmoke|TwoVsTwoEmbeddedLearnerSmoke" --output-on-failure
+ctest --test-dir out/build/x64-Debug -C Debug -R "BlueDefensePatrolRuntimeSmoke|BlueDefenseCombatRuntimeSmoke|BlueDefenseEmbeddedLearnerSmoke" --output-on-failure
 out/build/x64-Debug/Main/Debug/PPO.exe --example blue-patrol --check-example
-out/build/x64-Debug/Main/Debug/PPO.exe --example two-vs-two --check-example
+out/build/x64-Debug/Main/Debug/PPO.exe --example blue-defense --check-example
 ~~~
 
 Les modèles rouges `resources/model/RLMission/**/*.pt` et leur contrat réseau
