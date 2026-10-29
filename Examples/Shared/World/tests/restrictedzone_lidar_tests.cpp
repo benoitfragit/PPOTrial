@@ -135,5 +135,49 @@ int main()
     RequireNear(SNASystem::EvaluateDestruction(zoneHandle, victimHandle), 0.F,
                 "Restricted zones must not eliminate other restricted zones");
 
+
+    // Dynamic sensing detects nearest teammates without changing physical
+    // collisions or the stationary-zone sensor contract.
+    zoneState.m_destroyed = true;
+    auto const nearId = registry.create();
+    auto& nearBlue = registry.emplace<sEntityState>(nearId);
+    nearBlue.m_entityId = nearId;
+    nearBlue.m_side = eEntitySide::Friend;
+    nearBlue.m_type = eEntityType::Mobile;
+    nearBlue.m_x = 100.F;
+    auto const farId = registry.create();
+    auto& farBlue = registry.emplace<sEntityState>(farId);
+    farBlue.m_entityId = farId;
+    farBlue.m_side = eEntitySide::Friend;
+    farBlue.m_type = eEntityType::Mobile;
+    farBlue.m_x = 160.F;
+    UpdateRestrictedZonePseudoLidars(registry, eEntitySide::Friend, 20.F);
+    RequireNear(published.m_nearestCollisionDistances[30], 80.F,
+                "Nearest friendly envelope must win");
+    RequireNear(published.m_nearestCollisionRanges[30], 0.8F,
+                "Friendly envelope normalization changed");
+
+    nearBlue.m_destroyed = true;
+    UpdateRestrictedZonePseudoLidars(registry, eEntitySide::Friend, 20.F);
+    RequireNear(published.m_nearestCollisionDistances[30], 140.F,
+                "Destroyed friendlies must be excluded");
+
+    farBlue.m_side = eEntitySide::Hostile;
+    UpdateRestrictedZonePseudoLidars(registry, eEntitySide::Friend, 20.F);
+    RequireNear(published.m_nearestCollisionDistances[30], 200.F,
+                "Hostiles must not count as friendly safety obstacles");
+
+    farBlue.m_side = eEntitySide::Friend;
+    farBlue.m_x = 0.F;
+    UpdateRestrictedZonePseudoLidars(registry, eEntitySide::Friend, 20.F);
+    RequireNear(published.m_nearestCollisionDistances[30], 20.F,
+                "Overlap must retain a finite directional exit range");
+    RequireNear(published.m_nearestCollisionDistances[0], 20.F,
+                "Rear obstacles must be sensed");
+
+    farBlue.m_destroyed = true;
+    UpdateRestrictedZonePseudoLidars(registry, eEntitySide::Friend);
+    RequireNear(published.m_nearestCollisionDistances[30], 200.F,
+                "Disabled dynamic sensing must retain world-boundary hits");
     return 0;
 }

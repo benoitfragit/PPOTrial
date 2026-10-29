@@ -171,6 +171,64 @@ BuildRestrictedZonePseudoLidar(entt::registry& registry,
 }
 
 /**
+ * @brief Senses other living same-side mobiles as nonlethal moving circles.
+ *
+ * Inside a circle, the positive exit ray retains a usable escape direction,
+ * unlike the deliberately saturated legacy restricted-zone reading.
+ */
+void BuildFriendlyMobilePseudoLidar(
+    entt::registry& registry,
+    BaseEntity& ownEntity,
+    sEntityState const& ownState,
+    float const safetyRadius,
+    std::array<float, kPseudoLidarBinCount>& nearestCollisionRanges,
+    std::array<float, kPseudoLidarBinCount>& nearestCollisionDistances) noexcept
+{
+    if (!std::isfinite(safetyRadius) || safetyRadius <= 0.F)
+        return;
+    auto view = registry.view<ppo::model::sEntityState>();
+    for (auto entity : view)
+    {
+        auto const& other = view.get<ppo::model::sEntityState>(entity);
+        if (entity == ownEntity.uniqid()
+            || other.m_destroyed
+            || other.m_type != ppo::model::eEntityType::Mobile
+            || other.m_side != ownState.m_side)
+        {
+            continue;
+        }
+        float const mx = ownState.m_x - other.m_x;
+        float const my = ownState.m_y - other.m_y;
+        float const c = mx * mx + my * my - safetyRadius * safetyRadius;
+        for (std::size_t ray = 0U; ray < nearestCollisionRanges.size(); ++ray)
+        {
+            float const angle = ownState.m_rotation - kPseudoLidarHalfAngleSpan
+                + static_cast<float>(ray) * kPseudoLidarStepAngle;
+            float const b = mx * std::cos(angle) + my * std::sin(angle);
+            float const delta = b * b - c;
+            if (delta < 0.F)
+                continue;
+            float const root = std::sqrt(delta);
+            if (c < 0.F)
+            {
+                UpdatePseudoLidarHit(-b + root, safetyRadius,
+                                    nearestCollisionRanges[ray],
+                                    nearestCollisionDistances[ray]);
+            }
+            else
+            {
+                UpdatePseudoLidarHit(-b - root, safetyRadius,
+                                    nearestCollisionRanges[ray],
+                                    nearestCollisionDistances[ray]);
+                UpdatePseudoLidarHit(-b + root, safetyRadius,
+                                    nearestCollisionRanges[ray],
+                                    nearestCollisionDistances[ray]);
+            }
+        }
+    }
+}
+
+/**
 * @brief Extends pseudo-lidar hits with map-boundary intersections.
 */
 void
@@ -204,7 +262,8 @@ BuildZoneBoundaryPseudoLidar(ppo::model::sEntityState const& ownState,
 }
 
 void UpdateRestrictedZonePseudoLidars(entt::registry& registry,
-                                      eEntitySide mobileSide) noexcept
+                                      eEntitySide mobileSide,
+                                      float const friendlyMobileSafetyRadius) noexcept
 {
     if (!registry.ctx().contains<ppo::model::sEnvironmentState>())
         return;
@@ -223,6 +282,10 @@ void UpdateRestrictedZonePseudoLidars(entt::registry& registry,
         ppo::model::BaseEntity own{&registry, entity};
         BuildRestrictedZonePseudoLidar(
             registry, own, state, sensor.m_nearestCollisionRanges,
+            sensor.m_nearestCollisionDistances);
+        BuildFriendlyMobilePseudoLidar(
+            registry, own, state, friendlyMobileSafetyRadius,
+            sensor.m_nearestCollisionRanges,
             sensor.m_nearestCollisionDistances);
         BuildZoneBoundaryPseudoLidar(
             state, environment, sensor.m_nearestCollisionRanges,
