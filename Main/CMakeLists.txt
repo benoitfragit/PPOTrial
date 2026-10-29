@@ -67,6 +67,22 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         COMMAND $<TARGET_FILE:${PROJECT_NAME}> --example)
     set_tests_properties(MissingExampleIdRejected PROPERTIES WILL_FAIL TRUE)
 
+    # CLI rejects unsupported training modes before allocating a renderer.
+    add_test(NAME NoGuiRejectsAirspace
+        COMMAND $<TARGET_FILE:${PROJECT_NAME}> --no-gui --example airspace
+                --max-seconds 1)
+    set_tests_properties(NoGuiRejectsAirspace PROPERTIES WILL_FAIL TRUE)
+
+    add_test(NAME TrainingBudgetRequiresNoGui
+        COMMAND $<TARGET_FILE:${PROJECT_NAME}> --example blue-defense
+                --max-seconds 1)
+    set_tests_properties(TrainingBudgetRequiresNoGui PROPERTIES WILL_FAIL TRUE)
+
+    add_test(NAME NoGuiRejectsZeroBudget
+        COMMAND $<TARGET_FILE:${PROJECT_NAME}> --no-gui --example blue-defense
+                --max-seconds 0)
+    set_tests_properties(NoGuiRejectsZeroBudget PROPERTIES WILL_FAIL TRUE)
+
     # Preserve CLI handling for an explicitly selected compiled example.
     add_test(NAME ExplicitAirspaceExampleBootstrap
         COMMAND $<TARGET_FILE:${PROJECT_NAME}> --example airspace --check-example)
