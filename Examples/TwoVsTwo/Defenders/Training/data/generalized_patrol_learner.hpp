@@ -1,6 +1,7 @@
 #pragma once
 
 #include "generalized_training_checkpoint.hpp"
+#include "generalized_critic_network.hpp"
 
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
 
@@ -46,7 +47,7 @@ struct GeneralizedTrainingDiagnostics final
  * the constructor, never by the per-team-step success path.
  *
  * The historical two-agent PatrolLearner remains unchanged. This class owns a
- * distinct v8 actor, a pooled centralized critic and v5 training state.
+ * distinct v8 actor, agent-conditioned centralized critic and v6 training state.
  */
 class GeneralizedPatrolLearner final
 {
@@ -57,8 +58,7 @@ public:
     using Rewards = std::array<float, TeamCapacity::MaximumBlueMobiles>;
     using AvailabilityMask = std::array<bool,
                                         TeamCapacity::MaximumBlueMobiles>;
-    using CentralCriticObservation =
-        std::array<float, ObservationLayout::Size>;
+    using CentralCriticObservation = GeneralizedCriticObservation;
 
     /**
      * @brief Creates a generalized learner for immutable episode P/N counts.
@@ -124,7 +124,7 @@ public:
                       inferenceActorBuffer_);
         ++actorEvaluationCount_;
 
-        PoolCentralCritic(availability, pendingCentralCritic_);
+        BuildAgentCriticObservations(availability, pendingAgentCritic_);
 
         Actions actions{};
         constexpr float kTwoPi = 6.28318530717958647692F;
@@ -133,7 +133,7 @@ public:
             auto& transition = transitions_[TransitionIndex(
                 collectedTeamSteps_, agent)];
             transition.observation = observations[agent].values;
-            transition.centralCritic = pendingCentralCritic_;
+            transition.centralCritic = pendingAgentCritic_[agent];
             transition.available = availability[agent];
             transition.teamStep = collectedTeamSteps_;
             transition.oldLogProbability = 0.F;
@@ -240,8 +240,9 @@ public:
         ValidateBatch(nextObservations, nextAvailability);
 
         TransformObservations(nextObservations);
-        CentralCriticObservation nextCentralCritic{};
-        PoolCentralCritic(nextAvailability, nextCentralCritic);
+        std::array<CentralCriticObservation,
+                   TeamCapacity::MaximumBlueMobiles> nextCritics{};
+        BuildAgentCriticObservations(nextAvailability, nextCritics);
 
         for (std::size_t agent = 0U; agent < counts_.blueMobiles; ++agent)
         {
@@ -250,7 +251,7 @@ public:
                     "Nonfinite generalized MAPPO reward");
             auto& transition = transitions_[TransitionIndex(
                 collectedTeamSteps_, agent)];
-            transition.nextCentralCritic = nextCentralCritic;
+            transition.nextCentralCritic = nextCritics[agent];
             transition.reward = rewards[agent];
             transition.nextAvailable = nextAvailability[agent];
             transition.terminated = terminated;
@@ -323,10 +324,19 @@ public:
     {
         return pending_ ? pendingAvailability_ : lastMasks_;
     }
-    /** @brief Returns the last shared order-invariant critic input. */
+    /** @brief Returns one agent-conditioned critic input. */
+    CentralCriticObservation const& LastAgentCriticObservation(
+        std::size_t const agent) const
+    {
+        if (agent >= counts_.blueMobiles)
+            throw std::out_of_range("Invalid generalized critic agent slot");
+        return pendingAgentCritic_[agent];
+    }
+
+    /** @brief Compatibility accessor: first agent's critic input. */
     CentralCriticObservation const& LastCentralCriticObservation() const noexcept
     {
-        return pendingCentralCritic_;
+        return pendingAgentCritic_[0];
     }
     /** @brief Returns the number of shared actor batch evaluations. */
     std::uint64_t ActorEvaluationCount() const noexcept
@@ -416,7 +426,7 @@ public:
     {
         RequireUpdateBoundary("migrate v4 training state");
         LegacyActor legacyActor{};
-        Critic legacyCritic{};
+        LegacyCritic legacyCritic{};
         ActorOptimizer legacyActorOptimizer{};
         CriticOptimizer legacyCriticOptimizer{};
         auto legacyRng = rlt::random::default_engine(
@@ -456,7 +466,7 @@ public:
             lastTeamTransitionCount_ = 0U;
             pendingAvailability_ = {};
             lastMasks_ = {};
-            pendingCentralCritic_.fill(0.F);
+            pendingAgentCritic_ = {};
             diagnostics_ = {};
         }
         catch (...)
@@ -472,7 +482,60 @@ public:
         return report;
     }
 
-    /** @brief Saves the complete update-boundary v5 training state. */
+    /**
+     * @brief Migrates only the shared v8 actor from a historical v5 trainer.
+     *        The incompatible old critic/Adam state is deliberately reset.
+     */
+    void MigrateV5TrainingActor(std::filesystem::path const& checkpoint)
+    {
+        RequireUpdateBoundary("migrate v5 actor");
+        std::ifstream stream{checkpoint};
+        if (!stream)
+            throw std::runtime_error("Cannot open old generalized checkpoint");
+        std::string magic;
+        unsigned version{}, observationVersion{};
+        std::size_t raw{}, compact{}, output{}, actorHidden{}, actorLayers{};
+        std::size_t criticInput{}, criticHidden{}, criticLayers{};
+        if (!(stream >> magic >> version >> observationVersion
+              >> raw >> compact >> output >> actorHidden >> actorLayers
+              >> criticInput >> criticHidden >> criticLayers)
+            || magic != "BLUE_TEAM_TRAINING_V5" || version != 5U
+            || observationVersion != GeneralizedObservationLayout::Version
+            || raw != GeneralizedObservationLayout::Size
+            || compact != ObservationLayout::Size
+            || output != GeneralizedObservationLayout::ActionSize
+            || actorHidden != TrainingParameters::ACTOR_HIDDEN_DIM
+            || actorLayers != TrainingParameters::ACTOR_NUM_LAYERS
+            || criticInput != ObservationLayout::Size
+            || criticHidden != TrainingParameters::CRITIC_HIDDEN_DIM
+            || criticLayers != TrainingParameters::CRITIC_NUM_LAYERS)
+        {
+            throw std::runtime_error("Incompatible v5 generalized checkpoint");
+        }
+        auto const metadata = generalized_checkpoint_detail::ReadMetadata(stream);
+        if (metadata.activeBlueMobiles != counts_.blueMobiles
+            || metadata.activeRedMobiles != counts_.redMobiles)
+        {
+            throw std::runtime_error("V5 actor migration P/N mismatch");
+        }
+        training_checkpoint_detail::RequirePatrolCheckpointToken(
+            stream, "ACTOR");
+        auto const actorMetadata = ReadGeneralizedPolicyParameters(stream, actor_);
+        if (actorMetadata.activeBlueMobiles != counts_.blueMobiles
+            || actorMetadata.activeRedMobiles != counts_.redMobiles)
+        {
+            throw std::runtime_error("Inconsistent V5 actor metadata");
+        }
+        rlt::reset_optimizer_state(device_, actorOptimizer_, actor_);
+        rlt::reset_optimizer_state(device_, criticOptimizer_, critic_);
+        completedUpdates_ = 0U;
+        totalActionsSampled_ = 0U;
+        totalTransitionsRecorded_ = 0U;
+        pendingAgentCritic_ = {};
+        diagnostics_ = {};
+    }
+
+    /** @brief Saves the complete update-boundary v6 training state. */
     void SaveTrainingState(std::filesystem::path const& checkpoint) const
     {
         RequireUpdateBoundary("save generalized training state");
@@ -481,7 +544,7 @@ public:
             rng_, completedUpdates_, Metadata());
     }
 
-    /** @brief Restores a strict same-P/N v5 update-boundary training state. */
+    /** @brief Restores a strict same-P/N v6 update-boundary training state. */
     void LoadTrainingState(std::filesystem::path const& checkpoint)
     {
         RequireUpdateBoundary("load generalized training state");
@@ -507,7 +570,7 @@ public:
         lastTeamActionCount_ = 0U;
         lastTeamTransitionCount_ = 0U;
         lastMasks_ = {};
-        pendingCentralCritic_.fill(0.F);
+        pendingAgentCritic_ = {};
         diagnostics_ = {};
     }
 
@@ -516,7 +579,8 @@ private:
     using ActorSpecification = TrainingConfig::NN::ACTOR_SPEC;
     using Actor = GeneralizedAttentionActor<ActorSpecification>;
     using LegacyActor = TrainingConfig::NN::ACTOR_TYPE;
-    using Critic = TrainingConfig::NN::CRITIC_TYPE;
+    using Critic = GeneralizedCriticConfig::Network;
+    using LegacyCritic = TrainingConfig::NN::CRITIC_TYPE;
     using ActorOptimizer = TrainingConfig::NN::ACTOR_OPTIMIZER;
     using CriticOptimizer = TrainingConfig::NN::CRITIC_OPTIMIZER;
 
@@ -553,7 +617,7 @@ private:
         static_cast<Index>(GeneralizedObservationLayout::Size)>;
     using TrainingCriticSpecification = rlt::matrix::Specification<
         float, Index, kTrainingBatch,
-        static_cast<Index>(ObservationLayout::Size)>;
+        static_cast<Index>(GeneralizedCriticLayout::Size)>;
     using TrainingActionSpecification = rlt::matrix::Specification<
         float, Index, kTrainingBatch,
         static_cast<Index>(GeneralizedObservationLayout::ActionSize)>;
@@ -635,29 +699,59 @@ private:
             device_, actor_, inferenceRaw_, inferenceCompact_);
     }
 
-    void PoolCentralCritic(AvailabilityMask const& availability,
-                           CentralCriticObservation& pooled) const
+    void BuildAgentCriticObservations(
+        AvailabilityMask const& availability,
+        std::array<CentralCriticObservation,
+                   TeamCapacity::MaximumBlueMobiles>& outputs) const
     {
-        pooled.fill(0.F);
-        std::size_t availableCount = 0U;
+        outputs = {};
+        CentralCriticObservation mean{};
+        CentralCriticObservation maximum{};
+        maximum.fill(-std::numeric_limits<float>::infinity());
+        std::size_t living = 0U;
         for (std::size_t agent = 0U; agent < counts_.blueMobiles; ++agent)
         {
             if (!availability[agent])
                 continue;
-            ++availableCount;
+            ++living;
             for (std::size_t feature = 0U;
-                 feature < ObservationLayout::Size; ++feature)
+                 feature < GeneralizedCriticLayout::Compact; ++feature)
             {
-                pooled[feature] += rlt::get(
+                float const value = rlt::get(
                     inferenceCompact_, static_cast<Index>(agent),
                     static_cast<Index>(feature));
+                mean[feature] += value;
+                maximum[feature] = std::max(maximum[feature], value);
             }
         }
-        if (availableCount == 0U)
+        if (living == 0U)
             return;
-        float const scale = 1.F / static_cast<float>(availableCount);
-        for (float& value : pooled)
-            value *= scale;
+        float const inverseLiving = 1.F / static_cast<float>(living);
+        float const livingFraction = static_cast<float>(living)
+            / static_cast<float>(TeamCapacity::MaximumBlueMobiles);
+        float const teamFraction = static_cast<float>(counts_.blueMobiles)
+            / static_cast<float>(TeamCapacity::MaximumBlueMobiles);
+        for (std::size_t agent = 0U; agent < counts_.blueMobiles; ++agent)
+        {
+            if (!availability[agent])
+                continue;
+            auto& result = outputs[agent];
+            for (std::size_t feature = 0U;
+                 feature < GeneralizedCriticLayout::Compact; ++feature)
+            {
+                result[GeneralizedCriticLayout::OwnOffset + feature] = rlt::get(
+                    inferenceCompact_, static_cast<Index>(agent),
+                    static_cast<Index>(feature));
+                result[GeneralizedCriticLayout::MeanOffset + feature] =
+                    mean[feature] * inverseLiving;
+                result[GeneralizedCriticLayout::MaxOffset + feature] =
+                    maximum[feature];
+            }
+            result[GeneralizedCriticLayout::LivingFractionOffset] =
+                livingFraction;
+            result[GeneralizedCriticLayout::TeamFractionOffset] =
+                teamFraction;
+        }
     }
 
     void OptimizeRollout()
@@ -716,7 +810,7 @@ private:
                          transition->observation[feature]);
             }
             for (Index feature = 0;
-                 feature < static_cast<Index>(ObservationLayout::Size);
+                 feature < static_cast<Index>(GeneralizedCriticLayout::Size);
                  ++feature)
             {
                 rlt::set(trainingCritic_, row, feature,
@@ -1034,7 +1128,8 @@ private:
 
     AvailabilityMask pendingAvailability_{};
     AvailabilityMask lastMasks_{};
-    CentralCriticObservation pendingCentralCritic_{};
+    std::array<CentralCriticObservation,
+               TeamCapacity::MaximumBlueMobiles> pendingAgentCritic_{};
     GeneralizedTrainingDiagnostics diagnostics_{};
     std::size_t collectedTeamSteps_{};
     std::size_t lastTeamActionCount_{};
