@@ -2462,36 +2462,22 @@ EnvironmentRenderer::DrawTrainingControls(std::shared_ptr<AgentController> const
         return;
 
     agent->m_rollout = static_cast<int>(state.m_common.m_maxStep);
-    bool changed = false;
-    if (state.m_name.rfind("Blue MAPPO", 0U) == 0U)
+    if (state.m_name == "Blue generalized shared MAPPO")
     {
-        static constexpr std::array<int, 4> rolloutValues{
-            512, 1024, 2048, 4096
-        };
-        static constexpr std::array<char const*, 4> rolloutLabels{
-            "512", "1024", "2048", "4096"
-        };
-        auto const found = std::find(rolloutValues.begin(), rolloutValues.end(),
-                                     agent->m_rollout);
-        int selected = found == rolloutValues.end() ? 3
-            : static_cast<int>(std::distance(rolloutValues.begin(), found));
-        if (ImGui::Combo("Rollout Buffer", &selected, rolloutLabels.data(),
-                         static_cast<int>(rolloutLabels.size())))
-        {
-            agent->m_rollout = rolloutValues[static_cast<std::size_t>(selected)];
-            changed = true;
-        }
+        ImGui::Text("Rollout buffer: %d team steps", agent->m_rollout);
+        ImGui::TextDisabled(
+            "Set in Training/BluePatrol.json; restart to change.");
+        return;
     }
-    else
-    {
-        changed = ImGui::SliderInt("Rollout Buffer", &agent->m_rollout, 1, 10000);
-    }
-    if (changed)
+
+    if (ImGui::SliderInt(
+            "Rollout Buffer", &agent->m_rollout, 1, 10000))
     {
         ppo::model::sAgentRealTimeCommand command{};
         command.m_id = agent->m_id;
         command.m_rolloutBuffer = agent->m_rollout;
-        command.m_type = ppo::model::sAgentRealTimeCommand::eTypeCommand::RolloutBuffer;
+        command.m_type =
+            ppo::model::sAgentRealTimeCommand::eTypeCommand::RolloutBuffer;
         p_environment->AddAgentCommand(command);
     }
 }
@@ -2534,7 +2520,10 @@ EnvironmentRenderer::DrawRewardControls(std::shared_ptr<AgentController> const& 
             break;
         }
 
-        if (ImGui::SliderFloat(rewardLabel.c_str(), &agent->m_scalings[i], 0.F, 1.F))
+        float const maxWeight = state.m_name == "Blue generalized shared MAPPO"
+            ? 10.F : 1.F;
+        if (ImGui::SliderFloat(
+                rewardLabel.c_str(), &agent->m_scalings[i], 0.F, maxWeight))
         {
             ppo::model::sAgentRealTimeCommand command{};
             command.m_id = agent->m_id;
