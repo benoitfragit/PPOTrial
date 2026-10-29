@@ -109,6 +109,8 @@ struct sCommonAgentState :
     * @brief True while PPO optimization is active.
     */
     bool m_training{ false };
+    /** Completed MAPPO optimizer updates (zero for other agent families). */
+    std::uint64_t m_completedTrainingUpdates{ 0U };
 };
 
 /**
