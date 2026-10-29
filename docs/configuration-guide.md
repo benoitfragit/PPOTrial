@@ -16,7 +16,7 @@ resources/settings/
 ├── Scenarios/
 │   ├── BluePatrol.json           curriculum de patrouille sans rouge
 │   ├── Playground.json           composition du monde principal
-│   ├── TwoVsTwo.json             défense MAPPO P/N (P=2, N=4 par défaut)
+│   ├── TwoVsTwo.json             défense MAPPO P/N (P=4, N=4 par défaut)
 │   └── Evaluation/
 │       ├── RLMission.json        composition et limites des tests
 │       └── RLSNA.json
@@ -279,7 +279,7 @@ remplacée par la pénétration déterministe exacte pour les bleus.
 
 `Scenarios/TwoVsTwo.json` fournit l'unique entrée MAPPO du sélecteur. Le
 runtime bleu généralisé est sélectionné par `blueTeam`; `redTeam` dimensionne
-ses adversaires. Le profil livré utilise P=2/N=4 et deux zones hostiles de
+ses adversaires. Le profil livré utilise P=4/N=4 et deux zones hostiles de
 bordure dont les centres restent hors du monde. Aucune zone rouge n'est centrée
 dans la zone défendue et toutes sont reflétées du côté opposé à l'objectif :
 

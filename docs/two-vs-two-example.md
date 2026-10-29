@@ -175,7 +175,7 @@ rouges. La validation principale couvre :
 
 L'entrée de catalogue existante `two-vs-two` utilise directement le runtime
 généralisé. Aucune entrée `p-vs-n` et aucun second MAPPO ne sont créés.
-`Scenarios/TwoVsTwo.json` démarre à P=2/N=4 ; `blueTeam.activeCount`
+`Scenarios/TwoVsTwo.json` démarre à P=4/N=4 ; `blueTeam.activeCount`
 dimensionne les bleus dans la capacité 1..9 et `redTeam.activeCount` les rouges
 dans la capacité 0..10.
 

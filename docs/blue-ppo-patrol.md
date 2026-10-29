@@ -13,7 +13,7 @@ ne sont pas modifiés.
 Deux scénarios bleus sont disponibles dans `PPO.exe` :
 
 - `blue-patrol` entraîne la tenue de patrouille sans attaquant ;
-- `two-vs-two` entraîne le runtime généralisé v8/v5, livré à P=2/N=4 ; P est
+- `two-vs-two` entraîne le runtime généralisé v8/v5, livré à P=4/N=4 ; P est
   configurable de 1 à 9 et N de 0 à 10 dans `Scenarios/TwoVsTwo.json`.
 
 `Play` démarre la simulation et la collecte on-policy. `Pause` suspend aussi la

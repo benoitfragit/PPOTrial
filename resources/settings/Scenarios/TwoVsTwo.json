@@ -4,7 +4,7 @@
   "twoVsTwo": {
     "blueController": "mappo",
     "blueTeam": {
-      "activeCount": 2
+      "activeCount": 4
     },
     "redTeam": {
       "activeCount": 4,

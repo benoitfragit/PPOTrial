@@ -23,7 +23,7 @@ actuellement x64 ; les builds Debug sont recommandés pour le diagnostic.
 - `airspace` : scénario historique et agents LibTorch ;
 - `blue-patrol` : deux bleus MAPPO apprennent la patrouille sans ennemi ;
 - `two-vs-two` : l'unique MAPPO bleu généralisé protège l'objectif dans un
-  entraînement livré à P=2/N=4 contre des rouges pilotés par RLMission.
+  entraînement livré à P=4/N=4 contre des rouges pilotés par RLMission.
 
 Le scénario `two-vs-two` matérialise `blue_1..blue_P` depuis les templates
 typés du JSON. `blueTeam.activeCount` accepte 1 à 9 et
@@ -55,11 +55,11 @@ conservés à l'identique pour ne pas modifier le comportement des rouges.
 
 La patrouille est un unique hippodrome analytique continu, sans waypoint. Sa
 longueur, sa largeur, son orientation, son ancrage et le wedge sont tirés une
-fois par épisode. Les deux voitures reçoivent alors aléatoirement des rôles
-bijectifs : exactement un leader et un équipier. Seul le leader suit la piste ;
-l'équipier tient une pose arrière/intérieure relative au leader. Un seul
+fois par épisode. Les quatre voitures reçoivent alors des rôles bijectifs :
+exactement un leader et trois équipiers avec des slots distincts. Seul le
+leader suit la piste ; chaque équipier tient sa pose relative. Un seul
 contrôleur MAPPO possède l'acteur partagé, le critique centralisé, le buffer
-on-policy et l'optimiseur des deux bleus.
+on-policy et l'optimiseur des quatre bleus.
 
 La configuration livrée conserve une longueur de 50 à 60 km et échantillonne
 une largeur de 16 à 20 km. Ces rayons progressifs facilitent l'exploration
@@ -82,7 +82,7 @@ transitoire ne peut plus figer définitivement l'entraînement.
 
 Les réglages sont dans
 `resources/settings/Training/BluePatrol.json`. Le rollout par défaut est de
-2048 pas d'équipe, soit 4096 transitions pour deux défenseurs. L'IHM permet de
+2048 pas d'équipe, soit 8192 transitions pour quatre défenseurs. L'IHM permet de
 choisir 512, 1024, 2048 ou 4096 avant le début de la collecte. La valeur 128 du
 backend est la taille d'un mini-batch PPO et non la durée de l'entraînement.
 
@@ -99,10 +99,10 @@ les deux états Adam, le compteur de mises à jour et le RNG. Le buffer de rollo
 n'est volontairement pas sauvegardé : une reprise commence un rollout vide au
 même niveau d'optimisation.
 
-La collision entre les deux bleus est terminale à 1 km, avec une pénalité de
+La collision entre deux bleus est terminale à 1 km, avec une pénalité de
 sécurité progressive à partir de 2 km. Le leader reçoit seul le suivi de
 l'unique hippodrome ; l'équipier reçoit seul le wedge de 6 à 9 km, mesuré dans
-le repère du cap physique du leader. Les deux bleus voient toutes les pistes
+le repère du cap physique du leader. Les quatre bleus voient toutes les pistes
 rouges actives et apprennent à les couvrir par une récompense défensive commune
 et le critique centralisé. Il n'existe aucun coordinateur ni cible imposée.
 Le pooling et l'attention sont inchangés. Deux menaces simultanées peuvent
