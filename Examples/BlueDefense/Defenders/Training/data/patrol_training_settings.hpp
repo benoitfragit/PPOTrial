@@ -8,7 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /**
  * @brief Returns whether a rollout length has a compiled RLtools backend.
@@ -51,4 +51,4 @@ inline bool Valid(PatrolTrainingSettings const& settings) noexcept
         [](float weight) { return std::isfinite(weight) && weight >= 0.F; });
 }
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

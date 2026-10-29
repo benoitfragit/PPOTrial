@@ -12,7 +12,7 @@
 #include <string_view>
 #include <vector>
 
-namespace ppo::examples::twovstwo {
+namespace ppo::examples::bluedefense {
 
 /** @brief Half extents of the rectangular simulation world, in metres. */
 struct WorldBounds final
@@ -270,7 +270,7 @@ std::optional<EpisodeSpawnLayout> GenerateEpisodeSpawnLayout(
     std::mt19937& rng, std::string* diagnostic = nullptr);
 
 /**
- * @brief Builds the initial pose of one TwoVsTwo entity.
+ * @brief Builds the initial pose of one BlueDefense entity.
  * @param name Stable scenario entity name.
  * @param layout Coordinated layout generated for the current episode.
  * @param world Rectangular world half extents.
@@ -282,4 +282,4 @@ std::optional<Spawn> MakeSpawn(std::string_view name,
                                WorldBounds const& world,
                                std::mt19937& rng);
 
-} // namespace ppo::examples::twovstwo
+} // namespace ppo::examples::bluedefense

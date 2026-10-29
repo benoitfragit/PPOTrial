@@ -9,7 +9,7 @@
 #include <optional>
 #include <random>
 
-namespace ppo::examples::twovstwo {
+namespace ppo::examples::bluedefense {
 /**
  * @brief Mutable episode-initialization state shared by the scenario loader.
  */
