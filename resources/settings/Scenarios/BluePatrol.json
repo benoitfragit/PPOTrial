@@ -1,39 +1,7 @@
 {
   "formatVersion": 2,
   "agentProfiles": "../AgentProfiles.json",
-  "twoVsTwo": {
-    "patrolOnly": true,
-    "blueController": "mappo",
-    "red2InitiallyDestroyedProbability": 0,
-    "redSpawn": {
-      "minimumWorldScale": 1.05,
-      "maximumWorldScale": 1.35,
-      "minimumBearingDegrees": -90.0,
-      "maximumBearingDegrees": 90.0,
-      "minimumSeparation": 10000.0
-    },
-    "restrictedZoneSpawn": {
-      "enabledProbability": 1.0,
-      "minimumNorthFraction": 0.0,
-      "maximumNorthFraction": 0.0,
-      "minimumEastFraction": 0.0,
-      "maximumEastFraction": 0.0
-    },
-    "description": "Cooperative blue MAPPO patrol curriculum"
-  },
   "entities": {
-    "blue_guard_1": {
-      "type": "Mobile",
-      "platform": "defender_car",
-      "side": "Friend",
-      "agents": []
-    },
-    "blue_guard_2": {
-      "type": "Mobile",
-      "platform": "defender_car",
-      "side": "Friend",
-      "agents": []
-    },
     "blue_objective": {
       "type": "Objective",
       "platform": "",
@@ -45,6 +13,82 @@
       "platform": "restrictedzone",
       "side": "Friend",
       "agents": []
+    },
+    "blue_template": {
+      "type": "Mobile",
+      "platform": "defender_car",
+      "side": "Friend",
+      "agents": []
+    }
+  },
+  "blueDefense": {
+    "patrolOnly": true,
+    "blueController": "mappo",
+    "redSpawn": {
+      "minimumWorldScale": 1.05,
+      "maximumWorldScale": 1.35,
+      "minimumBearingDegrees": -90,
+      "maximumBearingDegrees": 90,
+      "minimumSeparation": 10000
+    },
+    "restrictedZoneSpawn": {
+      "enabledProbability": 1,
+      "minimumNorthFraction": 0,
+      "maximumNorthFraction": 0,
+      "minimumEastFraction": 0,
+      "maximumEastFraction": 0
+    },
+    "restrictedZones": {
+      "enabled": true,
+      "items": [
+        {
+          "id": "red_restricted_zone_north",
+          "type": "RestrictedZone",
+          "platform": "restrictedzone",
+          "side": "Hostile",
+          "enabled": true,
+          "enabledProbability": 0.75,
+          "randomPosition": {
+            "north": {
+              "minimum": 14000,
+              "maximum": 20500
+            },
+            "east": {
+              "minimum": -25000,
+              "maximum": 25000
+            }
+          }
+        },
+        {
+          "id": "red_restricted_zone_south",
+          "type": "RestrictedZone",
+          "platform": "restrictedzone",
+          "side": "Hostile",
+          "enabled": true,
+          "enabledProbability": 0.75,
+          "randomPosition": {
+            "north": {
+              "minimum": -20500,
+              "maximum": -14000
+            },
+            "east": {
+              "minimum": -25000,
+              "maximum": 25000
+            }
+          }
+        }
+      ]
+    },
+    "description": "Cooperative blue MAPPO patrol curriculum",
+    "blueTeam": {
+      "activeCount": 2
+    },
+    "redTeam": {
+      "activeCount": 0,
+      "maximumPlacementAttempts": 1024,
+      "delayedActivationProbability": 0,
+      "minimumActivationDelaySteps": 256,
+      "maximumActivationDelaySteps": 768
     }
   }
 }

@@ -21,14 +21,45 @@ No alternate runtime loaders or old-file path fallbacks exist.
 | Display state | Renderer.json |
 
 The `twoVsTwo` object in `Scenarios/TwoVsTwo.json` owns the episode spawn
-curriculum. `redSpawn` defines the front/lateral bearing interval, the scale
+contract. `redSpawn` defines the front/lateral bearing interval, the scale
 beyond the rectangular world boundary and the guaranteed attacker separation.
-`threatCurriculum` selects zero, one or two training threats and optional
-first/second activation delays in ECS team steps. Deterministic evaluation
-cases disable this stochastic schedule and keep immediate 2v1/2v2 layouts.
+The shipped `redTeam` instantiates four production RLMission attackers, with
+seeded optional activation delays. The legacy `threatCurriculum` remains
+available only when `redTeam` is absent.
 `restrictedZoneSpawn` defines a side-relative position box and an activation
 probability. World limits remain sensor and reward references; they do not stop
 the production RLMission attackers.
+
+`blueTeam` and `redTeam` are optional additive contracts. `blueTeam` selects
+the generalized blue runtime and `redTeam` sizes its opponents. If both are
+absent, the archived 2v2 entities, RNG order, curriculum and v7/v4 checkpoint
+path are unchanged. `Scenarios/TwoVsTwo.json` enables `blueTeam` and `redTeam`
+directly so the existing GUI entry owns the generalized MAPPO runtime:
+
+~~~json
+"blueTeam": {"activeCount": 5},
+"redTeam": {
+  "activeCount": 7,
+  "maximumPlacementAttempts": 512,
+  "delayedActivationProbability": 0.25,
+  "minimumActivationDelaySteps": 256,
+  "maximumActivationDelaySteps": 768
+}
+~~~
+
+`blueTeam.activeCount` is bounded to `[1,9]`; `redTeam.activeCount` is bounded
+to `[0,10]`. Generalized red placement attempts are bounded to `[1,4096]` per
+mobile and fail with a diagnostic when `redSpawn.minimumSeparation` cannot be
+satisfied. Activation delays are positive, finite, ordered ECS team-step
+indices. An enabled legacy `threatCurriculum` and generalized `redTeam` are
+mutually exclusive.
+
+The generalized loader clones one agent-free friendly Mobile template into
+`blue_1..blue_P`, and one production-RLMission hostile Mobile template into
+`red_1..red_N`. Exactly one blue leader is sampled per reset. Every teammate
+owns a stable unique V-formation slot and its normalized `[-1,1]` encoding.
+One synchronized team step produces P actions before physics and exactly P
+same-step transitions after ECS resolution.
 
 See docs/configuration-guide.md for explanations and examples.
 
@@ -94,12 +125,43 @@ Critic, both Adam states, update count and RLTools RNG. Rollout samples are not
 serialized; resume starts a fresh rollout. `model/BluePatrol/prod` remains an
 inference-only promoted Actor plus its evaluation score.
 
-The current blue checkpoint contract is Actor v6 and training-state v3. Older
-blue checkpoints are not warm starts for the episode-random leader/wingman
-observation contract; start training from new weights. Red RLMission
-checkpoints are unaffected.
+The archived two-blue checkpoint contract is Actor v7 and training-state v4.
+The P/N path writes `blue_patrol_generalized_v8.txt` and
+`blue_patrol_generalized_training_v5.txt`. Its raw v8 observation has 295
+values: own state, exactly 61 ECS pseudo-LiDAR rays, explicit role/slot, ten
+masked red tracks, eight masked other-blue tracks, a separate masked objective,
+patrol/global fields and normalized P/N. Masked order-invariant attention and
+mean/max pooling build the compact 156-value MLP trunk.
 
-The blue `Platforms/Mobile/defender_car.json` profile also exposes
+The same `evaluation` settings drive a generalized update-boundary campaign.
+It uses deterministic v8 Actor means in the live ECS without adding rollout
+rows or consuming the learner RNG. Episode survival and neutralization are
+normalized by P and N before campaign averaging. A strictly better candidate
+is promoted only to `model/BluePatrol/prod/blue_patrol_generalized_v8.txt`;
+its P/N-tagged score metadata and all v8 files remain separate from v7/v4.
+
+A strict v7 Actor can initialize the compatible v8 encoders, queries, trunk,
+output and standard deviation. The explicit v4 training migration copies only
+the compatible Actor and its matching Adam moments. The fixed-2v2 Critic,
+optimizer scalar states, RNG, update count and rollout are reset. This is not a
+bit-identical training resume. Never delete the v7/v4 files: the legacy 2v2
+runtime still owns them and the generalized runtime may use them as migration
+sources. V8/v5 writes are atomic and reject wrong versions or truncation. Red
+RLMission checkpoints are unaffected.
+
+Restricted zones never consume any of RLMission's ten ranked tracks. Only
+living opposing `Mobile` and `Objective` entities are track candidates; zones
+remain visible through the dedicated SAM/pseudo-LiDAR path. The RLMission
+152-value layout is unchanged.
+
+Each hostile zone may set `oppositeObjective=true`. Its configured east value
+is then treated as a magnitude and mirrored onto the side opposite the current
+objective. The shipped scenario uses only two boundary zones whose centres
+remain outside the world, so no hostile zone is centred in the defended area
+and the objective cannot be covered.
+
+The blue `Platforms/Mobile/defender_car.json` profile mirrors the
+`trainingaircraft` speed, turn-rate and SNA engagement-angle limits and exposes
 `FlightModel.CruiseSpeed`. The TwoVsTwo loader uses it consistently for the
 initial state and patrol reference. The remaining `FlightModel` and `SNA`
 fields define the blue physical and engagement limits without changing the
@@ -163,3 +225,10 @@ GenericRLCore.
 Configuration tests assert numeric settings, resolved agent names, initial
 case counts and handling of malformed JSON. Run the Windows VS2022 Debug and
 Release CTest suites before release.
+
+For fast development iterations, build and run only `TwoVsTwoSpawnTests`,
+`TwoVsTwoTeamDomainTests`, `TwoVsTwoTeamDynamicsTests`, the
+`TwoVsTwoGeneralized*` tests, and `MissionTrackSelectionTests`. The runtime and
+embedded-learner smoke tests plus `PPO.exe --example two-vs-two --check-example`
+are the heavier final pre-merge validation, not a requirement after each core
+edit.

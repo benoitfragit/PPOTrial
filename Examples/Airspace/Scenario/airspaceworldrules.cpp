@@ -14,6 +14,7 @@ using ppo::model::sEntityState;
 using ppo::model::sSNAState;
 using ppo::model::sExplosionEvent;
 using ppo::model::sExplosionEventBuffer;
+using ppo::model::eEntitySide;
 using ppo::model::eEntityType;
 using ppo::model::SNASystem;
 
@@ -120,7 +121,10 @@ AirspaceWorldRules::ResolveDestructions(WorldEntities& m_entities)
     
         auto const [entityState, snaState] = entity->get<sEntityState, sSNAState>();
     
-        if (entityState.m_destroyed)
+        if (entityState.m_destroyed
+            || (!m_resolveHostileRestrictedZoneWeapons
+                && entityState.m_type == eEntityType::RestrictedZone
+                && entityState.m_side == eEntitySide::Hostile))
             continue;
     
         for (auto& otherEntity : m_entities)

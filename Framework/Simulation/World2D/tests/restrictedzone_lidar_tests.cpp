@@ -1,8 +1,10 @@
 #include "restrictedzonelidar.hpp"
+#include "restrictedzonegeometry.hpp"
 #include "snasystem.hpp"
 #include "entitytypes.hpp"
 
 #include <cmath>
+#include <cstddef>
 #include <stdexcept>
 #include <type_traits>
 
@@ -29,6 +31,7 @@ int main()
     auto& ownState = registry.emplace<sEntityState>(ownId);
     ownState.m_entityId = ownId;
     ownState.m_side = eEntitySide::Friend;
+    ownState.m_type = eEntityType::Mobile;
     ownState.m_rotation = 0.F;
 
     auto const zoneId = registry.create();
@@ -47,6 +50,21 @@ int main()
     BuildRestrictedZonePseudoLidar(registry, own, ownState, ranges, distances);
     RequireNear(distances[30], 78.F, "Near intersection changed");
     RequireNear(ranges[30], 78.F / (78.F + 22.F), "Legacy normalization changed");
+    RequireNear(RestrictedZoneWarningRadius(20.F), 22.F,
+                "warning radius no longer differs explicitly from lethal radius");
+    if (IsInsideRestrictedZone({0.F, 0.F}, {30.F, 0.F}, 20.F)
+        || !IsInsideRestrictedZone({10.F, 0.F}, {30.F, 0.F}, 20.F)
+        || !CrossesRestrictedZone({0.F, 0.F}, {60.F, 0.F},
+                                  {30.F, 0.F}, 5.F))
+        throw std::runtime_error("pure restricted-zone geometry changed");
+
+    auto& environment = registry.ctx().emplace<sEnvironmentState>();
+    environment.m_maxNorth = 400.F;
+    environment.m_maxEast = 400.F;
+    auto& published = registry.emplace<sPseudoLidarState>(ownId);
+    UpdateRestrictedZonePseudoLidars(registry, eEntitySide::Friend);
+    RequireNear(published.m_nearestCollisionDistances[30], 78.F,
+                "ECS pseudo-lidar publication changed");
 
     zoneState.m_side = eEntitySide::Friend;
     BuildRestrictedZonePseudoLidar(registry, own, ownState, ranges, distances);
@@ -118,5 +136,68 @@ int main()
     RequireNear(SNASystem::EvaluateDestruction(zoneHandle, victimHandle), 0.F,
                 "Restricted zones must not eliminate other restricted zones");
 
+
+    // Dynamic sensing detects nearest teammates without changing physical
+    // collisions or the stationary-zone sensor contract.
+    zoneState.m_destroyed = true;
+    auto const nearId = registry.create();
+    auto& nearBlue = registry.emplace<sEntityState>(nearId);
+    nearBlue.m_entityId = nearId;
+    nearBlue.m_side = eEntitySide::Friend;
+    nearBlue.m_type = eEntityType::Mobile;
+    nearBlue.m_x = 100.F;
+    auto const farId = registry.create();
+    auto& farBlue = registry.emplace<sEntityState>(farId);
+    farBlue.m_entityId = farId;
+    farBlue.m_side = eEntitySide::Friend;
+    farBlue.m_type = eEntityType::Mobile;
+    farBlue.m_x = 160.F;
+    UpdateRestrictedZonePseudoLidars(registry, eEntitySide::Friend, 20.F);
+    RequireNear(published.m_nearestCollisionDistances[30], 80.F,
+                "Nearest friendly envelope must win");
+    RequireNear(published.m_nearestCollisionRanges[30], 0.8F,
+                "Friendly envelope normalization changed");
+
+    nearBlue.m_destroyed = true;
+    UpdateRestrictedZonePseudoLidars(registry, eEntitySide::Friend, 20.F);
+    RequireNear(published.m_nearestCollisionDistances[30], 140.F,
+                "Destroyed friendlies must be excluded");
+
+    farBlue.m_side = eEntitySide::Hostile;
+    UpdateRestrictedZonePseudoLidars(registry, eEntitySide::Friend, 20.F);
+    RequireNear(published.m_nearestCollisionDistances[30], 200.F,
+                "Hostiles must not count as friendly safety obstacles");
+
+    farBlue.m_side = eEntitySide::Friend;
+    farBlue.m_x = 0.F;
+    UpdateRestrictedZonePseudoLidars(registry, eEntitySide::Friend, 20.F);
+    RequireNear(published.m_nearestCollisionDistances[30], 20.F,
+                "Overlap must retain a finite directional exit range");
+    RequireNear(published.m_nearestCollisionDistances[0], 20.F,
+                "Rear obstacles must be sensed");
+
+    farBlue.m_destroyed = true;
+    UpdateRestrictedZonePseudoLidars(registry, eEntitySide::Friend);
+    RequireNear(published.m_nearestCollisionDistances[30], 200.F,
+                "Disabled dynamic sensing must retain world-boundary hits");
+
+    // A danger-zone penetration must stay saturated when both the world
+    // boundary and a teammate safety envelope overlap the same ray.
+    zoneState.m_side = eEntitySide::Hostile;
+    zoneState.m_destroyed = false;
+    zoneState.m_x = ownState.m_x;
+    zoneState.m_y = ownState.m_y;
+    zoneSense.m_noescapezone = 10.F;
+    farBlue.m_destroyed = false;
+    farBlue.m_x = ownState.m_x + 30.F;
+    farBlue.m_y = ownState.m_y;
+    UpdateRestrictedZonePseudoLidars(registry, eEntitySide::Friend, 20.F);
+    for (std::size_t ray = 0U; ray < kRestrictedZoneLidarBins; ++ray)
+    {
+        RequireNear(published.m_nearestCollisionRanges[ray], 0.F,
+                    "A teammate hid a penetrated restricted-zone alert");
+        RequireNear(published.m_nearestCollisionDistances[ray], 0.F,
+                    "A boundary changed a saturated restricted-zone distance");
+    }
     return 0;
 }

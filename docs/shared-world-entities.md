@@ -46,9 +46,12 @@ world boundaries has been moved from the RLMission adapter to the shared
 beam angles, masking, or iteration order was changed. Existing RLMission
 observations call this shared implementation and still write exactly the same
 `sPseudoLidarState` fields. The historical behavior of the restricted-zone
-danger region is 1.10 times the no-escape radius; elimination stays governed
-by the original `SNASystem::EvaluateDestruction` rule, and an area without
-orientation is still treated differently from a Mobile.
+warning region is 1.10 times the no-escape radius. Airspace keeps its original
+`SNASystem::EvaluateDestruction` behavior by default. TwoVsTwo instead owns a
+deterministic swept lethal-circle rule for friendly blue mobiles and refreshes
+only their ECS LiDAR components; RLMission red observations remain untouched.
+The historical friendly `blue_restricted_zone`, its RNG draw and its SNA effect
+against hostile red mobiles are retained unchanged.
 
 ## Validation
 - `SharedWorldLidarTests`: 61 beams, legacy enum values, forward ray,
@@ -59,4 +62,5 @@ orientation is still treated differently from a Mobile.
 - Manual GUI and RLMission training/eval/prod smoke tests are still required
   after successful CI. No model conversion or retraining.
 
-No TwoVsTwo gameplay, RLtools, MAPPO or new renderer has been implemented.
+The TwoVsTwo adapter consumes this shared sensor without changing the 61-bin
+layout or either legacy RLMission model format.

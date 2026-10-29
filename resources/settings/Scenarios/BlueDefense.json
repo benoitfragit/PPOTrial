@@ -1,0 +1,106 @@
+{
+  "formatVersion": 2,
+  "agentProfiles": "../AgentProfiles.json",
+  "entities": {
+    "blue_objective": {
+      "type": "Objective",
+      "platform": "",
+      "side": "Friend",
+      "agents": []
+    },
+    "blue_restricted_zone": {
+      "type": "RestrictedZone",
+      "platform": "restrictedzone",
+      "side": "Friend",
+      "agents": []
+    },
+    "blue_template": {
+      "type": "Mobile",
+      "platform": "defender_car",
+      "side": "Friend",
+      "agents": []
+    },
+    "red_template": {
+      "type": "Mobile",
+      "platform": "attacker_car",
+      "side": "Hostile",
+      "target": "blue_objective",
+      "agents": [
+        {
+          "profile": "RLMission",
+          "mode": "production"
+        }
+      ]
+    }
+  },
+  "blueDefense": {
+    "blueController": "mappo",
+    "blueTeam": {
+      "activeCount": 4
+    },
+    "redTeam": {
+      "activeCount": 4,
+      "maximumPlacementAttempts": 1024,
+      "delayedActivationProbability": 0.25,
+      "minimumActivationDelaySteps": 256,
+      "maximumActivationDelaySteps": 768
+    },
+    "redSpawn": {
+      "minimumWorldScale": 1.15,
+      "maximumWorldScale": 1.45,
+      "minimumBearingDegrees": -90,
+      "maximumBearingDegrees": 90,
+      "minimumSeparation": 10000
+    },
+    "restrictedZoneSpawn": {
+      "enabledProbability": 0.75,
+      "minimumNorthFraction": -0.45,
+      "maximumNorthFraction": 0.45,
+      "minimumEastFraction": 0.15,
+      "maximumEastFraction": 0.65
+    },
+    "restrictedZones": {
+      "enabled": true,
+      "items": [
+        {
+          "id": "red_restricted_zone_outside_north",
+          "type": "RestrictedZone",
+          "platform": "restrictedzone",
+          "side": "Hostile",
+          "enabled": true,
+          "enabledProbability": 0.65,
+          "oppositeObjective": true,
+          "randomPosition": {
+            "north": {
+              "minimum": 3000,
+              "maximum": 15000
+            },
+            "east": {
+              "minimum": 36000,
+              "maximum": 42000
+            }
+          }
+        },
+        {
+          "id": "red_restricted_zone_outside_south",
+          "type": "RestrictedZone",
+          "platform": "restrictedzone",
+          "side": "Hostile",
+          "enabled": true,
+          "enabledProbability": 0.65,
+          "oppositeObjective": true,
+          "randomPosition": {
+            "north": {
+              "minimum": -15000,
+              "maximum": -3000
+            },
+            "east": {
+              "minimum": 36000,
+              "maximum": 42000
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -7,6 +7,7 @@
 * @license MIT
 */
 #include "targetselector.hpp"
+#include "missiontrackfilter.hpp"
 #include "airspacecomponents.hpp"
 #include "utils.hpp"
 #include "snasystem.hpp"
@@ -79,26 +80,6 @@ struct sRestrictedZoneThreatAssessment
     float m_nearestDangerMargin{ std::numeric_limits<float>::infinity() };
     float m_forwardAlignmentToNearestThreat{ 0.F };
 };
-
-/**
-* @brief Filters entities that can be exposed as mission tracks.
-*/
-bool
-IsMissionTrackCandidate(ppo::model::sEntityState const& ownState,
-                        ppo::model::sEntityState const& otherState,
-                        entt::entity ownEntity) noexcept
-{
-    if (otherState.m_destroyed
-    ||  otherState.m_entityId == ownEntity
-    ||  otherState.m_side == ownState.m_side
-    ||  otherState.m_type == ppo::model::eEntityType::Missile
-    ||  otherState.m_type == ppo::model::eEntityType::None)
-    {
-        return false;
-    }
-
-    return true;
-}
 
 /**
 * @brief Maps one distance to a bounded range feature.
@@ -307,7 +288,8 @@ StatesAndActionsForMission::SetNewState(STATES& state) noexcept
         ppo::model::BaseEntity otherEntity{ registry, entity };
         auto [entityState] = otherEntity.get<ppo::model::sEntityState>();
 
-        if (!IsMissionTrackCandidate(aircraftState, entityState, m_entity.uniqid()))
+        if (!detail::IsMissionTrackCandidate(
+                aircraftState, entityState, m_entity.uniqid()))
             continue;
 
         tracks.push_back(BuildTrackObservation(ownEntity, aircraftState, snaState, otherEntity));

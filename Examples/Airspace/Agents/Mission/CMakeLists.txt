@@ -7,6 +7,7 @@ add_library(${PROJECT_NAME}
     ${CMAKE_CURRENT_SOURCE_DIR}/actorcriticmission.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/actorcriticmission.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/targetselector.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/missiontrackfilter.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/targetselector.cpp
 	)
 

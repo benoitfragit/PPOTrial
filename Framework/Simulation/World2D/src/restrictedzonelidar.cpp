@@ -1,4 +1,5 @@
 #include "restrictedzonelidar.hpp"
+#include "restrictedzonegeometry.hpp"
 #include "utils.hpp"
 
 #include <algorithm>
@@ -15,7 +16,8 @@ constexpr float kPseudoLidarAngleSpan = static_cast<float>(ppo::model::TWOPI);
 constexpr float kPseudoLidarHalfAngleSpan = 0.5F * kPseudoLidarAngleSpan;
 constexpr float kPseudoLidarStepAngle =
     kPseudoLidarAngleSpan / static_cast<float>(kPseudoLidarBinCount - 1U);
-constexpr float kRestrictedZoneDangerMultiplier = 1.10F;
+constexpr float kRestrictedZoneDangerMultiplier =
+    kRestrictedZoneWarningRadiusScale;
 constexpr float kNoEscapeEpsilon = 1.0e-4F;
 constexpr float kRayEpsilon = 1.0e-5F;
 
@@ -33,7 +35,9 @@ UpdatePseudoLidarHit(float hitDistance,
                      float& bestRange,
                      float& bestDistance) noexcept
 {
-    if (hitDistance < 0.F)
+    // A saturated restricted-zone ray must stay saturated, including its
+    // physical distance, when subsequent zones or boundaries are inspected.
+    if (hitDistance < 0.F || bestRange <= 0.F)
         return;
 
     float const normalizedDistance = NormalizeRange(hitDistance, dangerRadius);
@@ -126,7 +130,8 @@ BuildRestrictedZonePseudoLidar(entt::registry& registry,
             continue;
         }
 
-        float const dangerRadius = kRestrictedZoneDangerMultiplier * otherSnaState.m_noescapezone;
+        float const dangerRadius = kRestrictedZoneDangerMultiplier
+            * otherSnaState.m_noescapezone;
         float const mx = ownState.m_x - otherState.m_x;
         float const my = ownState.m_y - otherState.m_y;
         float const distanceToCenter = std::sqrt(mx * mx + my * my);
@@ -168,6 +173,71 @@ BuildRestrictedZonePseudoLidar(entt::registry& registry,
 }
 
 /**
+ * @brief Senses other living same-side mobiles as nonlethal moving circles.
+ *
+ * Inside a circle, the positive exit ray retains a usable escape direction,
+ * unlike the deliberately saturated legacy restricted-zone reading.
+ */
+void BuildFriendlyMobilePseudoLidar(
+    entt::registry& registry,
+    BaseEntity& ownEntity,
+    sEntityState const& ownState,
+    float const safetyRadius,
+    std::array<float, kPseudoLidarBinCount>& nearestCollisionRanges,
+    std::array<float, kPseudoLidarBinCount>& nearestCollisionDistances) noexcept
+{
+    if (!std::isfinite(safetyRadius) || safetyRadius <= 0.F)
+        return;
+    auto view = registry.view<ppo::model::sEntityState>();
+    for (auto entity : view)
+    {
+        auto const& other = view.get<ppo::model::sEntityState>(entity);
+        if (entity == ownEntity.uniqid()
+            || other.m_destroyed
+            || other.m_type != ppo::model::eEntityType::Mobile
+            || other.m_side != ownState.m_side)
+        {
+            continue;
+        }
+        float const mx = ownState.m_x - other.m_x;
+        float const my = ownState.m_y - other.m_y;
+        float const c = mx * mx + my * my - safetyRadius * safetyRadius;
+        for (std::size_t ray = 0U; ray < nearestCollisionRanges.size(); ++ray)
+        {
+            float const angle = ownState.m_rotation - kPseudoLidarHalfAngleSpan
+                + static_cast<float>(ray) * kPseudoLidarStepAngle;
+            float const b = mx * std::cos(angle) + my * std::sin(angle);
+            float const delta = b * b - c;
+            if (delta < 0.F)
+                continue;
+            float const root = std::sqrt(delta);
+            // Never replace a saturated restricted-zone hit with a
+            // nonlethal teammate reading, even after boundary processing.
+            // Otherwise choose by real metres, not by different per-obstacle
+            // normalization references: a nearer blue must not be hidden by
+            // the normalized distance to a much farther world boundary.
+            if (nearestCollisionRanges[ray] == 0.F)
+            {
+                continue;
+            }
+            float const entry = -b - root;
+            float const exit = -b + root;
+            float const distance = c < 0.F ? exit
+                : entry >= 0.F ? entry : exit;
+            if (!std::isfinite(distance) || distance < 0.F)
+                continue;
+            if (nearestCollisionDistances[ray] == 0.F
+                || distance < nearestCollisionDistances[ray])
+            {
+                nearestCollisionDistances[ray] = distance;
+                nearestCollisionRanges[ray] =
+                    NormalizeRange(distance, safetyRadius);
+            }
+        }
+    }
+}
+
+/**
 * @brief Extends pseudo-lidar hits with map-boundary intersections.
 */
 void
@@ -197,6 +267,38 @@ BuildZoneBoundaryPseudoLidar(ppo::model::sEntityState const& ownState,
             zoneRangeReference,
             nearestCollisionRanges[iang],
             nearestCollisionDistances[iang]);
+    }
+}
+
+void UpdateRestrictedZonePseudoLidars(entt::registry& registry,
+                                      eEntitySide mobileSide,
+                                      float const friendlyMobileSafetyRadius) noexcept
+{
+    if (!registry.ctx().contains<ppo::model::sEnvironmentState>())
+        return;
+    auto const& environment =
+        registry.ctx().get<ppo::model::sEnvironmentState>();
+    auto view = registry.view<ppo::model::sEntityState,
+                              ppo::model::sPseudoLidarState>();
+    for (auto entity : view)
+    {
+        auto const& state = view.get<ppo::model::sEntityState>(entity);
+        if (state.m_type != ppo::model::eEntityType::Mobile
+            || state.m_side != mobileSide
+            || state.m_destroyed)
+            continue;
+        auto& sensor = view.get<ppo::model::sPseudoLidarState>(entity);
+        ppo::model::BaseEntity own{&registry, entity};
+        BuildRestrictedZonePseudoLidar(
+            registry, own, state, sensor.m_nearestCollisionRanges,
+            sensor.m_nearestCollisionDistances);
+        BuildZoneBoundaryPseudoLidar(
+            state, environment, sensor.m_nearestCollisionRanges,
+            sensor.m_nearestCollisionDistances);
+        BuildFriendlyMobilePseudoLidar(
+            registry, own, state, friendlyMobileSafetyRadius,
+            sensor.m_nearestCollisionRanges,
+            sensor.m_nearestCollisionDistances);
     }
 }
 

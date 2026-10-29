@@ -4,7 +4,7 @@
 
 The desktop's example list now belongs to `Examples`, not `Main`. This is a
 small composition boundary, **not** a plugin loader and **not** a renderer
-abstraction. Airspace remains the default CLI example; interactive startup now shows an example selector. The TwoVsTwo example also uses the
+abstraction. Airspace remains the default CLI example; interactive startup now shows an example selector. The BlueDefense example also uses the
 existing renderer, the existing production RLMission agent and the canonical
 shared 2D world under `Examples/Shared/World`.
 
@@ -56,10 +56,12 @@ invalid startup callbacks/configuration. Existing desktop tests still exercise
 the real `PPO.exe` in headless mode and checkpoint parity. The desktop CI must
 compile and run CTest on Windows VS2022 x64 Debug and Release.
 
-The TwoVsTwo example adds no RLtools training, and does not change RLSNA/RLMission networks, weights, observations,
-actions, PPO math, checkpoint filenames/formats, JSON settings, scenario
-semantics, editor UI or render logic. It neither implements nor prepares
-runtime logic for the planned 2v2 or MAPPO examples.
+The `blue-patrol` and `blue-defense` entries both load the same generalized
+RLTools MAPPO agent, with P=1..9 blue mobiles and N=0..10 RLMission red
+mobiles. The selector and command-line dispatcher use the same catalog;
+there is no fixed-two defender controller. Both expose ten reward channels
+through the existing desktop agent snapshot API. The Airspace scenario,
+RLSNA/RLMission agents and renderer behavior remain independent.
 
 ## Deferred, explicitly out of scope
 

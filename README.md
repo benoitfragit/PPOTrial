@@ -1,119 +1,109 @@
 # PPOTrial
 
-PPOTrial est un simulateur C++17 d'apprentissage par renforcement multi-agent.
-La branche courante ajoute une équipe de deux défenseurs bleus entraînée avec
-MAPPO/RLTools face aux attaquants rouges RLMission existants.
+Simulateur C++17 avec environnement ECS, agents de reinforcement learning et
+interface graphique. Les défenseurs bleus sont pilotés par **un unique
+contrôleur MAPPO P/N**. Les attaquants rouges utilisent RLMission en production.
 
-## Démarrage rapide
+## Démarrage
 
-Depuis un terminal Visual Studio configuré pour C++ :
+```powershell
+cmake -S . -B build/desktop -G "Visual Studio 17 2022" -A x64 -DPPO_BUILD_DESKTOP=ON
+cmake --build build/desktop --config Debug
+build/desktop/Main/Debug/PPO.exe --list-examples
+build/desktop/Main/Debug/PPO.exe --example blue-patrol
+build/desktop/Main/Debug/PPO.exe --example blue-defense
+```
 
-~~~powershell
-cmake --build out/build/x64-Debug --config Debug --target PPO
-out/build/x64-Debug/Main/Debug/PPO.exe --example blue-patrol
-out/build/x64-Debug/Main/Debug/PPO.exe --example two-vs-two
-~~~
+Les chemins de l'exécutable dépendent du générateur et du preset sélectionné.
+Sans `--example`, l'application affiche le sélecteur graphique. Avec
+`--check-example`, l'exemple est initialisé sans démarrer la fenêtre.
 
-Le chemin exact de l'exécutable dépend du générateur CMake. Le projet impose
-actuellement x64 ; les builds Debug sont recommandés pour le diagnostic.
+## Exemples
 
-## Scénarios principaux
+| ID CLI / sélection IHM | Description | Configuration |
+|---|---|---|
+| `airspace` | Environnement historique d'agents LibTorch | `Scenarios/Playground.json` |
+| `blue-patrol` | Patrouille MAPPO sans adversaire, P=2/N=0 par défaut | `Scenarios/BluePatrol.json` |
+| `blue-defense` | Défense de l'objectif contre RLMission, P=4/N=4 par défaut | `Scenarios/BlueDefense.json` |
 
-- `airspace` : scénario historique et agents LibTorch ;
-- `blue-patrol` : deux bleus MAPPO apprennent la patrouille sans ennemi ;
-- `two-vs-two` : deux bleus MAPPO protègent l'objectif dans un curriculum à
-  zéro, un ou deux rouges pilotés par RLMission.
+Les deux scénarios bleus ont **exactement le même agent** :
+`GeneralizedPatrolMappoAgent`. Leur section JSON `blueDefense` exige
+`blueTeam.activeCount` de 1 à 9 et `redTeam.activeCount` de 0 à 10.
+Les entités sont créées dynamiquement depuis les templates
+`blue_template` et `red_template` ; un seul contrôleur distribue toutes
+les actions Bleues.
 
-Dans le sélecteur, ces entrées sont libellées explicitement `BLUE PATROL ONLY
-- NO RED` et `TWO VS TWO - MAPPO vs RLMission`. Le second scénario conserve
-toujours les deux entités rouges. Le curriculum active deux rouges dans 77,5 %
-des épisodes, un rouge dans 15 % et aucun dans 7,5 %. Tous sont actifs dès le
-début de l'épisode. Les évaluations restent des cas déterministes 2v1/2v2.
+L'ancien scénario `two-vs-two` et le contrôleur spécifique à deux Bleus
+n'existent plus. La patrouille sans Rouge n'utilise pas d'autre moteur.
 
-À chaque épisode 2v2, les rouges sont tirés sur un arc allant de l'avant aux
-deux côtés de la zone défendue. Ils commencent entre 1,05 et 1,35 fois la
-limite du monde et à au moins 10 km l'un de l'autre. La limite est un repère de
-zone, pas un mur : RLMission continue normalement à piloter les rouges vers
-l'objectif. La zone restreinte est déplacée dans la moitié défendue et n'est
-active que dans 75 % des épisodes.
+## Apprentissage MAPPO
 
-La patrouille est un unique hippodrome analytique continu, sans waypoint. Sa
-longueur, sa largeur, son orientation, son ancrage et le wedge sont tirés une
-fois par épisode. Les deux voitures reçoivent alors aléatoirement des rôles
-bijectifs : exactement un leader et un équipier. Seul le leader suit la piste ;
-l'équipier tient une pose arrière/intérieure relative au leader. Un seul
-contrôleur MAPPO possède l'acteur partagé, le critique centralisé, le buffer
-on-policy et l'optimiseur des deux bleus.
+- Acteur partagé de largeur 128, observation masquée des pistes rouges et
+  amies, pooling et attention à capacité fixe.
+- Critic centralisé individualisé de largeur 256.
+- Un seul hippodrome analytique par épisode : longueur, largeur,
+  orientation, ancrage et wedge échantillonnés dans les plages configurées.
+- Un Bleu leader ; les P−1 autres se positionnent dans leur slot de
+  formation, selon le cap **physique** du leader.
+- Reward du leader fondé sur la progression, l'écart latéral et le cap.
+  Reward des équipiers pénalisant la déviation hors tolérance.
+- Reward partagé de poursuite : progression géométrique des Bleus vers
+  les Rouges, indépendamment du déplacement propre des Rouges ;
+  pondération selon le risque pour l'objectif.
+- Le compromis patrouille/formation/poursuite varie avec la distance et
+  la menace. Aucun ordonnanceur externe n'attribue les cibles.
+- Capteurs : 61 rayons LiDAR ; zones interdites rouges et enveloppes de
+  sécurité autour des Bleus. Les collisions physiques restent terminales.
 
-La configuration livrée conserve une longueur de 50 à 60 km et échantillonne
-une largeur de 16 à 20 km. Ces rayons progressifs facilitent l'exploration
-initiale du leader et la tenue du wedge dans les demi-tours.
+Les **10 canaux de récompense** du snapshot IHM sont : Patrol tracking,
+Formation keeping, Pursuit progress, Control effort, Blue survival,
+Red neutralization, Threat containment, Objective survival,
+Mission outcome et Timeout.
 
-La plateforme bleue dispose d'un léger avantage d'entraînement : vitesse de
-croisière et vitesse maximale de 420 m/s, contre 400 m/s pour les rouges,
-accélération de 600 m/s² et rotation maximale de 0,50 rad/s, contre 0,40.
-Sa zone SNA sans
-échappement vaut 5 km et sa zone d'engagement atteint 10 km, contre 4 et 8 km
-pour les rouges. Son domaine angulaire de destruction vaut 1,10 rad, contre
-1,047198 rad pour les rouges. Les rouges restent inchangés.
+Les paramètres, le rollout et les poids de récompense sont définis dans
+`resources/settings/Training/BluePatrol.json`.
 
-## Configuration bleue
+## Sauvegardes et compatibilité
 
-Les réglages sont dans
-`resources/settings/Training/BluePatrol.json`. Le rollout par défaut est de
-2048 pas d'équipe, soit 4096 transitions pour deux défenseurs. L'IHM permet de
-choisir 512, 1024, 2048 ou 4096 avant le début de la collecte. La valeur 128 du
-backend est la taille d'un mini-batch PPO et non la durée de l'entraînement.
+Les modèles généralisés se trouvent sous `resources/model/BluePatrol` :
+`latest/blue_patrol_generalized_v8.txt` pour l'acteur et
+`latest/blue_patrol_generalized_training_v5.txt` pour l'état complet
+d'apprentissage. La promotion après évaluation utilise `prod/`.
 
-Le panneau `Blue MAPPO (RLTools)` expose les récompenses de patrouille, sécurité
-de formation, effort de contrôle, protection de zone, interception, résultat
-de mission et timeout.
+Les lecteurs des formats anciens V4/V7 sont conservés **pour migration
+uniquement**. Ils ne réactivent pas d'ancien agent ou entraînement 2v2.
+Les règles RLMission et les modèles des Rouges restent inchangés.
 
-Une évaluation déterministe intégrée est lancée à chaque checkpoint : elle
-utilise les vrais rouges RLMission dans le 2v2, publie ses mesures dans l'IHM et
-ne promeut dans `resources/model/BluePatrol/prod` que le meilleur acteur. Les
-acteurs non encore validés restent dans `BluePatrol/latest`. Le même dossier
-contient `blue_patrol_training_v4.txt`, qui restaure l'acteur, le critique,
-les deux états Adam, le compteur de mises à jour et le RNG. Le buffer de rollout
-n'est volontairement pas sauvegardé : une reprise commence un rollout vide au
-même niveau d'optimisation.
+## IHM
 
-La collision entre les deux bleus est terminale à 1 km, avec une pénalité de
-sécurité progressive à partir de 2 km. Le leader reçoit seul le suivi de
-l'unique hippodrome ; l'équipier reçoit seul le wedge de 6 à 9 km, mesuré dans
-le repère du cap physique du leader. Les deux bleus voient toutes les pistes
-rouges actives et apprennent à les couvrir par une récompense défensive commune
-et le critique centralisé. Il n'existe aucun coordinateur ni cible imposée.
-Le pooling et l'attention sont inchangés. Deux menaces simultanées peuvent
-relâcher le wedge ; la séparation de sécurité reste toujours active.
-
-Le contrat bleu v7 démarre un nouvel apprentissage : les anciens poids bleus
-conditionnés par les affectations v6 ne sont pas repris. Les nouveaux fichiers
-sont `blue_patrol_mappo_v7.txt` et `blue_patrol_training_v4.txt`.
-Les anciens fichiers restent sur disque mais sont ignorés. Aucun modèle rouge
-n'est concerné.
-
-Dans le scénario TwoVsTwo, la barre de la vue tactique propose `Show patrol
-track`. Cette option dessine l'unique piste du leader et son sens dans la vue 3D et la
-minimap ; elle n'existe pas dans Airspace et n'influence jamais la simulation.
-Le champ de scénario `blueController` accepte `mappo` ou `reference`, ce qui
-permet le même affichage avec ou sans PPO.
-
-## Documentation
-
-- [Architecture de la patrouille MAPPO](docs/blue-ppo-patrol.md)
-- [Architecture et feuille de route de la patrouille](docs/blue-patrol-architecture-roadmap.md)
-- [Architecture v7 : rôles leader/équipier et défense apprise](docs/blue-patrol-v6-architecture.md)
-- [Scénario TwoVsTwo](docs/two-vs-two-example.md)
-- [Guide de configuration](docs/configuration-guide.md)
+Le sélecteur lit les exemples depuis `Examples/src/examplecatalog.cpp`,
+sans cardinalité fixe. Après Play, les voitures sont pilotées par l'ECS
+normal. Le panneau d'entraînement exploite le snapshot du contrôleur
+MAPPO partagé : progression, diagnostics, évaluations et dix rewards.
+L'overlay de trajectoire peut afficher l'hippodrome.
 
 ## Validation
 
-~~~powershell
-ctest --test-dir out/build/x64-Debug -C Debug -R "TwoVsTwo|BluePatrol" --output-on-failure
-out/build/x64-Debug/Main/Debug/PPO.exe --example blue-patrol --check-example
-out/build/x64-Debug/Main/Debug/PPO.exe --example two-vs-two --check-example
-~~~
+Pour exécuter les tests de base sans interface :
 
-Les modèles rouges `resources/model/RLMission/**/*.pt` et leur contrat réseau
-restent indépendants du backend bleu RLTools.
+```powershell
+cmake -S . -B build/core -DPPO_BUILD_DESKTOP=OFF -DPPO_BUILD_CORE_TESTS=ON
+cmake --build build/core --config Release
+ctest --test-dir build/core -C Release --output-on-failure
+```
+
+Pour la régression Desktop, les workflows CI Windows construisent
+Debug et Release, puis lancent CTest : démarrage de l'exemple,
+instanciation P/N, mouvement après Play, rôle leader, collisions,
+LiDAR, checkpoints et format de snapshot.
+
+Une CI verte vérifie la compilation et les contrats testés ; la
+**convergence** sur plusieurs seeds et compositions P/N nécessite
+une campagne de validation distincte.
+
+## Documentation
+
+- [Guide des scénarios BlueDefense / BluePatrol](docs/blue-defense-example.md)
+- [Architecture MAPPO à effectifs variables](docs/mappo-variable-teams.md)
+- [Configuration JSON et paramètres](docs/configuration-guide.md)
+- [Instructions pour les contributions](AGENTS.md)

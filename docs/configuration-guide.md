@@ -10,13 +10,13 @@ resources/settings/
 ├── Environment.json              monde de simulation principal
 ├── Renderer.json                 affichage et caméra
 ├── Training/
-│   ├── BluePatrol.json           MAPPO RLTools des deux défenseurs
+│   ├── BluePatrol.json           MAPPO RLTools P/N partagé
 │   ├── RLMission.json            PPO, récompenses et version du modèle
 │   └── RLSNA.json
 ├── Scenarios/
 │   ├── BluePatrol.json           curriculum de patrouille sans rouge
 │   ├── Playground.json           composition du monde principal
-│   ├── TwoVsTwo.json             défense MAPPO face à RLMission
+│   ├── BlueDefense.json           défense MAPPO P/N (P=4, N=4 par défaut)
 │   └── Evaluation/
 │       ├── RLMission.json        composition et limites des tests
 │       └── RLSNA.json
@@ -185,76 +185,133 @@ les profils LibTorch historiques :
 }
 ~~~
 
-Ici, `rolloutSteps` compte les pas ECS de l'équipe. Chaque pas fournit deux
-transitions au buffer, une par défenseur. Les valeurs applicatives proposées
-sont 512, 1024, 2048 et 4096 ; 128 reste la taille interne d'un mini-batch PPO.
-Les modifications faites dans l'IHM s'appliquent à la session en cours. Pour
-un nouveau démarrage reproductible, modifier le JSON lorsque l'application est
-arrêtée.
+Ici, `rolloutSteps` compte les pas ECS synchronisés de l'équipe :
+chaque pas produit P transitions, une par Bleu initialement présent.
+Les valeurs usuelles sont 512, 1024, 2048 et 4096.
+Les paramètres sont chargés depuis `Training/BluePatrol.json`.
 
-Les coefficients s'appliquent à des canaux conditionnés par la mission. Sans
-menace crédible, `Patrol tracking` évalue uniquement le leader et `Formation
-safety` entraîne uniquement l'équipier sur le wedge. Une menace visible
-mais lointaine ou en éloignement ne suffit pas. Avec une menace crédible,
-l'affectation stable choisit un intercepteur et conserve l'autre en réserve ;
-avec deux menaces crédibles, les deux bleus reçoivent des cibles distinctes.
-Les contributions patrouille/défense suivent le poids continu `q`, y compris
-pendant la récupération. `Formation safety` combine le wedge pondéré et une
-marge anticollision toujours active. `Timeout` vaut -15 si une menace active
-ou encore planifiée reste irrésolue à l'horizon ; une patrouille sans menace
-n'est pas punie pour avoir atteint sa durée normale.
+Le MAPPO actuel utilise des canaux séparés pour la progression sur
+l'hippodrome (leader), le maintien du wedge (équipiers), la poursuite des
+Rouges, les pertes Bleues/Rouges, la protection de l'objectif, le coût de
+commande et l'issue de mission. Les sept poids nommés du JSON sont
+convertis explicitement en dix canaux de reward dans l'exécution.
+Une formation correctement tenue ne génère pas un bonus positif
+permanent : l'écart hors tolérance est pénalisé. Les 61 rayons LiDAR
+restent disponibles, y compris pour la prévention Bleu/Bleu.
 
-`checkpointEvery` lance réellement l'évaluateur intégré après le nombre de
-mises à jour indiqué. L'acteur agit alors de façon déterministe pendant
-`evaluation.episodes` cas de `evaluation.maxSteps` pas au maximum. En 2v2, ces
-cas conservent les rouges RLMission de production et alternent 2v2/2v1, côtés
-et phases. Le score et sa progression sont visibles dans l'IHM ; seul un
-candidat meilleur remplace le checkpoint de production.
+L'acteur ne reçoit aucune attribution externe de cible rouge.
+Le signal de poursuite tient les positions des Rouges fixes lors du
+calcul du progrès causé par le mouvement Bleu ; les menaces
+influencent continûment la priorité patrouille/formation/défense.
+Cela n'établit pas, à lui seul, la convergence de la politique.
 
-Le dossier `resources/model/BluePatrol/latest/` reçoit deux fichiers après la
-première mise à jour : `blue_patrol_mappo_v7.txt` destiné à l'inférence et
-`blue_patrol_training_v4.txt` destiné à la reprise. Ce second fichier conserve
-le critique, les états Adam, le compteur de mises à jour et le RNG. Les données
-du rollout ne sont pas conservées ; le buffer repart vide au redémarrage. Le
-dossier `prod/` reste volontairement limité au meilleur acteur évalué et à son
-score.
+`checkpointEvery` demande une campagne d'évaluation déterministe.
+Les checkpoints d'acteur `blue_patrol_generalized_v8.txt` et
+d'entraînement `blue_patrol_generalized_training_v5.txt` (format
+interne V6) sont enregistrés sous `resources/model/BluePatrol/latest/`.
+Les anciens fichiers V4/V7 sont uniquement des sources de migration
+de poids compatibles, et ne démarrent pas un autre entraîneur.
 
-Le contrat v7 doit être entraîné depuis des poids neufs : le coordinateur et
-l'index de cible imposé ont été retirés. Le dernier champ global local est
-réservé à zéro ; la pression défensive est commune aux deux rôles. Les noms et
-signatures v7/v4 empêchent de reprendre les anciens poids bleus. Les paramètres
-de défense décrivent uniquement le risque : ils ne masquent aucune piste rouge
-et ne distribuent aucune cible. Les anciennes temporisations d'affectation
-n'existent plus.
+Les deux scénarios lancés depuis l'IHM utilisent exactement
+`GeneralizedPatrolMappoAgent` : `blue-patrol` (P/N=2/0 par défaut)
+et `blue-defense` (4/4 par défaut). La progression, les commandes
+du panneau d'agent et les dix rewards sont publiés par l'API
+habituelle de snapshot ECS. Les tests de simulation et la CI Desktop
+doivent être validés avant fusion.
 
-### Géométrie aléatoire du 2v2
+### Géométrie aléatoire P/N
 
-`Scenarios/TwoVsTwo.json` règle les conditions initiales sans modifier les
+`Scenarios/BlueDefense.json` règle les conditions initiales sans modifier les
 agents RLMission. `redSpawn.minimumWorldScale` et `maximumWorldScale` placent
 les attaquants au-delà de la limite rectangulaire ; cette limite reste un
 repère et ne bloque pas leur mouvement. Les angles, exprimés en degrés, sont
 mesurés autour de la direction opposée à l'objectif : 0° est frontal et ±90°
-est latéral. `minimumSeparation` est une distance en mètres garantie entre les
-deux rouges.
+est latéral. `minimumSeparation` est une distance en mètres garantie entre
+toutes les paires de rouges.
 
-`threatCurriculum` ne modifie que les épisodes d'entraînement 2v2. Les champs
-`noThreatProbability` et `singleThreatProbability` définissent respectivement
-les cas à zéro et une menace ; la probabilité restante crée deux menaces.
-`delayedFirstThreatProbability` applique la plage `minimumFirstDelaySteps` à
-`maximumFirstDelaySteps` à la première activation. Pour deux menaces,
-`delayedSecondThreatProbability` ajoute la seconde plage après la première.
-Une entité non encore activée reste détruite et sa piste est masquée dans
-l'attention. Les campagnes d'évaluation désactivent le curriculum stochastique
-et conservent les cas immédiats 2v1/2v2.
+Le contrat d'effectif `blueTeam`/`redTeam` est obligatoire. Le
+`threatCurriculum` historique et les probabilités spécialisées
+sur exactement deux attaquants sont rejetés. Les activations
+retardées sont désormais définies par les champs génériques
+`redTeam.delayedActivationProbability`,
+`minimumActivationDelaySteps` et `maximumActivationDelaySteps`.
+Une piste non encore activée demeure masquée jusqu'à son
+activation effective.
 
-`restrictedZoneSpawn.enabledProbability` contrôle la présence de la zone. Ses
-quatre fractions définissent une boîte de tirage relative aux demi-dimensions
-du monde ; les fractions est sont orientées vers le côté défendu. Avec les
-valeurs distribuées, la zone est active dans 75 % des épisodes. Une même
-graine reproduit les positions et le calendrier d'entraînement ; les campagnes
-d'évaluation utilisent leur propre calendrier déterministe.
+Le bloc historique `restrictedZoneSpawn` continue à positionner
+`blue_restricted_zone` avec les mêmes fractions et le même ordre de tirage RNG.
+Cette zone reste consommée par RLMission et n'est pas incluse dans la nouvelle
+collection.
+
+`restrictedZones` est une collection dédiée, indépendante de `entities`. Son
+booléen `enabled` désactive toutes les zones. Chaque élément fournit un `id`
+unique, `type="RestrictedZone"`, un `platform`, `side="Hostile"`, `enabled`,
+une `enabledProbability` dans `[0,1]` et exactement un mode de position :
+`fixedPosition` ou `randomPosition`. Toutes les coordonnées sont en mètres.
+`oppositeObjective=true` interprète la coordonnée est comme une magnitude et
+la reflète automatiquement du côté opposé à l'objectif à chaque reset.
+Le mode aléatoire exige deux intervalles nord/est ordonnés et finis. Un champ
+inconnu dans ce contrat, un doublon, un mode ambigu ou une valeur invalide fait
+échouer explicitement le chargement. Une même graine reproduit positions et
+activations.
+
+Le profil de plateforme reste la source du rayon létal
+`SNA.MaxNoEscapeZoneRange`. Le rayon LiDAR vaut 110 % de ce rayon. Dans
+BlueDefense, seul le capteur ECS des `Mobile/Friend` est rafraîchi par ces règles;
+le contrôleur, l'observation 152 et les checkpoints RLMission rouges ne sont
+pas modifiés. La règle SNA probabiliste de la zone bleue historique reste elle
+aussi active contre les rouges ; seule l'arme des nouvelles zones hostiles est
+remplacée par la pénétration déterministe exacte pour les bleus.
+
+### Équipes P/N — contrôleur MAPPO unique
+
+Les deux scénarios `Scenarios/BluePatrol.json` et
+`Scenarios/BlueDefense.json` utilisent exactement le même moteur
+`GeneralizedPatrolMappoAgent`. Le sélecteur IHM expose
+`blue-patrol` (P=2/N=0 par défaut) et `blue-defense` (P=4/N=4 par défaut).
+Les effectifs sont déclarés sous `blueDefense` :
+
+~~~json
+{
+  "blueTeam": {"activeCount": 5},
+  "redTeam": {
+    "activeCount": 7,
+    "maximumPlacementAttempts": 512,
+    "delayedActivationProbability": 0.25,
+    "minimumActivationDelaySteps": 256,
+    "maximumActivationDelaySteps": 768
+  }
+}
+~~~
+
+Les blocs `blueTeam` et `redTeam` sont **obligatoires**.
+P est dans [1,9], N dans [0,10], les tentatives de placement dans
+[1,4096] et les bornes temporelles sont strictement positives et ordonnées.
+Les anciennes clés `red2InitiallyDestroyedProbability` et
+`threatCurriculum` sont refusées.
+
+Le scénario contient un template `blue_template` sans agent et, en
+présence de Rouges, `red_template` avec le profil
+`RLMission/production`. Les entités physiques `blue_i` et `red_i`
+sont instanciées pour les effectifs choisis. Aucun pilote PPO à deux
+Bleus n'est instancié ; les Rouges conservent leur RLMission d'origine.
+
+L'acteur commun lit les pistes masquées de 0 à 10 Rouges, les équipiers
+et les 61 rayons LiDAR ; les P actions sont exécutées de manière
+synchrone et les P transitions sont agrégées par le critic individualisé.
+Le snapshot de l'IHM expose **10 canaux de récompense**.
+
+Les checkpoints v8 de l'acteur et V6 d'entraînement généralisés restent
+dans `resources/model/BluePatrol/latest`. Les fichiers historiques V4/V7
+ne servent plus qu'aux migrations compatibles ; ils ne définissent pas
+un second chemin d'exécution.
+
+Voir [BlueDefense — MAPPO P/N](blue-defense-example.md) pour le
+démarrage, les tests IHM et les commandes de compilation.
 
 ## Scénarios et cas d'évaluation
+
+
 
 Les scènes de **Scenarios/Evaluation/RLMission.json** et **RLSNA.json** utilisent les mêmes déclarations d'entités que Playground, plus une section d'évaluation :
 
@@ -318,9 +375,10 @@ la référence de patrouille ; `MaxSpeed`, `MaxAcceleration` et
 `MaxRotAcceleration` restent les limites physiques. La section `SNA` règle la
 zone sans échappement et l'angle d'engagement des bleus indépendamment de la
 plateforme rouge `attacker_car`. La configuration d'entraînement actuelle fixe
-`CruiseSpeed` et `MaxSpeed` à 420 m/s. `MaxRotAcceleration` vaut 0,50 rad/s
-et `SNA.MaxShootAngle` 1,10 rad. Ces valeurs restent légèrement supérieures
-aux 400 m/s, 0,40 rad/s et 1,047198 rad d'`attacker_car`.
+`CruiseSpeed` et `MaxSpeed` à 700 m/s. `MaxRotAcceleration` vaut
+0,700000596 rad/s et `SNA.MaxShootAngle` 3,147198 rad. Ces limites reprennent
+`trainingaircraft` et restent propres aux bleus ; `attacker_car` conserve
+400 m/s, 0,40 rad/s et 1,047198 rad.
 
 **Evaluation/InitialStates.json** contient des collections de points initiaux nommés, au format **presets.blueeval[]** et **presets.redeval[]**, avec les coordonnées et commandes dans des champs explicites **north**, **east**, **heading**, **speed**, **turnAcceleration**, **acceleration**. L'initialiseur C++ peut les utiliser comme auparavant, sans liste opaque de six nombres ni ancien chemin. Le champ **evaluationSettings** conserve les paramètres numériques associés à ces jeux d'initialisation.
 
