@@ -150,6 +150,7 @@ GeneralizedPatrolMappoAgent::GeneralizedPatrolMappoAgent(
         attackerIds_[index] = attackers[index]->uniqid();
     }
 
+    rewardWeights_ = MapGeneralizedRewardWeights(training_.rewardWeights);
     learner_ = std::make_unique<GeneralizedPatrolLearner>(
         counts_, training_.seed, training_.rolloutSteps);
     if (std::filesystem::exists(trainingCheckpoint_))
@@ -557,8 +558,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         }
 
         GeneralizedRewardSettings rewardSettings{};
-        rewardSettings.weights = MapGeneralizedRewardWeights(
-            training_.rewardWeights);
+        rewardSettings.weights = rewardWeights_;
         rewardSettings.clampMagnitude = training_.rewardClamp;
         GeneralizedCooperativeRewards rewardBreakdown{};
         if (AggregateGeneralizedCooperativeRewards(
@@ -811,6 +811,16 @@ void GeneralizedPatrolMappoAgent::ProcessCommand(
     {
         training_.rewardClamp = command.m_rewardClamp;
     }
+    else if (command.m_type
+        == ppo::model::sAgentRealTimeCommand::eTypeCommand::RewardScaling
+        && command.m_rewardScalingType < rewardWeights_.size()
+        && std::isfinite(command.m_rewardScaling)
+        && command.m_rewardScaling >= 0.F
+        && command.m_rewardScaling <= 10.F)
+    {
+        rewardWeights_[command.m_rewardScalingType] =
+            command.m_rewardScaling;
+    }
 }
 
 ppo::model::sAgentStateSnaphot
@@ -859,10 +869,8 @@ GeneralizedPatrolMappoAgent::GetSnapshot() const noexcept
         evaluation_.ElapsedSeconds();
     snapshot.m_common.m_evaluationprogress = evaluation_.Progress();
     snapshot.m_common.m_evaluationinprogress = evaluation_.InProgress();
-    GeneralizedRewardValues const generalizedWeights =
-        MapGeneralizedRewardWeights(training_.rewardWeights);
     snapshot.m_scalings.assign(
-        generalizedWeights.begin(), generalizedWeights.end());
+        rewardWeights_.begin(), rewardWeights_.end());
     snapshot.m_rewards.assign(kGeneralizedRewardChannelCount, 0.F);
     snapshot.m_rewardnames = {
         "Patrol tracking", "Formation keeping", "Pursuit progress",
