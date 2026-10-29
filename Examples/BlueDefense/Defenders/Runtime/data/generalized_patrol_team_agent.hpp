@@ -2,6 +2,7 @@
 
 #include "generalized_evaluation_campaign.hpp"
 #include "generalized_runtime_state.hpp"
+#include "generalized_cooperative_reward.hpp"
 #include "patrol_training_settings.hpp"
 #include "baseentity.hpp"
 #include "iagent.hpp"
@@ -98,6 +99,8 @@ private:
     ActiveTeamCounts counts_{};
     Parameters parameters_{};
     PatrolTrainingSettings training_{};
+    /** @brief Live independent generalized weights for the ten UI channels. */
+    GeneralizedRewardValues rewardWeights_{};
     std::filesystem::path actorCheckpoint_{};
     std::filesystem::path trainingCheckpoint_{};
     std::filesystem::path productionCheckpoint_{};
