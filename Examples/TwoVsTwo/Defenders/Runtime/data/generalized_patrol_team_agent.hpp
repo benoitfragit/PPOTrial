@@ -76,7 +76,7 @@ private:
     Parameters ReadParameters() const;
     GeneralizedRuntimeState ReadState(Parameters const& parameters) const;
     BlueTeamRoles const& Roles() const;
-    bool BuildObservations(
+    void BuildObservations(
         Parameters const& parameters, GeneralizedRuntimeState const& state,
         std::array<GeneralizedObservation,
                    TeamCapacity::MaximumBlueMobiles>& observations) const;

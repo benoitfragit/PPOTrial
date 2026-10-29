@@ -12,6 +12,7 @@
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace ppo::examples::twovstwo::defenders {
@@ -326,20 +327,50 @@ BlueTeamRoles const& GeneralizedPatrolMappoAgent::Roles() const
     return *context.blueTeamRoles;
 }
 
-bool GeneralizedPatrolMappoAgent::BuildObservations(
+void GeneralizedPatrolMappoAgent::BuildObservations(
     Parameters const& parameters, GeneralizedRuntimeState const& state,
     std::array<GeneralizedObservation,
                TeamCapacity::MaximumBlueMobiles>& observations) const
 {
+    if (!Valid(parameters))
+        throw std::runtime_error("Invalid generalized blue parameters");
+    if (!Valid(state))
+        throw std::runtime_error("Invalid generalized blue runtime state");
+
+    BlueTeamRoles const& roles = Roles();
+    if (!roles.IsValid())
+        throw std::runtime_error("Invalid generalized blue role assignment");
+
     // The generalized runtime is deliberately stricter than the pure-domain
     // helper: every controlled ECS mobile must consume the sensor populated by
     // world rules so hostile restricted zones cannot disappear behind a
     // boundary-only fallback.
     for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
+    {
         if (!state.lidarAvailable[index])
-            return false;
-    return BuildGeneralizedObservations(
-        parameters, state, Roles(), observations);
+        {
+            throw std::runtime_error(
+                "Missing or non-finite pseudo-LiDAR for blue_"
+                + std::to_string(index + 1U));
+        }
+    }
+
+    if (BuildGeneralizedObservations(
+            parameters, state, roles, observations))
+    {
+        return;
+    }
+
+    for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
+    {
+        if (!Valid(observations[index]))
+        {
+            throw std::runtime_error(
+                "Invalid encoded observation for blue_"
+                + std::to_string(index + 1U));
+        }
+    }
+    throw std::runtime_error("Invalid generalized blue observation");
 }
 
 GeneralizedEvaluationSample
@@ -394,8 +425,7 @@ void GeneralizedPatrolMappoAgent::ChooseAction()
         beforeStep_ = ReadState(parameters);
         std::array<GeneralizedObservation,
                    TeamCapacity::MaximumBlueMobiles> observations{};
-        if (!BuildObservations(parameters, beforeStep_, observations))
-            throw std::runtime_error("Invalid generalized blue observation");
+        BuildObservations(parameters, beforeStep_, observations);
 
         beforeAvailability_.fill(false);
         for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
@@ -433,8 +463,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         GeneralizedRuntimeState const after = ReadState(parameters);
         std::array<GeneralizedObservation,
                    TeamCapacity::MaximumBlueMobiles> observations{};
-        if (!BuildObservations(parameters, after, observations))
-            throw std::runtime_error("Invalid generalized feedback observation");
+        BuildObservations(parameters, after, observations);
 
         std::array<bool, TeamCapacity::MaximumBlueMobiles> availability{};
         for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
@@ -799,7 +828,7 @@ GeneralizedPatrolMappoAgent::GetSnapshot() const noexcept
     snapshot.m_id = id_;
     snapshot.m_name = "Blue generalized shared MAPPO";
     snapshot.m_common.m_step = static_cast<long long>(episodeStep_);
-    snapshot.m_common.m_maxStep = static_cast<long long>(parameters_.episodeSteps);
+    snapshot.m_common.m_maxStep = static_cast<long long>(training_.rolloutSteps);
     snapshot.m_common.m_reward = currentReward_;
     snapshot.m_common.m_rewardClamp = training_.rewardClamp;
     snapshot.m_common.m_checkpoint = static_cast<unsigned int>(
