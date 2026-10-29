@@ -2,18 +2,6 @@
   "formatVersion": 2,
   "agentProfiles": "../AgentProfiles.json",
   "entities": {
-    "blue_guard_1": {
-      "type": "Mobile",
-      "platform": "defender_car",
-      "side": "Friend",
-      "agents": []
-    },
-    "blue_guard_2": {
-      "type": "Mobile",
-      "platform": "defender_car",
-      "side": "Friend",
-      "agents": []
-    },
     "blue_objective": {
       "type": "Objective",
       "platform": "",
@@ -23,6 +11,12 @@
     "blue_restricted_zone": {
       "type": "RestrictedZone",
       "platform": "restrictedzone",
+      "side": "Friend",
+      "agents": []
+    },
+    "blue_template": {
+      "type": "Mobile",
+      "platform": "defender_car",
       "side": "Friend",
       "agents": []
     }
