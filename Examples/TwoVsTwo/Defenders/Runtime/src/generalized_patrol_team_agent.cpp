@@ -2,6 +2,7 @@
 
 #include "generalized_cooperative_reward.hpp"
 #include "generalized_patrol_learner.hpp"
+#include "generalized_reward_shaping.hpp"
 #include "initializer.hpp"
 #include "components.hpp"
 #include "sharedworldcomponents.hpp"
@@ -58,60 +59,29 @@ GeneralizedCombatStateMask CombatMask(
     return result;
 }
 
-float FormationQuality(Parameters const& parameters,
-                       GeneralizedRuntimeState const& state,
-                       BlueTeamRoles const& roles,
-                       std::size_t const physicalIndex) noexcept
-{
-    auto const assignment = roles.Assignment(physicalIndex);
-    if (!assignment || assignment->role != BlueRole::Teammate)
-        return 0.F;
-    Mobile const& leader = state.blues[roles.LeaderPhysicalIndex()];
-    Mobile const& teammate = state.blues[physicalIndex];
-    if (!leader.available || !teammate.available)
-        return -1.F;
-    FormationOffset const slot = EvaluateFormationOffset(
-        assignment->formationSlot, parameters.geometry.separationDistance,
-        parameters.geometry.separationAngle);
-    float const cosine = std::cos(leader.heading);
-    float const sine = std::sin(leader.heading);
-    float const inward = static_cast<float>(parameters.geometry.direction)
-        * slot.inwardMeters;
-    float const expectedNorth = leader.north
-        + slot.longitudinalMeters * cosine - inward * sine;
-    float const expectedEast = leader.east
-        + slot.longitudinalMeters * sine + inward * cosine;
-    float const error = std::hypot(
-        teammate.north - expectedNorth, teammate.east - expectedEast);
-    return Clamp(1.F - error
-        / std::max(parameters.geometry.separationDistance, 1.F), -1.F, 1.F);
-}
-
 /**
- * @brief Maps the historical named reward settings to generalized semantics.
- * @param legacy Weights loaded from Training/BluePatrol.json in the legacy
- * channel order.
- * @return Weights in GeneralizedRewardChannel order.
- *
- * The generalized controller deliberately does not reinterpret array indices:
- * patrol responsibility remains role responsibility, formation safety becomes
- * team survival, zone protection becomes objective survival, and interception
- * becomes red neutralization. This keeps the existing configuration useful
- * without silently assigning a formation coefficient to control effort.
+ * @brief Maps the unchanged legacy JSON weights into distinct generalized
+ * responsibilities. No historical 2v2 reward or checkpoint layout is changed.
  */
 GeneralizedRewardValues MapGeneralizedRewardWeights(
     RewardValues const& legacy) noexcept
 {
     GeneralizedRewardValues result{};
     result[static_cast<std::size_t>(
-        GeneralizedRewardChannel::RoleResponsibility)] = legacy[
+        GeneralizedRewardChannel::PatrolTracking)] = legacy[
             static_cast<std::size_t>(RewardChannel::PatrolTracking)];
+    result[static_cast<std::size_t>(
+        GeneralizedRewardChannel::FormationKeeping)] = legacy[
+            static_cast<std::size_t>(RewardChannel::FormationSafety)];
+    result[static_cast<std::size_t>(
+        GeneralizedRewardChannel::PursuitProgress)] = legacy[
+            static_cast<std::size_t>(RewardChannel::Interception)];
     result[static_cast<std::size_t>(
         GeneralizedRewardChannel::ControlEffort)] = legacy[
             static_cast<std::size_t>(RewardChannel::ControlEffort)];
     result[static_cast<std::size_t>(
         GeneralizedRewardChannel::BlueSurvival)] = legacy[
-            static_cast<std::size_t>(RewardChannel::FormationSafety)];
+            static_cast<std::size_t>(RewardChannel::MissionOutcome)];
     result[static_cast<std::size_t>(
         GeneralizedRewardChannel::RedNeutralization)] = legacy[
             static_cast<std::size_t>(RewardChannel::Interception)];
@@ -430,7 +400,7 @@ GeneralizedPatrolMappoAgent::BuildEvaluationSample(
         if (assignment.role != BlueRole::Teammate)
             continue;
         result.formationSlotQuality[assignment.formationSlot] = Clamp(
-            FormationQuality(parameters, state, roles, physicalIndex),
+            GeneralizedFormationQuality(parameters, state, roles, physicalIndex),
             0.F, 1.F);
     }
     return result;
@@ -560,31 +530,26 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             ObjectiveThreatLevel(beforeStep_, parameters)
                 - ObjectiveThreatLevel(after, parameters), -1.F, 1.F);
         BlueTeamRoles const& roles = Roles();
-        std::size_t const leaderIndex = roles.LeaderPhysicalIndex();
-        PatrolProjection const beforeProjection = ProjectOnPatrolCurve(
-            parameters.geometry, beforeStep_.blues[leaderIndex].north,
-            beforeStep_.blues[leaderIndex].east);
-        PatrolProjection const afterProjection = ProjectOnPatrolCurve(
-            parameters.geometry, after.blues[leaderIndex].north,
-            after.blues[leaderIndex].east);
-        float progress = afterProjection.pose.arclength
-            - beforeProjection.pose.arclength;
-        float const circuit = CircuitLength(parameters);
-        if (progress > 0.5F * circuit)
-            progress -= circuit;
-        else if (progress < -0.5F * circuit)
-            progress += circuit;
-        transition.responsibilities.leaderPatrol = Clamp(
-            progress / std::max(parameters.cruiseSpeed * parameters.dt, 1.F),
-            -1.F, 1.F);
+        float const cooperation = GeneralizedCooperationWeight(
+            parameters, beforeStep_);
+        transition.responsibilities.leaderPatrol = cooperation
+            * GeneralizedLeaderTrackingReward(
+                parameters, beforeStep_, after, roles);
+        transition.responsibilities.pursuitProgress =
+            GeneralizedPursuitProgress(parameters, beforeStep_, after);
         for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
         {
             BlueRoleAssignment const assignment = *roles.Assignment(index);
             if (assignment.role == BlueRole::Teammate)
             {
+                float const quality = GeneralizedFormationQuality(
+                    parameters, after, roles, index);
+                float const relativeError = std::max(
+                    0.F, 1.F - quality - parameters.formationTolerance);
                 transition.responsibilities.formationSlots[
-                    assignment.formationSlot] = FormationQuality(
-                        parameters, after, roles, index);
+                    assignment.formationSlot] = -cooperation * Clamp(
+                        parameters.formationErrorWeight * relativeError,
+                        0.F, 1.F);
             }
             transition.responsibilities.controlEffort[index] = 0.5F
                 * (std::abs(Clamp(lastActions_[index][0], -1.F, 1.F))
@@ -900,8 +865,9 @@ GeneralizedPatrolMappoAgent::GetSnapshot() const noexcept
         generalizedWeights.begin(), generalizedWeights.end());
     snapshot.m_rewards.assign(kGeneralizedRewardChannelCount, 0.F);
     snapshot.m_rewardnames = {
-        "Role responsibility", "Control effort", "Blue survival",
-        "Red neutralization", "Threat containment", "Objective survival",
+        "Patrol tracking", "Formation keeping", "Pursuit progress",
+        "Control effort", "Blue survival", "Red neutralization",
+        "Threat containment", "Objective survival",
         "Mission outcome", "Timeout"};
     return snapshot;
 }

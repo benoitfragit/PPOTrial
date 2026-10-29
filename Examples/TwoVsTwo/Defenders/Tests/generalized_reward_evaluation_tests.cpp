@@ -95,7 +95,7 @@ bool TestOneVersusZero()
     if (!rewards.active[0]
         || rewards.active[1]
         || !Near(Channel(rewards.perBlue[0],
-            GeneralizedRewardChannel::RoleResponsibility), 0.8F)
+            GeneralizedRewardChannel::PatrolTracking), 0.8F)
         || !Near(Channel(rewards.perBlue[0],
             GeneralizedRewardChannel::ControlEffort), -0.2F)
         || !Near(Channel(rewards.team,
@@ -152,11 +152,13 @@ bool TestTwoVersusTwo()
         return false;
     }
     if (!Near(Channel(rewards.perBlue[0],
-            GeneralizedRewardChannel::RoleResponsibility), -0.25F)
+            GeneralizedRewardChannel::FormationKeeping), -0.25F)
         || !Near(Channel(rewards.perBlue[1],
-            GeneralizedRewardChannel::RoleResponsibility), 0.75F)
+            GeneralizedRewardChannel::PatrolTracking), 0.75F)
         || !Near(Channel(rewards.team,
-            GeneralizedRewardChannel::RoleResponsibility), 0.25F)
+            GeneralizedRewardChannel::PatrolTracking), 0.375F)
+        || !Near(Channel(rewards.team,
+            GeneralizedRewardChannel::FormationKeeping), -0.125F)
         || !Near(Channel(rewards.team,
             GeneralizedRewardChannel::BlueSurvival), -0.5F)
         || !Near(Channel(rewards.team,

@@ -179,9 +179,6 @@ inline bool BuildGeneralizedObservations(
     Mobile const& leader = state.blues[leaderIndex];
     PatrolProjection const projection = ProjectOnPatrolCurve(
         parameters.geometry, leader.north, leader.east);
-    Reference const leaderReference{
-        projection.pose.north, projection.pose.east,
-        projection.pose.heading, projection.pose.phase, 0.F};
     float const pressure = generalized_runtime_detail::ThreatPressure(
         state, parameters);
 
@@ -302,8 +299,8 @@ inline bool BuildGeneralizedObservations(
                 assignment.formationSlot,
                 parameters.geometry.separationDistance,
                 parameters.geometry.separationAngle);
-            float const cosHeading = std::cos(leaderReference.heading);
-            float const sinHeading = std::sin(leaderReference.heading);
+            float const cosHeading = std::cos(leader.heading);
+            float const sinHeading = std::sin(leader.heading);
             float const inward = static_cast<float>(
                 parameters.geometry.direction) * slot.inwardMeters;
             float const expectedNorth = leader.north
