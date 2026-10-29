@@ -40,6 +40,40 @@ float Channel(GeneralizedRewardBreakdown const& breakdown,
     return breakdown.values[static_cast<std::size_t>(channel)];
 }
 
+
+bool TestObjectiveThreatPriority()
+{
+    DefenseSettings const settings{};
+    DefenseTrack const objective{0.F, 0.F, 0.F, 0.F, true};
+    DefenseTrack const approachingClose{15000.F, 0.F, 3.14159265F, 400.F, true};
+    DefenseTrack const approachingFar{120000.F, 0.F, 3.14159265F, 400.F, true};
+    float const closeRisk = ObjectiveThreatRisk(settings, approachingClose, objective);
+    float const farRisk = ObjectiveThreatRisk(settings, approachingFar, objective);
+    if (!(closeRisk > farRisk) || closeRisk <= 0.F)
+        return false;
+    auto const roles = BlueTeamRoles::Create(3U, 0U);
+    if (!roles)
+        return false;
+    GeneralizedRewardTransition transition{};
+    transition.before = MakeState(3U, 2U);
+    transition.after = transition.before;
+    transition.responsibilities.threatContainment = (closeRisk - farRisk) / 2.F;
+    GeneralizedCooperativeRewards rewards{};
+    if (AggregateGeneralizedCooperativeRewards(*roles, transition, {}, rewards)
+        != GeneralizedRewardStatus::Applied)
+        return false;
+    float const expected = (closeRisk - farRisk) / 2.F;
+    for (std::size_t i = 0U; i < 3U; ++i)
+        if (!Near(Channel(rewards.perBlue[i],
+                GeneralizedRewardChannel::ThreatContainment), expected))
+            return false;
+    transition.responsibilities.threatContainment = -expected;
+    return AggregateGeneralizedCooperativeRewards(*roles, transition, {}, rewards)
+        == GeneralizedRewardStatus::Applied
+        && Near(Channel(rewards.team,
+            GeneralizedRewardChannel::ThreatContainment), -expected);
+}
+
 bool TestOneVersusZero()
 {
     auto const roles = BlueTeamRoles::Create(1U, 0U);
@@ -413,6 +447,8 @@ bool TestDeterministicCampaignBoundary()
 
 int main()
 {
+    if (!TestObjectiveThreatPriority())
+        return 21;
     if (!TestOneVersusZero())
         return 1;
     if (!TestTwoVersusTwo())

@@ -101,22 +101,18 @@ inline float ClosingSpeed(DefenseTrack const& source,
 } // namespace patrol_defense_detail
 
 /**
- * @brief Computes the instantaneous credibility of one hostile track.
- * @param settings Valid risk thresholds.
- * @param attacker Hostile kinematics.
- * @param objective Fixed defended objective.
- * @param guards Current blue-team kinematics.
- * @return Risk in [0, 1], including objective and teammate vulnerability.
+ * @brief Scores objective danger from one red mobile without assuming a
+ *        fixed number of blue defenders.
+ * @return Risk in [0, 1] including distance, closing velocity and
+ *         time-to-intrusion inside the configured protection radius.
  */
-inline float ThreatRisk(DefenseSettings const& settings,
-                        DefenseTrack const& attacker,
-                        DefenseTrack const& objective,
-                        std::array<DefenseTrack, 2> const& guards) noexcept
+inline float ObjectiveThreatRisk(DefenseSettings const& settings,
+                                 DefenseTrack const& attacker,
+                                 DefenseTrack const& objective) noexcept
 {
     using namespace patrol_defense_detail;
     if (!attacker.available)
         return 0.F;
-
     float const objectiveDistance = Distance(attacker, objective);
     float const objectiveClosing = ClosingSpeed(attacker, objective);
     float const penetration = Clamp01(
@@ -150,11 +146,30 @@ inline float ThreatRisk(DefenseSettings const& settings,
         timeRisk = 1.F - Clamp01(
             timeToIntrusion / settings.timeToIntrusionSeconds);
     }
-    float objectiveRisk = std::max(
+    float const objectiveRisk = std::max(
         penetration, std::max(distanceRisk * approachFactor, timeRisk));
-    if (objectiveDistance <= settings.protectedRadiusMeters)
-        objectiveRisk = 1.F;
+    return objectiveDistance <= settings.protectedRadiusMeters
+        ? 1.F : Clamp01(objectiveRisk);
+}
 
+/**
+ * @brief Computes the instantaneous credibility of one hostile track.
+ * @param settings Valid risk thresholds.
+ * @param attacker Hostile kinematics.
+ * @param objective Fixed defended objective.
+ * @param guards Current blue-team kinematics.
+ * @return Risk in [0, 1], including objective and teammate vulnerability.
+ */
+inline float ThreatRisk(DefenseSettings const& settings,
+                        DefenseTrack const& attacker,
+                        DefenseTrack const& objective,
+                        std::array<DefenseTrack, 2> const& guards) noexcept
+{
+    using namespace patrol_defense_detail;
+    if (!attacker.available)
+        return 0.F;
+
+    float const objectiveRisk = ObjectiveThreatRisk(settings, attacker, objective);
     float teammateRisk = 0.F;
     for (DefenseTrack const& guard : guards)
     {

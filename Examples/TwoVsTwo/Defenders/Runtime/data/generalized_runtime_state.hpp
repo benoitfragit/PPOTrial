@@ -76,6 +76,28 @@ inline bool Valid(GeneralizedRuntimeState const& state) noexcept
     return true;
 }
 
+/**
+ * @brief Average objective threat risk across the active red slots.
+ *        Dead reds contribute zero; fixed active N avoids reward-scale drift.
+ */
+inline float ObjectiveThreatLevel(GeneralizedRuntimeState const& state,
+                                  Parameters const& parameters) noexcept
+{
+    if (state.counts.redMobiles == 0U)
+        return 0.F;
+    DefenseTrack const objective{state.objectiveNorth, state.objectiveEast,
+                                 0.F, 0.F, state.objectiveAvailable};
+    float risk = 0.F;
+    for (std::size_t index = 0U; index < state.counts.redMobiles; ++index)
+    {
+        Mobile const& red = state.reds[index];
+        DefenseTrack const attacker{red.north, red.east, red.heading,
+                                    red.speed, red.available};
+        risk += ObjectiveThreatRisk(parameters.defense, attacker, objective);
+    }
+    return risk / static_cast<float>(state.counts.redMobiles);
+}
+
 namespace generalized_runtime_detail {
 
 inline void WriteRelativeTrack(
@@ -110,17 +132,15 @@ inline float ThreatPressure(GeneralizedRuntimeState const& state,
                             Parameters const& parameters) noexcept
 {
     float pressure = 0.F;
-    float const scale = std::max(
-        std::hypot(parameters.halfNorth, parameters.halfEast), 1.F);
+    DefenseTrack const objective{state.objectiveNorth, state.objectiveEast,
+                                 0.F, 0.F, state.objectiveAvailable};
     for (std::size_t index = 0U; index < state.counts.redMobiles; ++index)
     {
         Mobile const& red = state.reds[index];
-        if (!red.available)
-            continue;
-        float const distance = std::hypot(
-            red.north - state.objectiveNorth,
-            red.east - state.objectiveEast);
-        pressure = std::max(pressure, Clamp(1.F - distance / scale, 0.F, 1.F));
+        DefenseTrack const attacker{red.north, red.east, red.heading,
+                                    red.speed, red.available};
+        pressure = std::max(pressure, ObjectiveThreatRisk(
+            parameters.defense, attacker, objective));
     }
     return pressure;
 }

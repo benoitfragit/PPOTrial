@@ -80,6 +80,7 @@ enum class GeneralizedRewardChannel : std::size_t
     ControlEffort,
     BlueSurvival,
     RedNeutralization,
+    ThreatContainment,
     ObjectiveSurvival,
     MissionOutcome,
     Timeout,
@@ -100,7 +101,7 @@ using GeneralizedRewardValues =
 struct GeneralizedRewardSettings final
 {
     /** @brief Per-channel multipliers in enum order. */
-    GeneralizedRewardValues weights{1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F};
+    GeneralizedRewardValues weights{1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F};
     /** @brief Symmetric scalar reward limit. */
     float clampMagnitude{100.F};
 };
@@ -115,6 +116,8 @@ struct GeneralizedResponsibilitySignals final
 {
     /** @brief Leader patrol progress/quality contribution, normally [-1, 1]. */
     float leaderPatrol{};
+    /** @brief Team-average reduction of objective danger, in [-1, 1]. */
+    float threatContainment{};
     /** @brief Teammate contributions indexed by unique formation slot. */
     std::array<float, kMaximumFormationSlots> formationSlots{};
     /** @brief Non-negative normalized control effort by physical blue index. */
@@ -239,7 +242,9 @@ inline bool ValidMasks(GeneralizedCombatStateMask const& before,
 inline bool ValidSignals(GeneralizedResponsibilitySignals const& signals,
                          std::size_t const blueCount) noexcept
 {
-    if (!std::isfinite(signals.leaderPatrol))
+    if (!std::isfinite(signals.leaderPatrol)
+        || !std::isfinite(signals.threatContainment)
+        || std::abs(signals.threatContainment) > 1.F)
         return false;
     for (std::size_t slot = 0U; slot + 1U < blueCount; ++slot)
         if (!std::isfinite(signals.formationSlots[slot]))
@@ -343,6 +348,9 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
             GeneralizedRewardChannel::BlueSurvival)] = blueSurvival;
         breakdown.values[static_cast<std::size_t>(
             GeneralizedRewardChannel::RedNeutralization)] = redNeutralization;
+        breakdown.values[static_cast<std::size_t>(
+            GeneralizedRewardChannel::ThreatContainment)] =
+                transition.responsibilities.threatContainment;
         breakdown.values[static_cast<std::size_t>(
             GeneralizedRewardChannel::ObjectiveSurvival)] = objectiveSurvival;
         breakdown.values[static_cast<std::size_t>(
