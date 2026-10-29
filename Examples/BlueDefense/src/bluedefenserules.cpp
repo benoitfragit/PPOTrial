@@ -1,4 +1,4 @@
-#include "twovstworules.hpp"
+#include "bluedefenserules.hpp"
 #include "initializer.hpp"
 #include "airspacecomponents.hpp"
 #include "baseentity.hpp"
@@ -73,8 +73,8 @@ std::optional<std::size_t> RedEntityIndex(std::string_view name) noexcept
 
 } // namespace
 
-namespace ppo::examples::twovstwo {
-void TwoVsTwoWorldRules::BeforeStep(ppo::model::WorldEntities& entities)
+namespace ppo::examples::bluedefense {
+void BlueDefenseWorldRules::BeforeStep(ppo::model::WorldEntities& entities)
 {
     ActivateScheduledThreats(entities);
     original_.BeforeStep(entities);
@@ -88,7 +88,7 @@ void TwoVsTwoWorldRules::BeforeStep(ppo::model::WorldEntities& entities)
         }
 }
 
-void TwoVsTwoWorldRules::Resolve(ppo::model::WorldEntities& entities)
+void BlueDefenseWorldRules::Resolve(ppo::model::WorldEntities& entities)
 {
     // Resolve physical impacts before the legacy SNA rules record destruction
     // events. This makes both wrecks and explosions visible in the same ECS
@@ -114,7 +114,7 @@ void TwoVsTwoWorldRules::Resolve(ppo::model::WorldEntities& entities)
     }
 }
 
-void TwoVsTwoWorldRules::ResolveRestrictedZonePenetrations(
+void BlueDefenseWorldRules::ResolveRestrictedZonePenetrations(
     ppo::model::WorldEntities& entities)
 {
     entt::registry* registry = nullptr;
@@ -171,7 +171,7 @@ void TwoVsTwoWorldRules::ResolveRestrictedZonePenetrations(
     }
 }
 
-void TwoVsTwoWorldRules::ActivateScheduledThreats(
+void BlueDefenseWorldRules::ActivateScheduledThreats(
     ppo::model::WorldEntities& entities)
 {
     entt::registry* registry = nullptr;
@@ -211,7 +211,7 @@ void TwoVsTwoWorldRules::ActivateScheduledThreats(
     }
 }
 
-void TwoVsTwoWorldRules::ResolveFriendlyMobileCollisions(
+void BlueDefenseWorldRules::ResolveFriendlyMobileCollisions(
     ppo::model::WorldEntities& entities)
 {
     entt::registry* registry = nullptr;
@@ -265,12 +265,12 @@ void TwoVsTwoWorldRules::ResolveFriendlyMobileCollisions(
     }
 }
 
-void TwoVsTwoWorldRules::AfterStep()
+void BlueDefenseWorldRules::AfterStep()
 {
     original_.AfterStep();
 }
 
-void TwoVsTwoWorldRules::CopySnapshot(entt::registry& source, entt::registry& target) const
+void BlueDefenseWorldRules::CopySnapshot(entt::registry& source, entt::registry& target) const
 {
     original_.CopySnapshot(source, target);
     // The defended area and the shared LiDAR use exactly the same world bounds.

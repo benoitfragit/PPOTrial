@@ -1,7 +1,7 @@
-#include "twovstwoexample.hpp"
+#include "bluedefenseexample.hpp"
 #include "initializer.hpp"
 #include "spawn_config.hpp"
-#include "twovstworules.hpp"
+#include "bluedefenserules.hpp"
 #include "generalized_patrol_team_agent.hpp"
 #include "patrol_config.hpp"
 
@@ -24,7 +24,7 @@
 #include <string>
 #include <vector>
 
-namespace ppo::examples::twovstwo {
+namespace ppo::examples::bluedefense {
 namespace {
 
 /**
@@ -95,7 +95,7 @@ bool LoadScenario(std::filesystem::path const& path,
                   ppo::model::Environment& environment)
 {
     if (!environment.SetEntityInitializer(&InitializeEntity)
-        || !environment.SetWorldRules(std::make_unique<TwoVsTwoWorldRules>()))
+        || !environment.SetWorldRules(std::make_unique<BlueDefenseWorldRules>()))
         return false;
 
     auto const scenario = ppo::config::LoadScenarioDefinition(path);
@@ -103,11 +103,11 @@ bool LoadScenario(std::filesystem::path const& path,
         return false;
 
     auto const document = ppo::serialization::Serializer::Parse(path);
-    if (!document.is_object() || !document.contains("twoVsTwo")
-        || !document["twoVsTwo"].is_object())
+    if (!document.is_object() || !document.contains("blueDefense")
+        || !document["blueDefense"].is_object())
         return false;
 
-    auto const& settings = document["twoVsTwo"];
+    auto const& settings = document["blueDefense"];
     if (settings.contains("patrolOnly") && !settings["patrolOnly"].is_boolean())
         return false;
     bool const patrolOnly = settings.value("patrolOnly", false);
@@ -120,7 +120,7 @@ bool LoadScenario(std::filesystem::path const& path,
     auto const spawnSettings = ParseSpawnSettings(settings, &spawnDiagnostic);
     if (!spawnSettings)
     {
-        std::cerr << "[TWO_VS_TWO] Invalid spawn configuration: "
+        std::cerr << "[BLUE_DEFENSE] Invalid spawn configuration: "
                   << spawnDiagnostic << '\n';
         return false;
     }
@@ -423,4 +423,4 @@ ppo::app::ExampleDefinition BluePatrolDefinition()
     };
 }
 
-} // namespace ppo::examples::twovstwo
+} // namespace ppo::examples::bluedefense
