@@ -106,9 +106,8 @@ Sample Capture(ppo::model::Environment const& environment)
                 {
                     ++result.controllers;
                     result.trainingPresent |= snapshot.m_common.m_training;
-                    result.rewardsPresent |= snapshot.m_rewards.size() == 8U
-                        && snapshot.m_rewardnames.size() == 8U
-                        && snapshot.m_rewardnames[4] == "Threat containment";
+                    result.rewardsPresent |= snapshot.m_rewards.size() == 7U
+                        && snapshot.m_rewardnames.size() == 7U;
                     result.evaluationInProgress |=
                         snapshot.m_common.m_evaluationinprogress;
                     result.completedEvaluations = std::max(
