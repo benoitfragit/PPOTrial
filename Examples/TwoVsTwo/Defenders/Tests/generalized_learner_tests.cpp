@@ -223,7 +223,7 @@ int main()
     std::filesystem::path const policy =
         directory / "ppo_generalized_learner_v8_test.txt";
     std::filesystem::path const training =
-        directory / "ppo_generalized_learner_v5_test.txt";
+        directory / "ppo_generalized_learner_v6_test.txt";
     std::error_code ignored;
     std::filesystem::remove(policy, ignored);
     std::filesystem::remove(training, ignored);
@@ -239,6 +239,18 @@ int main()
     {
         return 6;
     }
+    // New learner shape is independent of the checkpoint's old team count.
+    blue::GeneralizedPatrolLearner resumedThree{{3U, 1U}, 123U, 1U};
+    resumedThree.LoadTrainingState(training);
+    if (resumedThree.StepCount() != first.StepCount()
+        || resumedThree.ActiveCounts().blueMobiles != 3U
+        || resumedThree.ActiveCounts().redMobiles != 1U)
+        return 16;
+    blue::GeneralizedPatrolLearner resumedNine{{9U, 10U}, 123U, 1U};
+    resumedNine.LoadTrainingState(training);
+    if (resumedNine.StepCount() != first.StepCount())
+        return 17;
+
     auto const uninterruptedActions =
         first.ChooseActions(observations, availability);
     auto const resumedActions =
