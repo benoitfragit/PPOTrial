@@ -82,7 +82,8 @@ void TwoVsTwoWorldRules::BeforeStep(ppo::model::WorldEntities& entities)
         if (entity && entity->registry() != nullptr)
         {
             ppo::model::UpdateRestrictedZonePseudoLidars(
-                *entity->registry(), ppo::model::eEntitySide::Friend);
+                *entity->registry(), ppo::model::eEntitySide::Friend,
+                defenders::Parameters{}.cautionDistance);
             break;
         }
 }
@@ -99,7 +100,8 @@ void TwoVsTwoWorldRules::Resolve(ppo::model::WorldEntities& entities)
         if (entity && entity->registry() != nullptr)
         {
             ppo::model::UpdateRestrictedZonePseudoLidars(
-                *entity->registry(), ppo::model::eEntitySide::Friend);
+                *entity->registry(), ppo::model::eEntitySide::Friend,
+                defenders::Parameters{}.cautionDistance);
             break;
         }
 
