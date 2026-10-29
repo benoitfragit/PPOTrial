@@ -37,6 +37,8 @@ struct Sample
     bool evaluationInProgress = false;
     std::uint64_t completedEvaluations = 0U;
     long long rollout = 0;
+    unsigned long long controllerId{};
+    float formationWeight{};
 };
 
 struct ExpectedTeam final
@@ -159,6 +161,9 @@ Sample Capture(
                         result.completedEvaluations,
                         snapshot.m_common.m_completedEvaluations);
                     result.rollout = snapshot.m_common.m_maxStep;
+                    result.controllerId = snapshot.m_id;
+                    if (snapshot.m_scalings.size() == 10U)
+                        result.formationWeight = snapshot.m_scalings[1];
                 }
             });
     });
@@ -244,6 +249,13 @@ int main(int argc, char** argv)
         {
             first = current;
             foundFirst = true;
+            ppo::model::sAgentRealTimeCommand command{};
+            command.m_id = current.controllerId;
+            command.m_type =
+                ppo::model::sAgentRealTimeCommand::eTypeCommand::RewardScaling;
+            command.m_rewardScalingType = 1U;
+            command.m_rewardScaling = 2.5F;
+            environment.AddAgentCommand(command);
             continue;
         }
         if (!foundFirst || !Ready(current, expected))
@@ -253,6 +265,7 @@ int main(int argc, char** argv)
         for (std::size_t role = 0; role < expected.blueCount; ++role)
             moved &= std::hypot(later.north[role] - first.north[role],
                                 later.east[role] - first.east[role]) > 32.F;
+        moved &= std::abs(current.formationWeight - 2.5F) < 1.e-4F;
         if (moved)
             break;
     }
