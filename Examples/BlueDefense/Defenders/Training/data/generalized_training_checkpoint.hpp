@@ -13,7 +13,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /** @brief Version of the complete generalized P/N training-state contract. */
 inline constexpr unsigned kGeneralizedTrainingCheckpointVersion = 6U;
@@ -229,4 +229,4 @@ void SaveGeneralizedTrainingState(
     });
 }
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

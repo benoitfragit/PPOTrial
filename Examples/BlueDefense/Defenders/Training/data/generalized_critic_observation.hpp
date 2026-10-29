@@ -5,7 +5,7 @@
 #include <array>
 #include <cstddef>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /**
  * @brief Agent-conditioned value input with fixed size for 1..9 blue mobiles.
@@ -28,4 +28,4 @@ struct GeneralizedCriticLayout final
 using GeneralizedCriticObservation =
     std::array<float, GeneralizedCriticLayout::Size>;
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

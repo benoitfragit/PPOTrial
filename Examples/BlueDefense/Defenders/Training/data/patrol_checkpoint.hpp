@@ -15,7 +15,7 @@
 #include <system_error>
 #include <utility>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 template<typename MATRIX> void ReadPatrolMatrix(std::istream& stream, MATRIX& matrix)
 {
     for (typename MATRIX::SPEC::TI i = 0; i < MATRIX::SPEC::ROWS; ++i)
@@ -179,4 +179,4 @@ void SavePatrolPolicy(std::filesystem::path const& path,ACTOR const& actor)
         WritePatrolPolicy(stream, actor);
     });
 }
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

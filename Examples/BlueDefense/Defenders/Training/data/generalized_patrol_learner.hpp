@@ -20,7 +20,7 @@
 #include <utility>
 #include <vector>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /** @brief Finite diagnostics from the latest generalized PPO update. */
 struct GeneralizedTrainingDiagnostics final
@@ -1148,4 +1148,4 @@ private:
     bool trainingCriticBufferAllocated_{};
 };
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders
