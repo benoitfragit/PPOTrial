@@ -1,4 +1,4 @@
-#include "twovstwoexample.hpp"
+#include "bluedefenseexample.hpp"
 #include "patrol_config.hpp"
 #include "environment.hpp"
 #include "serializer.hpp"
@@ -67,7 +67,7 @@ int NumberedIndex(std::string_view const name, std::string_view const prefix,
 ExpectedTeam ScenarioTeam(std::filesystem::path const& scenarioPath)
 {
     auto const document = ppo::serialization::Serializer::Parse(scenarioPath);
-    auto const& settings = document.at("twoVsTwo");
+    auto const& settings = document.at("blueDefense");
     ExpectedTeam result{};
     result.blueCount = settings.at("blueTeam").at("activeCount").get<std::size_t>();
     result.redCount = settings.at("redTeam").at("activeCount").get<std::size_t>();
@@ -76,7 +76,7 @@ ExpectedTeam ScenarioTeam(std::filesystem::path const& scenarioPath)
 
 Sample Capture(
     ppo::model::Environment const& environment,
-    ppo::examples::twovstwo::defenders::Parameters const& parameters)
+    ppo::examples::bluedefense::defenders::Parameters const& parameters)
 {
     Sample result{};
     environment.ReadSnapshot([&](entt::registry const& world) {
@@ -194,14 +194,14 @@ int main(int argc, char** argv)
     if (argc > 3 || (argc >= 2 && !combat) || (argc == 3 && !evaluationSmoke))
         return 3;
     auto const patrolParameters =
-        ppo::examples::twovstwo::defenders::LoadPatrolParameters(RESOURCE_PATH);
+        ppo::examples::bluedefense::defenders::LoadPatrolParameters(RESOURCE_PATH);
     // Verify the real configured platform contract, not stale numerical
     // constants from earlier defender_car.json revisions.
-    if (!ppo::examples::twovstwo::defenders::Valid(patrolParameters))
+    if (!ppo::examples::bluedefense::defenders::Valid(patrolParameters))
         return 5;
     auto const definition = combat
-        ? ppo::examples::twovstwo::Definition()
-        : ppo::examples::twovstwo::BluePatrolDefinition();
+        ? ppo::examples::bluedefense::Definition()
+        : ppo::examples::bluedefense::BluePatrolDefinition();
     ExpectedTeam const expected = ScenarioTeam(
         std::filesystem::path{RESOURCE_PATH} / definition.defaultScenario);
     definition.registerTypes();

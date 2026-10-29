@@ -20,8 +20,8 @@ namespace {
 bool MaximumBlueTeamFitsWorld()
 {
     using namespace ppo::model;
-    namespace twovstwo = ppo::examples::twovstwo;
-    namespace defenders = twovstwo::defenders;
+    namespace bluedefense = ppo::examples::bluedefense;
+    namespace defenders = bluedefense::defenders;
 
     constexpr float halfNorth = 22329.375F;
     constexpr float halfEast = 35727.F;
@@ -30,10 +30,10 @@ bool MaximumBlueTeamFitsWorld()
     environment.m_maxNorth = 2.F * halfNorth;
     environment.m_maxEast = 2.F * halfEast;
 
-    auto& context = registry.ctx().emplace<twovstwo::InitializerContext>();
+    auto& context = registry.ctx().emplace<bluedefense::InitializerContext>();
     context.rng.seed(73U);
     context.count = defenders::TeamCapacity::MaximumBlueMobiles;
-    context.spawnSettings.blueTeam = twovstwo::BlueTeamSpawnSettings{};
+    context.spawnSettings.blueTeam = bluedefense::BlueTeamSpawnSettings{};
     context.spawnSettings.blueTeam->activeCount =
         defenders::TeamCapacity::MaximumBlueMobiles;
 
@@ -49,7 +49,7 @@ bool MaximumBlueTeamFitsWorld()
     }
 
     for (auto const& blue : blues)
-        twovstwo::InitializeEntity(*blue);
+        bluedefense::InitializeEntity(*blue);
 
     if (!context.patrolGeometryReady
         || context.patrolGeometrySamplingFailed

@@ -1,4 +1,4 @@
-#include "twovstworules.hpp"
+#include "bluedefenserules.hpp"
 
 #include "components.hpp"
 #include "entity.hpp"
@@ -109,7 +109,7 @@ int main()
     ConfigureZone(*activeZone, kActiveZoneName, false, 12000.F);
     ConfigureZone(*disabledZone, kDisabledZoneName, true, -12000.F);
     if (!environment.SetWorldRules(
-            std::make_unique<ppo::examples::twovstwo::TwoVsTwoWorldRules>()))
+            std::make_unique<ppo::examples::bluedefense::BlueDefenseWorldRules>()))
         return 2;
 
     environment.Play();

@@ -9,10 +9,10 @@
 #include <string>
 
 namespace {
-using ppo::examples::twovstwo::EpisodeSpawnLayout;
-using ppo::examples::twovstwo::Spawn;
-using ppo::examples::twovstwo::SpawnSettings;
-using ppo::examples::twovstwo::WorldBounds;
+using ppo::examples::bluedefense::EpisodeSpawnLayout;
+using ppo::examples::bluedefense::Spawn;
+using ppo::examples::bluedefense::SpawnSettings;
+using ppo::examples::bluedefense::WorldBounds;
 
 constexpr float kHalfPi = 1.5707963267948966F;
 constexpr float kTwoPi = 6.2831853071795865F;
@@ -79,20 +79,20 @@ bool Same(EpisodeSpawnLayout const& first,
 
 int main()
 {
-    static_assert(ppo::examples::twovstwo::defenders::kBackendAvailable);
-    using ppo::examples::twovstwo::GenerateEpisodeSpawnLayout;
-    using ppo::examples::twovstwo::HasPendingThreats;
-    using ppo::examples::twovstwo::MakeSpawn;
-    using ppo::examples::twovstwo::ParseSpawnSettings;
-    using ppo::examples::twovstwo::Valid;
+    static_assert(ppo::examples::bluedefense::defenders::kBackendAvailable);
+    using ppo::examples::bluedefense::GenerateEpisodeSpawnLayout;
+    using ppo::examples::bluedefense::HasPendingThreats;
+    using ppo::examples::bluedefense::MakeSpawn;
+    using ppo::examples::bluedefense::ParseSpawnSettings;
+    using ppo::examples::bluedefense::Valid;
 
     SpawnSettings settings{};
     settings.restrictedZones.items = {
         {"zone_fixed", "restrictedzone", true, 1.F,
-         ppo::examples::twovstwo::RestrictedZonePositionMode::Fixed,
+         ppo::examples::bluedefense::RestrictedZonePositionMode::Fixed,
          {1250.F, -2500.F}, {}, {}},
         {"zone_random", "restrictedzone", true, 0.75F,
-         ppo::examples::twovstwo::RestrictedZonePositionMode::Random,
+         ppo::examples::bluedefense::RestrictedZonePositionMode::Random,
          {}, {-5000.F, 5000.F}, {-7000.F, 7000.F}}};
     if (!Valid(settings))
         return 1;
@@ -371,7 +371,7 @@ int main()
         return 26;
 
     auto boundedZoneSettings = settings;
-    using ZoneMode = ppo::examples::twovstwo::RestrictedZonePositionMode;
+    using ZoneMode = ppo::examples::bluedefense::RestrictedZonePositionMode;
     boundedZoneSettings.restrictedZones.items = {
         {"inside_north", "restrictedzone", true, 1.F, ZoneMode::Random,
          {}, {4000.F, 16000.F}, {8000.F, 22000.F}, true},
@@ -427,7 +427,7 @@ int main()
 
     auto noRedSettings = settings;
     noRedSettings.redTeam =
-        ppo::examples::twovstwo::RedTeamSpawnSettings{};
+        ppo::examples::bluedefense::RedTeamSpawnSettings{};
     noRedSettings.redTeam->activeCount = 0U;
     std::mt19937 noRedRng{31U};
     auto const noRed = GenerateEpisodeSpawnLayout(
@@ -440,10 +440,10 @@ int main()
     auto maximumRedSettings = settings;
     maximumRedSettings.red.minimumSeparation = 1000.F;
     maximumRedSettings.redTeam =
-        ppo::examples::twovstwo::RedTeamSpawnSettings{};
+        ppo::examples::bluedefense::RedTeamSpawnSettings{};
     auto& maximumTeam = *maximumRedSettings.redTeam;
     maximumTeam.activeCount =
-        ppo::examples::twovstwo::defenders::TeamCapacity::MaximumRedMobiles;
+        ppo::examples::bluedefense::defenders::TeamCapacity::MaximumRedMobiles;
     maximumTeam.maximumPlacementAttempts = 4096U;
     maximumTeam.delayedActivationProbability = 1.F;
     maximumTeam.activationDelaySteps = {17U, 17U};
