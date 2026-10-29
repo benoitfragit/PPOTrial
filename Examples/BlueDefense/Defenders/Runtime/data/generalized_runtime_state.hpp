@@ -8,7 +8,7 @@
 #include <cstddef>
 #include <type_traits>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /**
  * @brief Allocation-free ECS-neutral snapshot consumed by generalized MAPPO.
@@ -337,4 +337,4 @@ inline bool BuildGeneralizedObservations(
 static_assert(std::is_trivially_copyable_v<GeneralizedRuntimeState>,
     "Generalized runtime snapshots must remain allocation-free values");
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

@@ -16,7 +16,7 @@
 #include <string>
 #include <utility>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 namespace {
 
 Mobile GeneralizedMobileFromEcs(ppo::model::BaseEntity& entity)
@@ -872,4 +872,4 @@ GeneralizedPatrolMappoAgent::GetSnapshot() const noexcept
     return snapshot;
 }
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

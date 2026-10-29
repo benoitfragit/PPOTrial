@@ -2,7 +2,7 @@
 #include <cmath>
 #include <iostream>
 
-namespace blue=ppo::examples::twovstwo::defenders;
+namespace blue=ppo::examples::bluedefense::defenders;
 namespace rlt=rl_tools;
 
 int main()
