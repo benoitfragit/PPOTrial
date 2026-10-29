@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <iostream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -203,5 +204,18 @@ int main(int argc, char** argv)
             break;
     }
     environment.Stop();
+    if (!foundFirst || !moved)
+    {
+        std::cerr << "[PATROL SMOKE] initialized=" << foundFirst
+                  << " moved=" << moved << " combat=" << combat
+                  << " guards=" << later.present[0] << '/' << later.present[1]
+                  << " destroyed=" << later.destroyed[0] << '/'
+                  << later.destroyed[1]
+                  << " reds=" << later.redEntities
+                  << " controllers=" << later.controllers
+                  << " training=" << later.trainingPresent
+                  << " rewards=" << later.rewardsPresent
+                  << " rollout=" << later.rollout << '\n';
+    }
     return foundFirst && moved ? 0 : 2;
 }
