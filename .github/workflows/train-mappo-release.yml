@@ -1,0 +1,106 @@
+name: MAPPO training (Windows Release)
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: 'Blue scenario (production red RLMission is used in blue-defense)'
+        required: true
+        type: choice
+        options:
+          - blue-defense
+          - blue-patrol
+        default: blue-defense
+      max_seconds:
+        description: 'Training duration in seconds; leave time for build and artifact upload'
+        required: true
+        type: number
+        default: 14400
+      resume_run_id:
+        description: 'Optional completed run ID containing mappo-blue-checkpoints'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mappo-training-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  train:
+    name: Windows x64 Release / RLTools + LibTorch 2.9.1 CPU
+    runs-on: windows-2022
+    timeout-minutes: 350
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout PPOTrial and production RLMission weights
+        uses: actions/checkout@v4
+
+      - name: Restore previous full MAPPO checkpoint (optional)
+        if: ${{ inputs.resume_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: mappo-blue-checkpoints
+          path: resources/model/BluePatrol
+          run-id: ${{ inputs.resume_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache exact LibTorch CPU Release distribution
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/desktop/libtorch
+            build/desktop/_deps/libtorch-subbuild
+          key: libtorch-win-shared-with-deps-2.9.1-cpu-release-v1
+
+      - name: Configure MSVC 2022 x64 Release
+        run: >-
+          cmake -S . -B build/desktop -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_CONFIGURATION_TYPES=Release
+          -DPPO_LIBTORCH_VARIANT=Release
+          -DPPO_BUILD_DESKTOP=ON
+          -DPPO_BUILD_CORE_TESTS=OFF
+          -DPPO_BUILD_CHECKPOINT_TESTS=OFF
+
+      - name: Build PPO.exe in Release only
+        run: cmake --build build/desktop --config Release --target PPO --parallel 4
+
+      - name: Validate real ECS scenario and production RLMission loading
+        run: |
+          & "build/desktop/Main/Release/PPO.exe" --example "${{ inputs.scenario }}" --check-example
+          if ($LASTEXITCODE -ne 0) { throw "Scenario bootstrap failed (exit $LASTEXITCODE)" }
+
+      - name: Train MAPPO without graphics
+        run: |
+          & "build/desktop/Main/Release/PPO.exe" --no-gui --example "${{ inputs.scenario }}" --max-seconds "${{ inputs.max_seconds }}"
+          if ($LASTEXITCODE -ne 0) { throw "Headless training failed (exit $LASTEXITCODE)" }
+
+      - name: Validate resumable checkpoint
+        run: |
+          $root = "resources/model/BluePatrol/latest"
+          foreach ($name in @("blue_patrol_generalized_v8.txt", "blue_patrol_generalized_training_v5.txt")) {
+            $file = Join-Path $root $name
+            if (!(Test-Path $file -PathType Leaf) -or (Get-Item $file).Length -eq 0) {
+              throw "Missing or empty checkpoint: $file"
+            }
+          }
+
+      - name: Upload training state, actor and evaluated production actor
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mappo-blue-checkpoints
+          path: |
+            resources/model/BluePatrol/latest/blue_patrol_generalized_v8.txt
+            resources/model/BluePatrol/latest/blue_patrol_generalized_training_v5.txt
+            resources/model/BluePatrol/prod/blue_patrol_generalized_v8.txt
+            resources/model/BluePatrol/prod/blue_patrol_generalized_v8.txt.score
+            resources/model/BluePatrol/latest/*.bak
+          if-no-files-found: warn
+          retention-days: 90
+          compression-level: 6
