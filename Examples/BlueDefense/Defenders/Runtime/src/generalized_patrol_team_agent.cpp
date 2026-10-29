@@ -284,7 +284,8 @@ GeneralizedRuntimeState GeneralizedPatrolMappoAgent::ReadState(
             }
         }
     }
-    result.failed = GeneralizedBlueTeamFailed(result, parameters);
+    result.failed = GeneralizedBlueTeamFailed(
+        result, parameters, Roles().LeaderPhysicalIndex());
     for (std::size_t index = 0U; index < counts_.redMobiles; ++index)
     {
         if (attackerIds_[index] == entt::null
