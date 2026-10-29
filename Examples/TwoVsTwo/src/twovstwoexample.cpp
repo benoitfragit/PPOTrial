@@ -113,12 +113,8 @@ bool LoadScenario(std::filesystem::path const& path,
     bool const patrolOnly = settings.value("patrolOnly", false);
 
     if (settings.contains("blueController")
-        && !settings["blueController"].is_string())
-        return false;
-    std::string const blueController =
-        settings.value("blueController", std::string{"mappo"});
-    bool const useMappo = blueController == "mappo";
-    if (!useMappo && blueController != "reference")
+        && (!settings["blueController"].is_string()
+            || settings["blueController"].get<std::string>() != "mappo"))
         return false;
     std::string spawnDiagnostic;
     auto const spawnSettings = ParseSpawnSettings(settings, &spawnDiagnostic);
@@ -158,165 +154,70 @@ bool LoadScenario(std::filesystem::path const& path,
             1, *spawnSettings, worldBounds, validationRng))
         return false;
 
-    bool const generalizedRedTeam = spawnSettings->redTeam.has_value();
-    std::size_t const configuredRedCount = generalizedRedTeam
-        ? spawnSettings->redTeam->activeCount : 0U;
+    if (!spawnSettings->blueTeam || !spawnSettings->redTeam)
+    {
+        std::cerr << "[BLUE MAPPO] Missing P/N team configuration.\n";
+        return false;
+    }
+    std::size_t const configuredBlueCount = spawnSettings->blueTeam->activeCount;
+    std::size_t const configuredRedCount = spawnSettings->redTeam->activeCount;
     if (patrolOnly && configuredRedCount != 0U)
-    {
-        std::cerr << "[TWO_VS_TWO] patrolOnly requires redTeam.activeCount=0.\n";
         return false;
-    }
-    bool const generalizedBlueTeam = spawnSettings->blueTeam.has_value();
-    std::size_t const configuredBlueCount = generalizedBlueTeam
-        ? spawnSettings->blueTeam->activeCount : 2U;
-    if (generalizedBlueTeam && !useMappo)
-    {
-        std::cerr << "[BLUE MAPPO] blueTeam requires the generalized mappo "
-                     "controller; the archived reference controller remains "
-                     "strictly two-guard.\n";
-        return false;
-    }
 
     ppo::config::ScenarioEntityDefinition const* blueTemplate = nullptr;
-    if (generalizedBlueTeam)
-    {
-        for (auto const& item : scenario.m_entities)
-        {
-            bool const friendlyMobile = item.m_type == "Mobile"
-                && item.m_side == ppo::model::eEntitySide::Friend;
-            if (!friendlyMobile)
-                continue;
-            if (!IsGeneralizedBlueTemplate(item))
-            {
-                std::cerr << "[BLUE MAPPO] Friendly mobile template '"
-                          << item.m_name
-                          << "' must have a platform and no per-entity agent; "
-                             "the generalized patrol controller is shared.\n";
-                return false;
-            }
-            if (blueTemplate == nullptr)
-                blueTemplate = &item;
-            else if (!SameGeneralizedBlueTemplate(*blueTemplate, item))
-            {
-                std::cerr << "[BLUE MAPPO] Generalized blue templates must use "
-                             "the same platform and controller contract.\n";
-                return false;
-            }
-        }
-        if (blueTemplate == nullptr)
-        {
-            std::cerr << "[BLUE MAPPO] blueTeam requires one friendly Mobile "
-                         "template for the shared patrol controller.\n";
-            return false;
-        }
-    }
-
     ppo::config::ScenarioEntityDefinition const* redTemplate = nullptr;
-    if (generalizedRedTeam)
+    for (auto const& item : scenario.m_entities)
     {
-        for (auto const& item : scenario.m_entities)
+        if (item.m_type != "Mobile")
+            continue;
+        if (item.m_side == ppo::model::eEntitySide::Friend)
         {
-            bool const hostileMobile = item.m_type == "Mobile"
-                && item.m_side == ppo::model::eEntitySide::Hostile;
-            if (!hostileMobile)
-                continue;
-            if (!IsProductionRedTemplate(item))
-            {
-                std::cerr << "[TWO_VS_TWO] Hostile mobile template '"
-                          << item.m_name
-                          << "' must target blue_objective and use exactly one "
-                             "production RLMission controller.\n";
+            if (!IsGeneralizedBlueTemplate(item)
+                || (blueTemplate != nullptr
+                    && !SameGeneralizedBlueTemplate(*blueTemplate, item)))
                 return false;
-            }
-            if (redTemplate == nullptr)
-                redTemplate = &item;
-            else if (!SameProductionRedTemplate(*redTemplate, item))
-            {
-                std::cerr << "[TWO_VS_TWO] Generalized red templates must use "
-                             "the same platform and controller contract.\n";
-                return false;
-            }
+            blueTemplate = &item;
         }
-        if (configuredRedCount != 0U && redTemplate == nullptr)
+        else if (item.m_side == ppo::model::eEntitySide::Hostile)
         {
-            std::cerr << "[TWO_VS_TWO] redTeam requires one hostile Mobile "
-                         "template driven by production RLMission.\n";
-            return false;
+            if (!IsProductionRedTemplate(item)
+                || (redTemplate != nullptr
+                    && !SameProductionRedTemplate(*redTemplate, item)))
+                return false;
+            redTemplate = &item;
         }
     }
+    if (!blueTemplate || (configuredRedCount > 0U && !redTemplate))
+        return false;
 
     std::map<std::string, std::shared_ptr<ppo::model::Entity>> entities;
     std::vector<std::shared_ptr<ppo::model::IAgent>> agents;
 
     for (auto const& item : scenario.m_entities)
     {
-        if (generalizedRedTeam && IsProductionRedTemplate(item))
+        if (item.m_type == "Mobile")
             continue;
-        if (generalizedBlueTeam && IsGeneralizedBlueTemplate(item))
-            continue;
-
-        auto const& itemConfig = document["entities"][item.m_name];
-        if (!itemConfig.is_object())
+        bool const objective = item.m_name == "blue_objective"
+            && item.m_type == "Objective"
+            && item.m_side == ppo::model::eEntitySide::Friend;
+        bool const zone = item.m_name == "blue_restricted_zone"
+            && item.m_type == "RestrictedZone"
+            && item.m_side == ppo::model::eEntitySide::Friend;
+        if ((!objective && !zone)
+            || !document["entities"].contains(item.m_name)
+            || !item.m_agents.empty() || !item.m_target.empty())
             return false;
-        if (itemConfig.contains("enabled"))
-        {
-            if (item.m_name != "red_2" || !itemConfig["enabled"].is_boolean())
-                return false;
-            if (!itemConfig["enabled"].get<bool>())
-                continue;
-        }
-
-        bool const mobile = item.m_type == "Mobile";
-        bool const zone = item.m_type == "RestrictedZone";
-        bool const objective = item.m_type == "Objective";
-        if ((!mobile && !zone && !objective)
-            || ((mobile || zone) && item.m_platform.empty()))
-            return false;
-
-        auto const blue = item.m_name == "blue_guard_1"
-            || item.m_name == "blue_guard_2"
-            || item.m_name == "blue_objective"
-            || item.m_name == "blue_restricted_zone";
-        auto const red = item.m_name == "red_1" || item.m_name == "red_2";
-
-        if ((!blue && !red) || (patrolOnly && red)
-            || (blue && item.m_side != ppo::model::eEntitySide::Friend)
-            || (red && item.m_side != ppo::model::eEntitySide::Hostile)
-            || (blue && (!item.m_agents.empty() || !item.m_target.empty()))
-            || (red && (item.m_target != "blue_objective"
-                || item.m_agents.size() != 1U
-                || item.m_agents.front() != "TargetSelectorProdAgent"))
-            || ((item.m_name == "blue_guard_1" || item.m_name == "blue_guard_2" || red) && !mobile)
-            || (item.m_name == "blue_objective" && !objective)
-            || (item.m_name == "blue_restricted_zone" && !zone))
-            return false;
-
-        auto entity = ppo::reflection::CreateEntity(item.m_type,
-                                                     environment, item.m_platform, item.m_side);
+        auto entity = ppo::reflection::CreateEntity(
+            item.m_type, environment, item.m_platform, item.m_side);
         if (!entity)
             return false;
-
         entity->add<ppo::model::sEntityMetadata>(
             ppo::model::sEntityMetadata{item.m_name, item.m_platform});
-        if (mobile)
-        {
-            auto& sensor = entity->add<ppo::model::sPseudoLidarState>();
-            sensor.m_nearestCollisionRanges.fill(1.F);
-        }
-
-        for (auto const& agentName : item.m_agents)
-        {
-            auto agent = ppo::reflection::CreateAgent(agentName, environment, *entity);
-            if (!agent)
-                return false;
-            agents.push_back(std::move(agent));
-        }
-
         if (!entities.emplace(item.m_name, std::move(entity)).second)
             return false;
     }
 
-    if (generalizedBlueTeam && blueTemplate != nullptr)
+    if (blueTemplate != nullptr)
     {
         for (std::size_t index = 0U; index < configuredBlueCount; ++index)
         {
@@ -335,7 +236,7 @@ bool LoadScenario(std::filesystem::path const& path,
         }
     }
 
-    if (generalizedRedTeam && !patrolOnly && redTemplate != nullptr)
+    if (configuredRedCount > 0U && redTemplate != nullptr)
     {
         for (std::size_t index = 0U; index < configuredRedCount; ++index)
         {
@@ -380,62 +281,19 @@ bool LoadScenario(std::filesystem::path const& path,
             return false;
     }
 
-    std::size_t const blueCoreCount = generalizedBlueTeam
-        ? configuredBlueCount + 2U : 4U;
-    std::size_t const redCoreCount = generalizedRedTeam
-        ? (patrolOnly ? 0U : configuredRedCount)
-        : (patrolOnly ? 0U
-            : 1U + static_cast<std::size_t>(entities.count("red_2") != 0U));
-    std::size_t const expectedCoreEntities = blueCoreCount + redCoreCount;
-    bool blueCollectionComplete = true;
-    if (generalizedBlueTeam)
-    {
-        for (std::size_t index = 0U; index < configuredBlueCount; ++index)
-            blueCollectionComplete &= entities.count(
-                "blue_" + std::to_string(index + 1U)) != 0U;
-    }
-    if ((!generalizedBlueTeam
-            && (!entities.count("blue_guard_1")
-                || !entities.count("blue_guard_2")))
-        || !blueCollectionComplete
-        || !entities.count("blue_objective")
+    if (!entities.count("blue_objective")
         || !entities.count("blue_restricted_zone")
-        || (!generalizedRedTeam && !patrolOnly
-            && !entities.count("red_1"))
-        || entities.size() != expectedCoreEntities
+        || entities.size() != configuredBlueCount + configuredRedCount + 2U
             + spawnSettings->restrictedZones.items.size())
         return false;
-
-    if (generalizedRedTeam)
+    auto const objectiveId = entities.at("blue_objective")->uniqid();
+    for (std::size_t index = 0U; index < configuredRedCount; ++index)
     {
-        auto const objective = entities.find("blue_objective");
-        if (objective == entities.end())
+        auto& red = *entities.at("red_" + std::to_string(index + 1U));
+        if (!red.has<ppo::model::sSNAState>())
             return false;
-        for (std::size_t index = 0U; index < configuredRedCount; ++index)
-        {
-            auto const red = entities.find(
-                "red_" + std::to_string(index + 1U));
-            if (red == entities.end()
-                || !red->second->has<ppo::model::sSNAState>())
-                return false;
-            auto [sna] = red->second->get<ppo::model::sSNAState>();
-            sna.m_target = objective->second->uniqid();
-        }
-    }
-    else
-    {
-        for (auto const& item : scenario.m_entities)
-        {
-            auto source = entities.find(item.m_name);
-            if (source == entities.end() || item.m_target.empty())
-                continue;
-            auto target = entities.find(item.m_target);
-            if (target == entities.end()
-                || !source->second->has<ppo::model::sSNAState>())
-                return false;
-            auto [sna] = source->second->get<ppo::model::sSNAState>();
-            sna.m_target = target->second->uniqid();
-        }
+        auto [sna] = red.get<ppo::model::sSNAState>();
+        sna.m_target = objectiveId;
     }
 
     auto* registry = entities.begin()->second->registry();
@@ -504,11 +362,7 @@ bool LoadScenario(std::filesystem::path const& path,
             for (std::size_t index = 0U; index < configuredBlueCount; ++index)
                 guards[index] = entities.at(
                     "blue_" + std::to_string(index + 1U)).get();
-            std::size_t const redCount = generalizedRedTeam
-                ? configuredRedCount
-                : (patrolOnly ? 0U
-                    : 1U + static_cast<std::size_t>(
-                        entities.count("red_2") != 0U));
+            std::size_t const redCount = configuredRedCount;
             for (std::size_t index = 0U; index < redCount; ++index)
                 attackers[index] = entities.at(
                     "red_" + std::to_string(index + 1U)).get();
