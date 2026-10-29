@@ -206,6 +206,9 @@ LoadPatrolTrainingSettings(std::filesystem::path const& settings)
     result.rolloutSteps = training.at("rolloutSteps").get<std::size_t>();
     result.maxUpdates = training.at("maxUpdates").get<std::uint64_t>();
     result.checkpointEvery = training.at("checkpointEvery").get<std::uint64_t>();
+    // Old configurations retain their original save/evaluation cadence.
+    result.saveEveryUpdates = training.value(
+        "saveEveryUpdates", result.checkpointEvery);
     result.seed = training.at("seed").get<std::uint32_t>();
     result.evaluation.episodes = evaluation.at("episodes").get<std::size_t>();
     result.evaluation.maxSteps = evaluation.at("maxSteps").get<std::size_t>();
