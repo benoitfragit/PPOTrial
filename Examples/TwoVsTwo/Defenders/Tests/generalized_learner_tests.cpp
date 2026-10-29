@@ -35,10 +35,12 @@ blue::GeneralizedPatrolLearner::Observations MakeObservations(
     return observations;
 }
 
-bool Same(blue::GeneralizedPatrolLearner::CentralCriticObservation const& lhs,
+bool SamePooledContext(blue::GeneralizedPatrolLearner::CentralCriticObservation const& lhs,
           blue::GeneralizedPatrolLearner::CentralCriticObservation const& rhs)
 {
-    for (std::size_t feature = 0U; feature < lhs.size(); ++feature)
+    for (std::size_t feature = blue::GeneralizedCriticLayout::MeanOffset;
+         feature < blue::GeneralizedCriticLayout::LivingFractionOffset;
+         ++feature)
         if (std::abs(lhs[feature] - rhs[feature]) > 1.0e-6F)
             return false;
     return true;
@@ -171,6 +173,10 @@ int main()
 {
     if (!VerifyTeamSize({1U, 0U}))
         return 1;
+    if (!VerifyTeamSize({3U, 1U}))
+        return 14;
+    if (!VerifyTeamSize({4U, 4U}))
+        return 15;
     if (!VerifyTeamSize({2U, 2U}))
         return 2;
     if (!VerifyTeamSize({9U, 10U}))
@@ -186,12 +192,16 @@ int main()
     (void)first.ChooseActions(observations, availability);
     std::swap(observations[0], observations[1]);
     (void)permuted.ChooseActions(observations, availability);
-    if (!Same(first.LastCentralCriticObservation(),
+    if (!SamePooledContext(first.LastCentralCriticObservation(),
               permuted.LastCentralCriticObservation()))
     {
         return 4;
     }
 
+    auto const& ownFirst = first.LastAgentCriticObservation(0U);
+    auto const& ownSecond = first.LastAgentCriticObservation(1U);
+    if (std::abs(ownFirst[0] - ownSecond[0]) < 1.0e-5F)
+        return 13;
     blue::GeneralizedPatrolLearner::Rewards rewards{};
     rewards[0] = 1.F;
     rewards[1] = 1.F;
