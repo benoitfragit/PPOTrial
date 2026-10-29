@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <limits>
 
-using namespace ppo::examples::twovstwo::defenders;
+using namespace ppo::examples::bluedefense::defenders;
 
 namespace {
 

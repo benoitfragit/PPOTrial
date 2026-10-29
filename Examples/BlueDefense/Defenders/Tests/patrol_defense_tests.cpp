@@ -5,7 +5,7 @@
 #include <array>
 #include <cstddef>
 
-namespace blue = ppo::examples::twovstwo::defenders;
+namespace blue = ppo::examples::bluedefense::defenders;
 
 namespace {
 
@@ -14,7 +14,7 @@ namespace {
  * @return True when the failure, terminal flag, and role rewards stay consistent.
  *
  * The ECS bridge maps a destroyed blue entity to an unavailable guard. Zone
- * attribution itself is covered by the TwoVsTwo collision-rule tests; this
+ * attribution itself is covered by the BlueDefense collision-rule tests; this
  * test owns the downstream MAPPO contract without duplicating world rules.
  */
 bool RestrictedZoneDestructionTerminatesMappo()
