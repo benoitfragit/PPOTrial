@@ -415,7 +415,9 @@ void GeneralizedPatrolMappoAgent::ChooseAction()
     catch (std::exception const& error)
     {
         std::cerr << "[BLUE MAPPO V8] Action failed: " << error.what() << '\n';
-        finished_ = true;
+        if (learner_)
+            learner_->AbortPendingStep();
+        hasBeforeStep_ = false;
         episodeDone_ = true;
     }
 }
@@ -592,8 +594,9 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             evaluation_.Cancel();
             RestoreTrainingInitializer();
         }
+        if (learner_)
+            learner_->AbortPendingStep();
         hasBeforeStep_ = false;
-        finished_ = true;
         episodeDone_ = true;
         return true;
     }

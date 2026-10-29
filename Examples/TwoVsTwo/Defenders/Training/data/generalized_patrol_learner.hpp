@@ -282,6 +282,20 @@ public:
     std::size_t RolloutSize() const noexcept { return rolloutTeamSteps_; }
     /** @brief Returns whether Observe still owes feedback for one actor batch. */
     bool HasPendingAction() const noexcept { return pending_; }
+
+    /**
+     * @brief Discards an action batch that cannot receive valid feedback.
+     *
+     * Collected transitions and optimizer state are preserved. This recovery
+     * path is reserved for a rejected ECS step so the next episode can resume
+     * the partial rollout instead of leaving the learner permanently pending.
+     */
+    void AbortPendingStep() noexcept
+    {
+        pending_ = false;
+        pendingAvailability_.fill(false);
+    }
+
     /** @brief Returns completed generalized policy updates. */
     std::uint64_t StepCount() const noexcept { return completedUpdates_; }
     /** @brief Returns sampled decentralized actions in the latest team step. */

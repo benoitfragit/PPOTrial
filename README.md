@@ -74,6 +74,10 @@ Sa zone SNA sans
 pour les rouges. Son domaine angulaire de destruction vaut 3,147198 rad, contre
 1,047198 rad pour les rouges. Les rouges restent inchangés.
 
+Une transition ECS invalide annule uniquement l'action MAPPO concernée et
+réinitialise l'épisode. Le rollout déjà collecté est conservé : une erreur
+transitoire ne peut plus figer définitivement l'entraînement.
+
 ## Configuration bleue
 
 Les réglages sont dans
