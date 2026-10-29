@@ -9,7 +9,7 @@ add_library(PPOExampleCatalog STATIC
 target_compile_features(PPOExampleCatalog PUBLIC cxx_std_17)
 target_include_directories(PPOExampleCatalog PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/data")
-target_link_libraries(PPOExampleCatalog PUBLIC PPOAirspaceExample PPOTwoVsTwoExample)
+target_link_libraries(PPOExampleCatalog PUBLIC PPOAirspaceExample PPOBlueDefenseExample)
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     # Contract-only test: no LibTorch, renderer or concrete example needed.
