@@ -79,7 +79,9 @@ ExpectedTeam ScenarioTeam(std::filesystem::path const& scenarioPath)
     return result;
 }
 
-Sample Capture(ppo::model::Environment const& environment)
+Sample Capture(
+    ppo::model::Environment const& environment,
+    ppo::examples::twovstwo::defenders::Parameters const& parameters)
 {
     Sample result{};
     environment.ReadSnapshot([&](entt::registry const& world) {
@@ -109,9 +111,9 @@ Sample Capture(ppo::model::Environment const& environment)
                         world.try_get<ppo::model::sFlightModelState>(entity);
                     auto const* sna = world.try_get<ppo::model::sSNAState>(entity);
                     result.alignedBluePlatform[i] = flight && sna
-                        && std::abs(flight->m_maxAcc - 600.F) < 1e-3F
-                        && std::abs(flight->m_maxAccRot - 0.70000059604645F) < 1e-5F
-                        && std::abs(flight->m_maxSpeed - 700.F) < 1e-3F
+                        && std::abs(flight->m_maxAcc - parameters.maxAcceleration) < 1e-3F
+                        && std::abs(flight->m_maxAccRot - parameters.maxRotationRate) < 1e-5F
+                        && std::abs(flight->m_maxSpeed - parameters.maxSpeed) < 1e-3F
                         && std::abs(flight->m_minSpeed - 10.F) < 1e-3F
                         && std::abs(sna->m_maxNoescapeZone - 5000.F) < 1e-3F
                         && std::abs(sna->m_noescapezone - 5000.F) < 1e-3F
@@ -205,10 +207,9 @@ int main(int argc, char** argv)
         return 3;
     auto const patrolParameters =
         ppo::examples::twovstwo::defenders::LoadPatrolParameters(RESOURCE_PATH);
-    if (std::abs(patrolParameters.cruiseSpeed - 700.F) >= 1e-3F
-        || std::abs(patrolParameters.maxAcceleration - 600.F) >= 1e-3F
-        || std::abs(patrolParameters.maxRotationRate - 0.70000059604645F) >= 1e-5F
-        || std::abs(patrolParameters.maxSpeed - 700.F) >= 1e-3F)
+    // Verify the real configured platform contract, not stale numerical
+    // constants from earlier defender_car.json revisions.
+    if (!ppo::examples::twovstwo::defenders::Valid(patrolParameters))
         return 5;
     auto const definition = combat
         ? ppo::examples::twovstwo::Definition()
@@ -233,7 +234,7 @@ int main(int argc, char** argv)
         for (unsigned attempt = 0U; attempt < 12000U; ++attempt)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            auto const current = Capture(environment);
+            auto const current = Capture(environment, patrolParameters);
             evaluationSeen |= current.evaluationInProgress;
             evaluationCompleted |= current.completedEvaluations > 0U;
             if (evaluationCompleted)
@@ -250,7 +251,7 @@ int main(int argc, char** argv)
     for (unsigned attempt = 0U; attempt < 300U; ++attempt)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        auto const current = Capture(environment);
+        auto const current = Capture(environment, patrolParameters);
         if (!foundFirst && Ready(current, expected))
         {
             first = current;
