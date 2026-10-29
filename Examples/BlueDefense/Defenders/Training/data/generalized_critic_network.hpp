@@ -5,7 +5,7 @@
 
 #include <rl_tools/nn_models/mlp/network.h>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /**
  * @brief Dedicated 256-wide value network for generalized P/N training.
@@ -25,4 +25,4 @@ struct GeneralizedCriticConfig final
     using Network = rlt::nn_models::mlp::NeuralNetworkAdam<Spec>;
 };
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders
