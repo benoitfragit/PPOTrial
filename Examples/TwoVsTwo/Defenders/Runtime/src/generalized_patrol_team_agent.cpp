@@ -184,9 +184,28 @@ GeneralizedPatrolMappoAgent::GeneralizedPatrolMappoAgent(
         counts_, training_.seed, training_.rolloutSteps);
     if (std::filesystem::exists(trainingCheckpoint_))
     {
-        learner_->LoadTrainingState(trainingCheckpoint_);
-        std::cout << "[BLUE MAPPO V8] Resumed generalized v5 state at update "
-                  << learner_->StepCount() << ".\n";
+        // A V5 value function cannot be resumed with the new per-blue input.
+        // Keep an untouched backup and migrate only the compatible actor.
+        std::ifstream probe{trainingCheckpoint_};
+        std::string magic;
+        probe >> magic;
+        if (magic == "BLUE_TEAM_TRAINING_V5")
+        {
+            auto backup = trainingCheckpoint_;
+            backup += ".v5.bak";
+            if (!std::filesystem::exists(backup))
+                std::filesystem::copy_file(trainingCheckpoint_, backup);
+            learner_->MigrateV5TrainingActor(trainingCheckpoint_);
+            std::cout << "[BLUE MAPPO V8] Migrated V5 actor; old state backed up "
+                      << backup.string()
+                      << ". New 256-wide critic and optimizers start fresh.\n";
+        }
+        else
+        {
+            learner_->LoadTrainingState(trainingCheckpoint_);
+            std::cout << "[BLUE MAPPO V8] Resumed V6 generalized training update "
+                      << learner_->StepCount() << ".\n";
+        }
     }
     else if (std::filesystem::exists(actorCheckpoint_))
     {
