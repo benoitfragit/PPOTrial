@@ -1,12 +1,12 @@
 #pragma once
 #include "airspaceworldrules.hpp"
 
-namespace ppo::examples::twovstwo {
+namespace ppo::examples::bluedefense {
 
 /**
- * @brief TwoVsTwo outcome, collision, sensor, and snapshot rules.
+ * @brief BlueDefense outcome, collision, sensor, and snapshot rules.
  */
-class TwoVsTwoWorldRules final : public ppo::model::IWorldRules {
+class BlueDefenseWorldRules final : public ppo::model::IWorldRules {
 public:
     void BeforeStep(ppo::model::WorldEntities& entities) override;
     void Resolve(ppo::model::WorldEntities& entities) override;
