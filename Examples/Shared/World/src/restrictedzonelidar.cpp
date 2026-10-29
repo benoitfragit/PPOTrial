@@ -35,7 +35,9 @@ UpdatePseudoLidarHit(float hitDistance,
                      float& bestRange,
                      float& bestDistance) noexcept
 {
-    if (hitDistance < 0.F)
+    // A saturated restricted-zone ray must stay saturated, including its
+    // physical distance, when subsequent zones or boundaries are inspected.
+    if (hitDistance < 0.F || bestRange <= 0.F)
         return;
 
     float const normalizedDistance = NormalizeRange(hitDistance, dangerRadius);
@@ -209,12 +211,12 @@ void BuildFriendlyMobilePseudoLidar(
             if (delta < 0.F)
                 continue;
             float const root = std::sqrt(delta);
-            // Preserve saturated lethal-zone readings (range=distance=0).
+            // Never replace a saturated restricted-zone hit with a
+            // nonlethal teammate reading, even after boundary processing.
             // Otherwise choose by real metres, not by different per-obstacle
             // normalization references: a nearer blue must not be hidden by
             // the normalized distance to a much farther world boundary.
-            if (nearestCollisionRanges[ray] == 0.F
-                && nearestCollisionDistances[ray] == 0.F)
+            if (nearestCollisionRanges[ray] == 0.F)
             {
                 continue;
             }

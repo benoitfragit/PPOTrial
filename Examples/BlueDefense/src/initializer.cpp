@@ -259,6 +259,7 @@ void InitializeEntity(ppo::model::Entity& entity)
     config.next = (config.next + 1U) % config.count;
     if (config.next == 0U)
         ppo::model::UpdateRestrictedZonePseudoLidars(
-            *registry, ppo::model::eEntitySide::Friend);
+            *registry, ppo::model::eEntitySide::Friend,
+            defenders::Parameters{}.cautionDistance);
 }
 } // namespace ppo::examples::bluedefense

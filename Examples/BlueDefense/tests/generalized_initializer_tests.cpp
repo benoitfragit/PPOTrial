@@ -47,11 +47,33 @@ bool MaximumBlueTeamFitsWorld()
             &registry, eEntitySide::Friend, eEntityType::Mobile);
         blue->add<sEntityMetadata>(sEntityMetadata{
             "blue_" + std::to_string(index + 1U), "defender_car"});
+        blue->add<sPseudoLidarState>();
         blues.push_back(std::move(blue));
     }
 
-    for (auto const& blue : blues)
-        bluedefense::InitializeEntity(*blue);
+    // Insert one nearby friendly after blue_1 has been initialized but
+    // before the final initializer refreshes every blue's first LiDAR.
+    for (std::size_t index = 0U; index < blues.size(); ++index)
+    {
+        bluedefense::InitializeEntity(*blues[index]);
+        if (index == 0U)
+        {
+            auto const [state] = blues[0]->get<sEntityState>();
+            auto const nearbyId = registry.create();
+            auto& nearby = registry.emplace<sEntityState>(nearbyId);
+            nearby.m_type = eEntityType::Mobile;
+            nearby.m_side = eEntitySide::Friend;
+            nearby.m_x = state.m_x + 2500.F * std::cos(state.m_rotation);
+            nearby.m_y = state.m_y + 2500.F * std::sin(state.m_rotation);
+        }
+    }
+
+    auto const [sensor] = blues[0]->get<sPseudoLidarState>();
+    if (std::abs(sensor.m_nearestCollisionDistances[30U] - 500.F) > 1.F
+        || std::abs(sensor.m_nearestCollisionRanges[30U] - 0.2F) > 0.001F)
+    {
+        return false;
+    }
 
     if (!context.patrolGeometryReady
         || context.patrolGeometrySamplingFailed

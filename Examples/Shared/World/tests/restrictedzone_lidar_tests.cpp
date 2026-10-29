@@ -4,6 +4,7 @@
 #include "entitytypes.hpp"
 
 #include <cmath>
+#include <cstddef>
 #include <stdexcept>
 #include <type_traits>
 
@@ -179,5 +180,24 @@ int main()
     UpdateRestrictedZonePseudoLidars(registry, eEntitySide::Friend);
     RequireNear(published.m_nearestCollisionDistances[30], 200.F,
                 "Disabled dynamic sensing must retain world-boundary hits");
+
+    // A danger-zone penetration must stay saturated when both the world
+    // boundary and a teammate safety envelope overlap the same ray.
+    zoneState.m_side = eEntitySide::Hostile;
+    zoneState.m_destroyed = false;
+    zoneState.m_x = ownState.m_x;
+    zoneState.m_y = ownState.m_y;
+    zoneSense.m_noescapezone = 10.F;
+    farBlue.m_destroyed = false;
+    farBlue.m_x = ownState.m_x + 30.F;
+    farBlue.m_y = ownState.m_y;
+    UpdateRestrictedZonePseudoLidars(registry, eEntitySide::Friend, 20.F);
+    for (std::size_t ray = 0U; ray < kRestrictedZoneLidarBins; ++ray)
+    {
+        RequireNear(published.m_nearestCollisionRanges[ray], 0.F,
+                    "A teammate hid a penetrated restricted-zone alert");
+        RequireNear(published.m_nearestCollisionDistances[ray], 0.F,
+                    "A boundary changed a saturated restricted-zone distance");
+    }
     return 0;
 }
