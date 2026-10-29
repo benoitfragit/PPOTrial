@@ -107,26 +107,20 @@ void InitializeEntity(ppo::model::Entity& entity)
         config.patrolGeometryReady = true;
         BuildPatrolTrackOverlay(config);
         p.geometry = *geometry;
-        if (config.spawnSettings.blueTeam)
+        if (!config.spawnSettings.blueTeam)
         {
-            config.blueTeamRoles = defenders::BlueTeamRoles::Sample(
-                config.spawnSettings.blueTeam->activeCount, config.rng);
-            if (!config.blueTeamRoles)
-            {
-                config.patrolGeometrySamplingFailed = true;
-                return;
-            }
-            config.leaderGuardIndex =
-                config.blueTeamRoles->LeaderPhysicalIndex();
+            config.patrolGeometrySamplingFailed = true;
+            return;
         }
-        else
+        config.blueTeamRoles = defenders::BlueTeamRoles::Sample(
+            config.spawnSettings.blueTeam->activeCount, config.rng);
+        if (!config.blueTeamRoles)
         {
-            // Keep the archived Bernoulli draw byte-for-byte isolated from the
-            // generalized uniform leader sampler.
-            config.blueTeamRoles.reset();
-            config.leaderGuardIndex =
-                std::bernoulli_distribution{0.5}(config.rng) ? 0U : 1U;
+            config.patrolGeometrySamplingFailed = true;
+            return;
         }
+        config.leaderGuardIndex =
+            config.blueTeamRoles->LeaderPhysicalIndex();
         ++config.episodeIndex;
         std::clog << "[BLUE PATROL] Episode " << config.episodeIndex
                   << " racetrack length=" << geometry->length
@@ -138,7 +132,7 @@ void InitializeEntity(ppo::model::Entity& entity)
                   << geometry->separationAngle << "rad direction="
                   << (geometry->direction > 0 ? "counter-clockwise" : "clockwise")
                   << " leader="
-                  << (config.spawnSettings.blueTeam ? "blue_" : "blue_guard_")
+                  << "blue_"
                   << config.leaderGuardIndex + 1U
                   << '\n';
         if (config.evaluationOverride)
@@ -146,8 +140,7 @@ void InitializeEntity(ppo::model::Entity& entity)
             config.side = config.evaluationSide < 0 ? -1 : 1;
             config.arclength = defenders::PositiveModulo(
                 config.evaluationArclength, defenders::CircuitLength(p));
-            if (config.spawnSettings.blueTeam
-                && !defenders::GeneralizedFormationFitsBounds(
+            if (!defenders::GeneralizedFormationFitsBounds(
                     config.patrolGeometry, config.patrolGeometrySettings,
                     constraints,
                     config.spawnSettings.blueTeam->activeCount,
@@ -166,52 +159,26 @@ void InitializeEntity(ppo::model::Entity& entity)
         else
         {
             config.side = std::bernoulli_distribution{0.5}(config.rng) ? 1 : -1;
-            if (config.spawnSettings.blueTeam)
+            auto const arclength =
+                defenders::SampleGeneralizedFormationArclength(
+                    config.patrolGeometry, config.patrolGeometrySettings,
+                    constraints, config.spawnSettings.blueTeam->activeCount,
+                    config.rng);
+            if (!arclength)
             {
-                auto const arclength =
-                    defenders::SampleGeneralizedFormationArclength(
-                        config.patrolGeometry,
-                        config.patrolGeometrySettings, constraints,
-                        config.spawnSettings.blueTeam->activeCount,
-                        config.rng);
-                if (!arclength)
-                {
-                    config.patrolGeometryReady = false;
-                    config.patrolGeometrySamplingFailed = true;
-                    config.patrolTrackOverlay =
-                        ppo::model::sPatrolTrackOverlay{};
-                    config.episodeLayout.reset();
-                    std::cerr << "[BLUE PATROL] Cannot sample a bounded "
-                              << config.spawnSettings.blueTeam->activeCount
-                              << "-mobile formation after "
-                              << config.patrolGeometrySettings
-                                     .maximumSamplingAttempts
-                              << " attempts.\n";
-                    return;
-                }
-                config.arclength = *arclength;
+                config.patrolGeometryReady = false;
+                config.patrolGeometrySamplingFailed = true;
+                config.patrolTrackOverlay =
+                    ppo::model::sPatrolTrackOverlay{};
+                config.episodeLayout.reset();
+                std::cerr << "[BLUE PATROL] Cannot sample bounded formation.\n";
+                return;
             }
-            else
-            {
-                // Preserve the archived 2v2 RNG sequence exactly when the
-                // optional generalized blue-team configuration is absent.
-                config.arclength = std::uniform_real_distribution<float>{
-                    0.F, defenders::CircuitLength(p)}(config.rng);
-            }
-        }
-        auto spawnSettings = config.spawnSettings;
-        if (config.evaluationOverride && !spawnSettings.redTeam)
-        {
-            // Evaluations retain their deterministic immediate 2v1/2v2 cases;
-            // stochastic activation schedules belong to training only. This
-            // branch is intentionally limited to the archived contract.
-            spawnSettings.threatCurriculum.enabled = false;
-            spawnSettings.red2DestroyedProbability =
-                config.evaluationSecondAttackerDestroyed ? 1.F : 0.F;
+            config.arclength = *arclength;
         }
         std::string spawnDiagnostic;
         config.episodeLayout = GenerateEpisodeSpawnLayout(
-            config.side, spawnSettings, bounds, config.rng,
+            config.side, config.spawnSettings, bounds, config.rng,
             &spawnDiagnostic);
         if (!config.episodeLayout)
         {
@@ -229,54 +196,39 @@ void InitializeEntity(ppo::model::Entity& entity)
     auto const bounds = WorldBounds{0.5F * world.m_maxNorth, 0.5F * world.m_maxEast};
     auto pose = MakeSpawn(metadata.m_name, *config.episodeLayout,
                           bounds, config.rng);
-    auto const generalizedBlue = config.spawnSettings.blueTeam
-        ? GeneralizedBlueIndex(metadata.m_name) : std::nullopt;
+    auto const generalizedBlue = GeneralizedBlueIndex(metadata.m_name);
     if (generalizedBlue
         && *generalizedBlue < config.spawnSettings.blueTeam->activeCount)
     {
         pose = Spawn{};
     }
-    bool const legacyBlue = metadata.m_name == "blue_guard_1"
-        || metadata.m_name == "blue_guard_2";
-    if (pose && (legacyBlue || generalizedBlue.has_value()))
+    if (pose && generalizedBlue)
     {
-        defenders::Parameters p{};
-        p.halfNorth = bounds.halfNorth;
-        p.halfEast = bounds.halfEast;
-        p.cruiseSpeed = config.patrolCruiseSpeed;
-        p.maxRotationRate = config.patrolMaximumRotationRate;
-        p.collisionDistance = config.patrolCollisionDistance;
-        p.geometry = config.patrolGeometry;
-        std::size_t const guardIndex = generalizedBlue.value_or(
-            metadata.m_name == "blue_guard_1" ? 0U : 1U);
+        defenders::Parameters parameters{};
+        parameters.halfNorth = bounds.halfNorth;
+        parameters.halfEast = bounds.halfEast;
+        parameters.cruiseSpeed = config.patrolCruiseSpeed;
+        parameters.maxRotationRate = config.patrolMaximumRotationRate;
+        parameters.collisionDistance = config.patrolCollisionDistance;
+        parameters.geometry = config.patrolGeometry;
         auto const leader = defenders::PatrolReference(
-            p, config.side, config.arclength);
+            parameters, config.side, config.arclength);
         defenders::Reference reference = leader;
-        if (generalizedBlue)
+        auto const assignment =
+            config.blueTeamRoles->Assignment(*generalizedBlue);
+        if (!assignment)
+            return;
+        if (assignment->role == defenders::BlueRole::Teammate)
         {
-            if (!config.blueTeamRoles)
-                return;
-            auto const assignment = config.blueTeamRoles->Assignment(guardIndex);
-            if (!assignment)
-                return;
-            if (assignment->role == defenders::BlueRole::Teammate)
-            {
-                defenders::PatrolCurvePose const leaderPose{
-                    leader.north, leader.east, leader.heading,
-                    config.arclength, leader.phase, 0.F};
-                defenders::PatrolCurvePose const formationPose =
-                    defenders::EvaluateFormationPose(
-                        p.geometry, leaderPose,
-                        assignment->formationSlot);
-                reference.north = formationPose.north;
-                reference.east = formationPose.east;
-            }
+            defenders::PatrolCurvePose const leaderPose{
+                leader.north, leader.east, leader.heading,
+                config.arclength, leader.phase, 0.F};
+            auto const formationPose = defenders::EvaluateFormationPose(
+                parameters.geometry, leaderPose, assignment->formationSlot);
+            reference.north = formationPose.north;
+            reference.east = formationPose.east;
         }
-        else if (config.RoleForGuard(guardIndex) != 0U)
-        {
-            reference = defenders::WingmanReference(p, leader);
-        }
-        auto const mobile = defenders::OnReference(p, reference);
+        auto const mobile = defenders::OnReference(parameters, reference);
         pose->north = mobile.north;
         pose->east = mobile.east;
         pose->heading = mobile.heading;
