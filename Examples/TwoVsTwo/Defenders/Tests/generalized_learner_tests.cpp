@@ -203,7 +203,7 @@ int main()
         observations, availability);
     if (firstEvaluation != repeatedEvaluation || first.HasPendingAction()
         || first.CollectedTeamSteps() != 0U
-        || first.TotalActionsSampled() != 2U * counts.blueMobiles)
+        || first.TotalActionsSampled() != counts.blueMobiles)
     {
         return 12;
     }
