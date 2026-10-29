@@ -2,18 +2,6 @@
   "formatVersion": 2,
   "agentProfiles": "../AgentProfiles.json",
   "entities": {
-    "blue_guard_1": {
-      "type": "Mobile",
-      "platform": "defender_car",
-      "side": "Friend",
-      "agents": []
-    },
-    "blue_guard_2": {
-      "type": "Mobile",
-      "platform": "defender_car",
-      "side": "Friend",
-      "agents": []
-    },
     "blue_objective": {
       "type": "Objective",
       "platform": "",
@@ -26,20 +14,13 @@
       "side": "Friend",
       "agents": []
     },
-    "red_1": {
+    "blue_template": {
       "type": "Mobile",
-      "platform": "attacker_car",
-      "side": "Hostile",
-      "target": "blue_objective",
-      "agents": [
-        {
-          "profile": "RLMission",
-          "mode": "production"
-        }
-      ]
+      "platform": "defender_car",
+      "side": "Friend",
+      "agents": []
     },
-    "red_2": {
-      "enabled": true,
+    "red_template": {
       "type": "Mobile",
       "platform": "attacker_car",
       "side": "Hostile",
