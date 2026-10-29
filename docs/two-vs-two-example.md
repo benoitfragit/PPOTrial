@@ -66,39 +66,33 @@ Ces valeurs sont configurables dans `Scenarios/TwoVsTwo.json` :
   "minimumEastFraction": 0.15,
   "maximumEastFraction": 0.65
 },
-"threatCurriculum": {
-  "enabled": true,
-  "noThreatProbability": 0.075,
-  "singleThreatProbability": 0.15,
-  "delayedFirstThreatProbability": 0.0,
-  "delayedSecondThreatProbability": 0.0,
-  "minimumFirstDelaySteps": 256,
-  "maximumFirstDelaySteps": 768,
-  "minimumSecondDelaySteps": 384,
-  "maximumSecondDelaySteps": 1024
+"redTeam": {
+  "activeCount": 4,
+  "maximumPlacementAttempts": 1024,
+  "delayedActivationProbability": 0.25,
+  "minimumActivationDelaySteps": 256,
+  "maximumActivationDelaySteps": 768
 },
 "restrictedZones": {
   "enabled": true,
   "items": [{
-    "id": "red_restricted_zone_north",
+    "id": "red_restricted_zone_inside_north",
     "type": "RestrictedZone",
     "platform": "restrictedzone",
     "side": "Hostile",
     "enabled": true,
     "enabledProbability": 0.75,
+    "oppositeObjective": true,
     "randomPosition": {
-      "north": { "minimum": 14000.0, "maximum": 20500.0 },
-      "east": { "minimum": -25000.0, "maximum": 25000.0 }
+      "north": { "minimum": 4000.0, "maximum": 16000.0 },
+      "east": { "minimum": 8000.0, "maximum": 22000.0 }
     }
   }]
 }
 ~~~
 
-La probabilité restante après `noThreatProbability` et
-`singleThreatProbability` correspond aux épisodes à deux menaces. Le premier
-intervalle est le délai absolu de la première activation ; le second est un
-délai supplémentaire appliqué à la seconde. Les évaluations désactivent ce
-tirage et conservent des cas immédiats 2v1/2v2 reproductibles.
+Chaque rouge possède son propre RLMission. La probabilité de délai est appliquée
+indépendamment, sans changer ses observations ni ses poids.
 
 Un angle de 0° place un rouge directement en face de l'objectif ; -90° et
 +90° correspondent aux deux côtés. Les positions des zones sont en mètres.
@@ -106,6 +100,10 @@ Chaque entrée exige exactement `fixedPosition` (`north`, `east`) ou
 `randomPosition` (plages `minimum`/`maximum` nord et est). Les deux modes, les
 champs inconnus, les doublons d'identifiant et les probabilités hors de `[0,1]`
 sont refusés avec un diagnostic.
+Avec `oppositeObjective=true`, la valeur est est une magnitude automatiquement
+miroir du côté opposé à l'objectif. Le profil livré définit deux zones dans les
+limites du monde et deux zones hors limites ; l'objectif ne peut donc jamais
+être couvert par une zone rouge.
 
 `restrictedZoneSpawn` reste le contrat historique de la zone bleue
 `blue_restricted_zone`. Il n'est pas remplacé par la nouvelle collection :

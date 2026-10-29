@@ -324,6 +324,7 @@ int main()
                     {"side", "Hostile"},
                     {"enabled", false},
                     {"enabledProbability", 0.0},
+                    {"oppositeObjective", true},
                     {"randomPosition", {
                         {"north", {{"minimum", -4.0}, {"maximum", 5.0}}},
                         {"east", {{"minimum", 6.0}, {"maximum", 7.0}}}}}
@@ -339,6 +340,7 @@ int main()
         || !parsed->threatCurriculum.enabled
         || parsed->threatCurriculum.firstDelaySteps[0] != 256U
         || parsed->restrictedZones.items.size() != 2U
+        || !parsed->restrictedZones.items[1].oppositeObjective
         || ParseSpawnSettings(nlohmann::json::object()))
         return 17;
     std::mt19937 parsedRng{11U};
@@ -348,8 +350,15 @@ int main()
         || parsedLayout->restrictedZones[0].spawn.north != 10.F
         || parsedLayout->restrictedZones[0].spawn.east != 20.F
         || parsedLayout->restrictedZones[0].spawn.destroyed
-        || !parsedLayout->restrictedZones[1].spawn.destroyed)
+        || !parsedLayout->restrictedZones[1].spawn.destroyed
+        || parsedLayout->restrictedZones[1].spawn.east >= 0.F)
         return 25;
+    std::mt19937 mirroredZoneRng{11U};
+    auto const mirroredZoneLayout = GenerateEpisodeSpawnLayout(
+        -1, *parsed, world, mirroredZoneRng);
+    if (!mirroredZoneLayout
+        || mirroredZoneLayout->restrictedZones[1].spawn.east <= 0.F)
+        return 42;
     auto globallyDisabled = *parsed;
     globallyDisabled.restrictedZones.enabled = false;
     std::mt19937 disabledRng{11U};
@@ -360,6 +369,45 @@ int main()
             disabledLayout->restrictedZones.end(),
             [](auto const& zone) { return !zone.spawn.destroyed; }))
         return 26;
+
+    auto boundedZoneSettings = settings;
+    using ZoneMode = ppo::examples::twovstwo::RestrictedZonePositionMode;
+    boundedZoneSettings.restrictedZones.items = {
+        {"inside_north", "restrictedzone", true, 1.F, ZoneMode::Random,
+         {}, {4000.F, 16000.F}, {8000.F, 22000.F}, true},
+        {"inside_south", "restrictedzone", true, 1.F, ZoneMode::Random,
+         {}, {-16000.F, -4000.F}, {8000.F, 22000.F}, true},
+        {"outside_north", "restrictedzone", true, 1.F, ZoneMode::Random,
+         {}, {3000.F, 15000.F}, {38000.F, 45000.F}, true},
+        {"outside_south", "restrictedzone", true, 1.F, ZoneMode::Random,
+         {}, {-15000.F, -3000.F}, {38000.F, 45000.F}, true}};
+    for (int side : {-1, 1})
+        for (unsigned seed = 0U; seed < 64U; ++seed)
+        {
+            std::mt19937 boundedZoneRng{seed};
+            auto const boundedZones = GenerateEpisodeSpawnLayout(
+                side, boundedZoneSettings, world, boundedZoneRng);
+            if (!boundedZones || boundedZones->restrictedZones.size() != 4U)
+                return 43;
+            std::size_t insideCount = 0U;
+            std::size_t outsideCount = 0U;
+            float const objectiveEast = static_cast<float>(side)
+                * 0.92F * world.halfEast;
+            for (auto const& zone : boundedZones->restrictedZones)
+            {
+                Spawn const& spawn = zone.spawn;
+                bool const inside = std::abs(spawn.north) < world.halfNorth
+                    && std::abs(spawn.east) < world.halfEast;
+                insideCount += inside ? 1U : 0U;
+                outsideCount += inside ? 0U : 1U;
+                if (spawn.east * static_cast<float>(side) >= 0.F
+                    || std::hypot(spawn.north,
+                                  spawn.east - objectiveEast) <= 7000.F)
+                    return 44;
+            }
+            if (insideCount != 2U || outsideCount != 2U)
+                return 45;
+        }
 
     auto invalidZoneJson = json;
     invalidZoneJson["restrictedZones"]["items"][0]["randomPosition"] = {

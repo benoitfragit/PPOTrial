@@ -396,6 +396,8 @@ std::optional<EpisodeSpawnLayout> GenerateEpisodeSpawnLayout(
             north = Sample(zone.randomNorth, rng);
             east = Sample(zone.randomEast, rng);
         }
+        if (zone.oppositeObjective)
+            east = -normalizedSide * std::abs(east);
         result.restrictedZones.push_back(
             RestrictedZoneEpisodeSpawn{zone.id,
                 Spawn{north, east, 0.F, 0.F, !active}});

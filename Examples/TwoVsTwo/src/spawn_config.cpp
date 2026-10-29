@@ -100,7 +100,8 @@ bool ParseRestrictedZones(nlohmann::json const& settings,
         if (!item.is_object()
             || !OnlyKeys(item,
                 {"id", "type", "platform", "side", "enabled",
-                 "enabledProbability", "fixedPosition", "randomPosition"},
+                 "enabledProbability", "oppositeObjective",
+                 "fixedPosition", "randomPosition"},
                 path, diagnostic))
             return false;
         auto const id = item.find("id");
@@ -109,6 +110,7 @@ bool ParseRestrictedZones(nlohmann::json const& settings,
         auto const side = item.find("side");
         auto const enabled = item.find("enabled");
         auto const probability = Number(item, "enabledProbability");
+        auto const oppositeObjective = item.find("oppositeObjective");
         if (id == item.end() || !id->is_string() || id->get<std::string>().empty()
             || type == item.end() || !type->is_string()
             || type->get<std::string>() != "RestrictedZone"
@@ -117,6 +119,8 @@ bool ParseRestrictedZones(nlohmann::json const& settings,
             || side == item.end() || !side->is_string()
             || side->get<std::string>() != "Hostile"
             || enabled == item.end() || !enabled->is_boolean()
+            || (oppositeObjective != item.end()
+                && !oppositeObjective->is_boolean())
             || !probability || *probability < 0.F || *probability > 1.F)
         {
             diagnostic = path
@@ -144,6 +148,8 @@ bool ParseRestrictedZones(nlohmann::json const& settings,
         zone.platform = platform->get<std::string>();
         zone.enabled = enabled->get<bool>();
         zone.enabledProbability = *probability;
+        zone.oppositeObjective = oppositeObjective != item.end()
+            && oppositeObjective->get<bool>();
         if (fixed != item.end())
         {
             if (!fixed->is_object()

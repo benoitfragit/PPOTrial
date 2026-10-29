@@ -260,6 +260,8 @@ booléen `enabled` désactive toutes les zones. Chaque élément fournit un `id`
 unique, `type="RestrictedZone"`, un `platform`, `side="Hostile"`, `enabled`,
 une `enabledProbability` dans `[0,1]` et exactement un mode de position :
 `fixedPosition` ou `randomPosition`. Toutes les coordonnées sont en mètres.
+`oppositeObjective=true` interprète la coordonnée est comme une magnitude et
+la reflète automatiquement du côté opposé à l'objectif à chaque reset.
 Le mode aléatoire exige deux intervalles nord/est ordonnés et finis. Un champ
 inconnu dans ce contrat, un doublon, un mode ambigu ou une valeur invalide fait
 échouer explicitement le chargement. Une même graine reproduit positions et
@@ -277,8 +279,9 @@ remplacée par la pénétration déterministe exacte pour les bleus.
 
 `Scenarios/TwoVsTwo.json` fournit l'unique entrée MAPPO du sélecteur. Le
 runtime bleu généralisé est sélectionné par `blueTeam`; `redTeam` dimensionne
-ses adversaires. Le profil livré utilise P=2/N=4 et quatre zones hostiles
-aléatoires réparties au nord, au sud, à l'ouest et à l'est :
+ses adversaires. Le profil livré utilise P=2/N=4, deux zones hostiles dont le
+centre reste dans le monde et deux dont le centre reste à l'extérieur. Toutes
+sont reflétées du côté opposé à l'objectif :
 
 ~~~json
 "blueTeam": {

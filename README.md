@@ -45,8 +45,9 @@ deux côtés de la zone défendue. Ils commencent entre 1,05 et 1,35 fois la
 limite du monde et à au moins 10 km l'un de l'autre. La limite est un repère de
 zone, pas un mur : RLMission continue normalement à piloter les rouges vers
 l'objectif. Les zones rouges sont décrites par la collection typée
-`twoVsTwo.restrictedZones`. Quatre secteurs nord, sud, ouest et est sont tirés
-une fois par épisode avec leur probabilité d'activation, puis vus
+`twoVsTwo.restrictedZones`. Deux centres sont tirés à l'intérieur du monde et
+deux à l'extérieur, toujours du côté opposé à l'objectif ; au plus deux zones
+actives appartiennent donc à chaque région. Elles sont vues
 par les 61 rayons pseudo-LiDAR des bleus. Le chemin RLMission des rouges, son
 observation 152 et ses checkpoints restent inchangés. La zone bleue historique
 `blue_restricted_zone`, son tirage `restrictedZoneSpawn` et sa règle SNA sont

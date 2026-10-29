@@ -154,6 +154,11 @@ living opposing `Mobile` and `Objective` entities are track candidates; zones
 remain visible through the dedicated SAM/pseudo-LiDAR path. The RLMission
 152-value layout is unchanged.
 
+Each hostile zone may set `oppositeObjective=true`. Its configured east value
+is then treated as a magnitude and mirrored onto the side opposite the current
+objective. The shipped scenario uses two inside-world and two outside-world
+centres, so the objective cannot be covered by a hostile zone.
+
 The blue `Platforms/Mobile/defender_car.json` profile also exposes
 `FlightModel.CruiseSpeed`. The TwoVsTwo loader uses it consistently for the
 initial state and patrol reference. The remaining `FlightModel` and `SNA`

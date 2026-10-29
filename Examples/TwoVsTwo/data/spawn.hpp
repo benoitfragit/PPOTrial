@@ -119,6 +119,8 @@ struct RestrictedZoneSpawnSettings final
     SpawnRange randomNorth{};
     /** @brief Random east interval in metres. */
     SpawnRange randomEast{};
+    /** @brief Mirrors the east magnitude onto the side opposite the objective. */
+    bool oppositeObjective{false};
 };
 
 /** @brief Global switch and bounded-at-load collection of hostile zones. */
