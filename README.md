@@ -107,3 +107,4 @@ une campagne de validation distincte.
 - [Architecture MAPPO à effectifs variables](docs/mappo-variable-teams.md)
 - [Configuration JSON et paramètres](docs/configuration-guide.md)
 - [Instructions pour les contributions](AGENTS.md)
+- [Entraînement distant MAPPO Windows Release / GitHub Actions](docs/remote-mappo-training.md)
