@@ -85,6 +85,8 @@ struct Environment::Impl
     std::unique_ptr<IWorldRules>     m_worldRules{};
     Entity::InitializerSystem       m_entityInitializer{ nullptr };
 
+    // Set only while the worker is stopped; immutable during Run().
+    bool                            m_headless          { false };
     std::atomic<bool>               m_running           { false };  
     eEnvironmentState               m_state             { eEnvironmentState::INIT };
     eEnvironmentState               m_prevState         { m_state };
@@ -234,6 +236,7 @@ void
 Environment::Impl::Run(void)
 {  
     bool reinitrequest{ false };
+    std::size_t headlessStepCount{0U};
 
     while (m_running.load(std::memory_order_acquire))
     {
@@ -285,9 +288,12 @@ Environment::Impl::Run(void)
         if (m_worldRules != nullptr)
             m_worldRules->AfterStep();
 
-        CreateSnapshot();
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        // Snapshot publication and the desktop throttle are expensive in
+        // long-running training. Keep the desktop path exactly unchanged.
+        if (!m_headless || ++headlessStepCount % 256U == 0U)
+            CreateSnapshot();
+        if (!m_headless)
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
 
     m_prevState = eEnvironmentState::STOPPED;
@@ -467,6 +473,14 @@ Environment::Play(void)
 /**
 * @brief Requests the paused state.
 */
+void
+Environment::SetHeadlessMode(bool const enabled)
+{
+    if (p_impl != nullptr
+        && !p_impl->m_running.load(std::memory_order_acquire))
+        p_impl->m_headless = enabled;
+}
+
 void
 Environment::Pause(void)
 {
