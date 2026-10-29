@@ -1,0 +1,150 @@
+name: MAPPO training (Windows Release)
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "MAPPO scenario to train"
+        required: true
+        type: choice
+        default: blue-defense
+        options:
+          - blue-defense
+          - blue-patrol
+      max_seconds:
+        description: "Training time budget in seconds (leave headroom for build/artifacts)"
+        required: true
+        type: number
+        default: 14400
+      save_every_updates:
+        description: "Save actor and complete training state every N PPO updates"
+        required: true
+        type: number
+        default: 1
+      resume_run_id:
+        description: "Optional previous training workflow run ID whose checkpoint artifact will be restored"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mappo-training-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: windows-2022
+    timeout-minutes: 350
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout exact training sources
+        uses: actions/checkout@v4
+
+      - name: Restore previous training checkpoint (optional)
+        if: ${{ inputs.resume_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: blue-mappo-checkpoints
+          run-id: ${{ inputs.resume_run_id }}
+          github-token: ${{ github.token }}
+          path: resources/model/BluePatrol
+
+      - name: Verify existing RLMission production model
+        run: |
+          $red = "resources/model/RLMission/prod/model.pt"
+          if (-not (Test-Path -LiteralPath $red -PathType Leaf)) {
+            throw "The unchanged red production RLMission model is missing: $red"
+          }
+
+      - name: Configure MSVC 2022 x64 Release and LibTorch 2.9.1 CPU Release
+        run: |
+          cmake -S . -B build/release -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_CONFIGURATION_TYPES=Release `
+            -DPPO_LIBTORCH_VARIANT=Release `
+            -DPPO_BUILD_DESKTOP=ON `
+            -DPPO_BUILD_CORE_TESTS=OFF `
+            -DPPO_BUILD_CHECKPOINT_TESTS=OFF
+          if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
+
+      - name: Compile PPO.exe Release
+        run: |
+          cmake --build build/release --config Release --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Release build failed" }
+
+      - name: Check scenario startup without graphics
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+        run: |
+          $exe = "build/release/Main/Release/PPO.exe"
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+            throw "Missing Release executable: $exe"
+          }
+          & $exe --example $env:SCENARIO --check-example
+          if ($LASTEXITCODE -ne 0) { throw "Scenario bootstrap failed" }
+
+      - name: Configure independent frequent checkpoints
+        env:
+          SAVE_EVERY_UPDATES: ${{ inputs.save_every_updates }}
+        run: |
+          $value = 0L
+          if (-not [long]::TryParse($env:SAVE_EVERY_UPDATES, [ref]$value) -or $value -lt 1) {
+            throw "save_every_updates must be a positive integer"
+          }
+          $path = "resources/settings/Training/BluePatrol.json"
+          $config = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+          $config.training | Add-Member -MemberType NoteProperty -Name saveEveryUpdates -Value $value -Force
+          $config | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $path -Encoding utf8
+          Write-Host "Checkpoint every $value update(s); evaluation cadence unchanged."
+          # Must be newer than any restored checkpoint to reject no-op training.
+          New-Item -Path ".mappo-training-start" -ItemType File -Force | Out-Null
+          (Get-Item ".mappo-training-start").LastWriteTimeUtc = [DateTime]::UtcNow
+
+      - name: Train MAPPO without GUI
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+          MAX_SECONDS: ${{ inputs.max_seconds }}
+        run: |
+          $seconds = 0
+          if (-not [int]::TryParse($env:MAX_SECONDS, [ref]$seconds) -or $seconds -lt 1 -or $seconds -gt 18000) {
+            throw "max_seconds must be an integer in [1, 18000]"
+          }
+          & build/release/Main/Release/PPO.exe --no-gui --example $env:SCENARIO --max-seconds $seconds
+          if ($LASTEXITCODE -ne 0) { throw "Headless training exited with code $LASTEXITCODE" }
+
+      - name: Validate fresh resumable checkpoint
+        run: |
+          $root = "resources/model/BluePatrol/latest"
+          $training = Join-Path $root "blue_patrol_generalized_training_v5.txt"
+          $actor = Join-Path $root "blue_patrol_generalized_v8.txt"
+          $start = (Get-Item ".mappo-training-start").LastWriteTimeUtc
+          foreach ($path in @($training, $actor)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Checkpoint missing: $path" }
+            $file = Get-Item -LiteralPath $path
+            if ($file.Length -le 0 -or $file.LastWriteTimeUtc -le $start) {
+              throw "No new valid-size checkpoint saved during this run: $path"
+            }
+            Write-Host "$path : $($file.Length) bytes"
+          }
+          $header = Get-Content -LiteralPath $training -TotalCount 1
+          if (-not $header.StartsWith("BLUE_TEAM_TRAINING_V6 ")) {
+            throw "Unexpected full-training checkpoint format"
+          }
+
+      - name: Publish Blue MAPPO checkpoints (including after training failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blue-mappo-checkpoints
+          path: |
+            resources/model/BluePatrol/latest/blue_patrol_generalized_v8.txt
+            resources/model/BluePatrol/latest/blue_patrol_generalized_training_v5.txt
+            resources/model/BluePatrol/prod/blue_patrol_generalized_v8.txt
+            resources/model/BluePatrol/prod/blue_patrol_generalized_v8.txt.score
+          if-no-files-found: warn
+          retention-days: 30
