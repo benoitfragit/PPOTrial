@@ -197,19 +197,21 @@ int main()
     auto crossed = crossing;
     crossed.guards[0].north = 800.F;
     crossed.guards[1].north = -800.F;
-    if (blue::GuardSeparation(crossed) <= p.collisionDistance
+    if (std::hypot(crossed.guards[0].north - crossed.guards[1].north,
+                    crossed.guards[0].east - crossed.guards[1].east)
+            <= p.collisionDistance
         || !blue::GuardsCollided(p, crossing, crossed))
         return 16;
 
-    // The shaping penalty applies before contact, without ending the episode.
-    auto far = state, close = state;
-    far.guards[0].north = 0.F; far.guards[0].east = 0.F;
-    far.guards[1].north = 2500.F; far.guards[1].east = 0.F;
-    close.guards[0].north = 0.F; close.guards[0].east = 0.F;
-    close.guards[1].north = 1500.F; close.guards[1].east = 0.F;
-    if (!(blue::SeparationPenalty(p, far) == 0.F
-          && blue::SeparationPenalty(p, close) < 0.F
-          && blue::SeparationPenalty(p, close) > -0.5F))
+    // The removed separation shaping must not penalize flight within the
+    // 2 km LiDAR caution radius; only physical contact is terminal.
+    auto close = state;
+    close.guards[0].north = 0.F;
+    close.guards[0].east = 0.F;
+    close.guards[1].north = 1500.F;
+    close.guards[1].east = 0.F;
+    if (blue::GuardsCollided(p, close, close)
+        || blue::FormationReward(p, close, false) != 0.F)
         return 17;
 
     // A patrol-only horizon is a normal finite-horizon completion and must not
