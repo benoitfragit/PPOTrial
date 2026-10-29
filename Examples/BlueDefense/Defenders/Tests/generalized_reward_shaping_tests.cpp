@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstddef>
 
-namespace patrol = ppo::examples::twovstwo::defenders;
+namespace patrol = ppo::examples::bluedefense::defenders;
 
 namespace {
 bool Close(float const a, float const b, float const tolerance = 1.e-4F)
