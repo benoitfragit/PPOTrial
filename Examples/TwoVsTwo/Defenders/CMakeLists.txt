@@ -117,6 +117,8 @@ add_library(TwoVsTwoPatrolRuntime STATIC
     Runtime/src/patrol_team_agent.cpp
     Training/data/attention_actor.hpp
     Training/data/generalized_attention_actor.hpp
+    Training/data/generalized_critic_observation.hpp
+    Training/data/generalized_critic_network.hpp
     Training/data/generalized_checkpoint.hpp
     Training/data/generalized_patrol_learner.hpp
     Training/data/generalized_training_checkpoint.hpp
