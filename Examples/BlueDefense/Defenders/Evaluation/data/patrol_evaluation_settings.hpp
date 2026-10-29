@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /**
  * @brief Deterministic test-suite settings shared by patrol evaluators.
@@ -55,4 +55,4 @@ inline bool Valid(PatrolEvaluationSettings const& settings) noexcept
         && settings.restrictedRadius >= 0.F;
 }
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

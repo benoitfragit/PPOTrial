@@ -12,7 +12,7 @@
 #include <limits>
 #include <stdexcept>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /** @brief Reproducible reset parameters for one generalized evaluation case. */
 struct GeneralizedEvaluationCase final
@@ -216,4 +216,4 @@ private:
     bool hasLatest_{};
 };
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders
