@@ -1,74 +1,74 @@
-add_library(TwoVsTwoDefenderBackend INTERFACE)
-target_compile_features(TwoVsTwoDefenderBackend INTERFACE cxx_std_17)
-target_include_directories(TwoVsTwoDefenderBackend INTERFACE
+add_library(BlueDefenseDefenderBackend INTERFACE)
+target_compile_features(BlueDefenseDefenderBackend INTERFACE cxx_std_17)
+target_include_directories(BlueDefenseDefenderBackend INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/Core/data"
     "${CMAKE_CURRENT_SOURCE_DIR}/Evaluation/data"
     "${CMAKE_CURRENT_SOURCE_DIR}/Runtime/data"
     "${CMAKE_CURRENT_SOURCE_DIR}/Training/data")
-target_link_libraries(TwoVsTwoDefenderBackend INTERFACE RLtools::Core GenericRLCore)
+target_link_libraries(BlueDefenseDefenderBackend INTERFACE RLtools::Core GenericRLCore)
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
-    add_executable(TwoVsTwoTeamDomainTests Tests/team_domain_tests.cpp)
-    target_link_libraries(TwoVsTwoTeamDomainTests PRIVATE
-        TwoVsTwoDefenderBackend)
-    add_test(NAME TwoVsTwoTeamDomainTests COMMAND TwoVsTwoTeamDomainTests)
-    add_executable(TwoVsTwoTeamDynamicsTests Tests/team_dynamics_tests.cpp)
-    target_link_libraries(TwoVsTwoTeamDynamicsTests PRIVATE
-        TwoVsTwoDefenderBackend)
-    add_test(NAME TwoVsTwoTeamDynamicsTests COMMAND TwoVsTwoTeamDynamicsTests)
-    add_executable(TwoVsTwoGeneralizedRewardEvaluationTests
+    add_executable(BlueDefenseTeamDomainTests Tests/team_domain_tests.cpp)
+    target_link_libraries(BlueDefenseTeamDomainTests PRIVATE
+        BlueDefenseDefenderBackend)
+    add_test(NAME BlueDefenseTeamDomainTests COMMAND BlueDefenseTeamDomainTests)
+    add_executable(BlueDefenseTeamDynamicsTests Tests/team_dynamics_tests.cpp)
+    target_link_libraries(BlueDefenseTeamDynamicsTests PRIVATE
+        BlueDefenseDefenderBackend)
+    add_test(NAME BlueDefenseTeamDynamicsTests COMMAND BlueDefenseTeamDynamicsTests)
+    add_executable(BlueDefenseGeneralizedRewardEvaluationTests
         Tests/generalized_reward_evaluation_tests.cpp)
-    target_link_libraries(TwoVsTwoGeneralizedRewardEvaluationTests PRIVATE
-        TwoVsTwoDefenderBackend)
-    target_compile_features(TwoVsTwoGeneralizedRewardEvaluationTests PRIVATE
+    target_link_libraries(BlueDefenseGeneralizedRewardEvaluationTests PRIVATE
+        BlueDefenseDefenderBackend)
+    target_compile_features(BlueDefenseGeneralizedRewardEvaluationTests PRIVATE
         cxx_std_17)
-    add_test(NAME TwoVsTwoGeneralizedRewardEvaluationTests
-        COMMAND TwoVsTwoGeneralizedRewardEvaluationTests)
-    add_executable(TwoVsTwoPatrolDefenseTests Tests/patrol_defense_tests.cpp)
-    target_link_libraries(TwoVsTwoPatrolDefenseTests PRIVATE
-        TwoVsTwoDefenderBackend)
-    add_test(NAME TwoVsTwoPatrolDefenseTests COMMAND TwoVsTwoPatrolDefenseTests)
-    add_executable(TwoVsTwoPatrolGeometryTests Tests/patrol_geometry_tests.cpp)
-    target_link_libraries(TwoVsTwoPatrolGeometryTests PRIVATE
-        TwoVsTwoDefenderBackend nlohmann_json::nlohmann_json)
-    add_test(NAME TwoVsTwoPatrolGeometryTests COMMAND TwoVsTwoPatrolGeometryTests)
-    add_executable(TwoVsTwoAttentionTests Tests/attention_tests.cpp)
-    target_link_libraries(TwoVsTwoAttentionTests PRIVATE TwoVsTwoDefenderBackend)
-    target_compile_features(TwoVsTwoAttentionTests PRIVATE cxx_std_17)
-    add_test(NAME TwoVsTwoAttentionTests COMMAND TwoVsTwoAttentionTests)
-    add_executable(TwoVsTwoGeneralizedActorTests
+    add_test(NAME BlueDefenseGeneralizedRewardEvaluationTests
+        COMMAND BlueDefenseGeneralizedRewardEvaluationTests)
+    add_executable(BlueDefensePatrolDefenseTests Tests/patrol_defense_tests.cpp)
+    target_link_libraries(BlueDefensePatrolDefenseTests PRIVATE
+        BlueDefenseDefenderBackend)
+    add_test(NAME BlueDefensePatrolDefenseTests COMMAND BlueDefensePatrolDefenseTests)
+    add_executable(BlueDefensePatrolGeometryTests Tests/patrol_geometry_tests.cpp)
+    target_link_libraries(BlueDefensePatrolGeometryTests PRIVATE
+        BlueDefenseDefenderBackend nlohmann_json::nlohmann_json)
+    add_test(NAME BlueDefensePatrolGeometryTests COMMAND BlueDefensePatrolGeometryTests)
+    add_executable(BlueDefenseAttentionTests Tests/attention_tests.cpp)
+    target_link_libraries(BlueDefenseAttentionTests PRIVATE BlueDefenseDefenderBackend)
+    target_compile_features(BlueDefenseAttentionTests PRIVATE cxx_std_17)
+    add_test(NAME BlueDefenseAttentionTests COMMAND BlueDefenseAttentionTests)
+    add_executable(BlueDefenseGeneralizedActorTests
         Tests/generalized_actor_tests.cpp)
-    target_link_libraries(TwoVsTwoGeneralizedActorTests PRIVATE
-        TwoVsTwoDefenderBackend)
-    target_compile_features(TwoVsTwoGeneralizedActorTests PRIVATE cxx_std_17)
-    add_test(NAME TwoVsTwoGeneralizedActorTests
-        COMMAND TwoVsTwoGeneralizedActorTests)
-    add_executable(TwoVsTwoGeneralizedRuntimeStateTests
+    target_link_libraries(BlueDefenseGeneralizedActorTests PRIVATE
+        BlueDefenseDefenderBackend)
+    target_compile_features(BlueDefenseGeneralizedActorTests PRIVATE cxx_std_17)
+    add_test(NAME BlueDefenseGeneralizedActorTests
+        COMMAND BlueDefenseGeneralizedActorTests)
+    add_executable(BlueDefenseGeneralizedRuntimeStateTests
         Tests/generalized_runtime_state_tests.cpp)
-    add_executable(TwoVsTwoGeneralizedRewardShapingTests
+    add_executable(BlueDefenseGeneralizedRewardShapingTests
         Tests/generalized_reward_shaping_tests.cpp)
-    target_link_libraries(TwoVsTwoGeneralizedRewardShapingTests PRIVATE
-        TwoVsTwoDefenderBackend)
-    target_compile_features(TwoVsTwoGeneralizedRewardShapingTests PRIVATE cxx_std_17)
-    add_test(NAME TwoVsTwoGeneralizedRewardShapingTests
-        COMMAND TwoVsTwoGeneralizedRewardShapingTests)
-    target_link_libraries(TwoVsTwoGeneralizedRuntimeStateTests PRIVATE
-        TwoVsTwoDefenderBackend)
-    target_compile_features(TwoVsTwoGeneralizedRuntimeStateTests PRIVATE
+    target_link_libraries(BlueDefenseGeneralizedRewardShapingTests PRIVATE
+        BlueDefenseDefenderBackend)
+    target_compile_features(BlueDefenseGeneralizedRewardShapingTests PRIVATE cxx_std_17)
+    add_test(NAME BlueDefenseGeneralizedRewardShapingTests
+        COMMAND BlueDefenseGeneralizedRewardShapingTests)
+    target_link_libraries(BlueDefenseGeneralizedRuntimeStateTests PRIVATE
+        BlueDefenseDefenderBackend)
+    target_compile_features(BlueDefenseGeneralizedRuntimeStateTests PRIVATE
         cxx_std_17)
-    add_test(NAME TwoVsTwoGeneralizedRuntimeStateTests
-        COMMAND TwoVsTwoGeneralizedRuntimeStateTests)
-    add_executable(TwoVsTwoGeneralizedLearnerTests
+    add_test(NAME BlueDefenseGeneralizedRuntimeStateTests
+        COMMAND BlueDefenseGeneralizedRuntimeStateTests)
+    add_executable(BlueDefenseGeneralizedLearnerTests
         Tests/generalized_learner_tests.cpp)
-    target_link_libraries(TwoVsTwoGeneralizedLearnerTests PRIVATE
-        TwoVsTwoDefenderBackend)
-    target_compile_features(TwoVsTwoGeneralizedLearnerTests PRIVATE cxx_std_17)
-    add_test(NAME TwoVsTwoGeneralizedLearnerTests
-        COMMAND TwoVsTwoGeneralizedLearnerTests)
+    target_link_libraries(BlueDefenseGeneralizedLearnerTests PRIVATE
+        BlueDefenseDefenderBackend)
+    target_compile_features(BlueDefenseGeneralizedLearnerTests PRIVATE cxx_std_17)
+    add_test(NAME BlueDefenseGeneralizedLearnerTests
+        COMMAND BlueDefenseGeneralizedLearnerTests)
 endif()
 
 # One generalized MAPPO IAgent owns all P blue ECS mobiles per step.
-add_library(TwoVsTwoPatrolRuntime STATIC
+add_library(BlueDefensePatrolRuntime STATIC
     Core/data/blue_team_roles.hpp
     Core/data/generalized_observation.hpp
     Core/data/generalized_cooperative_reward.hpp
@@ -94,10 +94,10 @@ add_library(TwoVsTwoPatrolRuntime STATIC
     Training/data/patrol_checkpoint.hpp
     Training/data/patrol_training_checkpoint.hpp
     Training/data/patrol_training_settings.hpp)
-target_compile_features(TwoVsTwoPatrolRuntime PUBLIC cxx_std_17)
-target_include_directories(TwoVsTwoPatrolRuntime PRIVATE
+target_compile_features(BlueDefensePatrolRuntime PUBLIC cxx_std_17)
+target_include_directories(BlueDefensePatrolRuntime PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../data")
-target_link_libraries(TwoVsTwoPatrolRuntime PUBLIC
-    TwoVsTwoDefenderBackend GenericEnv SharedWorld LegacyAgentAPI
+target_link_libraries(BlueDefensePatrolRuntime PUBLIC
+    BlueDefenseDefenderBackend GenericEnv SharedWorld LegacyAgentAPI
     nlohmann_json::nlohmann_json)
 
