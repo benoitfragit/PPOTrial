@@ -839,6 +839,7 @@ GeneralizedPatrolMappoAgent::GetSnapshot() const noexcept
     snapshot.m_common.m_version = GeneralizedObservationLayout::Version;
     snapshot.m_common.m_done = episodeDone_;
     snapshot.m_common.m_training = !finished_ && !evaluation_.InProgress();
+    snapshot.m_common.m_completedTrainingUpdates = learner_ ? learner_->StepCount() : 0U;
     if (learner_)
     {
         snapshot.m_common.m_step = static_cast<long long>(
