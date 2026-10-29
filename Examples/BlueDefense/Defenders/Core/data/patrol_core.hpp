@@ -14,7 +14,7 @@
 #include <random>
 #include <type_traits>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 constexpr float kPi = 3.14159265358979323846F;
 constexpr float kTwoPi = 2.F * kPi;
@@ -1060,4 +1060,4 @@ inline float TeamReward(Parameters const& p, State const& before,
     return TeamRewardBreakdown(p, before, actions, after).Total(weights, 100.F);
 }
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

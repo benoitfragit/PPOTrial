@@ -2,10 +2,10 @@
 
 #include <cstddef>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /**
- * @brief Static capacities of the generalized TwoVsTwo team domain.
+ * @brief Static capacities of the generalized BlueDefense team domain.
  *
  * Runtime team sizes are validated against this single contract before they
  * are used to index fixed-capacity storage required by RLTools.
@@ -50,4 +50,4 @@ constexpr bool Valid(ActiveTeamCounts const counts) noexcept
         && counts.redMobiles <= TeamCapacity::MaximumRedMobiles;
 }
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders
