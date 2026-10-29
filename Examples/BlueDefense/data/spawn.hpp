@@ -28,7 +28,7 @@ struct SpawnRange final
     float maximum{};
 };
 
-/** @brief Configurable geometry of the two red attacker spawns. */
+/** @brief Configurable geometric bounds for all N hostile attacker spawns. */
 struct RedSpawnSettings final
 {
     /** @brief Scale relative to the regular rectangular world boundary. */
@@ -44,9 +44,8 @@ struct RedSpawnSettings final
  *
  * `activeCount` is the number of red entities created for the episode. Each
  * entry receives either activation step zero (initially active) or one finite
- * positive delayed activation step. No generalized entry uses
- * EpisodeSpawnLayout::NeverActivate; that sentinel remains available only to
- * the archived 2-vs-2 curriculum.
+ * positive delayed activation step. Scheduling never silently deactivates
+ * one of the N configured red attackers permanently.
  */
 struct RedTeamSpawnSettings final
 {
@@ -65,10 +64,9 @@ struct RedTeamSpawnSettings final
 /**
  * @brief Additive generalized blue-team contract.
  *
- * The optional contract only selects the bounded number of blue mobiles.
- * Leader identity and formation slots are sampled reproducibly by the episode
- * initializer. When the contract is absent, the archived two-guard reset and
- * its random-number sequence remain unchanged.
+ * The validated contract selects the bounded number of blue mobiles.
+ * Leader identity and formation slots are sampled reproducibly by the
+ * episode initializer.
  */
 struct BlueTeamSpawnSettings final
 {
@@ -132,51 +130,18 @@ struct RestrictedZonesSpawnSettings final
     std::vector<RestrictedZoneSpawnSettings> items{};
 };
 
-/**
- * @brief Training-only distribution of hostile activation schedules.
- *
- * The two count probabilities leave the remaining probability to two
- * attackers. Delays are expressed in ECS team steps and do not alter either
- * red RLMission controller.
- */
-struct ThreatCurriculumSettings final
-{
-    /** @brief Enables variable threat counts and delayed activations. */
-    bool enabled{false};
-    /** @brief Probability that an episode contains no hostile activation. */
-    float noThreatProbability{0.10F};
-    /** @brief Probability that exactly one hostile is activated. */
-    float singleThreatProbability{0.30F};
-    /** @brief Probability that the first hostile activation is delayed. */
-    float delayedFirstThreatProbability{0.20F};
-    /** @brief Probability that a second hostile appears after the first. */
-    float delayedSecondThreatProbability{0.45F};
-    /** @brief Inclusive delay range for the first hostile. */
-    std::array<std::size_t, 2> firstDelaySteps{256U, 768U};
-    /** @brief Inclusive additional delay range for the second hostile. */
-    std::array<std::size_t, 2> secondDelaySteps{384U, 1024U};
-};
-
 /** @brief Complete scenario-level spawn configuration. */
 struct SpawnSettings final
 {
-    /** @brief Probability that red_2 starts destroyed while remaining present. */
-    float red2DestroyedProbability{0.15F};
     RedSpawnSettings red{};
-    /**
-     * @brief Generalized team contract, or null for archived 2-vs-2 sampling.
-     *
-     * Absence deliberately selects the historical RNG sequence, two red
-     * names and threat curriculum without changing their checkpoint path.
-     */
+    /** @brief Mandatory generalized red-team configuration, validated at load. */
     std::optional<RedTeamSpawnSettings> redTeam{};
-    /** @brief Generalized blue contract, or null for archived two-guard reset. */
+    /** @brief Mandatory generalized blue-team configuration, validated at load. */
     std::optional<BlueTeamSpawnSettings> blueTeam{};
     /** @brief Historical blue zone retained unchanged for red RLMission. */
     FriendlyRestrictedZoneSpawnSettings friendlyRestrictedZone{};
     /** @brief Independently configured hostile restricted zones. */
     RestrictedZonesSpawnSettings restrictedZones{};
-    ThreatCurriculumSettings threatCurriculum{};
 };
 
 /** @brief Initial physical state of one scenario entity. */
@@ -201,12 +166,12 @@ struct RestrictedZoneEpisodeSpawn final
 /**
  * @brief Coordinated random layout generated exactly once per episode.
  *
- * Keeping both attackers in one layout makes their minimum separation a hard
- * invariant instead of an incidental result of independent entity resets.
+ * Keeping all N attackers in one layout makes their minimum separation a
+ * hard invariant instead of an incidental result of independent resets.
  */
 struct EpisodeSpawnLayout final
 {
-    /** @brief Sentinel used for an attacker disabled for the whole episode. */
+    /** @brief Sentinel outside the permitted finite activation-step range. */
     static constexpr std::size_t NeverActivate =
         std::numeric_limits<std::size_t>::max();
 
@@ -217,8 +182,8 @@ struct EpisodeSpawnLayout final
      * @brief Activation step for each red pose at the same index.
      *
      * At reset, `red[i].destroyed` is true exactly when this value is not
-     * zero. Generalized teams use finite delayed steps; NeverActivate is
-     * reserved for the archived curriculum.
+     * zero. All live-team activation steps are finite; no permanent deactivation
+     * is represented in an active P/N scenario.
      */
     std::vector<std::size_t> redActivationSteps{};
     /** @brief Historical friendly zone pose used by the red pseudo-LiDAR. */
