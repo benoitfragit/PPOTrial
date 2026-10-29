@@ -11,7 +11,7 @@ No alternate runtime loaders or old-file path fallbacks exist.
 | --- | --- |
 | Logical agent profiles | AgentProfiles.json |
 | Main scenario | Scenarios/Playground.json |
-| Blue MAPPO scenarios | Scenarios/BluePatrol.json, Scenarios/TwoVsTwo.json, Scenarios/PvsN.json |
+| Blue MAPPO scenarios | Scenarios/BluePatrol.json, Scenarios/TwoVsTwo.json |
 | Evaluation scenarios | Scenarios/Evaluation/RLMission.json, Scenarios/Evaluation/RLSNA.json |
 | PPO/MAPPO settings | Training/RLMission.json, Training/RLSNA.json, Training/BluePatrol.json |
 | Platform parameters | Platforms/Mobile/*.json, Platforms/RestrictedZone/*.json |
@@ -21,11 +21,11 @@ No alternate runtime loaders or old-file path fallbacks exist.
 | Display state | Renderer.json |
 
 The `twoVsTwo` object in `Scenarios/TwoVsTwo.json` owns the episode spawn
-curriculum. `redSpawn` defines the front/lateral bearing interval, the scale
+contract. `redSpawn` defines the front/lateral bearing interval, the scale
 beyond the rectangular world boundary and the guaranteed attacker separation.
-`threatCurriculum` selects zero, one or two training threats and optional
-first/second activation delays in ECS team steps. Deterministic evaluation
-cases disable this stochastic schedule and keep immediate 2v1/2v2 layouts.
+The shipped `redTeam` instantiates four production RLMission attackers, with
+seeded optional activation delays. The legacy `threatCurriculum` remains
+available only when `redTeam` is absent.
 `restrictedZoneSpawn` defines a side-relative position box and an activation
 probability. World limits remain sensor and reward references; they do not stop
 the production RLMission attackers.
@@ -33,7 +33,8 @@ the production RLMission attackers.
 `blueTeam` and `redTeam` are optional additive contracts. `blueTeam` selects
 the generalized blue runtime and `redTeam` sizes its opponents. If both are
 absent, the archived 2v2 entities, RNG order, curriculum and v7/v4 checkpoint
-path are unchanged. `Scenarios/PvsN.json` enables them explicitly:
+path are unchanged. `Scenarios/TwoVsTwo.json` enables `blueTeam` and `redTeam`
+directly so the existing GUI entry owns the generalized MAPPO runtime:
 
 ~~~json
 "blueTeam": {"activeCount": 5},
@@ -221,6 +222,6 @@ Release CTest suites before release.
 For fast development iterations, build and run only `TwoVsTwoSpawnTests`,
 `TwoVsTwoTeamDomainTests`, `TwoVsTwoTeamDynamicsTests`, the
 `TwoVsTwoGeneralized*` tests, and `MissionTrackSelectionTests`. The runtime and
-embedded-learner smoke tests plus `PPO.exe --example p-vs-n --check-example`
+embedded-learner smoke tests plus `PPO.exe --example two-vs-two --check-example`
 are the heavier final pre-merge validation, not a requirement after each core
 edit.

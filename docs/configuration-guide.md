@@ -16,8 +16,7 @@ resources/settings/
 ├── Scenarios/
 │   ├── BluePatrol.json           curriculum de patrouille sans rouge
 │   ├── Playground.json           composition du monde principal
-│   ├── TwoVsTwo.json             défense MAPPO 2v2 historique
-│   ├── PvsN.json                 défense MAPPO P/N généralisée
+│   ├── TwoVsTwo.json             défense MAPPO P/N (P=2, N=4 par défaut)
 │   └── Evaluation/
 │       ├── RLMission.json        composition et limites des tests
 │       └── RLSNA.json
@@ -230,17 +229,18 @@ de défense décrivent uniquement le risque : ils ne masquent aucune piste rouge
 et ne distribuent aucune cible. Les anciennes temporisations d'affectation
 n'existent plus.
 
-### Géométrie aléatoire du 2v2
+### Géométrie aléatoire P/N
 
 `Scenarios/TwoVsTwo.json` règle les conditions initiales sans modifier les
 agents RLMission. `redSpawn.minimumWorldScale` et `maximumWorldScale` placent
 les attaquants au-delà de la limite rectangulaire ; cette limite reste un
 repère et ne bloque pas leur mouvement. Les angles, exprimés en degrés, sont
 mesurés autour de la direction opposée à l'objectif : 0° est frontal et ±90°
-est latéral. `minimumSeparation` est une distance en mètres garantie entre les
-deux rouges.
+est latéral. `minimumSeparation` est une distance en mètres garantie entre
+toutes les paires de rouges.
 
-`threatCurriculum` ne modifie que les épisodes d'entraînement 2v2. Les champs
+Le contrat historique `threatCurriculum` reste accepté lorsque `redTeam` est
+absent. Les champs
 `noThreatProbability` et `singleThreatProbability` définissent respectivement
 les cas à zéro et une menace ; la probabilité restante crée deux menaces.
 `delayedFirstThreatProbability` applique la plage `minimumFirstDelaySteps` à
@@ -275,9 +275,10 @@ remplacée par la pénétration déterministe exacte pour les bleus.
 
 ### Équipes P/N optionnelles
 
-`Scenarios/PvsN.json` fournit une entrée de catalogue séparée `p-vs-n`. Le
+`Scenarios/TwoVsTwo.json` fournit l'unique entrée MAPPO du sélecteur. Le
 runtime bleu généralisé est sélectionné par `blueTeam`; `redTeam` dimensionne
-ses adversaires. Les deux blocs restent optionnels dans l'objet `twoVsTwo` :
+ses adversaires. Le profil livré utilise P=2/N=4 et quatre zones hostiles
+aléatoires réparties au nord, au sud, à l'ouest et à l'est :
 
 ~~~json
 "blueTeam": {
@@ -298,7 +299,7 @@ checkpoints v7/v4. `blueTeam.activeCount` est obligatoire lorsqu'un bloc bleu
 est présent et doit être un entier dans `[1,9]`. `redTeam.activeCount` doit être
 dans `[0,10]`. Les champs inconnus sont refusés.
 
-Le scénario P/N utilise un unique `Mobile/Friend` sans agent comme template
+Le scénario TwoVsTwo utilise un unique `Mobile/Friend` sans agent comme template
 pour `blue_1..blue_P`, et un unique `Mobile/Hostile` avec exactement un profil
 `RLMission/production` comme template de `red_1..red_N`. Le contrôleur bleu
 partagé est `GeneralizedPatrolMappoAgent`; chaque rouge conserve son propre
@@ -348,7 +349,7 @@ cmake --build out/build/x64-Debug --config Debug --target TwoVsTwoSpawnTests Two
 ctest --test-dir out/build/x64-Debug -C Debug -R "^(TwoVsTwoSpawnTests|TwoVsTwoTeamDomainTests|TwoVsTwoTeamDynamicsTests|TwoVsTwoGeneralized.*|MissionTrackSelectionTests)$" --output-on-failure
 ~~~
 
-Les smoke tests runtime/learner et `PPO.exe --example p-vs-n --check-example`
+Les smoke tests runtime/learner et `PPO.exe --example two-vs-two --check-example`
 sont une validation finale plus lourde, à exécuter avant fusion plutôt qu'à
 chaque petite modification.
 

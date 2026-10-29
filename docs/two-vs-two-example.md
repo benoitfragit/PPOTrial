@@ -172,24 +172,22 @@ rouges. La validation principale couvre :
 - une mise à jour MAPPO complète en smoke test ;
 - la patrouille sur l'axe long et les règles de terminaison.
 
-## Runtime généralisé séparé
+## Runtime MAPPO généralisé unique
 
-L'entrée de catalogue `p-vs-n` utilise `Scenarios/PvsN.json`. Elle est séparée
-de `two-vs-two` afin que le scénario, les checkpoints v7/v4 et le comportement
-historique restent disponibles sans conversion implicite. Le JSON livré
-démarre à P=2/N=2 ; les valeurs `blueTeam.activeCount` et
-`redTeam.activeCount` dimensionnent les équipes dans les capacités 1..9 et
-0..10.
+L'entrée de catalogue existante `two-vs-two` utilise directement le runtime
+généralisé. Aucune entrée `p-vs-n` et aucun second MAPPO ne sont créés.
+`Scenarios/TwoVsTwo.json` démarre à P=2/N=4 ; `blueTeam.activeCount`
+dimensionne les bleus dans la capacité 1..9 et `redTeam.activeCount` les rouges
+dans la capacité 0..10.
 
 À chaque reset, un unique leader est tiré avec le seed d'entraînement. Les
 autres bleus gardent un slot distinct et stable en formation V. Les rouges
 restent chacun pilotés par leur agent RLMission de production.
 
-Les objets `blueTeam` et `redTeam` restent néanmoins optionnels dans le parseur
-TwoVsTwo. `blueTeam` sélectionne le runtime bleu généralisé et `redTeam` y
-dimensionne les attaquants. Leur absence sélectionne strictement le chemin 2v2
-historique, son ordre RNG, son curriculum et ses checkpoints v7/v4. Dans
-`PvsN.json`, le bloc est de la forme :
+Les objets `blueTeam` et `redTeam` restent optionnels dans le parseur.
+Le fichier livré renseigne les deux sur l'unique entrée `two-vs-two`. Les quatre
+rouges conservent chacun leur RLMission de production ; un quart de leurs
+activations est retardé de façon seedée. Le même objet `twoVsTwo` accepte :
 
 ~~~json
 "blueTeam": {
@@ -248,8 +246,8 @@ déterministes dans le vrai ECS sans alimenter le rollout. Ses resets seedés et
 miroirs sont reproductibles. Elle publie un score composé de métriques
 normalisées par P/N (survie bleue, neutralisation rouge, objectif, succès,
 leader et slots) et promeut uniquement un meilleur acteur vers
-`prod/blue_patrol_generalized_v8.txt`. Le scénario `two-vs-two` et sa promotion
-v7 restent sur leur chemin historique.
+`prod/blue_patrol_generalized_v8.txt`. Cette promotion appartient à l'unique
+MAPPO exposé par `two-vs-two` et ne modifie jamais les checkpoints rouges.
 
 Boucle rapide pendant le développement :
 

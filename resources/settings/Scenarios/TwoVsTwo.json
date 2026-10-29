@@ -3,24 +3,22 @@
   "agentProfiles": "../AgentProfiles.json",
   "twoVsTwo": {
     "blueController": "mappo",
-    "red2InitiallyDestroyedProbability": 0.15,
+    "blueTeam": {
+      "activeCount": 2
+    },
+    "redTeam": {
+      "activeCount": 4,
+      "maximumPlacementAttempts": 1024,
+      "delayedActivationProbability": 0.25,
+      "minimumActivationDelaySteps": 256,
+      "maximumActivationDelaySteps": 768
+    },
     "redSpawn": {
       "minimumWorldScale": 1.15,
       "maximumWorldScale": 1.45,
       "minimumBearingDegrees": -90.0,
       "maximumBearingDegrees": 90.0,
       "minimumSeparation": 10000.0
-    },
-    "threatCurriculum": {
-      "enabled": true,
-      "noThreatProbability": 0.075,
-      "singleThreatProbability": 0.15,
-      "delayedFirstThreatProbability": 0.0,
-      "delayedSecondThreatProbability": 0.0,
-      "minimumFirstDelaySteps": 256,
-      "maximumFirstDelaySteps": 768,
-      "minimumSecondDelaySteps": 384,
-      "maximumSecondDelaySteps": 1024
     },
     "restrictedZoneSpawn": {
       "enabledProbability": 0.75,
@@ -54,6 +52,30 @@
           "randomPosition": {
             "north": { "minimum": -20500.0, "maximum": -14000.0 },
             "east": { "minimum": -25000.0, "maximum": 25000.0 }
+          }
+        },
+        {
+          "id": "red_restricted_zone_west",
+          "type": "RestrictedZone",
+          "platform": "restrictedzone",
+          "side": "Hostile",
+          "enabled": true,
+          "enabledProbability": 0.65,
+          "randomPosition": {
+            "north": { "minimum": -12000.0, "maximum": 12000.0 },
+            "east": { "minimum": -32000.0, "maximum": -15000.0 }
+          }
+        },
+        {
+          "id": "red_restricted_zone_east",
+          "type": "RestrictedZone",
+          "platform": "restrictedzone",
+          "side": "Hostile",
+          "enabled": true,
+          "enabledProbability": 0.65,
+          "randomPosition": {
+            "north": { "minimum": -12000.0, "maximum": 12000.0 },
+            "east": { "minimum": 15000.0, "maximum": 32000.0 }
           }
         }
       ]

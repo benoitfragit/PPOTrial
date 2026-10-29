@@ -3,20 +3,18 @@
 ## Objectif
 
 Les défenseurs bleus apprennent une politique coopérative pour tenir une
-patrouille et protéger l'objectif contre les attaquants rouges. Le chemin
-historique emploie `PatrolMappoAgent` pour deux bleus ; le chemin P/N optionnel
-emploie `GeneralizedPatrolMappoAgent` pour 1 à 9 bleus. Les rouges restent
+patrouille et protéger l'objectif contre les attaquants rouges. L'entrée
+`two-vs-two` emploie un unique contrôleur MAPPO généralisé pour 1 à 9 bleus.
+Les rouges restent
 pilotés individuellement par le
 `RLMission` de production existant ; son code, ses observations et ses modèles
 ne sont pas modifiés.
 
-Trois scénarios sont disponibles dans `PPO.exe` :
+Deux scénarios bleus sont disponibles dans `PPO.exe` :
 
 - `blue-patrol` entraîne la tenue de patrouille sans attaquant ;
-- `two-vs-two` entraîne la protection face à zéro, un ou deux rouges RLMission,
-  éventuellement activés en cours d'épisode, sur le chemin v7/v4 historique ;
-- `p-vs-n` active le runtime généralisé v8/v5, configurable de P=1..9 et
-  N=0..10 dans `Scenarios/PvsN.json`.
+- `two-vs-two` entraîne le runtime généralisé v8/v5, livré à P=2/N=4 ; P est
+  configurable de 1 à 9 et N de 0 à 10 dans `Scenarios/TwoVsTwo.json`.
 
 `Play` démarre la simulation et la collecte on-policy. `Pause` suspend aussi la
 collecte et `Stop` arrête la boucle d'environnement. RLTools n'ajoute pas de
@@ -118,8 +116,9 @@ Le runtime bleu généralisé est activé par la présence de `blueTeam` dans
 l'objet `twoVsTwo`; `redTeam` dimensionne les attaquants sur ce chemin.
 L'absence des deux blocs garde le chemin 2v2 legacy inchangé.
 `blueTeam.activeCount` accepte `[1,9]` et `redTeam.activeCount` `[0,10]`.
-L'entrée `p-vs-n` renseigne les deux blocs explicitement, alors que les
-scénarios historiques continuent à les omettre.
+`Scenarios/TwoVsTwo.json` renseigne `blueTeam` et `redTeam` directement. Il n'existe pas
+d'entrée GUI P/N distincte : les cardinalités appartiennent au même MAPPO.
+Le profil livré utilise quatre rouges et des activations retardées seedées.
 
 `BlueTeamRoles` tire exactement un leader par épisode. Les autres indices
 physiques obtiennent des slots de formation uniques `0..P-2`, stables pendant
@@ -243,12 +242,9 @@ initiale est lue dans `Training/BluePatrol.json`. Les canaux de protection
 récompensent notamment l'éloignement des menaces de l'objectif et leur
 interception ; la perte de l'objectif ou d'un défenseur est terminale.
 
-Le scénario `two-vs-two` applique pendant l'entraînement un curriculum défini
-dans `Scenarios/TwoVsTwo.json`. Le profil courant active deux rouges dans 77,5 %
-des épisodes, un rouge dans 15 % et aucun dans 7,5 %. Toutes les menaces sont
-actives dès le début de l'épisode, sans activation retardée. La destruction de
-la première ne termine pas l'épisode tant
-qu'une autre activation est planifiée. Le canal `Formation safety`, propre à
+Le scénario `two-vs-two` instancie quatre rouges RLMission. Chacun a 25 % de
+probabilité d'être activé entre les pas 256 et 768. La destruction d'une menace
+ne termine pas l'épisode tant qu'une autre activation est planifiée. Le canal `Formation safety`, propre à
 l'équipier, utilise un poids global de 4, une pénalité d'erreur de 2 et une
 tolérance de 3 %. Ce mécanisme ne change ni le réseau ni le contrôleur
 RLMission.
@@ -260,8 +256,8 @@ référence, puis toutes les `checkpointEvery` mises à jour PPO. La collecte es
 l'acteur courant est évalué sans bruit d'exploration dans le vrai ECS. Cette
 campagne n'est pas l'ancien utilitaire de patrouille isolé : dans
 `two-vs-two`, les rouges de production RLMission continuent à piloter les
-attaquants. Les huit cas par défaut couvrent les deux côtés, plusieurs phases
-du circuit et un mélange reproductible de 2v2 et de 2v1.
+attaquants. Les huit cas par défaut couvrent les deux côtés et plusieurs phases
+du circuit avec la composition P/N configurée.
 
 Dans `blue-patrol`, un cas réussit si les deux bleus restent sains, suivent la
 patrouille et atteignent la durée configurée. Dans `two-vs-two`, il réussit si
@@ -352,7 +348,7 @@ ctest --test-dir out/build/x64-Debug -C Debug -R "^(TwoVsTwoSpawnTests|TwoVsTwoT
 
 La validation finale ajoute le build `PPO`, les smoke tests
 `TwoVsTwoPatrolRuntimeSmoke`, `TwoVsTwoCombatRuntimeSmoke` et
-`TwoVsTwoEmbeddedLearnerSmoke`, puis `PPO.exe --example p-vs-n
+`TwoVsTwoEmbeddedLearnerSmoke`, puis `PPO.exe --example two-vs-two
 --check-example`. Le projet impose actuellement la plateforme x64 dans sa
 configuration CMake. Les smoke tests valident les scénarios avec et sans
 rouges, les observations masquées, l'attention, le rollout MAPPO, la physique

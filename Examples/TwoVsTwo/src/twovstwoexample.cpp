@@ -653,16 +653,4 @@ ppo::app::ExampleDefinition BluePatrolDefinition()
     };
 }
 
-ppo::app::ExampleDefinition GeneralizedPvsNDefinition()
-{
-    return {
-        "p-vs-n",
-        "GENERALIZED P vs N - MAPPO v8 vs RLMission",
-        std::filesystem::path("Scenarios") / "PvsN.json",
-        &ppo::examples::airspace::RegisterAirspaceMeta,
-        &LoadScenario,
-        "Bounded generalized blue MAPPO team against production RLMission reds."
-    };
-}
-
 } // namespace ppo::examples::twovstwo

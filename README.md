@@ -1,10 +1,9 @@
 # PPOTrial
 
 PPOTrial est un simulateur C++17 d'apprentissage par renforcement multi-agent.
-Le scénario distribué conserve son chemin historique à deux défenseurs bleus
-MAPPO/RLTools face aux attaquants rouges RLMission. Un contrat optionnel permet
-en plus d'instancier de 1 à 9 bleus face à 0 à 10 rouges sans modifier ce chemin
-legacy lorsque les nouveaux champs sont absents.
+Le scénario distribué utilise un unique contrôleur bleu MAPPO/RLTools face aux
+attaquants rouges RLMission. Son contrat permet d'instancier de 1 à 9 bleus
+face à 0 à 10 rouges, sans créer une seconde entrée d'application.
 
 ## Démarrage rapide
 
@@ -14,7 +13,6 @@ Depuis un terminal Visual Studio configuré pour C++ :
 cmake --build out/build/x64-Debug --config Debug --target PPO
 out/build/x64-Debug/Main/Debug/PPO.exe --example blue-patrol
 out/build/x64-Debug/Main/Debug/PPO.exe --example two-vs-two
-out/build/x64-Debug/Main/Debug/PPO.exe --example p-vs-n
 ~~~
 
 Le chemin exact de l'exécutable dépend du générateur CMake. Le projet impose
@@ -24,16 +22,14 @@ actuellement x64 ; les builds Debug sont recommandés pour le diagnostic.
 
 - `airspace` : scénario historique et agents LibTorch ;
 - `blue-patrol` : deux bleus MAPPO apprennent la patrouille sans ennemi ;
-- `two-vs-two` : deux bleus MAPPO protègent l'objectif dans un curriculum à
-  zéro, un ou deux rouges pilotés par RLMission.
-- `p-vs-n` : scénario généralisé isolé, configuré initialement en `P=2, N=2`,
-  qui entraîne l'acteur v8 et l'état complet v5 sans écrire dans les fichiers
-  historiques v7/v4.
+- `two-vs-two` : l'unique MAPPO bleu généralisé protège l'objectif dans un
+  entraînement livré à P=2/N=4 contre des rouges pilotés par RLMission.
 
-Le scénario `p-vs-n` matérialise `blue_1..blue_P` et `red_1..red_N` depuis les
-templates typés du JSON. `blueTeam.activeCount` accepte 1 à 9 et
-`redTeam.activeCount` 0 à 10. L'absence de `blueTeam` conserve strictement le
-chemin historique à deux gardes. Les sorties généralisées sont exclusivement
+Le scénario `two-vs-two` matérialise `blue_1..blue_P` depuis les templates
+typés du JSON. `blueTeam.activeCount` accepte 1 à 9 et
+`redTeam.activeCount` accepte 0 à 10. La configuration livrée utilise quatre
+rouges, dont chacun a 25 % de probabilité d'être activé avec retard. Les sorties sont
+exclusivement
 `blue_patrol_generalized_v8.txt` et
 `blue_patrol_generalized_training_v5.txt` dans `BluePatrol/latest` ; les
 checkpoints `blue_patrol_mappo_v7.txt` et `blue_patrol_training_v4.txt` restent
@@ -41,16 +37,16 @@ des sources de migration en lecture seule.
 
 Dans le sélecteur, ces entrées sont libellées explicitement `BLUE PATROL ONLY
 - NO RED` et `TWO VS TWO - MAPPO vs RLMission`. Le second scénario conserve
-toujours les deux entités rouges. Le curriculum active deux rouges dans 77,5 %
-des épisodes, un rouge dans 15 % et aucun dans 7,5 %. Tous sont actifs dès le
-début de l'épisode. Les évaluations restent des cas déterministes 2v1/2v2.
+une seule entrée GUI mais matérialise quatre entités rouges RLMission. Les
+activations retardées et les positions sont reproductibles avec le seed.
 
-À chaque épisode 2v2, les rouges sont tirés sur un arc allant de l'avant aux
+À chaque épisode P/N, les rouges sont tirés sur un arc allant de l'avant aux
 deux côtés de la zone défendue. Ils commencent entre 1,05 et 1,35 fois la
 limite du monde et à au moins 10 km l'un de l'autre. La limite est un repère de
 zone, pas un mur : RLMission continue normalement à piloter les rouges vers
 l'objectif. Les zones rouges sont décrites par la collection typée
-`twoVsTwo.restrictedZones`. Elles sont tirées une fois par épisode, puis vues
+`twoVsTwo.restrictedZones`. Quatre secteurs nord, sud, ouest et est sont tirés
+une fois par épisode avec leur probabilité d'activation, puis vus
 par les 61 rayons pseudo-LiDAR des bleus. Le chemin RLMission des rouges, son
 observation 152 et ses checkpoints restent inchangés. La zone bleue historique
 `blue_restricted_zone`, son tirage `restrictedZoneSpawn` et sa règle SNA sont
@@ -89,7 +85,7 @@ de formation, effort de contrôle, protection de zone, interception, résultat
 de mission et timeout.
 
 Une évaluation déterministe intégrée est lancée à chaque checkpoint : elle
-utilise les vrais rouges RLMission dans le 2v2, publie ses mesures dans l'IHM et
+utilise les vrais rouges RLMission du scénario P/N, publie ses mesures dans l'IHM et
 ne promeut dans `resources/model/BluePatrol/prod` que le meilleur acteur. Les
 acteurs non encore validés restent dans `BluePatrol/latest`. Le même dossier
 contient `blue_patrol_training_v4.txt`, qui restaure l'acteur, le critique,
@@ -134,13 +130,12 @@ Sur les scénarios historiques, le champ `blueController` accepte `mappo` ou
 
 ## Équipes P contre N optionnelles
 
-Les champs `twoVsTwo.blueTeam` et `twoVsTwo.redTeam` sont additifs. Leur
-absence sélectionne exactement le chargement 2v2 historique, ses noms
-`blue_guard_1`, `blue_guard_2`, `red_1`, `red_2`, son curriculum et ses
-checkpoints v7/v4. Les deux scénarios historiques continuent donc à les
-omettre ; l'entrée séparée `Scenarios/PvsN.json` les fournit explicitement.
-`blueTeam` sélectionne le runtime bleu généralisé et `redTeam` y dimensionne
-les attaquants.
+Les champs `twoVsTwo.blueTeam` et `twoVsTwo.redTeam` sont additifs.
+`Scenarios/TwoVsTwo.json` fournit `blueTeam` directement : l'entrée GUI
+existante `two-vs-two` sélectionne donc l'unique runtime MAPPO généralisé.
+`redTeam` est présent dans la configuration livrée avec N=4. Chaque rouge garde
+son propre contrôleur RLMission de production ; seule la cardinalité du monde
+est généralisée.
 
 ~~~json
 "blueTeam": {
@@ -216,7 +211,6 @@ Validation finale, plus lourde, avant fusion :
 ctest --test-dir out/build/x64-Debug -C Debug -R "TwoVsTwoPatrolRuntimeSmoke|TwoVsTwoCombatRuntimeSmoke|TwoVsTwoEmbeddedLearnerSmoke" --output-on-failure
 out/build/x64-Debug/Main/Debug/PPO.exe --example blue-patrol --check-example
 out/build/x64-Debug/Main/Debug/PPO.exe --example two-vs-two --check-example
-out/build/x64-Debug/Main/Debug/PPO.exe --example p-vs-n --check-example
 ~~~
 
 Les modèles rouges `resources/model/RLMission/**/*.pt` et leur contrat réseau
