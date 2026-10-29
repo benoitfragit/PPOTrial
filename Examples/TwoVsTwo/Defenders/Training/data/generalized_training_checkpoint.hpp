@@ -1,6 +1,7 @@
 #pragma once
 
 #include "generalized_checkpoint.hpp"
+#include "generalized_critic_network.hpp"
 #include "patrol_training_checkpoint.hpp"
 
 #include <cstdint>
@@ -15,7 +16,7 @@
 namespace ppo::examples::twovstwo::defenders {
 
 /** @brief Version of the complete generalized P/N training-state contract. */
-inline constexpr unsigned kGeneralizedTrainingCheckpointVersion = 5U;
+inline constexpr unsigned kGeneralizedTrainingCheckpointVersion = 6U;
 
 /**
  * @brief Explicit scope of a legacy training-state migration.
@@ -74,7 +75,7 @@ void WriteGeneralizedTrainingState(
     RandomEngine const& randomEngine, std::uint64_t const completedUpdates,
     GeneralizedCheckpointMetadata const metadata)
 {
-    stream << "BLUE_TEAM_TRAINING_V5 "
+    stream << "BLUE_TEAM_TRAINING_V6 "
            << kGeneralizedTrainingCheckpointVersion << ' '
            << GeneralizedObservationLayout::Version << ' '
            << GeneralizedObservationLayout::Size << ' '
@@ -83,8 +84,8 @@ void WriteGeneralizedTrainingState(
            << TrainingParameters::ACTOR_HIDDEN_DIM << ' '
            << TrainingParameters::ACTOR_NUM_LAYERS << ' '
            << Critic::INPUT_DIM << ' '
-           << TrainingParameters::CRITIC_HIDDEN_DIM << ' '
-           << TrainingParameters::CRITIC_NUM_LAYERS << ' ';
+           << GeneralizedCriticConfig::HiddenDim << ' '
+           << GeneralizedCriticConfig::Layers << ' ';
     generalized_checkpoint_detail::WriteMetadata(stream, metadata);
     stream << '\n'
            << std::setprecision(std::numeric_limits<float>::max_digits10)
@@ -145,7 +146,7 @@ std::uint64_t ReadGeneralizedTrainingState(
     if (!(stream >> magic >> formatVersion >> observationVersion
           >> rawInput >> compactInput >> output >> actorHidden >> actorLayers
           >> criticInput >> criticHidden >> criticLayers)
-        || magic != "BLUE_TEAM_TRAINING_V5"
+        || magic != "BLUE_TEAM_TRAINING_V6"
         || formatVersion != kGeneralizedTrainingCheckpointVersion
         || observationVersion != GeneralizedObservationLayout::Version
         || rawInput != GeneralizedObservationLayout::Size
@@ -154,8 +155,8 @@ std::uint64_t ReadGeneralizedTrainingState(
         || actorHidden != TrainingParameters::ACTOR_HIDDEN_DIM
         || actorLayers != TrainingParameters::ACTOR_NUM_LAYERS
         || criticInput != Critic::INPUT_DIM
-        || criticHidden != TrainingParameters::CRITIC_HIDDEN_DIM
-        || criticLayers != TrainingParameters::CRITIC_NUM_LAYERS)
+        || criticHidden != GeneralizedCriticConfig::HiddenDim
+        || criticLayers != GeneralizedCriticConfig::Layers)
     {
         throw std::runtime_error(
             "Incompatible generalized blue training checkpoint contract");
