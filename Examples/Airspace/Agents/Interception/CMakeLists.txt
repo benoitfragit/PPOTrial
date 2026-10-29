@@ -3,13 +3,13 @@ project(Interception LANGUAGES CXX)
 
 add_library(${PROJECT_NAME}
 	STATIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/actorcriticnet.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/interception.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/actorcriticnet.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/interception.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/actorcriticnet.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/interception.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/actorcriticnet.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/interception.cpp
 	)
 
-target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/data)
+target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_libraries(${PROJECT_NAME} 
 						PUBLIC 	GenericEntities

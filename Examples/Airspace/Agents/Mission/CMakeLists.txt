@@ -3,15 +3,15 @@ project(Mission LANGUAGES CXX)
 
 add_library(${PROJECT_NAME}
 	STATIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/missionlayout.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/actorcriticmission.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/actorcriticmission.cpp
-	${CMAKE_CURRENT_SOURCE_DIR}/data/targetselector.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/missiontrackfilter.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/targetselector.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/missionlayout.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/actorcriticmission.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/actorcriticmission.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/targetselector.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/missiontrackfilter.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/targetselector.cpp
 	)
 
-target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/data)
+target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_libraries(${PROJECT_NAME} 
 						PUBLIC	GenericEntities
