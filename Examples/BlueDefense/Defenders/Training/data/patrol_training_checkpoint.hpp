@@ -12,7 +12,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /** @brief Version of the complete blue MAPPO training-state contract. */
 inline constexpr unsigned kPatrolTrainingCheckpointVersion = 4U;
@@ -289,4 +289,4 @@ std::uint64_t ReadPatrolTrainingState(std::istream& stream,
     return updates;
 }
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

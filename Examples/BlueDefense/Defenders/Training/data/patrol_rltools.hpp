@@ -16,13 +16,13 @@ struct BluePatrol
 {
     using T = Scalar;
     using TI = Index;
-    using State = ppo::examples::twovstwo::defenders::State;
+    using State = ppo::examples::bluedefense::defenders::State;
     static constexpr TI OBSERVATION_DIM =
-        static_cast<TI>(ppo::examples::twovstwo::defenders::ObservationLayout::Size);
+        static_cast<TI>(ppo::examples::bluedefense::defenders::ObservationLayout::Size);
     static constexpr TI OBSERVATION_DIM_PRIVILEGED = OBSERVATION_DIM;
     static constexpr TI ACTION_DIM =
-        static_cast<TI>(ppo::examples::twovstwo::defenders::ObservationLayout::ActionSize);
-    ppo::examples::twovstwo::defenders::Parameters parameters{};
+        static_cast<TI>(ppo::examples::bluedefense::defenders::ObservationLayout::ActionSize);
+    ppo::examples::bluedefense::defenders::Parameters parameters{};
 };
 } // namespace rl_tools::rl::environments
 
@@ -43,8 +43,8 @@ void sample_initial_state(DEVICE&, rl::environments::BluePatrol<T, TI> const& en
     std::uniform_int_distribution<int> side{0, 1};
     std::uniform_int_distribution<std::size_t> role{0U, 1U};
     std::uniform_real_distribution<float> phase{
-        0.F, ppo::examples::twovstwo::defenders::CircuitLength(env.parameters)};
-    state = ppo::examples::twovstwo::defenders::InitialState(
+        0.F, ppo::examples::bluedefense::defenders::CircuitLength(env.parameters)};
+    state = ppo::examples::bluedefense::defenders::InitialState(
         env.parameters, side(rng) == 0 ? -1 : 1, role(rng), phase(rng));
 }
 
@@ -55,7 +55,7 @@ T step(DEVICE&, rl::environments::BluePatrol<T, TI> const& env,
        typename rl::environments::BluePatrol<T, TI>::State& next, RNG&)
 {
     static_assert(ACTION_SPEC::ROWS == 1 && ACTION_SPEC::COLS == 2);
-    using namespace ppo::examples::twovstwo::defenders;
+    using namespace ppo::examples::bluedefense::defenders;
     next = Advance(env.parameters, state, Action{
         static_cast<float>(get(actions, 0, 0)),
         static_cast<float>(get(actions, 0, 1))});
@@ -68,7 +68,7 @@ T reward(DEVICE&, rl::environments::BluePatrol<T, TI> const& env,
          Matrix<ACTION_SPEC> const& actions,
          typename rl::environments::BluePatrol<T, TI>::State const& after, RNG&)
 {
-    using namespace ppo::examples::twovstwo::defenders;
+    using namespace ppo::examples::bluedefense::defenders;
     return TeamReward(env.parameters, before, Action{
         static_cast<float>(get(actions, 0, 0)),
         static_cast<float>(get(actions, 0, 1))}, after);
@@ -81,8 +81,8 @@ void observe(DEVICE&, rl::environments::BluePatrol<T, TI> const& env,
 {
     static_assert(OBS_SPEC::ROWS == 1);
     static_assert(OBS_SPEC::COLS ==
-        ppo::examples::twovstwo::defenders::ObservationLayout::Size);
-    auto const obs = ppo::examples::twovstwo::defenders::Observe(env.parameters, state);
+        ppo::examples::bluedefense::defenders::ObservationLayout::Size);
+    auto const obs = ppo::examples::bluedefense::defenders::Observe(env.parameters, state);
     for (TI i = 0; i < OBS_SPEC::COLS; ++i)
         set(target, 0, i, static_cast<T>(obs[i]));
 }
@@ -111,7 +111,7 @@ bool terminated(DEVICE&, rl::environments::BluePatrol<T, TI> const& env,
 #include <rl_tools/rl/algorithms/ppo/loop/core/config.h>
 #include <rl_tools/rl/algorithms/ppo/loop/core/operations_generic.h>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 namespace rlt = rl_tools;
 using Device = rlt::devices::DEVICE_FACTORY<>;
@@ -164,4 +164,4 @@ using TrainingParameters = TrainingParametersFor<2048>;
 using TrainingConfig = TrainingConfigFor<2048>;
 using TrainingState = typename TrainingConfig::template State<TrainingConfig>;
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders
