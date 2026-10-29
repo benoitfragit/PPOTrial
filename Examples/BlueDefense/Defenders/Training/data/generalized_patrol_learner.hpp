@@ -567,8 +567,10 @@ public:
     }
 
 private:
-    static constexpr Index kTrainingBatch = 128;
+    static constexpr Index kTrainingBatch = 1024;
     using ActorSpecification = TrainingConfig::NN::ACTOR_SPEC;
+    static_assert(ActorSpecification::BATCH_SIZE >= kTrainingBatch,
+                  "RLtools actor scratch batch must cover MAPPO batch");
     using Actor = GeneralizedAttentionActor<ActorSpecification>;
     using LegacyActor = TrainingConfig::NN::ACTOR_TYPE;
     using Critic = GeneralizedCriticConfig::Network;
