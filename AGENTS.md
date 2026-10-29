@@ -6,8 +6,7 @@ repository. Adapted from the MFDStudio AGENTS.md engineering conventions.
 ## Before editing
 - Read the existing code, actual branch, configuration and tests first.
 - Keep change sets scoped, reviewable, and behaviorally justified.
-- Do not modify the RLMission legacy controller or historic 2v2 training
-  while improving the generalized MAPPO runtime.
+- Do not modify the red RLMission controller while evolving the generalized MAPPO runtime.
 - Keep simulator physics, policies, reward computation and ECS adaptation
   separated. Do not introduce an external target-assignment controller.
 
