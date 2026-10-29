@@ -513,16 +513,11 @@ public:
             throw std::runtime_error("Incompatible v5 generalized checkpoint");
         }
         auto const metadata = generalized_checkpoint_detail::ReadMetadata(stream);
-        if (metadata.activeBlueMobiles != counts_.blueMobiles
-            || metadata.activeRedMobiles != counts_.redMobiles)
-        {
-            throw std::runtime_error("V5 actor migration P/N mismatch");
-        }
         training_checkpoint_detail::RequirePatrolCheckpointToken(
             stream, "ACTOR");
         auto const actorMetadata = ReadGeneralizedPolicyParameters(stream, actor_);
-        if (actorMetadata.activeBlueMobiles != counts_.blueMobiles
-            || actorMetadata.activeRedMobiles != counts_.redMobiles)
+        if (actorMetadata.activeBlueMobiles != metadata.activeBlueMobiles
+            || actorMetadata.activeRedMobiles != metadata.activeRedMobiles)
         {
             throw std::runtime_error("Inconsistent V5 actor metadata");
         }
@@ -544,7 +539,7 @@ public:
             rng_, completedUpdates_, Metadata());
     }
 
-    /** @brief Restores a strict same-P/N v6 update-boundary training state. */
+    /** @brief Restores a v6 update-boundary model across valid P/N counts. */
     void LoadTrainingState(std::filesystem::path const& checkpoint)
     {
         RequireUpdateBoundary("load generalized training state");
@@ -557,12 +552,9 @@ public:
         std::uint64_t const updates = ReadGeneralizedTrainingState(
             stream, actor_, critic_, actorOptimizer_, criticOptimizer_, rng_,
             metadata);
-        if (metadata.activeBlueMobiles != counts_.blueMobiles
-            || metadata.activeRedMobiles != counts_.redMobiles)
-        {
-            throw std::runtime_error(
-                "Generalized training checkpoint P/N does not match episode");
-        }
+        // P/N are properties of the saved episode, not model dimensions.
+        // A new rollout is constructed with the current P/N and fresh masks.
+        // Shared actor/critic weights and Adam moments remain compatible.
         completedUpdates_ = updates;
         totalActionsSampled_ = 0U;
         totalTransitionsRecorded_ = 0U;
