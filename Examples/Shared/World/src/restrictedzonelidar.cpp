@@ -209,20 +209,27 @@ void BuildFriendlyMobilePseudoLidar(
             if (delta < 0.F)
                 continue;
             float const root = std::sqrt(delta);
-            if (c < 0.F)
+            // Preserve saturated lethal-zone readings (range=distance=0).
+            // Otherwise choose by real metres, not by different per-obstacle
+            // normalization references: a nearer blue must not be hidden by
+            // the normalized distance to a much farther world boundary.
+            if (nearestCollisionRanges[ray] == 0.F
+                && nearestCollisionDistances[ray] == 0.F)
             {
-                UpdatePseudoLidarHit(-b + root, safetyRadius,
-                                    nearestCollisionRanges[ray],
-                                    nearestCollisionDistances[ray]);
+                continue;
             }
-            else
+            float const entry = -b - root;
+            float const exit = -b + root;
+            float const distance = c < 0.F ? exit
+                : entry >= 0.F ? entry : exit;
+            if (!std::isfinite(distance) || distance < 0.F)
+                continue;
+            if (nearestCollisionDistances[ray] == 0.F
+                || distance < nearestCollisionDistances[ray])
             {
-                UpdatePseudoLidarHit(-b - root, safetyRadius,
-                                    nearestCollisionRanges[ray],
-                                    nearestCollisionDistances[ray]);
-                UpdatePseudoLidarHit(-b + root, safetyRadius,
-                                    nearestCollisionRanges[ray],
-                                    nearestCollisionDistances[ray]);
+                nearestCollisionDistances[ray] = distance;
+                nearestCollisionRanges[ray] =
+                    NormalizeRange(distance, safetyRadius);
             }
         }
     }
@@ -283,12 +290,12 @@ void UpdateRestrictedZonePseudoLidars(entt::registry& registry,
         BuildRestrictedZonePseudoLidar(
             registry, own, state, sensor.m_nearestCollisionRanges,
             sensor.m_nearestCollisionDistances);
+        BuildZoneBoundaryPseudoLidar(
+            state, environment, sensor.m_nearestCollisionRanges,
+            sensor.m_nearestCollisionDistances);
         BuildFriendlyMobilePseudoLidar(
             registry, own, state, friendlyMobileSafetyRadius,
             sensor.m_nearestCollisionRanges,
-            sensor.m_nearestCollisionDistances);
-        BuildZoneBoundaryPseudoLidar(
-            state, environment, sensor.m_nearestCollisionRanges,
             sensor.m_nearestCollisionDistances);
     }
 }
