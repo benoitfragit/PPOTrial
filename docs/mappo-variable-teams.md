@@ -42,7 +42,7 @@ multiple P/N configurations and independent seeds.
 World boundaries, hostile restricted-zone circles and living friendly mobiles
 are combined into the existing 61-ray 360-degree pseudo-LiDAR. Same-side
 mobiles other than the observer are treated as **nonlethal**, dynamic circular
-safety envelopes. The TwoVsTwo rules enable these at 2,000 metres by default,
+safety envelopes. The BlueDefense rules enable these at 2,000 metres by default,
 using `Parameters::cautionDistance`; other existing callers retain the
 default radius 0 and the previous sensor behavior.
 
