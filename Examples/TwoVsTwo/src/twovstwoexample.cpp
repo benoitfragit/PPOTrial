@@ -580,8 +580,10 @@ bool LoadScenario(std::filesystem::path const& path,
             {
                 std::array<ppo::model::BaseEntity*, 2> guards{&first, &second};
                 std::vector<ppo::model::BaseEntity*> attackers;
-                std::size_t const redCount = generalizedRedTeam
-                    ? configuredRedCount : 2U;
+                // Patrol-only scenarios have no red entities. The archived
+                // two-vs-two scenario still requires exactly two attackers.
+                std::size_t const redCount = patrolOnly ? 0U
+                    : generalizedRedTeam ? configuredRedCount : 2U;
                 attackers.reserve(redCount);
                 for (std::size_t index = 0U; index < redCount; ++index)
                 {
@@ -590,7 +592,7 @@ bool LoadScenario(std::filesystem::path const& path,
                     if (red != entities.end())
                         attackers.push_back(red->second.get());
                 }
-                if (attackers.size() != 2U)
+                if (attackers.size() != redCount)
                     return false;
                 auto controller = environment.CreateAgent<
                     defenders::PatrolMappoAgent>(
