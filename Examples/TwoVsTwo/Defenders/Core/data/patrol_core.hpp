@@ -369,13 +369,6 @@ inline float PatrolProgressDelta(Parameters const& p,
     return std::abs(delta) <= maximumPhysicalProgress ? delta : 0.F;
 }
 
-// Separation is evaluated for the team, independently of the learning role.
-inline float GuardSeparation(State const& state) noexcept
-{
-    return std::hypot(state.guards[0].north - state.guards[1].north,
-                      state.guards[0].east - state.guards[1].east);
-}
-
 // Check the relative path over the entire step: two fast cars can cross
 // between discrete observations without ending inside the collision radius.
 inline float MinimumGuardSeparation(State const& before,
