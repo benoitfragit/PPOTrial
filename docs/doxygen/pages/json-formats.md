@@ -27,9 +27,7 @@ The shipped `redTeam` instantiates four production RLMission attackers, with
 seeded optional activation delays. The legacy `threatCurriculum` remains
 available only when `redTeam` is absent.
 `restrictedZoneSpawn` defines a side-relative position box and an activation
-probability. The shipped value is zero, disabling the inner friendly zone while
-retaining the independent defended-area boundary. World limits remain sensor
-and reward references; they do not stop
+probability. World limits remain sensor and reward references; they do not stop
 the production RLMission attackers.
 
 `blueTeam` and `redTeam` are optional additive contracts. `blueTeam` selects
@@ -158,8 +156,9 @@ remain visible through the dedicated SAM/pseudo-LiDAR path. The RLMission
 
 Each hostile zone may set `oppositeObjective=true`. Its configured east value
 is then treated as a magnitude and mirrored onto the side opposite the current
-objective. The shipped scenario uses two inside-world and two outside-world
-centres, so the objective cannot be covered by a hostile zone.
+objective. The shipped scenario uses only two boundary zones whose centres
+remain outside the world, so no hostile zone is centred in the defended area
+and the objective cannot be covered.
 
 The blue `Platforms/Mobile/defender_car.json` profile mirrors the
 `trainingaircraft` speed, turn-rate and SNA engagement-angle limits and exposes

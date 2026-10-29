@@ -50,9 +50,8 @@ warning region is 1.10 times the no-escape radius. Airspace keeps its original
 `SNASystem::EvaluateDestruction` behavior by default. TwoVsTwo instead owns a
 deterministic swept lethal-circle rule for friendly blue mobiles and refreshes
 only their ECS LiDAR components; RLMission red observations remain untouched.
-The historical friendly `blue_restricted_zone` contract is retained, but the
-shipped scenario sets its activation probability to zero. The independent blue
-defended-area boundary remains available to rendering and rewards.
+The historical friendly `blue_restricted_zone`, its RNG draw and its SNA effect
+against hostile red mobiles are retained unchanged.
 
 ## Validation
 - `SharedWorldLidarTests`: 61 beams, legacy enum values, forward ray,

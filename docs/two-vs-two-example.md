@@ -26,7 +26,7 @@ Sans contrat P/N optionnel, le scénario contient :
 
 - deux défenseurs bleus pilotés ensemble par `PatrolMappoAgent` et RLTools ;
 - un objectif bleu à protéger ;
-- la bordure bleue de la zone défendue, sans zone interdite bleue intérieure ;
+- la zone bleue historique observée par le LiDAR RLMission rouge ;
 - zéro ou plusieurs zones restreintes rouges configurables ;
 - deux entités rouges pilotées par les agents `RLMission` de production
   existants, dont l'activation dépend du curriculum d'entraînement.
@@ -60,7 +60,7 @@ Ces valeurs sont configurables dans `Scenarios/TwoVsTwo.json` :
   "minimumSeparation": 10000.0
 },
 "restrictedZoneSpawn": {
-  "enabledProbability": 0.0,
+  "enabledProbability": 0.75,
   "minimumNorthFraction": -0.45,
   "maximumNorthFraction": 0.45,
   "minimumEastFraction": 0.15,
@@ -76,16 +76,16 @@ Ces valeurs sont configurables dans `Scenarios/TwoVsTwo.json` :
 "restrictedZones": {
   "enabled": true,
   "items": [{
-    "id": "red_restricted_zone_inside_north",
+    "id": "red_restricted_zone_outside_north",
     "type": "RestrictedZone",
     "platform": "restrictedzone",
     "side": "Hostile",
     "enabled": true,
-    "enabledProbability": 0.75,
+    "enabledProbability": 0.65,
     "oppositeObjective": true,
     "randomPosition": {
-      "north": { "minimum": 4000.0, "maximum": 16000.0 },
-      "east": { "minimum": 8000.0, "maximum": 22000.0 }
+      "north": { "minimum": 3000.0, "maximum": 15000.0 },
+      "east": { "minimum": 36000.0, "maximum": 42000.0 }
     }
   }]
 }
@@ -101,15 +101,15 @@ Chaque entrée exige exactement `fixedPosition` (`north`, `east`) ou
 champs inconnus, les doublons d'identifiant et les probabilités hors de `[0,1]`
 sont refusés avec un diagnostic.
 Avec `oppositeObjective=true`, la valeur est est une magnitude automatiquement
-miroir du côté opposé à l'objectif. Le profil livré définit deux zones dans les
-limites du monde et deux zones hors limites ; l'objectif ne peut donc jamais
-être couvert par une zone rouge.
+miroir du côté opposé à l'objectif. Le profil livré définit uniquement deux
+zones de bordure dont les centres restent hors des limites du monde ; aucune
+zone rouge n'est centrée dans la zone défendue et l'objectif ne peut jamais
+être couvert.
 
 `restrictedZoneSpawn` reste le contrat historique de la zone bleue
-`blue_restricted_zone`, mais le scénario livré fixe sa probabilité à zéro :
-aucune zone interdite bleue intérieure n'est active. La bordure de la zone
-défendue reste indépendante. `restrictedZones` décrit uniquement les zones
-rouges.
+`blue_restricted_zone`. Il n'est pas remplacé par la nouvelle collection :
+son ordre de tirage aléatoire, son LiDAR rouge et sa règle SNA restent
+inchangés. `restrictedZones` décrit uniquement les nouvelles zones rouges.
 
 Le rayon létal est exactement `SNA.MaxNoEscapeZoneRange` du profil. Le test de
 segment empêche le tunneling entre deux pas. Seuls les `Mobile/Friend` sont
