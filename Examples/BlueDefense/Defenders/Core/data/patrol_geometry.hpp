@@ -10,7 +10,7 @@
 #include <optional>
 #include <random>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 inline constexpr float kPatrolPi = 3.14159265358979323846F;
 inline constexpr float kPatrolTwoPi = 2.F * kPatrolPi;
@@ -633,4 +633,4 @@ inline std::optional<PatrolGeometry> SamplePatrolGeometry(
     return std::nullopt;
 }
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

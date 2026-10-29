@@ -10,7 +10,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 namespace patrol_config_detail {
 
@@ -222,4 +222,4 @@ LoadPatrolTrainingSettings(std::filesystem::path const& settings)
     return result;
 }
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

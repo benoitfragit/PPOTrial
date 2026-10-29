@@ -5,7 +5,7 @@
 #include <cmath>
 #include <cstddef>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /**
  * @brief Configurable, stateless assessment of hostile pressure.
@@ -188,4 +188,4 @@ inline float ThreatRisk(DefenseSettings const& settings,
 }
 
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders
