@@ -632,7 +632,7 @@ void GeneralizedPatrolMappoAgent::SaveAtUpdateBoundary(
         return;
     }
     if (!force
-        && learner_->StepCount() % training_.checkpointEvery != 0U
+        && learner_->StepCount() % training_.saveEveryUpdates != 0U
         && learner_->StepCount() < training_.maxUpdates)
     {
         return;
@@ -642,6 +642,8 @@ void GeneralizedPatrolMappoAgent::SaveAtUpdateBoundary(
         learner_->SaveActor(actorCheckpoint_);
         learner_->SaveTrainingState(trainingCheckpoint_);
         lastSavedUpdate_ = learner_->StepCount();
+        std::cout << "[BLUE MAPPO V8] Saved actor and training checkpoint at update "
+                  << lastSavedUpdate_ << '\n';
     }
     catch (std::exception const& error)
     {
