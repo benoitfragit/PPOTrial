@@ -901,8 +901,8 @@ GeneralizedPatrolMappoAgent::GetSnapshot() const noexcept
     snapshot.m_rewards.assign(kGeneralizedRewardChannelCount, 0.F);
     snapshot.m_rewardnames = {
         "Role responsibility", "Control effort", "Blue survival",
-        "Red neutralization", "Objective survival", "Mission outcome",
-        "Timeout"};
+        "Red neutralization", "Threat containment", "Objective survival",
+        "Mission outcome", "Timeout"};
     return snapshot;
 }
 
