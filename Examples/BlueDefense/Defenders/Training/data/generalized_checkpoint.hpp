@@ -13,7 +13,7 @@
 #include <string>
 #include <type_traits>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /** @brief Version of the generalized P/N actor checkpoint contract. */
 inline constexpr unsigned kGeneralizedPolicyCheckpointVersion = 8U;
@@ -312,4 +312,4 @@ void SaveGeneralizedPolicy(std::filesystem::path const& path,
     });
 }
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

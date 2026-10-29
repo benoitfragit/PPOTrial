@@ -10,7 +10,7 @@
 #include <limits>
 #include <type_traits>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 namespace rlt = rl_tools;
 
 template<typename T, typename TI, TI F, TI N, TI D>
@@ -138,7 +138,7 @@ struct AttentionActor : rlt::nn_models::mlp_unconditional_stddev::NeuralNetworkA
     TrackAttention<T,TI,ObservationLayout::RedFeatures,ObservationLayout::RedTracks,8> red;
     TrackAttention<T,TI,ObservationLayout::FriendlyFeatures,ObservationLayout::FriendlyTracks,6> friendlies;
 };
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders
 
 namespace rl_tools {
 namespace blue_attention_detail {
@@ -182,7 +182,7 @@ void initialize(DEVICE& d,BLOCK& b,RNG& rng){
 template<typename DEVICE,typename ACTOR,typename IN,typename OUT>
 void transform(DEVICE& d,ACTOR const& actor,IN const& input,OUT& output){
     rl_tools::copy(d,d,input,output);
-    using L=ppo::examples::twovstwo::defenders::ObservationLayout;
+    using L=ppo::examples::bluedefense::defenders::ObservationLayout;
     for(typename ACTOR::TI row=0;row<IN::SPEC::ROWS;++row){
         actor.red.Transform(input,row,L::RedOffset,output);
         actor.friendlies.Transform(input,row,L::FriendOffset,output);
@@ -199,32 +199,32 @@ void transform(DEVICE& d,ACTOR const& actor,IN const& input,OUT& output){
 } // namespace blue_attention_detail
 
 template<typename DEVICE,typename SPEC>
-void malloc(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<SPEC>& a){
-    using B=typename ppo::examples::twovstwo::defenders::AttentionActor<SPEC>::Base;
+void malloc(DEVICE& d,ppo::examples::bluedefense::defenders::AttentionActor<SPEC>& a){
+    using B=typename ppo::examples::bluedefense::defenders::AttentionActor<SPEC>::Base;
     rl_tools::malloc(d,static_cast<B&>(a));
     blue_attention_detail::malloc(d,a.red);blue_attention_detail::malloc(d,a.friendlies);
 }
 template<typename DEVICE,typename SPEC>
-void free(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<SPEC>& a){
-    using B=typename ppo::examples::twovstwo::defenders::AttentionActor<SPEC>::Base;
+void free(DEVICE& d,ppo::examples::bluedefense::defenders::AttentionActor<SPEC>& a){
+    using B=typename ppo::examples::bluedefense::defenders::AttentionActor<SPEC>::Base;
     blue_attention_detail::free(d,a.red);blue_attention_detail::free(d,a.friendlies);
     rl_tools::free(d,static_cast<B&>(a));
 }
 template<typename DEVICE,typename SPEC,typename RNG>
-void init_weights(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<SPEC>& a,RNG& rng){
-    using B=typename ppo::examples::twovstwo::defenders::AttentionActor<SPEC>::Base;
+void init_weights(DEVICE& d,ppo::examples::bluedefense::defenders::AttentionActor<SPEC>& a,RNG& rng){
+    using B=typename ppo::examples::bluedefense::defenders::AttentionActor<SPEC>::Base;
     rl_tools::init_weights(d,static_cast<B&>(a),rng);
     blue_attention_detail::initialize(d,a.red,rng);
     blue_attention_detail::initialize(d,a.friendlies,rng);
 }
 template<typename DEVICE,typename SPEC>
-void zero_gradient(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<SPEC>& a){
-    using B=typename ppo::examples::twovstwo::defenders::AttentionActor<SPEC>::Base;
+void zero_gradient(DEVICE& d,ppo::examples::bluedefense::defenders::AttentionActor<SPEC>& a){
+    using B=typename ppo::examples::bluedefense::defenders::AttentionActor<SPEC>::Base;
     rl_tools::zero_gradient(d,static_cast<B&>(a));
     blue_attention_detail::zero(d,a.red);blue_attention_detail::zero(d,a.friendlies);
 }
 template<typename DEVICE,typename SPEC,typename IN_SPEC,typename OUT_SPEC,typename BUF>
-void evaluate(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<SPEC> const& a,
+void evaluate(DEVICE& d,ppo::examples::bluedefense::defenders::AttentionActor<SPEC> const& a,
               Matrix<IN_SPEC> const& input,Matrix<OUT_SPEC>& output,BUF& buffer){
     MatrixDynamic<matrix::Specification<typename SPEC::T,typename SPEC::TI,
         IN_SPEC::ROWS,IN_SPEC::COLS>> transformed{};
@@ -235,7 +235,7 @@ void evaluate(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<SPEC>
     rl_tools::free(d,transformed);
 }
 template<typename DEVICE,typename SPEC,typename IN_SPEC,typename OUT_SPEC>
-void forward(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<SPEC>& a,
+void forward(DEVICE& d,ppo::examples::bluedefense::defenders::AttentionActor<SPEC>& a,
              Matrix<IN_SPEC> const& input,Matrix<OUT_SPEC>& output){
     MatrixDynamic<matrix::Specification<typename SPEC::T,typename SPEC::TI,
         IN_SPEC::ROWS,IN_SPEC::COLS>> transformed{};
@@ -246,7 +246,7 @@ void forward(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<SPEC>&
     rl_tools::free(d,transformed);
 }
 template<typename DEVICE,typename SPEC,typename IN_SPEC,typename OUT_SPEC,typename BUF>
-void backward(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<SPEC>& a,
+void backward(DEVICE& d,ppo::examples::bluedefense::defenders::AttentionActor<SPEC>& a,
               Matrix<IN_SPEC> const& input,Matrix<OUT_SPEC>& d_output,BUF& buffer){
     using T=typename SPEC::T;using TI=typename SPEC::TI;
     MatrixDynamic<matrix::Specification<T,TI,IN_SPEC::ROWS,IN_SPEC::COLS>> transformed{},d_input{};
@@ -254,7 +254,7 @@ void backward(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<SPEC>
     blue_attention_detail::transform(d,a,input,transformed);
     using MLP=nn_models::mlp::NeuralNetworkBackwardGradient<SPEC>;
     rl_tools::backward_full(d,static_cast<MLP&>(a),transformed,d_output,d_input,buffer);
-    using L=ppo::examples::twovstwo::defenders::ObservationLayout;
+    using L=ppo::examples::bluedefense::defenders::ObservationLayout;
     for(TI row=0;row<IN_SPEC::ROWS;++row){
         auto rc=a.red.Transform(input,row,L::RedOffset,transformed);
         a.red.Differentiate(input,row,L::RedOffset,d_input,rc);
@@ -268,7 +268,7 @@ void backward(DEVICE& d,ppo::examples::twovstwo::defenders::AttentionActor<SPEC>
 // Upstream Adam uses dependent unqualified calls. These overloads live only in
 // the actor's associated namespace (ADL). Providing duplicate overloads under
 // rl_tools causes MSVC C2668 ambiguity during PPO optimizer instantiation.
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 template<typename DEVICE,typename SPEC,typename OPT>
 void update(DEVICE& device,AttentionActor<SPEC>& actor,OPT& optimizer)
 {
@@ -285,4 +285,4 @@ void _reset_optimizer_state(DEVICE& device,AttentionActor<SPEC>& actor,OPT& opti
     rl_tools::blue_attention_detail::reset(device, actor.red, optimizer);
     rl_tools::blue_attention_detail::reset(device, actor.friendlies, optimizer);
 }
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders
