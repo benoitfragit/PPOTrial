@@ -1,5 +1,5 @@
 add_subdirectory(Airspace)
-add_subdirectory(TwoVsTwo)
+add_subdirectory(BlueDefense)
 
 # Explicit composition of compiled examples, separate from Main and the core.
 add_library(PPOExampleCatalog STATIC
