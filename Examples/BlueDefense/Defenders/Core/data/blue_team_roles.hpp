@@ -9,7 +9,7 @@
 #include <optional>
 #include <random>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /** @brief Semantic responsibility of an active blue mobile. */
 enum class BlueRole : std::uint8_t
@@ -264,4 +264,4 @@ private:
     std::size_t leaderPhysicalIndex_{};
 };
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

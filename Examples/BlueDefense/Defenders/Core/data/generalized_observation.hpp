@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <optional>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /**
  * @brief Raw fixed-capacity observation contract for a generalized blue team.
@@ -263,4 +263,4 @@ inline GeneralizedObservation UpgradeLegacy2v2Observation(
     return result;
 }
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

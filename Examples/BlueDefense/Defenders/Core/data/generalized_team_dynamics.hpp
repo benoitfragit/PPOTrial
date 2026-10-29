@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <type_traits>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /** @brief Maximum number of unordered blue-mobile pairs. */
 inline constexpr std::size_t kMaximumBlueCollisionPairs =
@@ -319,4 +319,4 @@ static_assert(std::is_trivially_copyable_v<GeneralizedBlueTeamState>,
 static_assert(std::is_trivially_copyable_v<GeneralizedBlueTeamStep>,
     "Generalized team transitions must not own dynamic storage");
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

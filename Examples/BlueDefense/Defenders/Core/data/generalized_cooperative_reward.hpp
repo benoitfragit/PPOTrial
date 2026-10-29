@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <type_traits>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 /** @brief Number of teammate formation slots at maximum blue capacity. */
 inline constexpr std::size_t kMaximumFormationSlots =
@@ -421,4 +421,4 @@ static_assert(std::is_trivially_copyable_v<GeneralizedCombatStateMask>,
 static_assert(std::is_trivially_copyable_v<GeneralizedCooperativeRewards>,
     "Generalized cooperative rewards must not own dynamic storage");
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders
