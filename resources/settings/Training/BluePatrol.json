@@ -51,6 +51,7 @@
     "rolloutSteps": 2048,
     "maxUpdates": 300,
     "checkpointEvery": 10,
+    "saveEveryUpdates": 1,
     "seed": 42
   },
   "evaluation": {
