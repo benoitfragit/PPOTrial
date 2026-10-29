@@ -103,7 +103,7 @@ using GeneralizedRewardValues =
 struct GeneralizedRewardSettings final
 {
     /** @brief Per-channel multipliers in enum order. */
-    GeneralizedRewardValues weights{};
+    GeneralizedRewardValues weights{1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F};
     /** @brief Symmetric scalar reward limit. */
     float clampMagnitude{100.F};
 };
