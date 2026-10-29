@@ -185,49 +185,39 @@ les profils LibTorch historiques :
 }
 ~~~
 
-Ici, `rolloutSteps` compte les pas ECS de l'équipe. Dans les anciennes implémentations (non utilisées),
-chaque pas fournit deux transitions au buffer, une par défenseur. Sur le chemin
-P/N optionnel décrit plus bas, il fournit exactement P transitions. Les valeurs
-applicatives proposées
-sont 512, 1024, 2048 et 4096 ; 128 reste la taille interne d'un mini-batch PPO.
-Les modifications faites dans l'IHM s'appliquent à la session en cours. Pour
-un nouveau démarrage reproductible, modifier le JSON lorsque l'application est
-arrêtée.
+Ici, `rolloutSteps` compte les pas ECS synchronisés de l'équipe :
+chaque pas produit P transitions, une par Bleu initialement présent.
+Les valeurs usuelles sont 512, 1024, 2048 et 4096.
+Les paramètres sont chargés depuis `Training/BluePatrol.json`.
 
-Les coefficients s'appliquent à des canaux conditionnés par la mission. Sans
-menace crédible, `Patrol tracking` évalue uniquement le leader et `Formation
-safety` entraîne uniquement l'équipier sur le wedge. Une menace visible
-mais lointaine ou en éloignement ne suffit pas. Avec une menace crédible,
-l'affectation stable choisit un intercepteur et conserve l'autre en réserve ;
-avec deux menaces crédibles, les deux bleus reçoivent des cibles distinctes.
-Les contributions patrouille/défense suivent le poids continu `q`, y compris
-pendant la récupération. `Formation safety` combine le wedge pondéré et une
-marge anticollision toujours active. `Timeout` vaut -15 si une menace active
-ou encore planifiée reste irrésolue à l'horizon ; une patrouille sans menace
-n'est pas punie pour avoir atteint sa durée normale.
+Le MAPPO actuel utilise des canaux séparés pour la progression sur
+l'hippodrome (leader), le maintien du wedge (équipiers), la poursuite des
+Rouges, les pertes Bleues/Rouges, la protection de l'objectif, le coût de
+commande et l'issue de mission. Les sept poids nommés du JSON sont
+convertis explicitement en dix canaux de reward dans l'exécution.
+Une formation correctement tenue ne génère pas un bonus positif
+permanent : l'écart hors tolérance est pénalisé. Les 61 rayons LiDAR
+restent disponibles, y compris pour la prévention Bleu/Bleu.
 
-`checkpointEvery` lance réellement l'évaluateur intégré après le nombre de
-mises à jour indiqué. L'acteur agit alors de façon déterministe pendant
-`evaluation.episodes` cas de `evaluation.maxSteps` pas au maximum. Historiquement, ces
-cas conservent les rouges RLMission de production et alternent 2v2/2v1, côtés
-et phases. Le score et sa progression sont visibles dans l'IHM ; seul un
-candidat meilleur remplace le checkpoint de production.
+L'acteur ne reçoit aucune attribution externe de cible rouge.
+Le signal de poursuite tient les positions des Rouges fixes lors du
+calcul du progrès causé par le mouvement Bleu ; les menaces
+influencent continûment la priorité patrouille/formation/défense.
+Cela n'établit pas, à lui seul, la convergence de la politique.
 
-Le dossier `resources/model/BluePatrol/latest/` reçoit deux fichiers après la
-première mise à jour : `blue_patrol_mappo_v7.txt` destiné à l'inférence et
-`blue_patrol_training_v4.txt` destiné à la reprise. Ce second fichier conserve
-le critique, les états Adam, le compteur de mises à jour et le RNG. Les données
-du rollout ne sont pas conservées ; le buffer repart vide au redémarrage. Le
-dossier `prod/` reste volontairement limité au meilleur acteur évalué et à son
-score.
+`checkpointEvery` demande une campagne d'évaluation déterministe.
+Les checkpoints d'acteur `blue_patrol_generalized_v8.txt` et
+d'entraînement `blue_patrol_generalized_training_v5.txt` (format
+interne V6) sont enregistrés sous `resources/model/BluePatrol/latest/`.
+Les anciens fichiers V4/V7 sont uniquement des sources de migration
+de poids compatibles, et ne démarrent pas un autre entraîneur.
 
-Le contrat v7 doit être entraîné depuis des poids neufs : le coordinateur et
-l'index de cible imposé ont été retirés. Le dernier champ global local est
-réservé à zéro ; la pression défensive est commune aux deux rôles. Les noms et
-signatures v7/v4 empêchent de reprendre les anciens poids bleus. Les paramètres
-de défense décrivent uniquement le risque : ils ne masquent aucune piste rouge
-et ne distribuent aucune cible. Les anciennes temporisations d'affectation
-n'existent plus.
+Les deux scénarios lancés depuis l'IHM utilisent exactement
+`GeneralizedPatrolMappoAgent` : `blue-patrol` (P/N=2/0 par défaut)
+et `blue-defense` (4/4 par défaut). La progression, les commandes
+du panneau d'agent et les dix rewards sont publiés par l'API
+habituelle de snapshot ECS. Les tests de simulation et la CI Desktop
+doivent être validés avant fusion.
 
 ### Géométrie aléatoire P/N
 
@@ -239,16 +229,14 @@ mesurés autour de la direction opposée à l'objectif : 0° est frontal et ±90
 est latéral. `minimumSeparation` est une distance en mètres garantie entre
 toutes les paires de rouges.
 
-Le contrat historique `threatCurriculum` reste accepté lorsque `redTeam` est
-absent. Les champs
-`noThreatProbability` et `singleThreatProbability` définissent respectivement
-les cas à zéro et une menace ; la probabilité restante crée deux menaces.
-`delayedFirstThreatProbability` applique la plage `minimumFirstDelaySteps` à
-`maximumFirstDelaySteps` à la première activation. Pour deux menaces,
-`delayedSecondThreatProbability` ajoute la seconde plage après la première.
-Une entité non encore activée reste détruite et sa piste est masquée dans
-l'attention. Les campagnes d'évaluation désactivent le curriculum stochastique
-et conservent les cas immédiats 2v1/2v2.
+Le contrat d'effectif `blueTeam`/`redTeam` est obligatoire. Le
+`threatCurriculum` historique et les probabilités spécialisées
+sur exactement deux attaquants sont rejetés. Les activations
+retardées sont désormais définies par les champs génériques
+`redTeam.delayedActivationProbability`,
+`minimumActivationDelaySteps` et `maximumActivationDelaySteps`.
+Une piste non encore activée demeure masquée jusqu'à son
+activation effective.
 
 Le bloc historique `restrictedZoneSpawn` continue à positionner
 `blue_restricted_zone` avec les mêmes fractions et le même ordre de tirage RNG.

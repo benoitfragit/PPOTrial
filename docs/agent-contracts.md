@@ -99,6 +99,8 @@ does not touch that behavior.
 ## Next passes (not included)
 
 An agent-agnostic factory/catalog can consume these descriptors for discovery
-and compatibility diagnostics. A later multi-agent experience contract can
-add team identity, termination/truncation and rollout metadata for MAPPO.
-Those additions must keep the existing legacy schemas and learners intact.
+and compatibility diagnostics. The generalized MAPPO implementation already
+supports team identity, per-agent state masking, termination/truncation and
+synchronous P-agent rollout collection. Future extensions must preserve the
+active generalized and RLMission schemas, without restoring a fixed-two
+blue controller.

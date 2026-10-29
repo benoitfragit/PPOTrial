@@ -1,8 +1,10 @@
 # MAPPO defender teams: architecture and migration
 
 This document describes the generalized Blue P/N learner introduced on 2026-10-29.
-The legacy RLMission and historical 2-vs-2 PPO training interfaces are separate
-and should not be confused with the generalized team runtime.
+Both blue-patrol (P/0) and blue-defense (P/N) execute this generalized
+learner. The historical two-blue controller has been removed; only the
+compatible V4/V7 checkpoint import readers remain to migrate existing
+parameters once. Red RLMission agents remain unchanged.
 
 ## Team sizes and shared model
 
@@ -119,7 +121,7 @@ engineering choices, not a claim of an optimal published architecture.
 
 ## Role-specific reward corrections (2026-10-29)
 
-The generalized runtime (not legacy 2v2 or RLMission) uses ten explainable
+The generalized runtime (independent of red RLMission) uses ten explainable
 channels: Patrol tracking, Formation keeping, Pursuit progress, Control effort,
 Blue survival, Red neutralization, Threat containment, Objective survival,
 Mission outcome, Timeout. The old seven-key JSON remains accepted, with

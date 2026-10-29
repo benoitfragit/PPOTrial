@@ -56,10 +56,12 @@ invalid startup callbacks/configuration. Existing desktop tests still exercise
 the real `PPO.exe` in headless mode and checkpoint parity. The desktop CI must
 compile and run CTest on Windows VS2022 x64 Debug and Release.
 
-The BlueDefense example adds no RLtools training, and does not change RLSNA/RLMission networks, weights, observations,
-actions, PPO math, checkpoint filenames/formats, JSON settings, scenario
-semantics, editor UI or render logic. It neither implements nor prepares
-runtime logic for the planned 2v2 or MAPPO examples.
+The `blue-patrol` and `blue-defense` entries both load the same generalized
+RLTools MAPPO agent, with P=1..9 blue mobiles and N=0..10 RLMission red
+mobiles. The selector and command-line dispatcher use the same catalog;
+there is no fixed-two defender controller. Both expose ten reward channels
+through the existing desktop agent snapshot API. The Airspace scenario,
+RLSNA/RLMission agents and renderer behavior remain independent.
 
 ## Deferred, explicitly out of scope
 
