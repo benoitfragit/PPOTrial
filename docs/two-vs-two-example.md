@@ -26,7 +26,7 @@ Sans contrat P/N optionnel, le scénario contient :
 
 - deux défenseurs bleus pilotés ensemble par `PatrolMappoAgent` et RLTools ;
 - un objectif bleu à protéger ;
-- la zone bleue historique observée par le LiDAR RLMission rouge ;
+- la bordure bleue de la zone défendue, sans zone interdite bleue intérieure ;
 - zéro ou plusieurs zones restreintes rouges configurables ;
 - deux entités rouges pilotées par les agents `RLMission` de production
   existants, dont l'activation dépend du curriculum d'entraînement.
@@ -60,7 +60,7 @@ Ces valeurs sont configurables dans `Scenarios/TwoVsTwo.json` :
   "minimumSeparation": 10000.0
 },
 "restrictedZoneSpawn": {
-  "enabledProbability": 0.75,
+  "enabledProbability": 0.0,
   "minimumNorthFraction": -0.45,
   "maximumNorthFraction": 0.45,
   "minimumEastFraction": 0.15,
@@ -106,9 +106,10 @@ limites du monde et deux zones hors limites ; l'objectif ne peut donc jamais
 être couvert par une zone rouge.
 
 `restrictedZoneSpawn` reste le contrat historique de la zone bleue
-`blue_restricted_zone`. Il n'est pas remplacé par la nouvelle collection :
-son ordre de tirage aléatoire, son LiDAR rouge et sa règle SNA restent
-inchangés. `restrictedZones` décrit uniquement les nouvelles zones rouges.
+`blue_restricted_zone`, mais le scénario livré fixe sa probabilité à zéro :
+aucune zone interdite bleue intérieure n'est active. La bordure de la zone
+défendue reste indépendante. `restrictedZones` décrit uniquement les zones
+rouges.
 
 Le rayon létal est exactement `SNA.MaxNoEscapeZoneRange` du profil. Le test de
 segment empêche le tunneling entre deux pas. Seuls les `Mobile/Friend` sont

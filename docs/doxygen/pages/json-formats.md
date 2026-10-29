@@ -27,7 +27,9 @@ The shipped `redTeam` instantiates four production RLMission attackers, with
 seeded optional activation delays. The legacy `threatCurriculum` remains
 available only when `redTeam` is absent.
 `restrictedZoneSpawn` defines a side-relative position box and an activation
-probability. World limits remain sensor and reward references; they do not stop
+probability. The shipped value is zero, disabling the inner friendly zone while
+retaining the independent defended-area boundary. World limits remain sensor
+and reward references; they do not stop
 the production RLMission attackers.
 
 `blueTeam` and `redTeam` are optional additive contracts. `blueTeam` selects

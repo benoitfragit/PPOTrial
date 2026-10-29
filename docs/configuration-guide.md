@@ -250,10 +250,10 @@ Une entité non encore activée reste détruite et sa piste est masquée dans
 l'attention. Les campagnes d'évaluation désactivent le curriculum stochastique
 et conservent les cas immédiats 2v1/2v2.
 
-Le bloc historique `restrictedZoneSpawn` continue à positionner
-`blue_restricted_zone` avec les mêmes fractions et le même ordre de tirage RNG.
-Cette zone reste consommée par RLMission et n'est pas incluse dans la nouvelle
-collection.
+Le bloc historique `restrictedZoneSpawn` conserve le contrat structurel de
+`blue_restricted_zone`. Le scénario livré fixe `enabledProbability` à zéro :
+la zone bleue intérieure est inactive, sans supprimer la bordure indépendante
+de la zone défendue. Elle n'est pas incluse dans la nouvelle collection.
 
 `restrictedZones` est une collection dédiée, indépendante de `entities`. Son
 booléen `enabled` désactive toutes les zones. Chaque élément fournit un `id`
@@ -271,9 +271,9 @@ Le profil de plateforme reste la source du rayon létal
 `SNA.MaxNoEscapeZoneRange`. Le rayon LiDAR vaut 110 % de ce rayon. Dans
 TwoVsTwo, seul le capteur ECS des `Mobile/Friend` est rafraîchi par ces règles;
 le contrôleur, l'observation 152 et les checkpoints RLMission rouges ne sont
-pas modifiés. La règle SNA probabiliste de la zone bleue historique reste elle
-aussi active contre les rouges ; seule l'arme des nouvelles zones hostiles est
-remplacée par la pénétration déterministe exacte pour les bleus.
+pas modifiés. La zone bleue historique est inactive dans le scénario livré ;
+l'arme des nouvelles zones hostiles utilise la pénétration déterministe exacte
+pour les bleus.
 
 ### Équipes P/N optionnelles
 

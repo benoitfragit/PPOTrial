@@ -21,7 +21,7 @@
       "minimumSeparation": 10000.0
     },
     "restrictedZoneSpawn": {
-      "enabledProbability": 0.75,
+      "enabledProbability": 0.0,
       "minimumNorthFraction": -0.45,
       "maximumNorthFraction": 0.45,
       "minimumEastFraction": 0.15,

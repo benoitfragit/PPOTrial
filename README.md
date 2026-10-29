@@ -49,9 +49,9 @@ l'objectif. Les zones rouges sont décrites par la collection typée
 deux à l'extérieur, toujours du côté opposé à l'objectif ; au plus deux zones
 actives appartiennent donc à chaque région. Elles sont vues
 par les 61 rayons pseudo-LiDAR des bleus. Le chemin RLMission des rouges, son
-observation 152 et ses checkpoints restent inchangés. La zone bleue historique
-`blue_restricted_zone`, son tirage `restrictedZoneSpawn` et sa règle SNA sont
-conservés à l'identique pour ne pas modifier le comportement des rouges.
+observation 152 et ses checkpoints restent inchangés. La zone bleue intérieure
+`blue_restricted_zone` est désactivée ; seule la bordure de la zone défendue
+reste affichée.
 
 La patrouille est un unique hippodrome analytique continu, sans waypoint. Sa
 longueur, sa largeur, son orientation, son ancrage et le wedge sont tirés une
