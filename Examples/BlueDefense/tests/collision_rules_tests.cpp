@@ -6,6 +6,9 @@
 #include "sharedworldcomponents.hpp"
 
 #include <entt/entt.hpp>
+#include <array>
+#include <cstddef>
+#include <initializer_list>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -373,16 +376,42 @@ void TestPatrolOverlaySnapshot()
 
 void TestBlueRolePermutationContract()
 {
-    using ppo::examples::bluedefense::InitializerContext;
-    InitializerContext context{};
-    for (std::size_t leader = 0U; leader < 2U; ++leader)
+    namespace defenders = ppo::examples::bluedefense::defenders;
+    for (std::size_t const count : {1U, 2U, 4U, 9U})
     {
-        context.leaderGuardIndex = leader;
-        Require(context.RoleForGuard(0U) != context.RoleForGuard(1U),
-                "blue guards received duplicate patrol roles");
-        Require(context.RoleForGuard(context.GuardForRole(0U)) == 0U
-                    && context.RoleForGuard(context.GuardForRole(1U)) == 1U,
-                "blue role permutation is not bijective");
+        for (std::size_t leader = 0U; leader < count; ++leader)
+        {
+            auto const roles = defenders::BlueTeamRoles::Create(count, leader);
+            Require(roles.has_value() && roles->IsValid(),
+                    "invalid generalized P-blue role assignment");
+            Require(roles->LeaderPhysicalIndex() == leader,
+                    "leader physical index was not preserved");
+
+            std::array<bool,
+                defenders::TeamCapacity::MaximumBlueMobiles - 1U> slots{};
+            std::size_t teammates = 0U;
+            for (std::size_t physical = 0U; physical < count; ++physical)
+            {
+                auto const assignment = roles->Assignment(physical);
+                Require(assignment.has_value(),
+                        "missing active blue role");
+                if (physical == leader)
+                {
+                    Require(assignment->role == defenders::BlueRole::Leader,
+                            "leader did not receive leader role");
+                    continue;
+                }
+                Require(assignment->role == defenders::BlueRole::Teammate,
+                        "teammate did not receive teammate role");
+                auto const slot = assignment->formationSlot;
+                Require(slot < count - 1U && !slots[slot],
+                        "formation slots are not unique");
+                slots[slot] = true;
+                ++teammates;
+            }
+            Require(teammates == count - 1U && !roles->Assignment(count),
+                    "P-blue role cardinality is incorrect");
+        }
     }
 }
 
