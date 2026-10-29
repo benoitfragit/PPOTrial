@@ -47,8 +47,8 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_test(NAME TwoVsTwoGeneralizedInitializerTests
         COMMAND TwoVsTwoGeneralizedInitializerTests)
 
-    # Regression: Play must advance both guards in the GUI ECS even when
-    # neither one has a trained PPO checkpoint available.
+    # Regression: Play advances every P/N agent through the actual desktop ECS
+    # without requiring a pre-existing trained actor checkpoint.
     add_executable(TwoVsTwoPatrolRuntimeSmokeTest tests/patrol_runtime_smoke.cpp)
     target_compile_features(TwoVsTwoPatrolRuntimeSmokeTest PRIVATE cxx_std_17)
     target_link_libraries(TwoVsTwoPatrolRuntimeSmokeTest PRIVATE
@@ -63,7 +63,7 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     endif()
     add_test(NAME TwoVsTwoPatrolRuntimeSmoke COMMAND TwoVsTwoPatrolRuntimeSmokeTest)
     add_test(NAME TwoVsTwoCombatRuntimeSmoke
-        COMMAND TwoVsTwoPatrolRuntimeSmokeTest two-vs-two)
+        COMMAND TwoVsTwoPatrolRuntimeSmokeTest blue-defense)
 
     # Renderer contract: both enabled and disabled hostile zones must remain
     # identifiable through the public ECS snapshot and m_destroyed flag.
