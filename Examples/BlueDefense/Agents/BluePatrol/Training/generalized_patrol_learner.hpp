@@ -567,8 +567,10 @@ public:
     }
 
 private:
-    static constexpr Index kTrainingBatch = 128;
+    static constexpr Index kTrainingBatch = TrainingParameters::BATCH_SIZE;
     using ActorSpecification = TrainingConfig::NN::ACTOR_SPEC;
+    static_assert(ActorSpecification::BATCH_SIZE >= kTrainingBatch,
+                  "RLtools actor batch capacity is too small");
     using Actor = GeneralizedAttentionActor<ActorSpecification>;
     using LegacyActor = TrainingConfig::NN::ACTOR_TYPE;
     using Critic = GeneralizedCriticConfig::Network;

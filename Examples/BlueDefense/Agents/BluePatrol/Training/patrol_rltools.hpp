@@ -138,7 +138,8 @@ struct TrainingParametersFor
     using PPO_PARAMETERS = PPOParameters;
     static constexpr Index N_ENVIRONMENTS = 2;
     static constexpr Index ON_POLICY_RUNNER_STEPS_PER_ENV = RolloutSteps;
-    static constexpr Index BATCH_SIZE = 128;
+    // Shared RLtools batch capacity for the actor and centralized critic.
+    static constexpr Index BATCH_SIZE = 1024;
     static constexpr Index ACTOR_HIDDEN_DIM = 128;
     static constexpr Index CRITIC_HIDDEN_DIM = 128;
     static constexpr Index ACTOR_NUM_LAYERS = 3;
