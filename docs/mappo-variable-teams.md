@@ -152,3 +152,8 @@ actor and v6 critic/checkpoint dimensions are unchanged. Continue training
 only with deliberate reward migration; a fresh training run and multi-seed
 evaluation are recommended. Unit tests cover good/off-track tracking,
 leader-heading wedge consistency, blue-motion pursuit and proximity blending.
+
+The GUI reports the latest **raw, unweighted** per-channel team values
+rather than placeholder zeros. The displayed scaling is applied only when
+computing the PPO scalar reward. The channel values are reset at each episode
+initialization; stale values are not retained across episode boundaries.

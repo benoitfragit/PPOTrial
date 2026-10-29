@@ -224,6 +224,7 @@ void GeneralizedPatrolMappoAgent::Init()
 {
     episodeStep_ = 0U;
     currentReward_ = 0.F;
+    lastRewardChannels_.fill(0.F);
     hasBeforeStep_ = false;
     episodeDone_ = false;
 }
@@ -582,6 +583,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         }
         currentReward_ = rewardCount == 0U ? 0.F
             : rewardSum / static_cast<float>(rewardCount);
+        lastRewardChannels_ = rewardBreakdown.team.values;
 
         bool const updated = learner_->Observe(
             observations, rewards, availability, terminated, truncated);
@@ -871,7 +873,8 @@ GeneralizedPatrolMappoAgent::GetSnapshot() const noexcept
     snapshot.m_common.m_evaluationinprogress = evaluation_.InProgress();
     snapshot.m_scalings.assign(
         rewardWeights_.begin(), rewardWeights_.end());
-    snapshot.m_rewards.assign(kGeneralizedRewardChannelCount, 0.F);
+    snapshot.m_rewards.assign(
+        lastRewardChannels_.begin(), lastRewardChannels_.end());
     snapshot.m_rewardnames = {
         "Patrol tracking", "Formation keeping", "Pursuit progress",
         "Control effort", "Blue survival", "Red neutralization",
