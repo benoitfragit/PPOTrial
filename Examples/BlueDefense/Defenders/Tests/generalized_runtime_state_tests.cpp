@@ -209,30 +209,50 @@ int main()
     if (blue::Valid(invalidDead))
         return 12;
 
-    // Destruction is per-agent: survivors continue unless the last blue dies.
+    // Nonleaders can be lost without ending the episode; loss of the
+    // episode-assigned leader ends it even when other blues remain alive.
     auto partiallyLost = StateFor(3U, 0U);
+    constexpr std::size_t leaderIndex = 2U;
     partiallyLost.blues[1U].available = false;
-    if (blue::GeneralizedBlueTeamFailed(partiallyLost, blue::Parameters{}))
+    if (blue::GeneralizedBlueTeamFailed(
+            partiallyLost, blue::Parameters{}, leaderIndex))
         return 13;
     partiallyLost.blues[0U].available = false;
-    if (blue::GeneralizedBlueTeamFailed(partiallyLost, blue::Parameters{}))
+    if (blue::GeneralizedBlueTeamFailed(
+            partiallyLost, blue::Parameters{}, leaderIndex))
         return 14;
     partiallyLost.blues[2U].available = false;
-    if (!blue::GeneralizedBlueTeamFailed(partiallyLost, blue::Parameters{}))
+    if (!blue::GeneralizedBlueTeamFailed(
+            partiallyLost, blue::Parameters{}, leaderIndex))
         return 15;
 
-    // Dead blues cannot terminate an otherwise surviving team by drifting
-    // outside the world after destruction; live blues still respect bounds.
+    // Dead blues cannot terminate a living leader by drifting beyond bounds;
+    // surviving blues must still obey the world boundary.
     blue::Parameters parameters{};
     auto oneSurvivor = StateFor(2U, 0U);
     oneSurvivor.blues[0U].available = false;
     oneSurvivor.blues[0U].north =
         parameters.hardBoundaryScale * parameters.halfNorth + 100.F;
-    if (blue::GeneralizedBlueTeamFailed(oneSurvivor, parameters))
+    if (blue::GeneralizedBlueTeamFailed(oneSurvivor, parameters, 1U))
         return 16;
     oneSurvivor.blues[1U].north =
         parameters.hardBoundaryScale * parameters.halfNorth;
-    if (!blue::GeneralizedBlueTeamFailed(oneSurvivor, parameters))
+    if (!blue::GeneralizedBlueTeamFailed(oneSurvivor, parameters, 1U))
         return 17;
+
+    // Same physical losses, different assigned leader: leader identity matters.
+    auto leaderLost = StateFor(3U, 0U);
+    leaderLost.blues[0U].available = false;
+    if (!blue::GeneralizedBlueTeamFailed(leaderLost, parameters, 0U))
+        return 18;
+    if (blue::GeneralizedBlueTeamFailed(leaderLost, parameters, 1U))
+        return 19;
+
+    auto solo = StateFor(1U, 0U);
+    if (blue::GeneralizedBlueTeamFailed(solo, parameters, 0U))
+        return 20;
+    solo.blues[0U].available = false;
+    if (!blue::GeneralizedBlueTeamFailed(solo, parameters, 0U))
+        return 21;
     return 0;
 }
