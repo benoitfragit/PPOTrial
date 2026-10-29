@@ -38,9 +38,42 @@ struct GeneralizedRuntimeState final
     int side{1};
     /** @brief Synchronized team-step counter. */
     std::size_t step{};
-    /** @brief Sticky physical failure resolved by the ECS world rules. */
+    /** @brief Team-level failure: no surviving blues or a living blue outside. */
     bool failed{};
 };
+
+/**
+ * @brief Team failure does not follow from losing an individual blue mobile.
+ *
+ * A destroyed mobile keeps its physical slot but cannot independently end
+ * the episode. Failure occurs when all P mobiles are lost, or any surviving
+ * mobile violates the hard world boundary. Mission/objective outcomes are
+ * evaluated separately by the MAPPO runtime.
+ *
+ * @param state Runtime state with valid episode counts.
+ * @param parameters Valid world boundaries and hard-boundary scale.
+ * @return True only for complete blue loss or a living blue out of bounds.
+ */
+inline bool GeneralizedBlueTeamFailed(
+    GeneralizedRuntimeState const& state, Parameters const& parameters) noexcept
+{
+    bool anyLivingBlue = false;
+    for (std::size_t index = 0U; index < state.counts.blueMobiles; ++index)
+    {
+        Mobile const& blue = state.blues[index];
+        if (!blue.available)
+            continue;
+        anyLivingBlue = true;
+        if (std::abs(blue.north)
+                >= parameters.hardBoundaryScale * parameters.halfNorth
+            || std::abs(blue.east)
+                >= parameters.hardBoundaryScale * parameters.halfEast)
+        {
+            return true;
+        }
+    }
+    return !anyLivingBlue;
+}
 
 /**
  * @brief Validates runtime counts and finite participating entity kinematics.

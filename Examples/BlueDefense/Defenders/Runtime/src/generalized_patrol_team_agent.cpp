@@ -270,11 +270,6 @@ GeneralizedRuntimeState GeneralizedPatrolMappoAgent::ReadState(
     {
         ppo::model::BaseEntity blue{registry_, guardIds_[index]};
         result.blues[index] = GeneralizedMobileFromEcs(blue);
-        result.failed |= !result.blues[index].available
-            || std::abs(result.blues[index].north)
-                >= parameters.hardBoundaryScale * parameters.halfNorth
-            || std::abs(result.blues[index].east)
-                >= parameters.hardBoundaryScale * parameters.halfEast;
         if (blue.has<ppo::model::sPseudoLidarState>())
         {
             auto const [sensor] = blue.get<ppo::model::sPseudoLidarState>();
@@ -289,6 +284,7 @@ GeneralizedRuntimeState GeneralizedPatrolMappoAgent::ReadState(
             }
         }
     }
+    result.failed = GeneralizedBlueTeamFailed(result, parameters);
     for (std::size_t index = 0U; index < counts_.redMobiles; ++index)
     {
         if (attackerIds_[index] == entt::null

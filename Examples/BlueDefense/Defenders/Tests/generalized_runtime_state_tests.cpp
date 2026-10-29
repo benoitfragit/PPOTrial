@@ -208,5 +208,31 @@ int main()
         std::numeric_limits<float>::quiet_NaN();
     if (blue::Valid(invalidDead))
         return 12;
+
+    // Destruction is per-agent: survivors continue unless the last blue dies.
+    auto partiallyLost = StateFor(3U, 0U);
+    partiallyLost.blues[1U].available = false;
+    if (blue::GeneralizedBlueTeamFailed(partiallyLost, blue::Parameters{}))
+        return 13;
+    partiallyLost.blues[0U].available = false;
+    if (blue::GeneralizedBlueTeamFailed(partiallyLost, blue::Parameters{}))
+        return 14;
+    partiallyLost.blues[2U].available = false;
+    if (!blue::GeneralizedBlueTeamFailed(partiallyLost, blue::Parameters{}))
+        return 15;
+
+    // Dead blues cannot terminate an otherwise surviving team by drifting
+    // outside the world after destruction; live blues still respect bounds.
+    blue::Parameters parameters{};
+    auto oneSurvivor = StateFor(2U, 0U);
+    oneSurvivor.blues[0U].available = false;
+    oneSurvivor.blues[0U].north =
+        parameters.hardBoundaryScale * parameters.halfNorth + 100.F;
+    if (blue::GeneralizedBlueTeamFailed(oneSurvivor, parameters))
+        return 16;
+    oneSurvivor.blues[1U].north =
+        parameters.hardBoundaryScale * parameters.halfNorth;
+    if (!blue::GeneralizedBlueTeamFailed(oneSurvivor, parameters))
+        return 17;
     return 0;
 }
