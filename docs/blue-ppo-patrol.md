@@ -34,11 +34,11 @@ La référence est recalculée depuis `Environment.json` : elle reste donc dans 
 monde si ses dimensions changent.
 
 Les bleus disposent d'un léger avantage cinématique pendant l'entraînement :
-600 m/s² d'accélération, 420 m/s en vitesse maximale et 0,50 rad/s en
+600 m/s² d'accélération, 700 m/s en vitesse maximale et 0,700000596 rad/s en
 rotation maximale, contre 400 m/s et 0,40 rad/s pour les rouges. La patrouille
-démarre à une vitesse de croisière configurable de 420 m/s. Leur domaine SNA
+démarre à une vitesse de croisière configurable de 700 m/s. Leur domaine SNA
 reste supérieur à celui des rouges : zone sans échappement de 5 km, zone
-d'engagement maximale de 10 km et angle de tir de 1,10 rad. Les rouges
+d'engagement maximale de 10 km et angle de tir de 3,147198 rad. Les rouges
 RLMission conservent leurs paramètres existants (4 km, 8 km et 1,047198 rad).
 
 Ces valeurs se règlent dans

@@ -95,9 +95,9 @@ Le curriculum active deux rouges dans 77,5 % des épisodes, un dans 15 % et
 aucun dans 7,5 %. Toutes les menaces sont immédiates. Les rouges utilisent
 toujours leurs modèles RLMission de production.
 
-L'avantage bleu reste local et léger : croisière et maximum à 420 m/s,
-accélération de 600 m/s², rotation à 0,50 rad/s et domaine angulaire de
-destruction à 1,10 rad, contre 400 m/s, 0,40 rad/s et 1,047198 rad pour les
+Les limites bleues reprennent `trainingaircraft` : croisière et maximum à 700 m/s,
+accélération de 600 m/s², rotation à 0,700000596 rad/s et domaine angulaire de
+destruction à 3,147198 rad, contre 400 m/s, 0,40 rad/s et 1,047198 rad pour les
 rouges.
 Il ne fait l'objet d'aucun nouveau commit.
 

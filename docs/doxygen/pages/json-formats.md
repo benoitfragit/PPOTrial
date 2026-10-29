@@ -159,7 +159,8 @@ is then treated as a magnitude and mirrored onto the side opposite the current
 objective. The shipped scenario uses two inside-world and two outside-world
 centres, so the objective cannot be covered by a hostile zone.
 
-The blue `Platforms/Mobile/defender_car.json` profile also exposes
+The blue `Platforms/Mobile/defender_car.json` profile mirrors the
+`trainingaircraft` speed, turn-rate and SNA engagement-angle limits and exposes
 `FlightModel.CruiseSpeed`. The TwoVsTwo loader uses it consistently for the
 initial state and patrol reference. The remaining `FlightModel` and `SNA`
 fields define the blue physical and engagement limits without changing the

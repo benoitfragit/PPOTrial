@@ -65,12 +65,13 @@ La configuration livrée conserve une longueur de 50 à 60 km et échantillonne
 une largeur de 16 à 20 km. Ces rayons progressifs facilitent l'exploration
 initiale du leader et la tenue du wedge dans les demi-tours.
 
-La plateforme bleue dispose d'un léger avantage d'entraînement : vitesse de
-croisière et vitesse maximale de 420 m/s, contre 400 m/s pour les rouges,
-accélération de 600 m/s² et rotation maximale de 0,50 rad/s, contre 0,40.
+La plateforme bleue reprend les limites de `trainingaircraft` : vitesse de
+croisière et vitesse maximale de 700 m/s, contre 400 m/s pour les rouges,
+accélération de 600 m/s² et rotation maximale de 0,700000596 rad/s, contre
+0,40.
 Sa zone SNA sans
 échappement vaut 5 km et sa zone d'engagement atteint 10 km, contre 4 et 8 km
-pour les rouges. Son domaine angulaire de destruction vaut 1,10 rad, contre
+pour les rouges. Son domaine angulaire de destruction vaut 3,147198 rad, contre
 1,047198 rad pour les rouges. Les rouges restent inchangés.
 
 ## Configuration bleue

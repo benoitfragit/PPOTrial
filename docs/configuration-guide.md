@@ -420,9 +420,10 @@ la référence de patrouille ; `MaxSpeed`, `MaxAcceleration` et
 `MaxRotAcceleration` restent les limites physiques. La section `SNA` règle la
 zone sans échappement et l'angle d'engagement des bleus indépendamment de la
 plateforme rouge `attacker_car`. La configuration d'entraînement actuelle fixe
-`CruiseSpeed` et `MaxSpeed` à 420 m/s. `MaxRotAcceleration` vaut 0,50 rad/s
-et `SNA.MaxShootAngle` 1,10 rad. Ces valeurs restent légèrement supérieures
-aux 400 m/s, 0,40 rad/s et 1,047198 rad d'`attacker_car`.
+`CruiseSpeed` et `MaxSpeed` à 700 m/s. `MaxRotAcceleration` vaut
+0,700000596 rad/s et `SNA.MaxShootAngle` 3,147198 rad. Ces limites reprennent
+`trainingaircraft` et restent propres aux bleus ; `attacker_car` conserve
+400 m/s, 0,40 rad/s et 1,047198 rad.
 
 **Evaluation/InitialStates.json** contient des collections de points initiaux nommés, au format **presets.blueeval[]** et **presets.redeval[]**, avec les coordonnées et commandes dans des champs explicites **north**, **east**, **heading**, **speed**, **turnAcceleration**, **acceleration**. L'initialiseur C++ peut les utiliser comme auparavant, sans liste opaque de six nombres ni ancien chemin. Le champ **evaluationSettings** conserve les paramètres numériques associés à ces jeux d'initialisation.
 
