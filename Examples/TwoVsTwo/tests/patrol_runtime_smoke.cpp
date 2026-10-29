@@ -43,7 +43,6 @@ struct ExpectedTeam final
 {
     std::size_t blueCount{};
     std::size_t redCount{};
-    bool generalized{};
 };
 
 // Resolve dynamic entity names without depending on fixed 2v2 slot names.
@@ -70,12 +69,8 @@ ExpectedTeam ScenarioTeam(std::filesystem::path const& scenarioPath)
     auto const document = ppo::serialization::Serializer::Parse(scenarioPath);
     auto const& settings = document.at("twoVsTwo");
     ExpectedTeam result{};
-    result.generalized = settings.contains("blueTeam");
-    result.blueCount = result.generalized
-        ? settings.at("blueTeam").at("activeCount").get<std::size_t>() : 2U;
-    result.redCount = settings.value("patrolOnly", false) ? 0U
-        : settings.contains("redTeam")
-        ? settings.at("redTeam").at("activeCount").get<std::size_t>() : 2U;
+    result.blueCount = settings.at("blueTeam").at("activeCount").get<std::size_t>();
+    result.redCount = settings.at("redTeam").at("activeCount").get<std::size_t>();
     return result;
 }
 
@@ -95,9 +90,8 @@ Sample Capture(
                    ppo::model::sEntityMetadata>().each(
             [&](entt::entity entity, auto const& state, auto const& metadata) {
                 std::string_view const name{metadata.m_name};
-                int const index = name == "blue_guard_1" ? 0
-                    : name == "blue_guard_2" ? 1
-                    : NumberedIndex(name, "blue_", Sample::kBlueCapacity);
+                int const index = NumberedIndex(
+                    name, "blue_", Sample::kBlueCapacity);
                 if (index >= 0)
                 {
                     auto const i = static_cast<std::size_t>(index);
@@ -151,20 +145,14 @@ Sample Capture(
         world.view<ppo::model::sAgentStateSnaphot>().each(
             [&](auto const& snapshot) {
                 std::string_view const name{snapshot.m_name};
-                bool const legacy = name == "Blue MAPPO (RLTools)";
-                bool const generalized =
-                    name == "Blue generalized shared MAPPO";
-                if (legacy || generalized)
+                if (name == "Blue generalized shared MAPPO")
                 {
                     ++result.controllers;
-                    result.generalizedController |= generalized;
+                    result.generalizedController = true;
                     result.trainingPresent |= snapshot.m_common.m_training;
-                    result.rewardsPresent |= generalized
-                        ? snapshot.m_rewards.size() == 8U
-                            && snapshot.m_rewardnames.size() == 8U
-                            && snapshot.m_rewardnames[4] == "Threat containment"
-                        : snapshot.m_rewards.size() == 7U
-                            && snapshot.m_rewardnames.size() == 7U;
+                    result.rewardsPresent |= snapshot.m_rewards.size() == 10U
+                        && snapshot.m_rewardnames.size() == 10U
+                        && snapshot.m_rewardnames[6] == "Threat containment";
                     result.evaluationInProgress |=
                         snapshot.m_common.m_evaluationinprogress;
                     result.completedEvaluations = std::max(
@@ -185,7 +173,7 @@ bool Ready(Sample const& s, ExpectedTeam const expected)
         || s.redsTargetingObjective != expected.redCount
         || s.unmodifiedRedPlatforms != expected.redCount
         || s.controllers != 1U || !s.trainingPresent || !s.rewardsPresent
-        || s.generalizedController != expected.generalized
+        || !s.generalizedController
         || s.rollout != 2048)
         return false;
     for (std::size_t i = 0U; i < expected.blueCount; ++i)
@@ -200,7 +188,7 @@ bool Ready(Sample const& s, ExpectedTeam const expected)
 
 int main(int argc, char** argv)
 {
-    bool const combat = argc >= 2 && std::string{argv[1]} == "two-vs-two";
+    bool const combat = argc >= 2 && std::string{argv[1]} == "blue-defense";
     bool const evaluationSmoke = argc == 3
         && std::string{argv[2]} == "evaluation-smoke";
     if (argc > 3 || (argc >= 2 && !combat) || (argc == 3 && !evaluationSmoke))
