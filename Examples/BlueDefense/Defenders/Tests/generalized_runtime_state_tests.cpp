@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 
 namespace blue = ppo::examples::bluedefense::defenders;
 
@@ -177,5 +178,35 @@ int main()
     auto noRed = StateFor(1U, 0U);
     if (blue::ObjectiveThreatLevel(noRed, blue::Parameters{}) != 0.F)
         return 8;
+
+    // The flight model marks an aircraft destroyed after speed drops
+    // below its minimum; its last finite speed can be negative.
+    // Dead tracks must not abort the MAPPO feedback for surviving blues.
+    auto destroyed = StateFor(2U, 1U);
+    destroyed.blues[1U].available = false;
+    destroyed.blues[1U].speed = -12.F;
+    destroyed.reds[0U].available = false;
+    destroyed.reds[0U].speed = -3.F;
+    auto const destroyedRoles = blue::BlueTeamRoles::Create(2U, 0U);
+    if (!destroyedRoles || !blue::Valid(destroyed)
+        || !blue::BuildGeneralizedObservations(
+            blue::Parameters{}, destroyed, *destroyedRoles, observations))
+        return 9;
+
+    auto invalidLiveBlue = destroyed;
+    invalidLiveBlue.blues[1U].available = true;
+    if (blue::Valid(invalidLiveBlue))
+        return 10;
+
+    auto invalidLiveRed = destroyed;
+    invalidLiveRed.reds[0U].available = true;
+    if (blue::Valid(invalidLiveRed))
+        return 11;
+
+    auto invalidDead = destroyed;
+    invalidDead.reds[0U].speed =
+        std::numeric_limits<float>::quiet_NaN();
+    if (blue::Valid(invalidDead))
+        return 12;
     return 0;
 }
