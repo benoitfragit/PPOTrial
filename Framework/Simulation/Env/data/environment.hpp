@@ -120,6 +120,11 @@ public:
     * @brief Resumes execution when paused.
     */
     void Play(void);
+
+    /** Enables unthrottled simulation with reduced snapshot frequency.
+     * Must be called before starting the worker thread.
+     */
+    void SetHeadlessMode(bool enabled);
     /**
     * @brief Pauses the simulation loop.
     */
