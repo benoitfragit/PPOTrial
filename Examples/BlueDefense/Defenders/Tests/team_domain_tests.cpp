@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <random>
 
-namespace patrol = ppo::examples::twovstwo::defenders;
+namespace patrol = ppo::examples::bluedefense::defenders;
 
 namespace {
 

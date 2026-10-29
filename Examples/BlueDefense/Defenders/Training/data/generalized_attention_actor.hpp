@@ -10,7 +10,7 @@
 #include <limits>
 #include <type_traits>
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 namespace rlt = rl_tools;
 
@@ -331,7 +331,7 @@ struct GeneralizedCompactFeatures final
         ActiveBlueCount + 1U;
 };
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders
 
 namespace rl_tools {
 namespace blue_generalized_attention_detail {
@@ -411,7 +411,7 @@ template<typename Device, typename Actor, typename Input, typename Output>
 void transform(Device& device, Actor const& actor, Input const& input,
                Output& compact)
 {
-    namespace blue = ppo::examples::twovstwo::defenders;
+    namespace blue = ppo::examples::bluedefense::defenders;
     using Raw = blue::GeneralizedObservationLayout;
     using Legacy = blue::ObservationLayout;
     rl_tools::set_all(device, compact, 0.F);
@@ -461,10 +461,10 @@ void transform(Device& device, Actor const& actor, Input const& input,
 template<typename Device, typename Specification>
 void malloc(
     Device& device,
-    ppo::examples::twovstwo::defenders::GeneralizedAttentionActor<
+    ppo::examples::bluedefense::defenders::GeneralizedAttentionActor<
         Specification>& actor)
 {
-    using Actor = ppo::examples::twovstwo::defenders::GeneralizedAttentionActor<
+    using Actor = ppo::examples::bluedefense::defenders::GeneralizedAttentionActor<
         Specification>;
     rl_tools::malloc(device, static_cast<typename Actor::Base&>(actor));
     rl_tools::malloc(device, actor.forwardCompact);
@@ -475,10 +475,10 @@ void malloc(
 template<typename Device, typename Specification>
 void free(
     Device& device,
-    ppo::examples::twovstwo::defenders::GeneralizedAttentionActor<
+    ppo::examples::bluedefense::defenders::GeneralizedAttentionActor<
         Specification>& actor)
 {
-    using Actor = ppo::examples::twovstwo::defenders::GeneralizedAttentionActor<
+    using Actor = ppo::examples::bluedefense::defenders::GeneralizedAttentionActor<
         Specification>;
     blue_generalized_attention_detail::free(device, actor.red);
     blue_generalized_attention_detail::free(device, actor.friendlies);
@@ -490,10 +490,10 @@ template<typename Device, typename Specification,
          typename Specification::TI Batch, typename ContainerTag>
 void malloc(
     Device& device,
-    ppo::examples::twovstwo::defenders::GeneralizedAttentionActorBuffer<
+    ppo::examples::bluedefense::defenders::GeneralizedAttentionActorBuffer<
         Specification, Batch, ContainerTag>& buffer)
 {
-    using Buffer = ppo::examples::twovstwo::defenders::
+    using Buffer = ppo::examples::bluedefense::defenders::
         GeneralizedAttentionActorBuffer<Specification, Batch, ContainerTag>;
     rl_tools::malloc(device, static_cast<typename Buffer::Base&>(buffer));
     rl_tools::malloc(device, buffer.compact);
@@ -504,10 +504,10 @@ template<typename Device, typename Specification,
          typename Specification::TI Batch, typename ContainerTag>
 void free(
     Device& device,
-    ppo::examples::twovstwo::defenders::GeneralizedAttentionActorBuffer<
+    ppo::examples::bluedefense::defenders::GeneralizedAttentionActorBuffer<
         Specification, Batch, ContainerTag>& buffer)
 {
-    using Buffer = ppo::examples::twovstwo::defenders::
+    using Buffer = ppo::examples::bluedefense::defenders::
         GeneralizedAttentionActorBuffer<Specification, Batch, ContainerTag>;
     rl_tools::free(device, buffer.compactDerivative);
     rl_tools::free(device, buffer.compact);
@@ -517,11 +517,11 @@ void free(
 template<typename Device, typename Specification, typename RandomEngine>
 void init_weights(
     Device& device,
-    ppo::examples::twovstwo::defenders::GeneralizedAttentionActor<
+    ppo::examples::bluedefense::defenders::GeneralizedAttentionActor<
         Specification>& actor,
     RandomEngine& randomEngine)
 {
-    using Actor = ppo::examples::twovstwo::defenders::GeneralizedAttentionActor<
+    using Actor = ppo::examples::bluedefense::defenders::GeneralizedAttentionActor<
         Specification>;
     rl_tools::init_weights(device, static_cast<typename Actor::Base&>(actor),
                            randomEngine);
@@ -534,10 +534,10 @@ void init_weights(
 template<typename Device, typename Specification>
 void zero_gradient(
     Device& device,
-    ppo::examples::twovstwo::defenders::GeneralizedAttentionActor<
+    ppo::examples::bluedefense::defenders::GeneralizedAttentionActor<
         Specification>& actor)
 {
-    using Actor = ppo::examples::twovstwo::defenders::GeneralizedAttentionActor<
+    using Actor = ppo::examples::bluedefense::defenders::GeneralizedAttentionActor<
         Specification>;
     rl_tools::zero_gradient(device, static_cast<typename Actor::Base&>(actor));
     blue_generalized_attention_detail::zero_gradient(device, actor.red);
@@ -549,13 +549,13 @@ template<typename Device, typename Specification, typename InputSpecification,
          typename OutputSpecification, typename Buffer>
 void evaluate(
     Device& device,
-    ppo::examples::twovstwo::defenders::GeneralizedAttentionActor<
+    ppo::examples::bluedefense::defenders::GeneralizedAttentionActor<
         Specification> const& actor,
     Matrix<InputSpecification> const& input,
     Matrix<OutputSpecification>& output, Buffer& buffer)
 {
     static_assert(InputSpecification::COLS
-                  == ppo::examples::twovstwo::defenders::
+                  == ppo::examples::bluedefense::defenders::
                       GeneralizedObservationLayout::Size);
     using BufferType = std::remove_reference_t<Buffer>;
     static_assert(BufferType::CompactSpecification::ROWS
@@ -564,7 +564,7 @@ void evaluate(
         device, buffer.compact,
         matrix::ViewSpec<
             InputSpecification::ROWS,
-            ppo::examples::twovstwo::defenders::ObservationLayout::Size>{});
+            ppo::examples::bluedefense::defenders::ObservationLayout::Size>{});
     blue_generalized_attention_detail::transform(device, actor, input,
                                                   compact);
     using Mlp = nn_models::mlp::NeuralNetwork<Specification>;
@@ -577,20 +577,20 @@ template<typename Device, typename Specification, typename InputSpecification,
          typename OutputSpecification>
 void forward(
     Device& device,
-    ppo::examples::twovstwo::defenders::GeneralizedAttentionActor<
+    ppo::examples::bluedefense::defenders::GeneralizedAttentionActor<
         Specification>& actor,
     Matrix<InputSpecification> const& input,
     Matrix<OutputSpecification>& output)
 {
     static_assert(InputSpecification::COLS
-                  == ppo::examples::twovstwo::defenders::
+                  == ppo::examples::bluedefense::defenders::
                       GeneralizedObservationLayout::Size);
     static_assert(Specification::BATCH_SIZE >= InputSpecification::ROWS);
     auto compact = rl_tools::view(
         device, actor.forwardCompact,
         matrix::ViewSpec<
             InputSpecification::ROWS,
-            ppo::examples::twovstwo::defenders::ObservationLayout::Size>{});
+            ppo::examples::bluedefense::defenders::ObservationLayout::Size>{});
     blue_generalized_attention_detail::transform(device, actor, input,
                                                   compact);
     using Mlp = nn_models::mlp::NeuralNetworkBackwardGradient<Specification>;
@@ -601,12 +601,12 @@ template<typename Device, typename Specification, typename InputSpecification,
          typename OutputSpecification, typename Buffer>
 void backward(
     Device& device,
-    ppo::examples::twovstwo::defenders::GeneralizedAttentionActor<
+    ppo::examples::bluedefense::defenders::GeneralizedAttentionActor<
         Specification>& actor,
     Matrix<InputSpecification> const& input,
     Matrix<OutputSpecification>& outputDerivative, Buffer& buffer)
 {
-    namespace blue = ppo::examples::twovstwo::defenders;
+    namespace blue = ppo::examples::bluedefense::defenders;
     using Index = typename Specification::TI;
     using BufferType = std::remove_reference_t<Buffer>;
     static_assert(BufferType::CompactSpecification::ROWS
@@ -645,7 +645,7 @@ void backward(
 
 } // namespace rl_tools
 
-namespace ppo::examples::twovstwo::defenders {
+namespace ppo::examples::bluedefense::defenders {
 
 template<typename Device, typename Specification, typename Optimizer>
 void update(Device& device, GeneralizedAttentionActor<Specification>& actor,
@@ -678,4 +678,4 @@ void _reset_optimizer_state(
         device, actor.friendlies, optimizer);
 }
 
-} // namespace ppo::examples::twovstwo::defenders
+} // namespace ppo::examples::bluedefense::defenders

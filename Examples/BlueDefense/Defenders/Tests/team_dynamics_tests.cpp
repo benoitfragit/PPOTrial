@@ -3,7 +3,7 @@
 #include <cmath>
 #include <cstddef>
 
-namespace blue = ppo::examples::twovstwo::defenders;
+namespace blue = ppo::examples::bluedefense::defenders;
 
 namespace {
 
