@@ -12,7 +12,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace blue = ppo::examples::twovstwo::defenders;
+namespace blue = ppo::examples::bluedefense::defenders;
 namespace rlt = rl_tools;
 
 namespace {
