@@ -4,20 +4,19 @@
   "twoVsTwo": {
     "patrolOnly": true,
     "blueController": "mappo",
-    "red2InitiallyDestroyedProbability": 0,
     "redSpawn": {
       "minimumWorldScale": 1.05,
       "maximumWorldScale": 1.35,
-      "minimumBearingDegrees": -90.0,
-      "maximumBearingDegrees": 90.0,
-      "minimumSeparation": 10000.0
+      "minimumBearingDegrees": -90,
+      "maximumBearingDegrees": 90,
+      "minimumSeparation": 10000
     },
     "restrictedZoneSpawn": {
-      "enabledProbability": 1.0,
-      "minimumNorthFraction": 0.0,
-      "maximumNorthFraction": 0.0,
-      "minimumEastFraction": 0.0,
-      "maximumEastFraction": 0.0
+      "enabledProbability": 1,
+      "minimumNorthFraction": 0,
+      "maximumNorthFraction": 0,
+      "minimumEastFraction": 0,
+      "maximumEastFraction": 0
     },
     "restrictedZones": {
       "enabled": true,
@@ -30,8 +29,14 @@
           "enabled": true,
           "enabledProbability": 0.75,
           "randomPosition": {
-            "north": { "minimum": 14000.0, "maximum": 20500.0 },
-            "east": { "minimum": -25000.0, "maximum": 25000.0 }
+            "north": {
+              "minimum": 14000,
+              "maximum": 20500
+            },
+            "east": {
+              "minimum": -25000,
+              "maximum": 25000
+            }
           }
         },
         {
@@ -42,13 +47,29 @@
           "enabled": true,
           "enabledProbability": 0.75,
           "randomPosition": {
-            "north": { "minimum": -20500.0, "maximum": -14000.0 },
-            "east": { "minimum": -25000.0, "maximum": 25000.0 }
+            "north": {
+              "minimum": -20500,
+              "maximum": -14000
+            },
+            "east": {
+              "minimum": -25000,
+              "maximum": 25000
+            }
           }
         }
       ]
     },
-    "description": "Cooperative blue MAPPO patrol curriculum"
+    "description": "Cooperative blue MAPPO patrol curriculum",
+    "blueTeam": {
+      "activeCount": 2
+    },
+    "redTeam": {
+      "activeCount": 0,
+      "maximumPlacementAttempts": 1024,
+      "delayedActivationProbability": 0,
+      "minimumActivationDelaySteps": 256,
+      "maximumActivationDelaySteps": 768
+    }
   },
   "entities": {
     "blue_guard_1": {
