@@ -1,7 +1,33 @@
 {
   "formatVersion": 2,
   "agentProfiles": "../AgentProfiles.json",
-  "twoVsTwo": {
+  "entities": {
+    "blue_guard_1": {
+      "type": "Mobile",
+      "platform": "defender_car",
+      "side": "Friend",
+      "agents": []
+    },
+    "blue_guard_2": {
+      "type": "Mobile",
+      "platform": "defender_car",
+      "side": "Friend",
+      "agents": []
+    },
+    "blue_objective": {
+      "type": "Objective",
+      "platform": "",
+      "side": "Friend",
+      "agents": []
+    },
+    "blue_restricted_zone": {
+      "type": "RestrictedZone",
+      "platform": "restrictedzone",
+      "side": "Friend",
+      "agents": []
+    }
+  },
+  "blueDefense": {
     "patrolOnly": true,
     "blueController": "mappo",
     "redSpawn": {
@@ -69,32 +95,6 @@
       "delayedActivationProbability": 0,
       "minimumActivationDelaySteps": 256,
       "maximumActivationDelaySteps": 768
-    }
-  },
-  "entities": {
-    "blue_guard_1": {
-      "type": "Mobile",
-      "platform": "defender_car",
-      "side": "Friend",
-      "agents": []
-    },
-    "blue_guard_2": {
-      "type": "Mobile",
-      "platform": "defender_car",
-      "side": "Friend",
-      "agents": []
-    },
-    "blue_objective": {
-      "type": "Objective",
-      "platform": "",
-      "side": "Friend",
-      "agents": []
-    },
-    "blue_restricted_zone": {
-      "type": "RestrictedZone",
-      "platform": "restrictedzone",
-      "side": "Friend",
-      "agents": []
     }
   }
 }
