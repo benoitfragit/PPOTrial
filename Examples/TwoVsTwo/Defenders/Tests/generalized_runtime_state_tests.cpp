@@ -1,5 +1,6 @@
 #include "generalized_runtime_state.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -149,5 +150,32 @@ int main()
     {
         return 5;
     }
+    // The dense defensive reward must prioritize a red with imminent risk
+    // over one that cannot reach the objective in the threat horizon.
+    auto riskState = StateFor(3U, 2U);
+    riskState.objectiveNorth = 0.F;
+    riskState.objectiveEast = 0.F;
+    riskState.reds[0U] = {15000.F, 0.F, blue::kPi, 400.F, 0.F, true};
+    riskState.reds[1U] = {120000.F, 0.F, blue::kPi, 400.F, 0.F, true};
+    float const beforeRisk = blue::ObjectiveThreatLevel(
+        riskState, blue::Parameters{});
+    auto farNeutralized = riskState;
+    farNeutralized.reds[1U].available = false;
+    auto closeNeutralized = riskState;
+    closeNeutralized.reds[0U].available = false;
+    float const farBenefit = beforeRisk - blue::ObjectiveThreatLevel(
+        farNeutralized, blue::Parameters{});
+    float const closeBenefit = beforeRisk - blue::ObjectiveThreatLevel(
+        closeNeutralized, blue::Parameters{});
+    if (!(closeBenefit > farBenefit)
+        || closeBenefit <= 0.F || farBenefit < 0.F)
+        return 6;
+    std::swap(riskState.reds[0U], riskState.reds[1U]);
+    if (std::abs(blue::ObjectiveThreatLevel(
+            riskState, blue::Parameters{}) - beforeRisk) > 1.0e-6F)
+        return 7;
+    auto noRed = StateFor(1U, 0U);
+    if (blue::ObjectiveThreatLevel(noRed, blue::Parameters{}) != 0.F)
+        return 8;
     return 0;
 }
