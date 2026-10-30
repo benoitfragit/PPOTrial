@@ -762,6 +762,10 @@ private:
         diagnostics_ = {};
         EvaluateCriticBaselines();
         auto const baselinesDone = Clock::now();
+        std::clog << "[MAPPO_TIMING] phase=critic_baselines_done update="
+                  << completedUpdates_ + 1U << " elapsed_ms="
+                  << std::chrono::duration_cast<std::chrono::milliseconds>(
+                         baselinesDone - started).count() << std::endl;
         std::size_t learnable = EstimateGeneralizedAdvantages();
         diagnostics_.learnableTransitions = learnable;
         if (learnable == 0U)
@@ -791,6 +795,12 @@ private:
                 TrainActorBatch(offset, batchLearnable);
                 TrainCriticBatch(offset, batchLearnable);
             }
+            std::clog << "[MAPPO_TIMING] phase=epoch_done update="
+                      << completedUpdates_ + 1U << " epoch="
+                      << epoch + 1 << '/' << PPOParameters::N_EPOCHS
+                      << " elapsed_ms="
+                      << std::chrono::duration_cast<std::chrono::milliseconds>(
+                             Clock::now() - started).count() << std::endl;
         }
         auto const ended = Clock::now();
         auto const millis = [](Clock::duration duration) {
