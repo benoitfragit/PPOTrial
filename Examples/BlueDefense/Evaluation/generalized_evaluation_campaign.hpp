@@ -14,6 +14,17 @@
 
 namespace ppo::examples::bluedefense::defenders {
 
+/** @brief Evaluate on configured optimizer boundaries, or the final update.
+ *  Update 1 must not force a costly campaign when the period is ten.
+ */
+inline bool ShouldEvaluateGeneralizedUpdate(
+    std::uint64_t const updates, std::size_t const period,
+    bool const finished) noexcept
+{
+    return updates != 0U
+        && (finished || (period != 0U && updates % period == 0U));
+}
+
 /** @brief Reproducible reset parameters for one generalized evaluation case. */
 struct GeneralizedEvaluationCase final
 {
