@@ -137,7 +137,8 @@ def evaluation_summary(episodes: List[Dict[str, str]]) -> List[str]:
     terminals = Counter(episode["terminal"] for episode in latest)
     losses = Counter(value for episode in latest
                      for key, value in episode.items()
-                     if key.startswith("blue_") and value != "alive")
+                     if key.startswith("blue_") and key[5:].isdigit()
+                     and value != "alive")
     alive = sum(int(episode["blue_alive"]) for episode in latest)
     return [
         f"Last evaluation campaign: **#{last_campaign_id}**, "
