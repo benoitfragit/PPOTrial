@@ -502,7 +502,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                         after.failed || !after.objectiveAvailable, truncated));
                 if (hasMore)
                 {
-                    PrepareEvaluationCase(parameters);
+                    PrepareEvaluationCase();
                 }
                 else
                 {
@@ -604,7 +604,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             SaveAtUpdateBoundary(evaluate);
             if (evaluate)
             {
-                StartEvaluation(parameters);
+                StartEvaluation();
                 episodeDone_ = true;
             }
         }
@@ -673,8 +673,7 @@ void GeneralizedPatrolMappoAgent::SaveAtUpdateBoundary(
     }
 }
 
-void GeneralizedPatrolMappoAgent::StartEvaluation(
-    Parameters const& parameters)
+void GeneralizedPatrolMappoAgent::StartEvaluation()
 {
     if (registry_ == nullptr
         || !registry_->ctx().contains<InitializerContext>())
@@ -688,7 +687,7 @@ void GeneralizedPatrolMappoAgent::StartEvaluation(
     evaluation_.Start();
     try
     {
-        PrepareEvaluationCase(parameters);
+        PrepareEvaluationCase();
     }
     catch (...)
     {
@@ -702,8 +701,7 @@ void GeneralizedPatrolMappoAgent::StartEvaluation(
               << " (" << evaluation_.TestCount() << " cases)\n";
 }
 
-void GeneralizedPatrolMappoAgent::PrepareEvaluationCase(
-    Parameters const& parameters)
+void GeneralizedPatrolMappoAgent::PrepareEvaluationCase()
 {
     if (registry_ == nullptr
         || !registry_->ctx().contains<InitializerContext>())
@@ -711,11 +709,11 @@ void GeneralizedPatrolMappoAgent::PrepareEvaluationCase(
         throw std::runtime_error(
             "Missing initializer context for generalized evaluation case");
     }
-    GeneralizedEvaluationCase const test = evaluation_.CurrentCase(parameters);
+    GeneralizedEvaluationCase const test = evaluation_.CurrentCase();
     auto& context = registry_->ctx().get<InitializerContext>();
     context.evaluationOverride = true;
     context.evaluationSide = test.side;
-    context.evaluationArclength = test.arclength;
+    context.evaluationPhaseFraction = test.phaseFraction;
     context.rng.seed(test.seed);
     context.next = 0U;
 }
