@@ -33,6 +33,44 @@ Mobile GeneralizedMobileFromEcs(ppo::model::BaseEntity& entity)
             turnRate, !state.m_destroyed};
 }
 
+/**
+ * @brief Reward-only zone clearance; matches 1.10 NEZ and 1.75 NEZ
+ * thresholds in the historical red zone danger assessment.
+ *
+ * The ECS scan does not modify the shared 61-ray LiDAR or RLMission.
+ */
+float GeneralizedRestrictedZoneRisk(
+    entt::registry& registry, ppo::model::sEntityState const& own) noexcept
+{
+    float risk = 0.F;
+    auto zones = registry.view<ppo::model::sEntityState,
+                               ppo::model::sSNAState>();
+    for (auto entity : zones)
+    {
+        auto const [zone, sna] = zones.get(entity);
+        if (zone.m_destroyed
+            || zone.m_type != ppo::model::eEntityType::RestrictedZone
+            || zone.m_side == own.m_side
+            || !std::isfinite(sna.m_noescapezone)
+            || sna.m_noescapezone <= 0.F)
+            continue;
+        float const dangerRadius = 1.10F * sna.m_noescapezone;
+        float const cautionRadius = 1.75F * sna.m_noescapezone;
+        float const north = zone.m_x - own.m_x;
+        float const east = zone.m_y - own.m_y;
+        float const distance = std::hypot(north, east);
+        float const proximity = Clamp((cautionRadius - distance)
+            / std::max(cautionRadius - dangerRadius, 1.F), 0.F, 1.F);
+        float const alignment = distance > 1.F
+            ? std::max(0.F, (north * std::cos(own.m_rotation)
+                + east * std::sin(own.m_rotation)) / distance) : 1.F;
+        float const candidate = distance <= dangerRadius
+            ? 1.F : proximity * (0.5F + 0.5F * alignment);
+        risk = std::max(risk, candidate);
+    }
+    return risk;
+}
+
 template<std::size_t Capacity>
 std::size_t AliveCount(std::array<Mobile, Capacity> const& mobiles,
                        std::size_t const activeCount) noexcept
@@ -129,6 +167,13 @@ GeneralizedRewardValues MapGeneralizedRewardWeights(
     result[static_cast<std::size_t>(
         GeneralizedRewardChannel::Timeout)] = legacy[
             static_cast<std::size_t>(RewardChannel::Timeout)];
+    // Independent blue-only safety weights; old ten channel indices are stable.
+    result[static_cast<std::size_t>(
+        GeneralizedRewardChannel::BlueSeparation)] = 1.F;
+    result[static_cast<std::size_t>(
+        GeneralizedRewardChannel::RestrictedZoneClearance)] = 1.F;
+    result[static_cast<std::size_t>(
+        GeneralizedRewardChannel::BoundaryClearance)] = 1.F;
     return result;
 }
 
@@ -319,6 +364,9 @@ GeneralizedRuntimeState GeneralizedPatrolMappoAgent::ReadState(
     {
         ppo::model::BaseEntity blue{registry_, guardIds_[index]};
         result.blues[index] = GeneralizedMobileFromEcs(blue);
+        auto const [ownState] = blue.get<ppo::model::sEntityState>();
+        result.restrictedZoneRisk[index] = GeneralizedRestrictedZoneRisk(
+            *registry_, ownState);
         if (blue.has<ppo::model::sPseudoLidarState>())
         {
             auto const [sensor] = blue.get<ppo::model::sPseudoLidarState>();
@@ -694,6 +742,23 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             transition.responsibilities.controlEffort[index] =
                 GeneralizedControlEffortPenalty(
                     parameters, lastActions_[index]);
+            if (beforeAvailability_[index])
+            {
+                transition.responsibilities.blueSeparation[index] =
+                    GeneralizedSafetyPenalty(
+                        GeneralizedBlueSeparationRisk(
+                            parameters, beforeStep_, index),
+                        GeneralizedBlueSeparationRisk(parameters, after, index));
+                transition.responsibilities.restrictedZoneClearance[index] =
+                    GeneralizedSafetyPenalty(
+                        beforeStep_.restrictedZoneRisk[index],
+                        after.restrictedZoneRisk[index]);
+                transition.responsibilities.boundaryClearance[index] =
+                    GeneralizedSafetyPenalty(
+                        GeneralizedBoundaryRisk(
+                            parameters, beforeStep_.blues[index]),
+                        GeneralizedBoundaryRisk(parameters, after.blues[index]));
+            }
         }
 
         GeneralizedRewardSettings rewardSettings{};
@@ -1034,7 +1099,8 @@ GeneralizedPatrolMappoAgent::GetSnapshot() const noexcept
         "Patrol tracking", "Formation keeping", "Pursuit progress",
         "Control effort", "Blue survival", "Red neutralization",
         "Threat containment", "Objective survival",
-        "Mission outcome", "Timeout"};
+        "Mission outcome", "Timeout", "Blue separation",
+        "Restricted zone clearance", "Boundary clearance"};
     return snapshot;
 }
 
