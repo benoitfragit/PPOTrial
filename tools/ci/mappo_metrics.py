@@ -127,6 +127,89 @@ def read_eval_episodes(path: Path) -> List[Dict[str, str]]:
     return episodes
 
 
+LOSS_FIELDS = (
+    "update", "campaign", "case", "seed", "step", "blue", "source",
+    "speed_before", "speed", "accel_cmd", "flight_model", "low_speed",
+    "fuel_empty", "min_speed", "low_speed_threshold",
+    "fuel_remaining", "fuel_capacity",
+)
+
+
+def read_eval_losses(path: Path) -> List[Dict[str, str]]:
+    """Read one diagnostic record for each newly destroyed evaluation Blue."""
+    if not path.is_file():
+        return []
+    losses: List[Dict[str, str]] = []
+    with path.open("r", encoding="utf-8-sig", errors="replace") as stream:
+        for line in stream:
+            if "[MAPPO_EVAL_LOSS]" not in line:
+                continue
+            payload = line.split("[MAPPO_EVAL_LOSS]", 1)[1]
+            fields = dict(token.split("=", 1)
+                          for token in payload.split() if "=" in token)
+            if not all(name in fields for name in
+                       ("campaign", "case", "blue", "source",
+                        "low_speed", "fuel_empty", "speed", "step")):
+                continue
+            try:
+                int(fields["campaign"])
+                int(fields["case"])
+                int(fields["step"])
+                speed = float(fields["speed"])
+                low_speed = int(fields["low_speed"])
+                fuel_empty = int(fields["fuel_empty"])
+            except ValueError:
+                continue
+            if (not math.isfinite(speed) or low_speed not in (0, 1)
+                    or fuel_empty not in (0, 1)):
+                continue
+            losses.append(fields)
+    return losses
+
+
+def write_loss_csv(losses: List[Dict[str, str]], out: Path) -> None:
+    """Export bounded, evaluation-only loss evidence without changing PPO CSV."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=LOSS_FIELDS)
+        writer.writeheader()
+        for loss in losses:
+            writer.writerow({key: loss.get(key, "") for key in LOSS_FIELDS})
+
+
+def evaluation_loss_summary(
+    losses: List[Dict[str, str]], episodes: List[Dict[str, str]]
+) -> List[str]:
+    """Differentiate low-speed/fuel evidence from external loss attribution."""
+    if not losses:
+        return ["No evaluation loss-transition diagnostics available."]
+    campaign = episodes[-1]["campaign"] if episodes else losses[-1]["campaign"]
+    latest = [loss for loss in losses if loss["campaign"] == campaign]
+    if not latest:
+        return [f"Campaign #{campaign}: no new Blue loss transitions recorded."]
+
+    low_speed = sum(loss["low_speed"] == "1" for loss in latest)
+    fuel_empty = sum(loss["fuel_empty"] == "1" for loss in latest)
+    both = sum(loss["low_speed"] == "1" and loss["fuel_empty"] == "1"
+               for loss in latest)
+    unknown = [loss for loss in latest if loss["source"] == "unknown"]
+    unknown_low_speed = sum(loss["low_speed"] == "1" for loss in unknown)
+    unknown_fuel = sum(loss["fuel_empty"] == "1" for loss in unknown)
+    unexplained = sum(loss["low_speed"] == "0"
+                      and loss["fuel_empty"] == "0" for loss in unknown)
+    return [
+        f"Campaign #{campaign}: **{len(latest)}** newly destroyed Blues "
+        "(one record per transition).",
+        f"Flight-model condition met: **low_speed={low_speed}**, "
+        f"**fuel_empty={fuel_empty}**, **both={both}**. "
+        "These flags are sampled at destruction, not an exclusive causal label.",
+        f"Of **{len(unknown)}** losses with unknown ECS source: "
+        f"low_speed={unknown_low_speed}, fuel_empty={unknown_fuel}, "
+        f"neither={unexplained}.",
+        "Per-loss speed, fuel and acceleration command: mappo-losses.csv.",
+    ]
+
+
 def evaluation_summary(episodes: List[Dict[str, str]]) -> List[str]:
     """Describe the last complete/partial evaluated campaign separately."""
     if not episodes:
@@ -153,7 +236,9 @@ def evaluation_summary(episodes: List[Dict[str, str]]) -> List[str]:
     ]
 
 
-def summary(rows: List[Dict[str, float]], run_url: str, eval_episodes: List[Dict[str, str]] | None = None) -> str:
+def summary(rows: List[Dict[str, float]], run_url: str,
+            eval_episodes: List[Dict[str, str]] | None = None,
+            eval_losses: List[Dict[str, str]] | None = None) -> str:
     last = rows[-1] if rows else None
     updates = int(max((r["updates"] for r in rows), default=0))
     longest_stagnation = 0.0
@@ -200,6 +285,10 @@ def summary(rows: List[Dict[str, float]], run_url: str, eval_episodes: List[Dict
     if eval_episodes is not None:
         lines.extend(["", "### Evaluation episode diagnostics", ""])
         lines.extend(evaluation_summary(eval_episodes))
+    if eval_losses is not None:
+        lines.extend(["", "### Blue flight-model loss diagnostics", ""])
+        lines.extend(evaluation_loss_summary(
+            eval_losses, eval_episodes or []))
     if run_url:
         lines.extend([
             "",
@@ -226,7 +315,11 @@ def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
     write_chart(rows, args.out / "mappo-progress.svg")
     evaluation = read_eval_episodes(args.log) if args.log else None
-    result = summary(rows, os.environ.get("MAPPO_RUN_URL", ""), evaluation)
+    losses = read_eval_losses(args.log) if args.log else None
+    if losses is not None:
+        write_loss_csv(losses, args.out / "mappo-losses.csv")
+    result = summary(rows, os.environ.get("MAPPO_RUN_URL", ""),
+                     evaluation, losses)
     (args.out / "mappo-summary.md").write_text(result, encoding="utf-8")
     # GitHub's Windows runner can expose a CP1252 stdout even though the
     # summary includes Unicode sparkline blocks.
