@@ -50,7 +50,8 @@ struct InitializerContext {
     float arclength{0.F};
     bool evaluationOverride{false};
     int evaluationSide{1};
-    float evaluationArclength{0.F};
+    /** @brief Preferred fractional phase of the newly generated racetrack. */
+    float evaluationPhaseFraction{0.F};
 
 
 };
