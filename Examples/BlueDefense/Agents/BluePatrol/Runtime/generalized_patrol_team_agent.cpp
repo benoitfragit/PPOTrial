@@ -261,6 +261,23 @@ Parameters GeneralizedPatrolMappoAgent::ReadParameters() const
 GeneralizedRuntimeState GeneralizedPatrolMappoAgent::ReadState(
     Parameters const& parameters) const
 {
+    if (registry_->ctx().contains<InitializerContext>())
+    {
+        auto const& context = registry_->ctx().get<InitializerContext>();
+        if (context.patrolGeometrySamplingFailed
+            || context.episodeLayoutGenerationFailed
+            || !context.patrolGeometryReady)
+        {
+            throw std::runtime_error(
+                "Generalized episode initialization failed (geometry="
+                + std::to_string(context.patrolGeometrySamplingFailed)
+                + ", red_layout="
+                + std::to_string(context.episodeLayoutGenerationFailed)
+                + ", ready=" + std::to_string(context.patrolGeometryReady)
+                + ", evaluation=" + std::to_string(context.evaluationOverride)
+                + ", episode=" + std::to_string(context.episodeIndex) + ")");
+        }
+    }
     GeneralizedRuntimeState result{};
     result.counts = counts_;
     result.step = episodeStep_;
@@ -327,7 +344,9 @@ void GeneralizedPatrolMappoAgent::BuildObservations(
     if (!Valid(parameters))
         throw std::runtime_error("Invalid generalized blue parameters");
     if (!Valid(state))
-        throw std::runtime_error("Invalid generalized blue runtime state");
+        throw std::runtime_error(
+            "Invalid generalized blue runtime state: "
+            + DescribeInvalidGeneralizedRuntimeState(state));
 
     BlueTeamRoles const& roles = Roles();
     if (!roles.IsValid())
@@ -442,6 +461,11 @@ void GeneralizedPatrolMappoAgent::ChooseAction()
                   << (learner_ ? learner_->StepCount() : 0U)
                   << " episode_step=" << episodeStep_
                   << " cause=" << error.what() << '\n';
+        if (evaluation_.InProgress())
+        {
+            evaluation_.Cancel();
+            RestoreTrainingInitializer();
+        }
         if (learner_)
         {
             learner_->AbortPendingStep();
