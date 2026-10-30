@@ -491,7 +491,7 @@ inline std::optional<float> FindGeneralizedEvaluationArclength(
             : (attempt % 2U != 0U
                 ? static_cast<int>((attempt + 1U) / 2U)
                 : -static_cast<int>(attempt / 2U));
-        float const phase = PositiveModulo(
+        float const phase = patrol_geometry_detail::PositiveModulo(
             preferredPhaseFraction + static_cast<float>(offset)
                 / static_cast<float>(candidateCount), 1.F);
         float const candidate = circuit * phase;
