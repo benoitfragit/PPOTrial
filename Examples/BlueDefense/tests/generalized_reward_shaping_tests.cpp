@@ -148,6 +148,52 @@ bool TestCooperation()
         && patrol::GeneralizedCooperationWeight(
             parameters, closeRed) > 0.F;
 }
+bool TestSafetyRisks()
+{
+    patrol::Parameters parameters{};
+    auto state = MakeState(2U, 0U);
+    state.blues[0] = {0.F, 0.F, 0.F, 500.F, 0.F, true};
+    state.blues[1] = {5000.F, 0.F, patrol::kPi, 500.F, 0.F, true};
+    float const approaching = patrol::GeneralizedBlueSeparationRisk(
+        parameters, state, 0U);
+    state.blues[1].heading = 0.F;
+    if (!(approaching > 0.F)
+        || !Close(patrol::GeneralizedBlueSeparationRisk(
+            parameters, state, 0U), 0.F))
+        return false;
+
+    // P=1/N=0 and dead peers produce no friendly-separation penalty.
+    state.blues[1].available = false;
+    if (!Close(patrol::GeneralizedBlueSeparationRisk(
+            parameters, state, 0U), 0.F)
+        || !Close(patrol::GeneralizedBlueSeparationRisk(
+            parameters, state, 1U), 0.F))
+        return false;
+    auto alone = MakeState(1U, 0U);
+    if (!Close(patrol::GeneralizedBlueSeparationRisk(
+            parameters, alone, 0U), 0.F))
+        return false;
+
+    // Anticipate the soft world edge, not only the terminal hard boundary.
+    alone.blues[0] = {0.F, 0.F, 0.F, 500.F, 0.F, true};
+    float const inside = patrol::GeneralizedBoundaryRisk(
+        parameters, alone.blues[0]);
+    alone.blues[0].north = parameters.halfNorth - 3500.F;
+    float const approach = patrol::GeneralizedBoundaryRisk(
+        parameters, alone.blues[0]);
+    alone.blues[0].north = parameters.halfNorth + 100.F;
+    float const outside = patrol::GeneralizedBoundaryRisk(
+        parameters, alone.blues[0]);
+    if (!Close(inside, 0.F) || !(approach > inside)
+        || !Close(outside, 1.F))
+        return false;
+
+    return Close(patrol::GeneralizedSafetyPenalty(0.F, 0.F), 0.F)
+        && patrol::GeneralizedSafetyPenalty(0.1F, 0.9F)
+            > patrol::GeneralizedSafetyPenalty(0.9F, 0.1F)
+        && patrol::GeneralizedSafetyPenalty(0.9F, 0.1F) > 0.F;
+}
+
 } // namespace
 
 int main()
@@ -157,5 +203,6 @@ int main()
     if (!TestPursuit()) return 3;
     if (!TestCooperation()) return 4;
     if (!TestControlEffortPenalty()) return 5;
+    if (!TestSafetyRisks()) return 6;
     return 0;
 }
