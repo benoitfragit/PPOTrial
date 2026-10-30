@@ -25,6 +25,13 @@ PROD = MODEL_ROOT / "prod/blue_patrol_generalized_v8.txt"
 PROD_SCORE = Path(str(PROD) + ".score")
 PROGRESS = MODEL_ROOT / "curriculum-progress.json"
 TELEMETRY = MODEL_ROOT / "telemetry/mappo-training.csv"
+FRESH_SEEDS = (
+    MODEL_ROOT / "latest/blue_patrol_training_v4.txt",
+    MODEL_ROOT / "latest/blue_patrol_mappo_v7.txt",
+    MODEL_ROOT / "prod/blue_patrol_mappo_v7.txt",
+    MODEL_ROOT / "latest/blue_patrol_generalized_training_v5.txt",
+    MODEL_ROOT / "latest/blue_patrol_generalized_v8.txt",
+)
 OUTPUT = Path("build/mappo-telemetry")
 EVAL_PATTERN = re.compile(
     r"Evaluation #\d+ P=(\d+) N=(\d+) score=([0-9.eE+-]+)"
@@ -173,6 +180,20 @@ def save_candidate_and_restore(baseline: dict[Path, bytes | None],
             path.write_bytes(baseline[path])
 
 
+def require_clean_fresh_start() -> None:
+    """Avoid the silent legacy V4/V7 migration when no run ID was supplied.
+
+    These are Blue checkpoints in this runner's temporary checkout ONLY.
+    The Red production RLMission model is never touched.
+    """
+    if PROGRESS.exists():
+        raise ValueError("Fresh-start requested but curriculum progress already exists")
+    for path in FRESH_SEEDS:
+        if path.is_file():
+            print(f"[CURRICULUM] Removing old Blue seed from checkout: {path}")
+            path.unlink()
+
+
 def run(args: argparse.Namespace) -> int:
     config = json.loads(Path(args.curriculum).read_text(encoding="utf-8"))
     stages = validate_curriculum(config)
@@ -184,6 +205,8 @@ def run(args: argparse.Namespace) -> int:
     original_scenario = json.loads(SCENARIO_FILE.read_text(encoding="utf-8"))
     original_training_bytes = TRAINING_FILE.read_bytes()
     original_scenario_bytes = SCENARIO_FILE.read_bytes()
+    if args.fresh_start:
+        require_clean_fresh_start()
     updates = read_updates()
     progress = load_progress(config_hash, updates)
     if not 0 <= progress["nextStage"] <= len(stages):
@@ -280,6 +303,8 @@ def main() -> int:
     parser.add_argument("--curriculum",
                         default="resources/settings/Training/BluePatrolCurriculum.json")
     parser.add_argument("--max-seconds", type=int, required=True)
+    parser.add_argument("--fresh-start", action="store_true",
+                        help="ignore checked-in legacy Blue seeds (no resume run ID)")
     args = parser.parse_args()
     if not 1 <= args.max_seconds <= 18000:
         parser.error("--max-seconds must be in [1, 18000]")
