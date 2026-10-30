@@ -19,3 +19,5 @@ jobs:
         run: cmake --build build/core --config Release
       - name: Test
         run: ctest --test-dir build/core -C Release --output-on-failure
+      - name: MAPPO telemetry Python tests
+        run: python -m unittest discover -s tools/ci -p "test_mappo_metrics.py" -v
