@@ -86,6 +86,9 @@ enum class GeneralizedRewardChannel : std::size_t
     ObjectiveSurvival,
     MissionOutcome,
     Timeout,
+    BlueSeparation,
+    RestrictedZoneClearance,
+    BoundaryClearance,
     Count
 };
 
@@ -103,7 +106,8 @@ using GeneralizedRewardValues =
 struct GeneralizedRewardSettings final
 {
     /** @brief Per-channel multipliers in enum order. */
-    GeneralizedRewardValues weights{1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F};
+    GeneralizedRewardValues weights{1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F,
+        1.F, 1.F, 1.F, 1.F, 1.F, 1.F};
     /** @brief Symmetric scalar reward limit. */
     float clampMagnitude{100.F};
 };
@@ -126,6 +130,10 @@ struct GeneralizedResponsibilitySignals final
     std::array<float, kMaximumFormationSlots> formationSlots{};
     /** @brief Non-negative normalized control effort by physical blue index. */
     std::array<float, TeamCapacity::MaximumBlueMobiles> controlEffort{};
+    /** @brief Normalized per-blue risk penalties in [0,1]. */
+    std::array<float, TeamCapacity::MaximumBlueMobiles> blueSeparation{};
+    std::array<float, TeamCapacity::MaximumBlueMobiles> restrictedZoneClearance{};
+    std::array<float, TeamCapacity::MaximumBlueMobiles> boundaryClearance{};
 };
 
 /**
@@ -257,7 +265,16 @@ inline bool ValidSignals(GeneralizedResponsibilitySignals const& signals,
             return false;
     for (std::size_t index = 0U; index < blueCount; ++index)
         if (!std::isfinite(signals.controlEffort[index])
-            || signals.controlEffort[index] < 0.F)
+            || signals.controlEffort[index] < 0.F
+            || !std::isfinite(signals.blueSeparation[index])
+            || signals.blueSeparation[index] < 0.F
+            || signals.blueSeparation[index] > 1.F
+            || !std::isfinite(signals.restrictedZoneClearance[index])
+            || signals.restrictedZoneClearance[index] < 0.F
+            || signals.restrictedZoneClearance[index] > 1.F
+            || !std::isfinite(signals.boundaryClearance[index])
+            || signals.boundaryClearance[index] < 0.F
+            || signals.boundaryClearance[index] > 1.F)
         {
             return false;
         }
@@ -372,6 +389,9 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
     float patrolSum = 0.F;
     float formationSum = 0.F;
     float effortSum = 0.F;
+    float separationSum = 0.F;
+    float zoneSum = 0.F;
+    float boundarySum = 0.F;
     for (std::size_t physicalIndex = 0U;
          physicalIndex < blueCount; ++physicalIndex)
     {
@@ -403,6 +423,21 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
         breakdown.values[static_cast<std::size_t>(
             GeneralizedRewardChannel::ControlEffort)] = -effort;
         effortSum += effort;
+        float const separation = -transition.responsibilities.blueSeparation[
+            physicalIndex];
+        float const zone = -transition.responsibilities.restrictedZoneClearance[
+            physicalIndex];
+        float const boundary = -transition.responsibilities.boundaryClearance[
+            physicalIndex];
+        breakdown.values[static_cast<std::size_t>(
+            GeneralizedRewardChannel::BlueSeparation)] = separation;
+        breakdown.values[static_cast<std::size_t>(
+            GeneralizedRewardChannel::RestrictedZoneClearance)] = zone;
+        breakdown.values[static_cast<std::size_t>(
+            GeneralizedRewardChannel::BoundaryClearance)] = boundary;
+        separationSum += separation;
+        zoneSum += zone;
+        boundarySum += boundary;
     }
     result.team.values[static_cast<std::size_t>(
         GeneralizedRewardChannel::PatrolTracking)] =
@@ -413,6 +448,15 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
     result.team.values[static_cast<std::size_t>(
         GeneralizedRewardChannel::ControlEffort)] =
             -effortSum / static_cast<float>(blueCount);
+    result.team.values[static_cast<std::size_t>(
+        GeneralizedRewardChannel::BlueSeparation)] =
+            separationSum / static_cast<float>(blueCount);
+    result.team.values[static_cast<std::size_t>(
+        GeneralizedRewardChannel::RestrictedZoneClearance)] =
+            zoneSum / static_cast<float>(blueCount);
+    result.team.values[static_cast<std::size_t>(
+        GeneralizedRewardChannel::BoundaryClearance)] =
+            boundarySum / static_cast<float>(blueCount);
     return GeneralizedRewardStatus::Applied;
 }
 
