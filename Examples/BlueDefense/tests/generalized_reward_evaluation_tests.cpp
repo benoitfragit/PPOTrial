@@ -450,12 +450,11 @@ bool TestEvaluationCadence()
 bool TestDeterministicCampaignBoundary()
 {
     PatrolEvaluationSettings settings{};
-    settings.episodes = 2U;
+    settings.episodes = 8U;
     settings.maxSteps = 4U;
     settings.seed = 700U;
     GeneralizedEvaluationCampaign first{settings};
     GeneralizedEvaluationCampaign second{settings};
-    Parameters parameters{};
     auto const roles = BlueTeamRoles::Create(1U, 0U);
     if (!roles)
         return false;
@@ -465,13 +464,15 @@ bool TestDeterministicCampaignBoundary()
     for (std::size_t episode = 0U; episode < settings.episodes; ++episode)
     {
         GeneralizedEvaluationCase const firstCase =
-            first.CurrentCase(parameters);
+            first.CurrentCase();
         GeneralizedEvaluationCase const secondCase =
-            second.CurrentCase(parameters);
+            second.CurrentCase();
         if (firstCase.seed != 700U + episode
             || firstCase.seed != secondCase.seed
             || firstCase.side != secondCase.side
-            || !Near(firstCase.arclength, secondCase.arclength))
+            || !Near(firstCase.phaseFraction, secondCase.phaseFraction)
+            || !Near(firstCase.phaseFraction,
+                     static_cast<float>((episode / 2U) % 4U) / 4.F))
         {
             return false;
         }
