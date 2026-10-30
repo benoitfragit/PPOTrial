@@ -90,12 +90,23 @@ enum class GeneralizedRewardChannel : std::size_t
     RestrictedZoneClearance,
     BoundaryClearance,
     LowSpeedRisk,
+    OwnLoss,
     Count
 };
 
 /** @brief Number of generalized reward channels. */
 inline constexpr std::size_t kGeneralizedRewardChannelCount =
     static_cast<std::size_t>(GeneralizedRewardChannel::Count);
+
+/** @brief Channel labels shared by snapshots and regression tests. */
+inline constexpr std::array kGeneralizedRewardChannelNames{
+    "Patrol tracking", "Formation keeping", "Pursuit progress",
+    "Control effort", "Blue survival", "Red neutralization",
+    "Threat containment", "Objective survival", "Mission outcome", "Timeout",
+    "Blue separation", "Restricted zone clearance", "Boundary clearance",
+    "Low speed risk", "Own loss"};
+static_assert(kGeneralizedRewardChannelNames.size() == kGeneralizedRewardChannelCount,
+              "Generalized reward labels must match channel storage");
 
 /** @brief Fixed reward-channel storage used by training and telemetry. */
 using GeneralizedRewardValues =
@@ -108,7 +119,7 @@ struct GeneralizedRewardSettings final
 {
     /** @brief Per-channel multipliers in enum order. */
     GeneralizedRewardValues weights{1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F,
-        1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F};
+        1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F};
     /** @brief Symmetric scalar reward limit. */
     float clampMagnitude{100.F};
 };
@@ -303,9 +314,10 @@ inline bool ValidSettings(GeneralizedRewardSettings const& settings) noexcept
  * @brief Aggregates normalized role-specific and cooperative rewards.
  *
  * Red neutralization is divided by active N. Team blue-loss telemetry is
- * divided by P, while a dying actor receives the full sparse loss event
- * immediately before its trajectory ends. Surviving peers share the loss.
- * All other cooperative event channels are shared. Only the leader
+ * divided by P. OwnLoss is a separate undiluted individual event. Collective
+ * rewards remain present after death so earlier actions retain mission credit;
+ * result.active masks only physical actions and local responsibility signals.
+ * All cooperative event channels are shared. Only the living leader
  * receives patrol tracking; each teammate receives only its unique formation
  * penalty. The team decomposition averages role/control contributions
  * over P, making its scale independent of team size.
@@ -403,14 +415,14 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
     for (std::size_t physicalIndex = 0U;
          physicalIndex < blueCount; ++physicalIndex)
     {
+        GeneralizedRewardBreakdown& breakdown = result.perBlue[physicalIndex];
+        shared(breakdown);
         if (!transition.before.blueAlive[physicalIndex])
             continue;
         result.active[physicalIndex] = true;
-        GeneralizedRewardBreakdown& breakdown = result.perBlue[physicalIndex];
-        shared(breakdown);
         if (!transition.after.blueAlive[physicalIndex])
             breakdown.values[static_cast<std::size_t>(
-                GeneralizedRewardChannel::BlueSurvival)] = -1.F;
+                GeneralizedRewardChannel::OwnLoss)] = -1.F;
         BlueRoleAssignment const assignment = *roles.Assignment(physicalIndex);
         if (assignment.role == BlueRole::Leader)
         {
@@ -455,6 +467,8 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
         boundarySum += boundary;
         lowSpeedSum += lowSpeed;
     }
+    result.team.values[static_cast<std::size_t>(
+        GeneralizedRewardChannel::OwnLoss)] = blueSurvival;
     result.team.values[static_cast<std::size_t>(
         GeneralizedRewardChannel::PatrolTracking)] =
             patrolSum / static_cast<float>(blueCount);

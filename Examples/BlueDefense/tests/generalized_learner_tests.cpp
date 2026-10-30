@@ -179,6 +179,74 @@ bool VerifyAbortPendingStep()
         && learner.StepCount() == 1U && !learner.OptimizationFailed();
 }
 
+bool VerifyDeadActorMask()
+{
+    blue::ActiveTeamCounts const counts{1U, 0U};
+    blue::GeneralizedPatrolLearner learner{counts, 812U, 2U};
+    auto const observations = MakeObservations(counts);
+    blue::GeneralizedPatrolLearner::AvailabilityMask alive{};
+    alive[0] = true;
+    blue::GeneralizedPatrolLearner::AvailabilityMask dead{};
+    auto const means = learner.EvaluateActions(observations, alive);
+    blue::GeneralizedPatrolLearner::Rewards rewards{};
+    rewards[0] = -1.F;
+    (void)learner.ChooseActions(observations, dead);
+    if (learner.Observe(observations, rewards, dead, false, false))
+        return false;
+    (void)learner.ChooseActions(observations, dead);
+    if (!learner.Observe(observations, rewards, dead, true, false))
+        return false;
+    auto const diagnostics = learner.Diagnostics();
+    return diagnostics.learnableTransitions == 0U
+        && diagnostics.criticTransitions == 2U
+        && diagnostics.actorDerivativeL1 == 0.F
+        && diagnostics.logStdGradientL1 == 0.F
+        && diagnostics.criticDerivativeL1 > 0.F
+        && means == learner.EvaluateActions(observations, alive);
+}
+
+bool VerifyPostLossMissionCredit()
+{
+    blue::ActiveTeamCounts const counts{2U, 0U};
+    auto const observations = MakeObservations(counts);
+    float absoluteAdvantages[2]{};
+    for (std::size_t run = 0U; run < 2U; ++run)
+    {
+        blue::GeneralizedPatrolLearner learner{counts, 192U, 3U};
+        blue::GeneralizedPatrolLearner::AvailabilityMask availability{};
+        availability[0] = availability[1] = true;
+        blue::GeneralizedPatrolLearner::Rewards rewards{};
+        rewards[0] = -24.F;
+        (void)learner.ChooseActions(observations, availability);
+        availability[0] = false;
+        if (learner.Observe(observations, rewards, availability, false, false))
+            return false;
+        (void)learner.ChooseActions(observations, availability);
+        auto const& dead = learner.LastAgentCriticObservation(0U);
+        auto const& living = learner.LastAgentCriticObservation(1U);
+        for (std::size_t feature = 0U; feature < blue::GeneralizedCriticLayout::Compact; ++feature)
+            if (dead[feature] != 0.F)
+                return false;
+        if (!SamePooledContext(dead, living)
+            || dead[blue::GeneralizedCriticLayout::LivingFractionOffset] <= 0.F)
+            return false;
+        rewards.fill(0.F);
+        if (learner.Observe(observations, rewards, availability, false, false))
+            return false;
+        (void)learner.ChooseActions(observations, availability);
+        rewards[0] = run == 0U ? 0.F : -10.F;
+        if (!learner.Observe(observations, rewards, availability, true, false))
+            return false;
+        auto const diagnostics = learner.Diagnostics();
+        if (diagnostics.learnableTransitions != 4U || diagnostics.criticTransitions != 6U)
+            return false;
+        absoluteAdvantages[run] = diagnostics.generalizedAdvantageAbsMean;
+    }
+    // Only the dead slot's final reward differs: it must affect earlier
+    // learnable actions rather than being discarded by availability masking.
+    return absoluteAdvantages[1] > absoluteAdvantages[0] + 0.1F;
+}
+
 bool VerifyTeamSize(blue::ActiveTeamCounts const counts)
 {
     blue::GeneralizedPatrolLearner learner{counts, 731U, 2U};
@@ -243,6 +311,7 @@ bool VerifyTeamSize(blue::ActiveTeamCounts const counts)
         : 1U;
     return actorAddress == actorAfterUpdate
         && diagnostics.learnableTransitions == 2U * liveAgents
+        && diagnostics.criticTransitions == 2U * counts.blueMobiles
         && diagnostics.generalizedAdvantageAbsMean > 0.F
         && diagnostics.actorDerivativeL1 > 0.F
         && diagnostics.criticDerivativeL1 > 0.F
@@ -258,6 +327,10 @@ int main()
         return 18;
     if (!VerifyAbortPendingStep())
         return 19;
+    if (!VerifyDeadActorMask())
+        return 20;
+    if (!VerifyPostLossMissionCredit())
+        return 21;
     if (!VerifyTeamSize({1U, 0U}))
         return 1;
     if (!VerifyTeamSize({3U, 1U}))

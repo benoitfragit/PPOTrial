@@ -58,6 +58,12 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         cxx_std_17)
     add_test(NAME BlueDefenseGeneralizedRuntimeStateTests
         COMMAND BlueDefenseGeneralizedRuntimeStateTests)
+    add_executable(BlueDefenseGeneralizedAdvantageTests
+        ../../tests/generalized_advantage_tests.cpp)
+    target_link_libraries(BlueDefenseGeneralizedAdvantageTests PRIVATE
+        BlueDefenseDefenderBackend)
+    add_test(NAME BlueDefenseGeneralizedAdvantageTests
+        COMMAND BlueDefenseGeneralizedAdvantageTests)
     add_executable(BlueDefenseGeneralizedLearnerTests
         ../../tests/generalized_learner_tests.cpp)
     target_link_libraries(BlueDefenseGeneralizedLearnerTests PRIVATE
@@ -90,6 +96,7 @@ add_library(BlueDefensePatrolRuntime STATIC
     Training/generalized_critic_network.hpp
     Training/generalized_checkpoint.hpp
     Training/generalized_patrol_learner.hpp
+    Training/generalized_advantage.hpp
     Training/generalized_training_checkpoint.hpp
     Training/patrol_checkpoint.hpp
     Training/patrol_training_checkpoint.hpp

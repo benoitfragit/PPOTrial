@@ -61,6 +61,10 @@
   },
   "rewards": {
     "clamp": 100.0,
+    "generalized": {
+      "ownLossWeight": 24.0,
+      "lowSpeedRiskWeight": 5.0
+    },
     "shaping": {
       "patrolProgressWeight": 0.5,
       "patrolCrossTrackWeight": 0.75,

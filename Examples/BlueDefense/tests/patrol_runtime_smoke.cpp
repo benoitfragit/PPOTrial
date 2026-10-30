@@ -1,5 +1,6 @@
 #include "bluedefenseexample.hpp"
 #include "patrol_config.hpp"
+#include "generalized_cooperative_reward.hpp"
 #include "environment.hpp"
 #include "serializer.hpp"
 #include "components.hpp"
@@ -153,13 +154,14 @@ Sample Capture(
                     ++result.controllers;
                     result.generalizedController = true;
                     result.trainingPresent |= snapshot.m_common.m_training;
-                    result.rewardsPresent |= snapshot.m_rewards.size() == 13U
-                        && snapshot.m_scalings.size() == 13U
-                        && snapshot.m_rewardnames.size() == 13U
-                        && snapshot.m_rewardnames[6] == "Threat containment"
-                        && snapshot.m_rewardnames[10] == "Blue separation"
-                        && snapshot.m_rewardnames[11] == "Restricted zone clearance"
-                        && snapshot.m_rewardnames[12] == "Boundary clearance";
+                    result.rewardsPresent |= snapshot.m_rewards.size() ==
+                            ppo::examples::bluedefense::defenders::kGeneralizedRewardChannelCount
+                        && snapshot.m_scalings.size() == snapshot.m_rewards.size()
+                        && snapshot.m_rewardnames.size() == snapshot.m_rewards.size()
+                        && std::equal(snapshot.m_rewardnames.begin(),
+                            snapshot.m_rewardnames.end(),
+                            ppo::examples::bluedefense::defenders::
+                                kGeneralizedRewardChannelNames.begin());
                     result.nonzeroRewardChannel |= std::any_of(
                         snapshot.m_rewards.begin(), snapshot.m_rewards.end(),
                         [](float const value) {
@@ -173,7 +175,7 @@ Sample Capture(
                         snapshot.m_common.m_completedEvaluations);
                     result.rollout = snapshot.m_common.m_maxStep;
                     result.controllerId = snapshot.m_id;
-                    if (snapshot.m_scalings.size() == 13U)
+                    if (snapshot.m_scalings.size() > 1U)
                         result.formationWeight = snapshot.m_scalings[1];
                 }
             });

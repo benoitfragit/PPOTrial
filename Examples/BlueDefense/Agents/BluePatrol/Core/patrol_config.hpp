@@ -189,14 +189,13 @@ inline Parameters LoadPatrolParameters(std::filesystem::path const& settings)
 }
 
 /**
- * @brief Loads the configurable embedded MAPPO rollout and reward settings.
- * @param settings Root resources/settings directory.
+ * @brief Parses the configurable embedded MAPPO rollout and reward settings.
+ * @param document Full BluePatrol JSON document.
  * @return Validated blue training settings.
  */
 inline PatrolTrainingSettings
-LoadPatrolTrainingSettings(std::filesystem::path const& settings)
+ParsePatrolTrainingSettings(nlohmann::json const& document)
 {
-    auto const document = ReadPatrolJson(settings / "Training/BluePatrol.json");
     auto const& training = document.at("training");
     auto const& rewards = document.at("rewards");
     auto const& weights = rewards.at("weights");
@@ -219,10 +218,30 @@ LoadPatrolTrainingSettings(std::filesystem::path const& settings)
     for (std::size_t i = 0; i < kRewardChannelNames.size(); ++i)
         result.rewardWeights[i] = weights.at(kRewardChannelNames[i]).get<float>();
 
+    // Optional to preserve existing blue configuration files.
+    auto const generalized = rewards.find("generalized");
+    if (generalized != rewards.end())
+    {
+        if (!generalized->is_object())
+            throw std::invalid_argument("Invalid generalized blue reward settings");
+        result.ownLossWeight = patrol_config_detail::FiniteNumber(
+            *generalized, "ownLossWeight");
+        result.lowSpeedRiskWeight = patrol_config_detail::FiniteNumber(
+            *generalized, "lowSpeedRiskWeight");
+    }
+
     if (!Valid(result) || !weights.is_object()
         || weights.size() != kRewardChannelNames.size())
         throw std::invalid_argument("Invalid BluePatrol MAPPO training settings");
     return result;
+}
+
+/** @brief Loads validated blue MAPPO settings from the resource directory. */
+inline PatrolTrainingSettings
+LoadPatrolTrainingSettings(std::filesystem::path const& settings)
+{
+    return ParsePatrolTrainingSettings(
+        ReadPatrolJson(settings / "Training/BluePatrol.json"));
 }
 
 } // namespace ppo::examples::bluedefense::defenders

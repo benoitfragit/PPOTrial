@@ -199,7 +199,8 @@ std::uint64_t ReadGeneralizedTrainingState(
     if (!(stream >> completedUpdates))
         throw std::runtime_error("Invalid generalized PPO update count");
     training_checkpoint_detail::RequirePatrolCheckpointToken(stream, "RNG");
-    if (!(stream >> randomEngine))
+    // Some standard engines clear skipws while reading their state.
+    if (!(stream >> std::ws >> randomEngine))
         throw std::runtime_error("Invalid generalized random-engine state");
     training_checkpoint_detail::RequirePatrolCheckpointToken(
         stream, "END_BLUE_TEAM_TRAINING");

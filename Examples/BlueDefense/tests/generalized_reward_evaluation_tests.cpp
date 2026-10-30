@@ -223,7 +223,7 @@ bool TestSafetyRewardChannels()
         || !Near(Channel(rewards.team,
             GeneralizedRewardChannel::BlueSurvival), -0.5F)
         || !Near(Channel(rewards.perBlue[1],
-            GeneralizedRewardChannel::BlueSurvival), -1.F)
+            GeneralizedRewardChannel::OwnLoss), -1.F)
         || !Near(Channel(rewards.perBlue[0],
             GeneralizedRewardChannel::BlueSurvival), -0.5F))
         return false;
@@ -240,7 +240,7 @@ bool TestSafetyRewardChannels()
             GeneralizedRewardChannel::RestrictedZoneClearance), -0.3F);
 }
 
-bool TestSurvivalDominatesDeathShortcut()
+bool TestOwnLossNotDiluted()
 {
     auto const roles = BlueTeamRoles::Create(4U, 0U);
     if (!roles)
@@ -252,18 +252,54 @@ bool TestSurvivalDominatesDeathShortcut()
     GeneralizedRewardSettings weights{};
     weights.weights.fill(0.F);
     weights.weights[static_cast<std::size_t>(
-        GeneralizedRewardChannel::BlueSurvival)] = 24.F;
+        GeneralizedRewardChannel::OwnLoss)] = 24.F;
     GeneralizedCooperativeRewards rewards{};
     if (AggregateGeneralizedCooperativeRewards(
             *roles, transition, weights, rewards)
         != GeneralizedRewardStatus::Applied)
         return false;
-    // One death costs the dying agent 24, not 24/P; living peers still
-    // share the team cost 24/P and team telemetry remains normalized.
+    // Own loss is independent of P. The normalized shared loss remains
+    // a distinct channel rather than replacing individual loss credit.
     return Near(rewards.perBlue[2].Total(weights), -24.F)
-        && Near(rewards.perBlue[1].Total(weights), -6.F)
+        && Near(rewards.perBlue[1].Total(weights), 0.F)
         && Near(Channel(rewards.team,
             GeneralizedRewardChannel::BlueSurvival), -0.25F);
+}
+
+bool TestDelayedMissionCredit()
+{
+    for (std::size_t const count : {1U, 4U, 9U})
+    {
+        auto const roles = BlueTeamRoles::Create(count, 0U);
+        if (!roles)
+            return false;
+        GeneralizedRewardTransition transition{};
+        transition.before = MakeState(count, 2U);
+        transition.after = transition.before;
+        transition.after.blueAlive[0] = false;
+        GeneralizedCooperativeRewards rewards{};
+        if (AggregateGeneralizedCooperativeRewards(*roles, transition, {}, rewards)
+                != GeneralizedRewardStatus::Applied
+            || !rewards.active[0]
+            || !Near(Channel(rewards.perBlue[0], GeneralizedRewardChannel::OwnLoss), -1.F)
+            || !Near(Channel(rewards.perBlue[0], GeneralizedRewardChannel::BlueSurvival),
+                     -1.F / static_cast<float>(count)))
+            return false;
+        transition.before = transition.after;
+        transition.after.objectiveAvailable = false;
+        transition.missionFailed = true;
+        // Local signals on a dead participant must be ignored.
+        transition.responsibilities.controlEffort[0] = 1.F;
+        if (AggregateGeneralizedCooperativeRewards(*roles, transition, {}, rewards)
+                != GeneralizedRewardStatus::Applied
+            || rewards.active[0]
+            || !Near(Channel(rewards.perBlue[0], GeneralizedRewardChannel::ObjectiveSurvival), -1.F)
+            || !Near(Channel(rewards.perBlue[0], GeneralizedRewardChannel::MissionOutcome), -1.F)
+            || !Near(Channel(rewards.perBlue[0], GeneralizedRewardChannel::OwnLoss), 0.F)
+            || !Near(Channel(rewards.perBlue[0], GeneralizedRewardChannel::ControlEffort), 0.F))
+            return false;
+    }
+    return kGeneralizedRewardChannelNames.size() == kGeneralizedRewardChannelCount;
 }
 
 bool TestTwoVersusTwo()
@@ -402,8 +438,8 @@ bool TestNineVersusTenAndMaskValidation()
         return false;
     }
 
-    // A blue destroyed before this step remains part of P but receives no new
-    // trajectory reward; it is not confused with unused capacity either.
+    // A dead participant keeps shared mission credit but receives no local
+    // formation, effort or repeated own-loss cost, and cannot act.
     GeneralizedRewardTransition masked = transition;
     masked.before.blueAlive[0] = false;
     masked.after.blueAlive[0] = false;
@@ -411,7 +447,12 @@ bool TestNineVersusTenAndMaskValidation()
             *roles, masked, {}, rewards)
             != GeneralizedRewardStatus::Applied
         || rewards.active[0]
-        || !Near(rewards.perBlue[0].Total({}), 0.F))
+        || !Near(Channel(rewards.perBlue[0],
+            GeneralizedRewardChannel::BlueSurvival), -2.F / 9.F)
+        || !Near(Channel(rewards.perBlue[0],
+            GeneralizedRewardChannel::OwnLoss), 0.F)
+        || !Near(Channel(rewards.perBlue[0],
+            GeneralizedRewardChannel::ControlEffort), 0.F))
     {
         return false;
     }
@@ -606,11 +647,13 @@ int main()
         return 21;
     if (!TestOneVersusZero())
         return 1;
+    if (!TestDelayedMissionCredit())
+        return 25;
     if (!TestTwoVersusTwo())
         return 2;
     if (!TestSafetyRewardChannels())
         return 23;
-    if (!TestSurvivalDominatesDeathShortcut())
+    if (!TestOwnLossNotDiluted())
         return 24;
     if (!TestIndependentRoleAndPursuitWeights())
         return 7;
