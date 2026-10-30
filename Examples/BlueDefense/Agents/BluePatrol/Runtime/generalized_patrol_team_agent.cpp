@@ -752,6 +752,7 @@ void GeneralizedPatrolMappoAgent::RestoreTrainingInitializer() noexcept
     auto& context = registry_->ctx().get<InitializerContext>();
     context.evaluationOverride = false;
     context.next = 0U;
+    context.ClearEpisodeInitializationFailures();
     if (trainingRngSaved_)
     {
         context.rng = trainingRng_;
