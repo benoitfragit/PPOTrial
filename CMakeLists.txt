@@ -23,6 +23,9 @@ endif()
 
 # Core contracts deliberately compile independently of Torch, EnTT and graphics.
 if (NOT PPO_BUILD_DESKTOP)
+    if (PPO_BUILD_CORE_TESTS)
+        add_subdirectory(Examples/BlueDefense/tests BlueDefenseCoreTests)
+    endif()
     return()
 endif()
 

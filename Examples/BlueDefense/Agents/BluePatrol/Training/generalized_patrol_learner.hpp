@@ -2,6 +2,7 @@
 
 #include "generalized_training_checkpoint.hpp"
 #include "generalized_critic_network.hpp"
+#include "generalized_advantage.hpp"
 
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
 
@@ -27,8 +28,10 @@ namespace ppo::examples::bluedefense::defenders {
 /** @brief Finite diagnostics from the latest generalized PPO update. */
 struct GeneralizedTrainingDiagnostics final
 {
-    /** @brief Number of non-destroyed transition rows used for learning. */
+    /** @brief Living actor rows used for policy gradients. */
     std::size_t learnableTransitions{};
+    /** @brief Participating rows, including dead slots, used by the critic. */
+    std::size_t criticTransitions{};
     /** @brief Mean absolute GAE value before normalization. */
     float generalizedAdvantageAbsMean{};
     /** @brief Sum of absolute actor-output loss derivatives. */
@@ -113,7 +116,8 @@ private:
  * A call to ChooseActions evaluates one actor batch containing exactly the P
  * episode mobiles. The matching Observe call then appends exactly P rows with
  * one common team-step index. Destroyed mobiles keep their stable row but have
- * a zero learning mask. Storage and neural-network workspaces are allocated by
+ * a zero actor mask. Their collective returns and critic rows remain valid.
+ * Storage and neural-network workspaces are allocated by
  * the constructor, never by the per-team-step success path.
  *
  * The historical two-agent PatrolLearner remains unchanged. This class owns a
@@ -337,7 +341,6 @@ public:
                 collectedTeamSteps_, agent)];
             transition.nextCentralCritic = nextCritics[agent];
             transition.reward = rewards[agent];
-            transition.nextAvailable = nextAvailability[agent];
             transition.terminated = terminated;
             transition.truncated = truncated;
         }
@@ -684,7 +687,6 @@ private:
         float advantage{};
         std::size_t teamStep{};
         bool available{};
-        bool nextAvailable{};
         bool terminated{};
         bool truncated{};
     };
@@ -811,28 +813,28 @@ private:
                 maximum[feature] = std::max(maximum[feature], value);
             }
         }
-        if (living == 0U)
-            return;
-        float const inverseLiving = 1.F / static_cast<float>(living);
+        float const inverseLiving = living == 0U ? 0.F
+            : 1.F / static_cast<float>(living);
         float const livingFraction = static_cast<float>(living)
             / static_cast<float>(TeamCapacity::MaximumBlueMobiles);
         float const teamFraction = static_cast<float>(counts_.blueMobiles)
             / static_cast<float>(TeamCapacity::MaximumBlueMobiles);
         for (std::size_t agent = 0U; agent < counts_.blueMobiles; ++agent)
         {
-            if (!availability[agent])
-                continue;
             auto& result = outputs[agent];
             for (std::size_t feature = 0U;
                  feature < GeneralizedCriticLayout::Compact; ++feature)
             {
-                result[GeneralizedCriticLayout::OwnOffset + feature] = rlt::get(
-                    inferenceCompact_, static_cast<Index>(agent),
-                    static_cast<Index>(feature));
+                // Zero own block represents death; pooled living context is
+                // still required to predict future cooperative outcomes.
+                if (availability[agent])
+                    result[GeneralizedCriticLayout::OwnOffset + feature] = rlt::get(
+                        inferenceCompact_, static_cast<Index>(agent),
+                        static_cast<Index>(feature));
                 result[GeneralizedCriticLayout::MeanOffset + feature] =
                     mean[feature] * inverseLiving;
                 result[GeneralizedCriticLayout::MaxOffset + feature] =
-                    maximum[feature];
+                    living == 0U ? 0.F : maximum[feature];
             }
             result[GeneralizedCriticLayout::LivingFractionOffset] =
                 livingFraction;
@@ -859,17 +861,9 @@ private:
                          baselinesDone - started).count() << std::endl;
         std::size_t learnable = EstimateGeneralizedAdvantages();
         diagnostics_.learnableTransitions = learnable;
-        if (learnable == 0U)
-        {
-            std::clog << "[MAPPO_TIMING] optimizer=done update="
-                      << completedUpdates_ + 1U
-                      << " learnable=0 total_ms="
-                      << std::chrono::duration_cast<std::chrono::milliseconds>(
-                             Clock::now() - started).count()
-                      << std::endl;
-            return;
-        }
-        NormalizeAdvantages(learnable);
+        diagnostics_.criticTransitions = transitions_.size();
+        if (learnable != 0U)
+            NormalizeAdvantages(learnable);
         auto const advantagesDone = Clock::now();
 
         for (Index epoch = 0; epoch < PPOParameters::N_EPOCHS; ++epoch)
@@ -881,10 +875,12 @@ private:
                 FillTrainingBatch(offset, false);
                 std::size_t const batchLearnable =
                     CountLearnableBatch(offset);
-                if (batchLearnable == 0U)
-                    continue;
-                TrainActorBatch(offset, batchLearnable);
-                TrainCriticBatch(offset, batchLearnable);
+                if (batchLearnable != 0U)
+                    TrainActorBatch(offset, batchLearnable);
+                std::size_t const criticRows = std::min(
+                    static_cast<std::size_t>(kTrainingBatch),
+                    trainingOrder_.size() - offset);
+                TrainCriticBatch(offset, criticRows);
             }
             std::clog << "[MAPPO_TIMING] phase=epoch_done update="
                       << completedUpdates_ + 1U << " epoch="
@@ -901,6 +897,7 @@ private:
         std::clog << "[MAPPO_TIMING] optimizer=done update="
                   << completedUpdates_ + 1U
                   << " learnable=" << learnable
+                  << " critic_rows=" << diagnostics_.criticTransitions
                   << " critic_baselines_ms=" << millis(baselinesDone - started)
                   << " advantages_ms=" << millis(advantagesDone - baselinesDone)
                   << " ppo_ms=" << millis(ended - advantagesDone)
@@ -989,32 +986,19 @@ private:
             {
                 auto& transition = transitions_[TransitionIndex(
                     reverse - 1U, agent)];
-                if (!transition.available)
-                {
-                    transition.returnValue = 0.F;
-                    transition.advantage = 0.F;
-                    followingAdvantage = 0.F;
-                    continue;
-                }
-                bool const terminal = transition.terminated
-                    || !transition.nextAvailable;
-                bool const traceBoundary = terminal || transition.truncated;
-                // A time-limit truncation ends the GAE trace but is not a
-                // terminal physical state: retain V(s') in the TD target.
-                float const bootstrap = terminal ? 0.F
-                                                 : transition.nextValue;
-                float const delta = transition.reward
-                    + PPOParameters::GAMMA * bootstrap - transition.value;
-                transition.advantage = delta
-                    + (traceBoundary ? 0.F
-                                     : PPOParameters::GAMMA
-                                           * PPOParameters::LAMBDA
-                                           * followingAdvantage);
-                transition.returnValue =
-                    transition.value + transition.advantage;
+                // Death masks actor gradients, never the mission return.
+                transition.advantage = GeneralizedMissionAdvantage(
+                    transition.reward, transition.value, transition.nextValue,
+                    followingAdvantage, PPOParameters::GAMMA,
+                    PPOParameters::LAMBDA, transition.terminated,
+                    transition.truncated);
+                transition.returnValue = transition.value + transition.advantage;
                 followingAdvantage = transition.advantage;
-                absoluteAdvantage += std::abs(transition.advantage);
-                ++learnable;
+                if (transition.available)
+                {
+                    absoluteAdvantage += std::abs(transition.advantage);
+                    ++learnable;
+                }
             }
         }
         diagnostics_.generalizedAdvantageAbsMean = learnable == 0U
@@ -1137,7 +1121,7 @@ private:
     }
 
     void TrainCriticBatch(std::size_t const offset,
-                          std::size_t const batchLearnable)
+                          std::size_t const criticRows)
     {
         rlt::zero_gradient(device_, critic_);
         rlt::forward(device_, critic_, trainingCritic_,
@@ -1146,12 +1130,12 @@ private:
         for (Index row = 0; row < kTrainingBatch; ++row)
         {
             Transition const* const transition = BatchTransition(offset, row);
-            if (transition == nullptr || !transition->available)
+            if (transition == nullptr)
                 continue;
             float const value = rlt::get(trainingCriticOutput_, row, 0);
             float const derivative =
                 2.F * (value - transition->returnValue)
-                / static_cast<float>(batchLearnable);
+                / static_cast<float>(criticRows);
             rlt::set(trainingCriticDerivative_, row, 0, derivative);
             diagnostics_.criticDerivativeL1 += std::abs(derivative);
         }

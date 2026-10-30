@@ -171,7 +171,9 @@ inline float GeneralizedFormationProgressReward(
     std::size_t const physicalIndex) noexcept
 {
     std::size_t const leaderIndex = roles.LeaderPhysicalIndex();
-    if (physicalIndex >= before.counts.blueMobiles
+    if (!roles.IsValid() || leaderIndex >= before.counts.blueMobiles
+        || leaderIndex >= after.counts.blueMobiles
+        || physicalIndex >= before.counts.blueMobiles
         || physicalIndex >= after.counts.blueMobiles
         || !before.blues[physicalIndex].available
         || !after.blues[physicalIndex].available
@@ -200,6 +202,19 @@ inline float GeneralizedLowSpeedRisk(
     // Aircraft start near cruise; warn well before the physics minimum speed.
     float const cautionSpeed = std::max(0.35F * parameters.cruiseSpeed, 1.F);
     return Clamp((cautionSpeed - mobile.speed) / cautionSpeed, 0.F, 1.F);
+}
+
+/** @brief Preserve the low-speed endpoint on an alive-to-dead transition. */
+inline float GeneralizedLowSpeedTransitionPenalty(
+    Parameters const& parameters, Mobile const& before,
+    Mobile const& after) noexcept
+{
+    if (!before.available)
+        return 0.F;
+    Mobile endpoint = after;
+    endpoint.available = true;
+    return GeneralizedSafetyPenalty(GeneralizedLowSpeedRisk(parameters, before),
+                                   GeneralizedLowSpeedRisk(parameters, endpoint));
 }
 
 /**
@@ -289,11 +304,10 @@ inline float GeneralizedPursuitProgress(
 }
 
 /**
- * @brief Continuously blends autonomous distant pursuit with nearby teamwork.
- * Without hostile mobiles, full patrol/formation is required. Imminent threats
- * can relax formation to prioritize defense without removing the safety LiDAR.
+ * @brief Engagement pressure from nearby reds or danger to the objective.
+ * No target is selected; distant harmless tracks do not reward pursuit.
  */
-inline float GeneralizedCooperationWeight(
+inline float GeneralizedEngagementWeight(
     Parameters const& parameters,
     GeneralizedRuntimeState const& state) noexcept
 {
@@ -318,7 +332,7 @@ inline float GeneralizedCooperationWeight(
         }
     }
     if (!threatPresent)
-        return 1.F;
+        return 0.F;
     if (!std::isfinite(nearest))
         return 0.F;
     float const engagementRange =
@@ -327,7 +341,14 @@ inline float GeneralizedCooperationWeight(
         (2.F * engagementRange - nearest) / engagementRange, 0.F, 1.F);
     float const pressure = generalized_runtime_detail::ThreatPressure(
         state, parameters);
-    return close * (1.F - 0.75F * pressure);
+    return std::max(close, pressure);
+}
+
+/** @brief Retain patrol outside engagement and relax it under pressure. */
+inline float GeneralizedCooperationWeight(
+    Parameters const& parameters, GeneralizedRuntimeState const& state) noexcept
+{
+    return 1.F - 0.75F * GeneralizedEngagementWeight(parameters, state);
 }
 
 } // namespace ppo::examples::bluedefense::defenders

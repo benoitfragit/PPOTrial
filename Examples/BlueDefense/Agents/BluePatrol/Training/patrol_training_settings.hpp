@@ -32,6 +32,9 @@ struct PatrolTrainingSettings final
     std::uint64_t saveEveryUpdates{10U}; // Independent full-state checkpoint cadence.
     std::uint32_t seed{42U};
     float rewardClamp{100.F};
+    // Generalized blue-only channels; legacy weights retain their mapping.
+    float ownLossWeight{24.F};
+    float lowSpeedRiskWeight{5.F};
     RewardValues rewardWeights{1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F};
     PatrolEvaluationSettings evaluation{};
 };
@@ -47,6 +50,8 @@ inline bool Valid(PatrolTrainingSettings const& settings) noexcept
         || settings.maxUpdates == 0U || settings.checkpointEvery == 0U
         || settings.saveEveryUpdates == 0U
         || !std::isfinite(settings.rewardClamp) || settings.rewardClamp <= 0.F
+        || !std::isfinite(settings.ownLossWeight) || settings.ownLossWeight < 0.F
+        || !std::isfinite(settings.lowSpeedRiskWeight) || settings.lowSpeedRiskWeight < 0.F
         || !Valid(settings.evaluation))
         return false;
     return std::all_of(settings.rewardWeights.begin(), settings.rewardWeights.end(),

@@ -139,14 +139,22 @@ bool TestCooperation()
     patrol::Parameters parameters{};
     auto noRed = MakeState(2U, 0U);
     auto farRed = MakeState(2U, 1U);
+    farRed.reds[0].north = 250000.F;
+    auto objectiveThreat = farRed;
+    objectiveThreat.reds[0].north = 90000.F;
     auto closeRed = farRed;
     closeRed.reds[0].north = 20000.F;
     return Close(patrol::GeneralizedCooperationWeight(
             parameters, noRed), 1.F)
         && Close(patrol::GeneralizedCooperationWeight(
-            parameters, farRed), 0.F)
+            parameters, farRed), 1.F)
         && patrol::GeneralizedCooperationWeight(
-            parameters, closeRed) > 0.F;
+            parameters, closeRed) > 0.F
+        && patrol::GeneralizedCooperationWeight(parameters, closeRed) < 1.F
+        && Close(patrol::GeneralizedEngagementWeight(parameters, noRed), 0.F)
+        && Close(patrol::GeneralizedEngagementWeight(parameters, farRed), 0.F)
+        && patrol::GeneralizedEngagementWeight(parameters, closeRed) > 0.F
+        && patrol::GeneralizedEngagementWeight(parameters, objectiveThreat) > 0.F;
 }
 bool TestFormationAndLowSpeed()
 {
@@ -194,7 +202,15 @@ bool TestFormationAndLowSpeed()
     float const zeroRisk = patrol::GeneralizedLowSpeedRisk(
         parameters, mobile);
     mobile.available = false;
-    return Close(cruiseRisk, 0.F)
+    auto beforeLoss = mobile;
+    beforeLoss.available = true;
+    beforeLoss.speed = 0.1F * parameters.cruiseSpeed;
+    float const fatalPenalty = patrol::GeneralizedLowSpeedTransitionPenalty(
+        parameters, beforeLoss, mobile);
+    float const maskedPenalty = patrol::GeneralizedLowSpeedTransitionPenalty(
+        parameters, mobile, mobile);
+    return fatalPenalty > 0.F && Close(maskedPenalty, 0.F)
+        && Close(cruiseRisk, 0.F)
         && cautionRisk > 0.F && cautionRisk < 1.F
         && Close(zeroRisk, 1.F)
         && Close(patrol::GeneralizedLowSpeedRisk(parameters, mobile), 0.F);

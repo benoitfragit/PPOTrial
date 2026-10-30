@@ -13,6 +13,7 @@ namespace ppo::examples::bluedefense::defenders {
  * The evaluated agent contributes its attention-encoded local state and role.
  * Mean and max pool the alive team without depending on slot order.
  * Living and initial team fractions distinguish losses from smaller teams.
+ * Dead participants have a zero own block and retain the living pooled context.
  */
 struct GeneralizedCriticLayout final
 {

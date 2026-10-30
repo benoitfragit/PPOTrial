@@ -279,7 +279,8 @@ std::uint64_t ReadPatrolTrainingState(std::istream& stream,
     if (!(stream >> updates))
         throw std::runtime_error("Invalid blue MAPPO update count");
     training_checkpoint_detail::RequirePatrolCheckpointToken(stream, "RNG");
-    if (!(stream >> rng))
+    // Some standard engines clear skipws while reading their state.
+    if (!(stream >> std::ws >> rng))
         throw std::runtime_error("Invalid blue MAPPO random-engine state");
     training_checkpoint_detail::RequirePatrolCheckpointToken(
         stream, "END_BLUE_PATROL_TRAINING");

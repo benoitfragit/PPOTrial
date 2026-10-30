@@ -2,7 +2,8 @@
 
 #include "generalized_observation.hpp"
 
-#include <rl_tools/nn_models/mlp_unconditional_stddev/network.h>
+// Establish CPU and model operations before defining RLtools adapters.
+#include "patrol_rltools.hpp"
 
 #include <algorithm>
 #include <array>

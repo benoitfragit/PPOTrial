@@ -32,6 +32,41 @@ nlohmann::json ValidDocument()
     };
 }
 
+bool TestGeneralizedRewardConfiguration()
+{
+    nlohmann::json document{
+        {"training", {{"rolloutSteps", 1024U}, {"maxUpdates", 1U},
+                      {"checkpointEvery", 1U}, {"seed", 42U}}},
+        {"evaluation", {{"episodes", 8U}, {"maxSteps", 100U},
+                        {"seed", 4242U}, {"minimumTrackingFraction", 0.8F}}},
+        {"rewards", {{"clamp", 100.F}, {"weights", nlohmann::json::object()}}}};
+    for (auto const* name : patrol::kRewardChannelNames)
+        document["rewards"]["weights"][name] = 1.F;
+    auto const defaults = patrol::ParsePatrolTrainingSettings(document);
+    if (defaults.ownLossWeight != 24.F || defaults.lowSpeedRiskWeight != 5.F)
+        return false;
+    document["rewards"]["generalized"] = {
+        {"ownLossWeight", 30.F}, {"lowSpeedRiskWeight", 2.F}};
+    auto const custom = patrol::ParsePatrolTrainingSettings(document);
+    if (custom.ownLossWeight != 30.F || custom.lowSpeedRiskWeight != 2.F)
+        return false;
+    for (float const invalid : {-1.F, std::numeric_limits<float>::infinity(),
+                               std::numeric_limits<float>::quiet_NaN()})
+    {
+        for (auto const* name : {"ownLossWeight", "lowSpeedRiskWeight"})
+        {
+            auto bad = document;
+            bad["rewards"]["generalized"][name] = invalid;
+            bool rejected = false;
+            try { (void)patrol::ParsePatrolTrainingSettings(bad); }
+            catch (std::invalid_argument const&) { rejected = true; }
+            if (!rejected)
+                return false;
+        }
+    }
+    return true;
+}
+
 bool Same(patrol::PatrolGeometry const& first,
           patrol::PatrolGeometry const& second) noexcept
 {
@@ -49,6 +84,8 @@ bool Same(patrol::PatrolGeometry const& first,
 
 int main()
 {
+    if (!TestGeneralizedRewardConfiguration())
+        return 12;
     patrol::PatrolGeometrySettings const settings =
         patrol::ParsePatrolGeometrySettings(ValidDocument());
     patrol::PatrolSamplingConstraints const constraints{

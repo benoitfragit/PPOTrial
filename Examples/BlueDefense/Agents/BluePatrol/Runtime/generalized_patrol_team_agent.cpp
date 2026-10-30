@@ -130,8 +130,9 @@ char const* GeneralizedBlueLossCause(
  * responsibilities. No historical 2v2 reward or checkpoint layout is changed.
  */
 GeneralizedRewardValues MapGeneralizedRewardWeights(
-    RewardValues const& legacy) noexcept
+    PatrolTrainingSettings const& training) noexcept
 {
+    RewardValues const& legacy = training.rewardWeights;
     GeneralizedRewardValues result{};
     result[static_cast<std::size_t>(
         GeneralizedRewardChannel::PatrolTracking)] = legacy[
@@ -145,10 +146,11 @@ GeneralizedRewardValues MapGeneralizedRewardWeights(
     result[static_cast<std::size_t>(
         GeneralizedRewardChannel::ControlEffort)] = legacy[
             static_cast<std::size_t>(RewardChannel::ControlEffort)];
-    // Blue-only survival cost: a destroyed trajectory must not be rewarded
-    // for escaping recurrent shaping penalties.
     result[static_cast<std::size_t>(
-        GeneralizedRewardChannel::BlueSurvival)] = 24.F;
+        GeneralizedRewardChannel::BlueSurvival)] = legacy[
+            static_cast<std::size_t>(RewardChannel::MissionOutcome)];
+    result[static_cast<std::size_t>(
+        GeneralizedRewardChannel::OwnLoss)] = training.ownLossWeight;
     result[static_cast<std::size_t>(
         GeneralizedRewardChannel::RedNeutralization)] = legacy[
             static_cast<std::size_t>(RewardChannel::Interception)];
@@ -172,7 +174,7 @@ GeneralizedRewardValues MapGeneralizedRewardWeights(
     result[static_cast<std::size_t>(
         GeneralizedRewardChannel::BoundaryClearance)] = 1.F;
     result[static_cast<std::size_t>(
-        GeneralizedRewardChannel::LowSpeedRisk)] = 5.F;
+        GeneralizedRewardChannel::LowSpeedRisk)] = training.lowSpeedRiskWeight;
     return result;
 }
 
@@ -226,7 +228,7 @@ GeneralizedPatrolMappoAgent::GeneralizedPatrolMappoAgent(
         attackerIds_[index] = attackers[index]->uniqid();
     }
 
-    rewardWeights_ = MapGeneralizedRewardWeights(training_.rewardWeights);
+    rewardWeights_ = MapGeneralizedRewardWeights(training_);
     learner_ = std::make_unique<GeneralizedPatrolLearner>(
         counts_, training_.seed, training_.rolloutSteps);
     if (std::filesystem::exists(trainingCheckpoint_))
@@ -724,7 +726,8 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             * GeneralizedLeaderTrackingReward(
                 parameters, beforeStep_, after, roles);
         transition.responsibilities.pursuitProgress =
-            GeneralizedPursuitProgress(parameters, beforeStep_, after);
+            GeneralizedEngagementWeight(parameters, beforeStep_)
+            * GeneralizedPursuitProgress(parameters, beforeStep_, after);
         for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
         {
             BlueRoleAssignment const assignment = *roles.Assignment(index);
@@ -755,10 +758,8 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                             parameters, beforeStep_.blues[index]),
                         GeneralizedBoundaryRisk(parameters, after.blues[index]));
                 transition.responsibilities.lowSpeedRisk[index] =
-                    GeneralizedSafetyPenalty(
-                        GeneralizedLowSpeedRisk(
-                            parameters, beforeStep_.blues[index]),
-                        GeneralizedLowSpeedRisk(parameters, after.blues[index]));
+                    GeneralizedLowSpeedTransitionPenalty(
+                        parameters, beforeStep_.blues[index], after.blues[index]);
             }
         }
 
@@ -1096,12 +1097,8 @@ GeneralizedPatrolMappoAgent::GetSnapshot() const noexcept
         rewardWeights_.begin(), rewardWeights_.end());
     snapshot.m_rewards.assign(
         lastRewardChannels_.begin(), lastRewardChannels_.end());
-    snapshot.m_rewardnames = {
-        "Patrol tracking", "Formation keeping", "Pursuit progress",
-        "Control effort", "Blue survival", "Red neutralization",
-        "Threat containment", "Objective survival",
-        "Mission outcome", "Timeout", "Blue separation",
-        "Restricted zone clearance", "Boundary clearance"};
+    snapshot.m_rewardnames.assign(kGeneralizedRewardChannelNames.begin(),
+                                  kGeneralizedRewardChannelNames.end());
     return snapshot;
 }
 
