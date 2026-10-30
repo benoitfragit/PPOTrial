@@ -3,7 +3,7 @@
     "parameters": {
         "FlightModel": {
             "CruiseSpeed": 300,
-            "MaxAcceleration": 600,
+            "MaxAcceleration": 100,
             "MaxFuel": 2000000,
             "MaxRotAcceleration": 0.8,
             "MaxSpeed": 750,
