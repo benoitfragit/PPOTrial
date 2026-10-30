@@ -42,9 +42,10 @@ sans logique spéciale pour une équipe de deux.
 - Défense : protection de l'objectif, neutralisation, survie, collisions et
   zones interdites.
 
-Les **10 canaux** du snapshot sont : Patrol tracking, Formation keeping,
+Les **13 canaux** du snapshot sont : Patrol tracking, Formation keeping,
 Pursuit progress, Control effort, Blue survival, Red neutralization,
-Threat containment, Objective survival, Mission outcome, Timeout.
+Threat containment, Objective survival, Mission outcome, Timeout,
+Blue separation, Restricted zone clearance, Boundary clearance.
 
 Les poids des canaux restent lus de `Training/BluePatrol.json`
 et sont convertis explicitement au runtime généralisé.
@@ -56,7 +57,7 @@ Bleu publie son snapshot, le nombre de rewards, l'état de l'entraînement
 et les évaluations. Les fonctions de rendu et le sélecteur utilisent le
 catalogue commun ; les rouges restent visibles comme entités indépendantes.
 Les tests de fumée utilisent les deux vrais scénarios et vérifient les
-10 noms/valeurs de récompenses du snapshot.
+13 noms/valeurs de récompenses du snapshot.
 
 ## Compatibilité de checkpoints
 
