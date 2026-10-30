@@ -2,7 +2,7 @@
     "formatVersion": 2,
     "parameters": {
         "FlightModel": {
-            "CruiseSpeed": 750,
+            "CruiseSpeed": 300,
             "MaxAcceleration": 600,
             "MaxFuel": 2000000,
             "MaxRotAcceleration": 0.8,
