@@ -85,12 +85,14 @@ jobs:
       - name: Check scenario startup without graphics
         env:
           SCENARIO: ${{ inputs.scenario }}
+          CURRICULUM: ${{ inputs.curriculum_enabled }}
         run: |
           $exe = "build/release/Main/Release/PPO.exe"
           if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
             throw "Missing Release executable: $exe"
           }
-          & $exe --example $env:SCENARIO --check-example
+          $scenario = if ($env:CURRICULUM -eq "true") { "blue-defense" } else { $env:SCENARIO }
+          & $exe --example $scenario --check-example
           if ($LASTEXITCODE -ne 0) { throw "Scenario bootstrap failed" }
 
       - name: Validate MAPPO telemetry report logic
