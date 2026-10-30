@@ -169,7 +169,9 @@ int main(int argc, char** argv)
                 telemetry << "elapsed_seconds,updates,rollout_steps,rollout_target,"
                              "evaluating,evaluation_progress,evaluation_cases_done,"
                              "evaluation_cases_total,evaluation_steps,"
-                             "evaluation_steps_per_second,training\n";
+                             "evaluation_steps_per_second,training,"
+                             "eval_completed,latest_score,best_score,"
+                             "eval_success_rate,instant_reward\n";
                 telemetry.flush();
             }
             else
@@ -224,7 +226,12 @@ int main(int argc, char** argv)
                                           << common.m_latestEvaluationTestCount << ','
                                           << common.m_evaluationStepsExecuted << ','
                                           << common.m_evaluationStepsPerSecond << ','
-                                          << (common.m_training ? 1 : 0) << '\n';
+                                          << (common.m_training ? 1 : 0) << ','
+                                          << (common.m_hasLatestEvaluation ? 1 : 0) << ','
+                                          << common.m_latestEvaluationNotation << ','
+                                          << common.m_notation << ','
+                                          << common.m_latestEvaluationSuccessRate << ','
+                                          << common.m_reward << '\n';
                                 telemetry.flush();
                             }
                             if (heartbeat || !haveLastState
