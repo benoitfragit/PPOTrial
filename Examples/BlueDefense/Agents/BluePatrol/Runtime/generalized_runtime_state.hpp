@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <string>
 #include <type_traits>
 
 namespace ppo::examples::bluedefense::defenders {
@@ -115,6 +116,67 @@ inline bool Valid(GeneralizedRuntimeState const& state) noexcept
         if (!finiteMobile(state.reds[index]))
             return false;
     return true;
+}
+
+/**
+ * @brief First invalid kinematic field; destruction does not excuse NaN.
+ */
+inline char const* InvalidGeneralizedMobileField(Mobile const& mobile) noexcept
+{
+    if (!std::isfinite(mobile.north)) return "north";
+    if (!std::isfinite(mobile.east)) return "east";
+    if (!std::isfinite(mobile.heading)) return "heading";
+    if (!std::isfinite(mobile.speed)) return "speed";
+    if (!std::isfinite(mobile.turnRate)) return "turnRate";
+    if (mobile.available && mobile.speed < 0.F) return "speed";
+    return nullptr;
+}
+
+/**
+ * @brief Detailed error built only on the failing validation path.
+ * @return Entity, field, numerical values and availability (or count error).
+ */
+inline std::string DescribeInvalidGeneralizedRuntimeState(
+    GeneralizedRuntimeState const& state)
+{
+    if (!Valid(state.counts))
+        return "counts P=" + std::to_string(state.counts.blueMobiles)
+            + " N=" + std::to_string(state.counts.redMobiles);
+    if (!std::isfinite(state.objectiveNorth)) return "objective.north";
+    if (!std::isfinite(state.objectiveEast)) return "objective.east";
+
+    for (std::size_t index = 0U; index < state.counts.blueMobiles; ++index)
+    {
+        Mobile const& mobile = state.blues[index];
+        if (char const* field = InvalidGeneralizedMobileField(mobile))
+            return "blue_" + std::to_string(index + 1U) + "." + field
+                + " north=" + std::to_string(mobile.north)
+                + " east=" + std::to_string(mobile.east)
+                + " heading=" + std::to_string(mobile.heading)
+                + " speed=" + std::to_string(mobile.speed)
+                + " turnRate=" + std::to_string(mobile.turnRate)
+                + " available=" + std::to_string(mobile.available);
+        if (state.lidarAvailable[index])
+        {
+            for (std::size_t ray = 0U; ray < state.lidar[index].size(); ++ray)
+                if (!std::isfinite(state.lidar[index][ray]))
+                    return "blue_" + std::to_string(index + 1U)
+                        + ".lidar[" + std::to_string(ray) + "]";
+        }
+    }
+    for (std::size_t index = 0U; index < state.counts.redMobiles; ++index)
+    {
+        Mobile const& mobile = state.reds[index];
+        if (char const* field = InvalidGeneralizedMobileField(mobile))
+            return "red_" + std::to_string(index + 1U) + "." + field
+                + " north=" + std::to_string(mobile.north)
+                + " east=" + std::to_string(mobile.east)
+                + " heading=" + std::to_string(mobile.heading)
+                + " speed=" + std::to_string(mobile.speed)
+                + " turnRate=" + std::to_string(mobile.turnRate)
+                + " available=" + std::to_string(mobile.available);
+    }
+    return "unknown validation failure";
 }
 
 /**
