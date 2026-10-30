@@ -211,6 +211,14 @@ def run(args: argparse.Namespace) -> int:
     progress = load_progress(config_hash, updates)
     if not 0 <= progress["nextStage"] <= len(stages):
         raise ValueError("Invalid curriculum progress stage")
+    completed_target = progress["baselineUpdates"] + sum(
+        item["updates"] for item in stages[:progress["nextStage"]]
+    )
+    if updates < completed_target:
+        raise ValueError(
+            "Checkpoint is behind completed curriculum stages: "
+            f"updates={updates}, required={completed_target}"
+        )
     if progress["nextStage"] == len(stages):
         print("[CURRICULUM] All stages already completed.")
         return 0
