@@ -7,11 +7,13 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <numeric>
@@ -750,13 +752,30 @@ private:
 
     void OptimizeRollout()
     {
+        using Clock = std::chrono::steady_clock;
+        auto const started = Clock::now();
+        // Emit before the synchronous optimizer so a stalled first update
+        // cannot look like an idle evaluator in CI logs.
+        std::clog << "[MAPPO_TIMING] optimizer=begin update="
+                  << completedUpdates_ + 1U
+                  << " transitions=" << transitions_.size() << std::endl;
         diagnostics_ = {};
         EvaluateCriticBaselines();
+        auto const baselinesDone = Clock::now();
         std::size_t learnable = EstimateGeneralizedAdvantages();
         diagnostics_.learnableTransitions = learnable;
         if (learnable == 0U)
+        {
+            std::clog << "[MAPPO_TIMING] optimizer=done update="
+                      << completedUpdates_ + 1U
+                      << " learnable=0 total_ms="
+                      << std::chrono::duration_cast<std::chrono::milliseconds>(
+                             Clock::now() - started).count()
+                      << std::endl;
             return;
+        }
         NormalizeAdvantages(learnable);
+        auto const advantagesDone = Clock::now();
 
         for (Index epoch = 0; epoch < PPOParameters::N_EPOCHS; ++epoch)
         {
@@ -773,6 +792,18 @@ private:
                 TrainCriticBatch(offset, batchLearnable);
             }
         }
+        auto const ended = Clock::now();
+        auto const millis = [](Clock::duration duration) {
+            return std::chrono::duration_cast<
+                std::chrono::milliseconds>(duration).count();
+        };
+        std::clog << "[MAPPO_TIMING] optimizer=done update="
+                  << completedUpdates_ + 1U
+                  << " learnable=" << learnable
+                  << " critic_baselines_ms=" << millis(baselinesDone - started)
+                  << " advantages_ms=" << millis(advantagesDone - baselinesDone)
+                  << " ppo_ms=" << millis(ended - advantagesDone)
+                  << " total_ms=" << millis(ended - started) << std::endl;
     }
 
     Transition* BatchTransition(std::size_t const offset,
