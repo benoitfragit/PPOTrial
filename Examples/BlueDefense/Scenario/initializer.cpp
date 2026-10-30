@@ -138,23 +138,25 @@ void InitializeEntity(ppo::model::Entity& entity)
         if (config.evaluationOverride)
         {
             config.side = config.evaluationSide < 0 ? -1 : 1;
-            config.arclength = defenders::PositiveModulo(
-                config.evaluationArclength, defenders::CircuitLength(p));
-            if (!defenders::GeneralizedFormationFitsBounds(
-                    config.patrolGeometry, config.patrolGeometrySettings,
-                    constraints,
-                    config.spawnSettings.blueTeam->activeCount,
-                    config.arclength))
+            auto const feasible = defenders::FindGeneralizedEvaluationArclength(
+                config.patrolGeometry, config.patrolGeometrySettings,
+                constraints, config.spawnSettings.blueTeam->activeCount,
+                config.evaluationPhaseFraction);
+            if (!feasible)
             {
                 config.patrolGeometryReady = false;
                 config.patrolGeometrySamplingFailed = true;
                 config.patrolTrackOverlay =
                     ppo::model::sPatrolTrackOverlay{};
                 config.episodeLayout.reset();
-                std::cerr << "[BLUE PATROL] Evaluation phase places an active "
-                          << "generalized blue outside patrol bounds.\n";
+                std::cerr << "[BLUE PATROL] No feasible evaluation formation "
+                          << "on sampled racetrack (P="
+                          << config.spawnSettings.blueTeam->activeCount
+                          << ", desired_phase=" << config.evaluationPhaseFraction
+                          << ", episode=" << config.episodeIndex << ").\n";
                 return;
             }
+            config.arclength = *feasible;
         }
         else
         {
