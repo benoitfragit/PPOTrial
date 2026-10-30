@@ -142,12 +142,17 @@ jobs:
         if: ${{ inputs.curriculum_enabled }}
         env:
           MAX_SECONDS: ${{ inputs.max_seconds }}
+          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
         run: |
           $seconds = 0
           if (-not [int]::TryParse($env:MAX_SECONDS, [ref]$seconds) -or $seconds -lt 1 -or $seconds -gt 18000) {
             throw "max_seconds must be an integer in [1, 18000]"
           }
-          python -u tools/ci/mappo_curriculum.py --max-seconds $seconds
+          $fresh = @()
+          if ([string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) {
+            $fresh = @("--fresh-start")
+          }
+          python -u tools/ci/mappo_curriculum.py --max-seconds $seconds @fresh
           if ($LASTEXITCODE -ne 0) { throw "MAPPO curriculum failed with code $LASTEXITCODE" }
 
       - name: Validate fresh resumable checkpoint
