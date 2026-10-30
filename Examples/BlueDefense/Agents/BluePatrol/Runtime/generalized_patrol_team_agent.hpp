@@ -85,8 +85,8 @@ private:
         Parameters const& parameters, GeneralizedRuntimeState const& state,
         bool missionFailed, bool timeout) const;
     void SaveAtUpdateBoundary(bool force = false) noexcept;
-    void StartEvaluation(Parameters const& parameters);
-    void PrepareEvaluationCase(Parameters const& parameters);
+    void StartEvaluation();
+    void PrepareEvaluationCase();
     void RestoreTrainingInitializer() noexcept;
     void PromoteEvaluatedActor() noexcept;
     void LoadPromotedScore() noexcept;
