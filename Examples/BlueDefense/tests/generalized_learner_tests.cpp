@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
 namespace blue = ppo::examples::bluedefense::defenders;
@@ -96,6 +97,88 @@ void WriteText(std::filesystem::path const& path, std::string const& text)
         throw std::runtime_error("Cannot write generalized learner fixture");
 }
 
+bool VerifyOptimizationFailureGuard()
+{
+    blue::GeneralizedOptimizationGuard guard{};
+    // Exhausted storage must be rejected before any transition indexing.
+    try
+    {
+        guard.RequireWritable(2U, 2U, __FILE__, __LINE__);
+        return false;
+    }
+    catch (std::out_of_range const& error)
+    {
+        std::string const message = error.what();
+        if (message.find("generalized_learner_tests.cpp") == std::string::npos
+            || message.find("line=") == std::string::npos
+            || message.find("collected=2 capacity=2") == std::string::npos)
+            return false;
+    }
+    if (guard.Failed())
+        return false;
+
+    try
+    {
+        guard.Run([] { throw std::runtime_error("simulated Adam failure"); },
+                  __FILE__, __LINE__);
+        return false;
+    }
+    catch (std::runtime_error const& error)
+    {
+        std::string const message = error.what();
+        if (message.find("simulated Adam failure") == std::string::npos
+            || message.find("file=") == std::string::npos
+            || message.find("line=") == std::string::npos)
+            return false;
+    }
+    if (!guard.Failed())
+        return false;
+    try
+    {
+        guard.RequireWritable(0U, 2U, __FILE__, __LINE__);
+        return false;
+    }
+    catch (std::logic_error const& error)
+    {
+        if (std::string{error.what()}.find("restart from a valid checkpoint")
+            == std::string::npos)
+            return false;
+    }
+    bool invoked = false;
+    try
+    {
+        guard.Run([&invoked] { invoked = true; }, __FILE__, __LINE__);
+        return false;
+    }
+    catch (std::logic_error const&)
+    {
+        return !invoked;
+    }
+}
+
+bool VerifyAbortPendingStep()
+{
+    blue::ActiveTeamCounts const counts{1U, 0U};
+    blue::GeneralizedPatrolLearner learner{counts, 412U, 2U};
+    auto const observations = MakeObservations(counts);
+    blue::GeneralizedPatrolLearner::AvailabilityMask availability{};
+    availability[0] = true;
+    blue::GeneralizedPatrolLearner::Rewards rewards{};
+    rewards[0] = 0.25F;
+
+    (void)learner.ChooseActions(observations, availability);
+    learner.AbortPendingStep();
+    if (learner.HasPendingAction() || learner.CollectedTeamSteps() != 0U
+        || learner.OptimizationFailed())
+        return false;
+    (void)learner.ChooseActions(observations, availability);
+    if (learner.Observe(observations, rewards, availability, false, false))
+        return false;
+    (void)learner.ChooseActions(observations, availability);
+    return learner.Observe(observations, rewards, availability, true, false)
+        && learner.StepCount() == 1U && !learner.OptimizationFailed();
+}
+
 bool VerifyTeamSize(blue::ActiveTeamCounts const counts)
 {
     blue::GeneralizedPatrolLearner learner{counts, 731U, 2U};
@@ -171,6 +254,10 @@ bool VerifyTeamSize(blue::ActiveTeamCounts const counts)
 
 int main()
 {
+    if (!VerifyOptimizationFailureGuard())
+        return 18;
+    if (!VerifyAbortPendingStep())
+        return 19;
     if (!VerifyTeamSize({1U, 0U}))
         return 1;
     if (!VerifyTeamSize({3U, 1U}))
