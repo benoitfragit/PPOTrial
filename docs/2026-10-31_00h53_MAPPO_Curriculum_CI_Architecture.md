@@ -78,10 +78,12 @@ Run workflow**, on the updated `master` branch.
 - `max_seconds`: **14400** recommended; permits continuing with another
   run if the time budget ends before 4v4.
 - `save_every_updates`: **1**.
-- `resume_run_id`: leave empty for a new curriculum; use the run ID of an
-  earlier **curriculum** run to continue its current level. A compatible
-  prior ordinary training V6 checkpoint can also seed a new curriculum but
-  changes the experiment's initial conditions.
+- `resume_run_id`: leave **empty for a true new random-initialized Blue
+  curriculum**. The runner removes checked-in legacy Blue V4/V7 actor/training
+  seeds (not the Red RLMission model) to prevent automatic legacy migration.
+  Use an earlier **curriculum** run ID to continue its current level.
+  A compatible prior ordinary training V6 checkpoint can seed the curriculum,
+  but changes the experiment's initial conditions.
 - The `scenario` field is used only by the original non-curriculum mode.
   Curriculum always drives the generalized `blue-defense` example.
 
