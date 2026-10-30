@@ -148,6 +148,58 @@ bool TestCooperation()
         && patrol::GeneralizedCooperationWeight(
             parameters, closeRed) > 0.F;
 }
+bool TestFormationAndLowSpeed()
+{
+    patrol::Parameters parameters{};
+    auto const roles = patrol::BlueTeamRoles::Create(2U, 0U);
+    if (!roles)
+        return false;
+    auto before = MakeState(2U, 0U);
+    before.blues[0] = {0.F, 0.F, 0.F, parameters.cruiseSpeed, 0.F, true};
+    patrol::FormationOffset const slot = patrol::EvaluateFormationOffset(
+        0U, parameters.geometry.separationDistance,
+        parameters.geometry.separationAngle);
+    before.blues[1] = {
+        slot.longitudinalMeters + 2000.F,
+        static_cast<float>(parameters.geometry.direction) * slot.inwardMeters,
+        0.F, parameters.cruiseSpeed, 0.F, true};
+    auto closer = before;
+    closer.blues[1].north -= 1000.F;
+    if (!Close(patrol::GeneralizedFormationProgressReward(
+            parameters, before, before, *roles, 1U), 0.F)
+        || !(patrol::GeneralizedFormationProgressReward(
+            parameters, before, closer, *roles, 1U) > 0.F)
+        || !(patrol::GeneralizedFormationProgressReward(
+            parameters, closer, before, *roles, 1U) < 0.F))
+        return false;
+    auto leaderLost = closer;
+    leaderLost.blues[0].available = false;
+    if (!Close(patrol::GeneralizedFormationProgressReward(
+            parameters, before, leaderLost, *roles, 1U), 0.F))
+        return false;
+    auto teammateLost = closer;
+    teammateLost.blues[1].available = false;
+    if (!Close(patrol::GeneralizedFormationProgressReward(
+            parameters, before, teammateLost, *roles, 1U), 0.F))
+        return false;
+
+    patrol::Mobile mobile{0.F, 0.F, 0.F,
+                          parameters.cruiseSpeed, 0.F, true};
+    float const cruiseRisk = patrol::GeneralizedLowSpeedRisk(
+        parameters, mobile);
+    mobile.speed = 0.2F * parameters.cruiseSpeed;
+    float const cautionRisk = patrol::GeneralizedLowSpeedRisk(
+        parameters, mobile);
+    mobile.speed = 0.F;
+    float const zeroRisk = patrol::GeneralizedLowSpeedRisk(
+        parameters, mobile);
+    mobile.available = false;
+    return Close(cruiseRisk, 0.F)
+        && cautionRisk > 0.F && cautionRisk < 1.F
+        && Close(zeroRisk, 1.F)
+        && Close(patrol::GeneralizedLowSpeedRisk(parameters, mobile), 0.F);
+}
+
 bool TestSafetyRisks()
 {
     patrol::Parameters parameters{};
@@ -218,5 +270,6 @@ int main()
     if (!TestCooperation()) return 4;
     if (!TestControlEffortPenalty()) return 5;
     if (!TestSafetyRisks()) return 6;
+    if (!TestFormationAndLowSpeed()) return 7;
     return 0;
 }

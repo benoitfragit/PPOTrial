@@ -41,32 +41,28 @@ struct GeneralizedRuntimeState final
     int side{1};
     /** @brief Synchronized team-step counter. */
     std::size_t step{};
-    /** @brief Team failure: lost leader, no survivors, or a living blue outside. */
+    /** @brief Team failure: no survivors or a living blue outside. */
     bool failed{};
 };
 
 /**
- * @brief Team failure follows the assigned leader rather than any casualty.
+ * @brief Team failure follows the survival of the team, not its leader.
  *
- * The episode ends if the assigned leader is destroyed, even while wingmen
- * survive. Losing a nonleader does not end the episode while the leader lives.
- * A living blue crossing the hard world boundary also ends the episode.
- * Other mission outcomes are evaluated separately by the MAPPO runtime.
+ * Losing an assigned leader does not cut off surviving teammates' actions.
+ * The episode ends when all blues are gone or a living blue crosses the
+ * hard world boundary; objective failure remains a separate runtime outcome.
  *
  * @param state Runtime state with valid episode counts.
  * @param parameters Valid world boundaries and hard-boundary scale.
- * @param leaderPhysicalIndex Immutable episode-assigned leader index.
- * @return True for leader loss, complete blue loss, or living blue out of bounds.
+ * @param leaderPhysicalIndex Immutable leader index, validated for safety.
+ * @return True for invalid leader index, no survivors or world-boundary exit.
  */
 inline bool GeneralizedBlueTeamFailed(
     GeneralizedRuntimeState const& state, Parameters const& parameters,
     std::size_t const leaderPhysicalIndex) noexcept
 {
-    if (leaderPhysicalIndex >= state.counts.blueMobiles
-        || !state.blues[leaderPhysicalIndex].available)
-    {
+    if (leaderPhysicalIndex >= state.counts.blueMobiles)
         return true;
-    }
     bool anyLivingBlue = false;
     for (std::size_t index = 0U; index < state.counts.blueMobiles; ++index)
     {

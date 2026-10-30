@@ -89,6 +89,7 @@ enum class GeneralizedRewardChannel : std::size_t
     BlueSeparation,
     RestrictedZoneClearance,
     BoundaryClearance,
+    LowSpeedRisk,
     Count
 };
 
@@ -107,7 +108,7 @@ struct GeneralizedRewardSettings final
 {
     /** @brief Per-channel multipliers in enum order. */
     GeneralizedRewardValues weights{1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F,
-        1.F, 1.F, 1.F, 1.F, 1.F, 1.F};
+        1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F};
     /** @brief Symmetric scalar reward limit. */
     float clampMagnitude{100.F};
 };
@@ -134,6 +135,7 @@ struct GeneralizedResponsibilitySignals final
     std::array<float, TeamCapacity::MaximumBlueMobiles> blueSeparation{};
     std::array<float, TeamCapacity::MaximumBlueMobiles> restrictedZoneClearance{};
     std::array<float, TeamCapacity::MaximumBlueMobiles> boundaryClearance{};
+    std::array<float, TeamCapacity::MaximumBlueMobiles> lowSpeedRisk{};
 };
 
 /**
@@ -274,7 +276,10 @@ inline bool ValidSignals(GeneralizedResponsibilitySignals const& signals,
             || signals.restrictedZoneClearance[index] > 1.F
             || !std::isfinite(signals.boundaryClearance[index])
             || signals.boundaryClearance[index] < 0.F
-            || signals.boundaryClearance[index] > 1.F)
+            || signals.boundaryClearance[index] > 1.F
+            || !std::isfinite(signals.lowSpeedRisk[index])
+            || signals.lowSpeedRisk[index] < 0.F
+            || signals.lowSpeedRisk[index] > 1.F)
         {
             return false;
         }
@@ -297,8 +302,10 @@ inline bool ValidSettings(GeneralizedRewardSettings const& settings) noexcept
 /**
  * @brief Aggregates normalized role-specific and cooperative rewards.
  *
- * Red neutralization is divided by active N and blue loss by active P. Every
- * active blue receives the same cooperative event channels. Only the leader
+ * Red neutralization is divided by active N. Team blue-loss telemetry is
+ * divided by P, while a dying actor receives the full sparse loss event
+ * immediately before its trajectory ends. Surviving peers share the loss.
+ * All other cooperative event channels are shared. Only the leader
  * receives patrol tracking; each teammate receives only its unique formation
  * penalty. The team decomposition averages role/control contributions
  * over P, making its scale independent of team size.
@@ -392,6 +399,7 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
     float separationSum = 0.F;
     float zoneSum = 0.F;
     float boundarySum = 0.F;
+    float lowSpeedSum = 0.F;
     for (std::size_t physicalIndex = 0U;
          physicalIndex < blueCount; ++physicalIndex)
     {
@@ -400,6 +408,9 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
         result.active[physicalIndex] = true;
         GeneralizedRewardBreakdown& breakdown = result.perBlue[physicalIndex];
         shared(breakdown);
+        if (!transition.after.blueAlive[physicalIndex])
+            breakdown.values[static_cast<std::size_t>(
+                GeneralizedRewardChannel::BlueSurvival)] = -1.F;
         BlueRoleAssignment const assignment = *roles.Assignment(physicalIndex);
         if (assignment.role == BlueRole::Leader)
         {
@@ -429,6 +440,10 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
             physicalIndex];
         float const boundary = -transition.responsibilities.boundaryClearance[
             physicalIndex];
+        float const lowSpeed = -transition.responsibilities.lowSpeedRisk[
+            physicalIndex];
+        breakdown.values[static_cast<std::size_t>(
+            GeneralizedRewardChannel::LowSpeedRisk)] = lowSpeed;
         breakdown.values[static_cast<std::size_t>(
             GeneralizedRewardChannel::BlueSeparation)] = separation;
         breakdown.values[static_cast<std::size_t>(
@@ -438,6 +453,7 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
         separationSum += separation;
         zoneSum += zone;
         boundarySum += boundary;
+        lowSpeedSum += lowSpeed;
     }
     result.team.values[static_cast<std::size_t>(
         GeneralizedRewardChannel::PatrolTracking)] =
@@ -457,6 +473,9 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
     result.team.values[static_cast<std::size_t>(
         GeneralizedRewardChannel::BoundaryClearance)] =
             boundarySum / static_cast<float>(blueCount);
+    result.team.values[static_cast<std::size_t>(
+        GeneralizedRewardChannel::LowSpeedRisk)] =
+            lowSpeedSum / static_cast<float>(blueCount);
     return GeneralizedRewardStatus::Applied;
 }
 

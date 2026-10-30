@@ -159,6 +159,50 @@ inline float GeneralizedFormationQuality(
 }
 
 /**
+ * @brief Bounded one-step improvement of a living teammate's formation error.
+ *
+ * Static poor geometry does not incur an unbounded per-step debt that makes
+ * self-destruction preferable. Destroyed participants or leaders cannot
+ * contribute synthetic progress. The loss event has its own sparse penalty.
+ */
+inline float GeneralizedFormationProgressReward(
+    Parameters const& parameters, GeneralizedRuntimeState const& before,
+    GeneralizedRuntimeState const& after, BlueTeamRoles const& roles,
+    std::size_t const physicalIndex) noexcept
+{
+    std::size_t const leaderIndex = roles.LeaderPhysicalIndex();
+    if (physicalIndex >= before.counts.blueMobiles
+        || physicalIndex >= after.counts.blueMobiles
+        || !before.blues[physicalIndex].available
+        || !after.blues[physicalIndex].available
+        || !before.blues[leaderIndex].available
+        || !after.blues[leaderIndex].available)
+        return 0.F;
+
+    float const previousError = Clamp(
+        1.F - GeneralizedFormationQuality(
+            parameters, before, roles, physicalIndex)
+            - parameters.formationTolerance, 0.F, 2.F);
+    float const currentError = Clamp(
+        1.F - GeneralizedFormationQuality(
+            parameters, after, roles, physicalIndex)
+            - parameters.formationTolerance, 0.F, 2.F);
+    return Clamp(parameters.formationErrorWeight
+        * (previousError - currentError), -1.F, 1.F);
+}
+
+/** @brief Risk gradient before a blue reaches critical low speed. */
+inline float GeneralizedLowSpeedRisk(
+    Parameters const& parameters, Mobile const& mobile) noexcept
+{
+    if (!mobile.available)
+        return 0.F;
+    // Aircraft start near cruise; warn well before the physics minimum speed.
+    float const cautionSpeed = std::max(0.35F * parameters.cruiseSpeed, 1.F);
+    return Clamp((cautionSpeed - mobile.speed) / cautionSpeed, 0.F, 1.F);
+}
+
+/**
  * @brief Rewards physical progress along the racetrack, penalizing lateral and
  * heading errors. Unlike a pure arclength term, leaving the track costs reward.
  */
