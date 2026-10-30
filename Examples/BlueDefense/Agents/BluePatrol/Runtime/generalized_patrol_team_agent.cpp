@@ -590,9 +590,8 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         if (updated)
         {
             finished_ = learner_->StepCount() >= training_.maxUpdates;
-            bool const evaluate = learner_->StepCount() == 1U
-                || learner_->StepCount() % training_.checkpointEvery == 0U
-                || finished_;
+            bool const evaluate = ShouldEvaluateGeneralizedUpdate(
+                learner_->StepCount(), training_.checkpointEvery, finished_);
             SaveAtUpdateBoundary(evaluate);
             if (evaluate)
             {
