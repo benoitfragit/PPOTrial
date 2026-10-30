@@ -61,6 +61,37 @@ GeneralizedCombatStateMask CombatMask(
 }
 
 /**
+ * @brief Evaluation-only loss classification using the recorded ECS source.
+ *
+ * Unknown is intentionally explicit when the world did not retain a valid
+ * destroying entity. This helper does not alter collision or SNA resolution.
+ */
+char const* GeneralizedBlueLossCause(
+    entt::registry const& registry, entt::entity const blueId) noexcept
+{
+    using ppo::model::sEntityState;
+    using ppo::model::eEntitySide;
+    using ppo::model::eEntityType;
+    if (!registry.valid(blueId) || !registry.all_of<sEntityState>(blueId))
+        return "missing_blue";
+    sEntityState const& blue = registry.get<sEntityState>(blueId);
+    if (!blue.m_destroyed)
+        return "alive";
+    entt::entity const sourceId = blue.m_destroyedById;
+    if (sourceId == entt::null || !registry.valid(sourceId)
+        || !registry.all_of<sEntityState>(sourceId))
+        return "unknown";
+    sEntityState const& source = registry.get<sEntityState>(sourceId);
+    if (source.m_type == eEntityType::Mobile)
+        return source.m_side == eEntitySide::Friend
+            ? "blue_collision" : "hostile_mobile";
+    if (source.m_type == eEntityType::RestrictedZone)
+        return source.m_side == eEntitySide::Hostile
+            ? "hostile_zone" : "other_zone";
+    return "other_source";
+}
+
+/**
  * @brief Maps the unchanged legacy JSON weights into distinct generalized
  * responsibilities. No historical 2v2 reward or checkpoint layout is changed.
  */
@@ -520,6 +551,41 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             currentReward_ = 0.F;
             if (episodeDone_)
             {
+                // One bounded diagnostic row per evaluation episode. The
+                // production physics and the training rollout stay untouched.
+                auto const test = evaluation_.CurrentCase();
+                std::size_t const livingBlue =
+                    AliveCount(after.blues, counts_.blueMobiles);
+                std::size_t const livingRed =
+                    AliveCount(after.reds, counts_.redMobiles);
+                char const* const outcome = !after.objectiveAvailable
+                    ? "objective_lost"
+                    : !after.blues[Roles().LeaderPhysicalIndex()].available
+                        ? "leader_lost"
+                    : after.failed ? "boundary_failure"
+                    : noThreatRemains ? "reds_cleared"
+                    : truncated ? "timeout" : "unknown";
+                std::cout << "[MAPPO_EVAL_EPISODE] update="
+                          << learner_->StepCount()
+                          << " campaign=" << evaluation_.CompletedCampaigns() + 1U
+                          << " case=" << evaluation_.TestsFinished() + 1U
+                          << " seed=" << test.seed
+                          << " steps=" << episodeStep_
+                          << " P=" << counts_.blueMobiles
+                          << " N=" << counts_.redMobiles
+                          << " blue_alive=" << livingBlue
+                          << " red_alive=" << livingRed
+                          << " objective_alive=" << after.objectiveAvailable
+                          << " leader_alive="
+                          << after.blues[Roles().LeaderPhysicalIndex()].available
+                          << " terminal=" << outcome;
+                for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
+                {
+                    std::cout << " blue_" << index + 1U << '='
+                              << GeneralizedBlueLossCause(
+                                     *registry_, guardIds_[index]);
+                }
+                std::cout << '\n';
                 bool const hasMore = evaluation_.FinishEpisode(
                     Roles(), BuildEvaluationSample(
                         parameters, after,
@@ -584,9 +650,9 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                         parameters.formationErrorWeight * relativeError,
                         0.F, 1.F);
             }
-            transition.responsibilities.controlEffort[index] = 0.5F
-                * (std::abs(Clamp(lastActions_[index][0], -1.F, 1.F))
-                   + std::abs(Clamp(lastActions_[index][1], -1.F, 1.F)));
+            transition.responsibilities.controlEffort[index] =
+                GeneralizedControlEffortPenalty(
+                    parameters, lastActions_[index]);
         }
 
         GeneralizedRewardSettings rewardSettings{};
