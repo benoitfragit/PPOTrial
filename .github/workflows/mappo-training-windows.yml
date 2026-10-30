@@ -11,6 +11,11 @@ on:
         options:
           - blue-defense
           - blue-patrol
+      curriculum:
+        description: "Enable staged curriculum 1v0 through 4v4 (same Release binary)"
+        required: true
+        type: boolean
+        default: false
       max_seconds:
         description: "Training time budget in seconds (leave headroom for build/artifacts)"
         required: true
@@ -93,6 +98,11 @@ jobs:
           python -m unittest discover -s tools/ci -p "test_mappo_metrics.py" -v
           if ($LASTEXITCODE -ne 0) { throw "MAPPO telemetry tests failed" }
 
+      - name: Validate MAPPO curriculum configuration and orchestrator
+        run: |
+          python -m unittest discover -s tools/ci -p "test_mappo_curriculum.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "MAPPO curriculum tests failed" }
+
       - name: Configure independent frequent checkpoints
         env:
           SAVE_EVERY_UPDATES: ${{ inputs.save_every_updates }}
@@ -113,6 +123,7 @@ jobs:
           (Get-Item ".mappo-training-start").LastWriteTimeUtc = [DateTime]::UtcNow
 
       - name: Train MAPPO without GUI
+        if: ${{ !inputs.curriculum }}
         env:
           SCENARIO: ${{ inputs.scenario }}
           MAX_SECONDS: ${{ inputs.max_seconds }}
@@ -126,6 +137,18 @@ jobs:
           & build/release/Main/Release/PPO.exe --no-gui --example $env:SCENARIO --max-seconds $seconds |
             Tee-Object -FilePath $trainingLog
           if ($LASTEXITCODE -ne 0) { throw "Headless training exited with code $LASTEXITCODE" }
+
+      - name: Train staged MAPPO curriculum without recompiling between levels
+        if: ${{ inputs.curriculum }}
+        env:
+          MAX_SECONDS: ${{ inputs.max_seconds }}
+        run: |
+          $seconds = 0
+          if (-not [int]::TryParse($env:MAX_SECONDS, [ref]$seconds) -or $seconds -lt 1 -or $seconds -gt 18000) {
+            throw "max_seconds must be an integer in [1, 18000]"
+          }
+          python -u tools/ci/mappo_curriculum.py --max-seconds $seconds
+          if ($LASTEXITCODE -ne 0) { throw "MAPPO curriculum failed with code $LASTEXITCODE" }
 
       - name: Validate fresh resumable checkpoint
         run: |
@@ -156,6 +179,7 @@ jobs:
             resources/model/BluePatrol/latest/blue_patrol_generalized_training_v5.txt
             resources/model/BluePatrol/prod/blue_patrol_generalized_v8.txt
             resources/model/BluePatrol/prod/blue_patrol_generalized_v8.txt.score
+            resources/model/BluePatrol/curriculum-progress.json
           if-no-files-found: warn
           retention-days: 30
 
@@ -187,5 +211,7 @@ jobs:
             build/mappo-telemetry/mappo-progress.svg
             build/mappo-telemetry/mappo-losses.csv
             build/mappo-telemetry/mappo-training.log
+            build/mappo-telemetry/curriculum-summary.md
+            build/mappo-telemetry/curriculum/**
           if-no-files-found: warn
           retention-days: 30
