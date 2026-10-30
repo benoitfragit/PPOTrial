@@ -26,6 +26,24 @@ patrol::GeneralizedRuntimeState MakeState(
     return state;
 }
 
+bool TestControlEffortPenalty()
+{
+    patrol::Parameters parameters{};
+    parameters.controlEffortWeight = 0.002F;
+    if (!Close(patrol::GeneralizedControlEffortPenalty(
+            parameters, patrol::Action{0.F, 0.F}), 0.F, 1.e-7F)
+        || !Close(patrol::GeneralizedControlEffortPenalty(
+            parameters, patrol::Action{1.F, -1.F}), 0.002F, 1.e-7F)
+        || !Close(patrol::GeneralizedControlEffortPenalty(
+            parameters, patrol::Action{0.5F, -0.5F}), 0.001F, 1.e-7F)
+        || !Close(patrol::GeneralizedControlEffortPenalty(
+            parameters, patrol::Action{2.F, -3.F}), 0.002F, 1.e-7F))
+        return false;
+    parameters.controlEffortWeight = 0.F;
+    return Close(patrol::GeneralizedControlEffortPenalty(
+        parameters, patrol::Action{1.F, 1.F}), 0.F, 1.e-7F);
+}
+
 bool TestTracking()
 {
     patrol::Parameters parameters{};
@@ -138,5 +156,6 @@ int main()
     if (!TestWedgeReference()) return 2;
     if (!TestPursuit()) return 3;
     if (!TestCooperation()) return 4;
+    if (!TestControlEffortPenalty()) return 5;
     return 0;
 }
