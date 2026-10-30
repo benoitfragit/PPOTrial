@@ -546,6 +546,47 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         if (evaluation_.InProgress())
         {
             evaluation_.ObserveStep();
+            // Diagnostics only: record the first alive-to-destroyed transition.
+            // The ECS remains authoritative; no physics or training input changes.
+            for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
+            {
+                if (!beforeStep_.blues[index].available
+                    || after.blues[index].available)
+                    continue;
+
+                entt::entity const blueId = guardIds_[index];
+                auto const* flight = registry_->valid(blueId)
+                    ? registry_->try_get<ppo::model::sFlightModelState>(blueId)
+                    : nullptr;
+                bool const lowSpeed = flight != nullptr
+                    && 2.F * after.blues[index].speed < flight->m_minSpeed;
+                bool const fuelEmpty = flight != nullptr
+                    && flight->m_fuel
+                        < std::numeric_limits<float>::epsilon();
+                auto const test = evaluation_.CurrentCase();
+
+                std::cout << "[MAPPO_EVAL_LOSS] update="
+                          << learner_->StepCount()
+                          << " campaign=" << evaluation_.CompletedCampaigns() + 1U
+                          << " case=" << evaluation_.TestsFinished() + 1U
+                          << " seed=" << test.seed
+                          << " step=" << episodeStep_
+                          << " blue=blue_" << index + 1U
+                          << " source=" << GeneralizedBlueLossCause(
+                                 *registry_, blueId)
+                          << " speed_before=" << beforeStep_.blues[index].speed
+                          << " speed=" << after.blues[index].speed
+                          << " accel_cmd=" << lastActions_[index][1]
+                          << " flight_model=" << static_cast<int>(flight != nullptr)
+                          << " low_speed=" << static_cast<int>(lowSpeed)
+                          << " fuel_empty=" << static_cast<int>(fuelEmpty);
+                if (flight != nullptr)
+                    std::cout << " min_speed=" << flight->m_minSpeed
+                              << " low_speed_threshold=" << 0.5F * flight->m_minSpeed
+                              << " fuel_remaining=" << flight->m_fuel
+                              << " fuel_capacity=" << flight->m_maxfuel;
+                std::cout << '\n';
+            }
             hasBeforeStep_ = false;
             episodeDone_ = terminated || truncated;
             currentReward_ = 0.F;
