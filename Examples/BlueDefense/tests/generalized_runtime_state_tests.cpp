@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <string>
 
 namespace blue = ppo::examples::bluedefense::defenders;
 
@@ -195,18 +196,24 @@ int main()
 
     auto invalidLiveBlue = destroyed;
     invalidLiveBlue.blues[1U].available = true;
-    if (blue::Valid(invalidLiveBlue))
+    if (blue::Valid(invalidLiveBlue)
+        || blue::DescribeInvalidGeneralizedRuntimeState(invalidLiveBlue)
+            .find("blue_2.speed") == std::string::npos)
         return 10;
 
     auto invalidLiveRed = destroyed;
     invalidLiveRed.reds[0U].available = true;
-    if (blue::Valid(invalidLiveRed))
+    if (blue::Valid(invalidLiveRed)
+        || blue::DescribeInvalidGeneralizedRuntimeState(invalidLiveRed)
+            .find("red_1.speed") == std::string::npos)
         return 11;
 
     auto invalidDead = destroyed;
     invalidDead.reds[0U].speed =
         std::numeric_limits<float>::quiet_NaN();
-    if (blue::Valid(invalidDead))
+    if (blue::Valid(invalidDead)
+        || blue::DescribeInvalidGeneralizedRuntimeState(invalidDead)
+            .find("red_1.speed") == std::string::npos)
         return 12;
 
     // Nonleaders can be lost without ending the episode; loss of the
