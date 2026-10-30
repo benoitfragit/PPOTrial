@@ -99,7 +99,7 @@ private:
     ActiveTeamCounts counts_{};
     Parameters parameters_{};
     PatrolTrainingSettings training_{};
-    /** @brief Live independent generalized weights for the ten UI channels. */
+    /** @brief Live independent weights for the generalized UI reward channels. */
     GeneralizedRewardValues rewardWeights_{};
     /** @brief Most recent unweighted team reward channels displayed by the IHM. */
     GeneralizedRewardValues lastRewardChannels_{};
