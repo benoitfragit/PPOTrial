@@ -185,6 +185,7 @@ jobs:
             resources/model/BluePatrol/telemetry/mappo-training.csv
             build/mappo-telemetry/mappo-summary.md
             build/mappo-telemetry/mappo-progress.svg
+            build/mappo-telemetry/mappo-losses.csv
             build/mappo-telemetry/mappo-training.log
           if-no-files-found: warn
           retention-days: 30
