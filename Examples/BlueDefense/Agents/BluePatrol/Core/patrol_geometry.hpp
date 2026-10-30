@@ -466,6 +466,43 @@ inline std::optional<float> SampleGeneralizedFormationArclength(
 }
 
 /**
+ * @brief Find a deterministic feasible evaluation phase on this episode's
+ * newly sampled geometry, starting closest to the requested quarter-circuit.
+ * The bounded grid search consumes no random numbers.
+ */
+inline std::optional<float> FindGeneralizedEvaluationArclength(
+    PatrolGeometry const& geometry,
+    PatrolGeometrySettings const& settings,
+    PatrolSamplingConstraints const& constraints,
+    std::size_t const activeBlueCount,
+    float const preferredPhaseFraction) noexcept
+{
+    if (!std::isfinite(preferredPhaseFraction)
+        || preferredPhaseFraction < 0.F || preferredPhaseFraction >= 1.F)
+        return std::nullopt;
+    float const circuit = CircuitLength(geometry);
+    if (!std::isfinite(circuit) || circuit <= 0.F)
+        return std::nullopt;
+
+    constexpr std::size_t candidateCount = 256U;
+    for (std::size_t attempt = 0U; attempt < candidateCount; ++attempt)
+    {
+        int const offset = attempt == 0U ? 0
+            : (attempt % 2U != 0U
+                ? static_cast<int>((attempt + 1U) / 2U)
+                : -static_cast<int>(attempt / 2U));
+        float const phase = PositiveModulo(
+            preferredPhaseFraction + static_cast<float>(offset)
+                / static_cast<float>(candidateCount), 1.F);
+        float const candidate = circuit * phase;
+        if (GeneralizedFormationFitsBounds(
+                geometry, settings, constraints, activeBlueCount, candidate))
+            return candidate;
+    }
+    return std::nullopt;
+}
+
+/**
  * @brief Projects a position onto the leader's unique patrol curve.
  * @param geometry Episode geometry.
  * @param north World north coordinate in metres.
