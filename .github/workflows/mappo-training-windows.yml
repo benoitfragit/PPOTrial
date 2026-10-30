@@ -101,6 +101,8 @@ jobs:
           $config.training | Add-Member -MemberType NoteProperty -Name saveEveryUpdates -Value $value -Force
           $config | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $path -Encoding utf8
           Write-Host "Checkpoint every $value update(s); evaluation cadence unchanged."
+          # Each run produces fresh telemetry, not restored timestamps.
+          Remove-Item "resources/model/BluePatrol/telemetry/mappo-training.csv" -Force -ErrorAction SilentlyContinue
           # Must be newer than any restored checkpoint to reject no-op training.
           New-Item -Path ".mappo-training-start" -ItemType File -Force | Out-Null
           (Get-Item ".mappo-training-start").LastWriteTimeUtc = [DateTime]::UtcNow
@@ -146,5 +148,32 @@ jobs:
             resources/model/BluePatrol/latest/blue_patrol_generalized_training_v5.txt
             resources/model/BluePatrol/prod/blue_patrol_generalized_v8.txt
             resources/model/BluePatrol/prod/blue_patrol_generalized_v8.txt.score
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Summarize MAPPO telemetry and render progress charts
+        if: always()
+        env:
+          MAPPO_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if (Test-Path "tools/ci/mappo_metrics.py") {
+            python tools/ci/mappo_metrics.py `
+              --csv resources/model/BluePatrol/telemetry/mappo-training.csv `
+              --out build/mappo-telemetry `
+              --summary $env:GITHUB_STEP_SUMMARY
+            if ($LASTEXITCODE -ne 0) { Write-Warning "MAPPO telemetry report generation failed" }
+          } else {
+            Write-Warning "MAPPO telemetry script unavailable (checkout failed?)"
+          }
+
+      - name: Publish MAPPO telemetry CSV and SVG curves
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blue-mappo-telemetry
+          path: |
+            resources/model/BluePatrol/telemetry/mappo-training.csv
+            build/mappo-telemetry/mappo-summary.md
+            build/mappo-telemetry/mappo-progress.svg
           if-no-files-found: warn
           retention-days: 30
