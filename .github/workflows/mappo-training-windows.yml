@@ -121,7 +121,10 @@ jobs:
           if (-not [int]::TryParse($env:MAX_SECONDS, [ref]$seconds) -or $seconds -lt 1 -or $seconds -gt 18000) {
             throw "max_seconds must be an integer in [1, 18000]"
           }
-          & build/release/Main/Release/PPO.exe --no-gui --example $env:SCENARIO --max-seconds $seconds
+          New-Item -ItemType Directory -Path "build/mappo-telemetry" -Force | Out-Null
+          $trainingLog = "build/mappo-telemetry/mappo-training.log"
+          & build/release/Main/Release/PPO.exe --no-gui --example $env:SCENARIO --max-seconds $seconds |
+            Tee-Object -FilePath $trainingLog
           if ($LASTEXITCODE -ne 0) { throw "Headless training exited with code $LASTEXITCODE" }
 
       - name: Validate fresh resumable checkpoint
@@ -160,10 +163,12 @@ jobs:
         if: always()
         env:
           MAPPO_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PYTHONIOENCODING: utf-8
         run: |
           if (Test-Path "tools/ci/mappo_metrics.py") {
             python tools/ci/mappo_metrics.py `
               --csv resources/model/BluePatrol/telemetry/mappo-training.csv `
+              --log build/mappo-telemetry/mappo-training.log `
               --out build/mappo-telemetry `
               --summary $env:GITHUB_STEP_SUMMARY
             if ($LASTEXITCODE -ne 0) { Write-Warning "MAPPO telemetry report generation failed" }
@@ -180,5 +185,6 @@ jobs:
             resources/model/BluePatrol/telemetry/mappo-training.csv
             build/mappo-telemetry/mappo-summary.md
             build/mappo-telemetry/mappo-progress.svg
+            build/mappo-telemetry/mappo-training.log
           if-no-files-found: warn
           retention-days: 30
