@@ -216,8 +216,7 @@ int main()
             .find("red_1.speed") == std::string::npos)
         return 12;
 
-    // Nonleaders can be lost without ending the episode; loss of the
-    // episode-assigned leader ends it even when other blues remain alive.
+    // Any role can be lost without ending the episode if a blue survives.
     auto partiallyLost = StateFor(3U, 0U);
     constexpr std::size_t leaderIndex = 2U;
     partiallyLost.blues[1U].available = false;
@@ -247,13 +246,15 @@ int main()
     if (!blue::GeneralizedBlueTeamFailed(oneSurvivor, parameters, 1U))
         return 17;
 
-    // Same physical losses, different assigned leader: leader identity matters.
+    // Same physical losses, different assigned leader: both may continue.
     auto leaderLost = StateFor(3U, 0U);
     leaderLost.blues[0U].available = false;
-    if (!blue::GeneralizedBlueTeamFailed(leaderLost, parameters, 0U))
+    if (blue::GeneralizedBlueTeamFailed(leaderLost, parameters, 0U))
         return 18;
     if (blue::GeneralizedBlueTeamFailed(leaderLost, parameters, 1U))
         return 19;
+    if (!blue::GeneralizedBlueTeamFailed(leaderLost, parameters, 3U))
+        return 24;
 
     auto solo = StateFor(1U, 0U);
     if (blue::GeneralizedBlueTeamFailed(solo, parameters, 0U))

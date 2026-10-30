@@ -145,9 +145,10 @@ GeneralizedRewardValues MapGeneralizedRewardWeights(
     result[static_cast<std::size_t>(
         GeneralizedRewardChannel::ControlEffort)] = legacy[
             static_cast<std::size_t>(RewardChannel::ControlEffort)];
+    // Blue-only survival cost: a destroyed trajectory must not be rewarded
+    // for escaping recurrent shaping penalties.
     result[static_cast<std::size_t>(
-        GeneralizedRewardChannel::BlueSurvival)] = legacy[
-            static_cast<std::size_t>(RewardChannel::MissionOutcome)];
+        GeneralizedRewardChannel::BlueSurvival)] = 24.F;
     result[static_cast<std::size_t>(
         GeneralizedRewardChannel::RedNeutralization)] = legacy[
             static_cast<std::size_t>(RewardChannel::Interception)];
@@ -170,6 +171,8 @@ GeneralizedRewardValues MapGeneralizedRewardWeights(
         GeneralizedRewardChannel::RestrictedZoneClearance)] = 1.F;
     result[static_cast<std::size_t>(
         GeneralizedRewardChannel::BoundaryClearance)] = 1.F;
+    result[static_cast<std::size_t>(
+        GeneralizedRewardChannel::LowSpeedRisk)] = 5.F;
     return result;
 }
 
@@ -645,8 +648,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                     AliveCount(after.reds, counts_.redMobiles);
                 char const* const outcome = !after.objectiveAvailable
                     ? "objective_lost"
-                    : !after.blues[Roles().LeaderPhysicalIndex()].available
-                        ? "leader_lost"
+                    : livingBlue == 0U ? "all_blues_lost"
                     : after.failed ? "boundary_failure"
                     : noThreatRemains ? "reds_cleared"
                     : truncated ? "timeout" : "unknown";
@@ -714,8 +716,10 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             ObjectiveThreatLevel(beforeStep_, parameters)
                 - ObjectiveThreatLevel(after, parameters), -1.F, 1.F);
         BlueTeamRoles const& roles = Roles();
-        float const cooperation = GeneralizedCooperationWeight(
-            parameters, beforeStep_);
+        float const cooperation =
+            beforeStep_.blues[roles.LeaderPhysicalIndex()].available
+            && after.blues[roles.LeaderPhysicalIndex()].available
+            ? GeneralizedCooperationWeight(parameters, beforeStep_) : 0.F;
         transition.responsibilities.leaderPatrol = cooperation
             * GeneralizedLeaderTrackingReward(
                 parameters, beforeStep_, after, roles);
@@ -726,14 +730,10 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             BlueRoleAssignment const assignment = *roles.Assignment(index);
             if (assignment.role == BlueRole::Teammate)
             {
-                float const quality = GeneralizedFormationQuality(
-                    parameters, after, roles, index);
-                float const relativeError = std::max(
-                    0.F, 1.F - quality - parameters.formationTolerance);
                 transition.responsibilities.formationSlots[
-                    assignment.formationSlot] = -cooperation * Clamp(
-                        parameters.formationErrorWeight * relativeError,
-                        0.F, 1.F);
+                    assignment.formationSlot] = cooperation
+                    * GeneralizedFormationProgressReward(
+                        parameters, beforeStep_, after, roles, index);
             }
             transition.responsibilities.controlEffort[index] =
                 GeneralizedControlEffortPenalty(
@@ -754,6 +754,11 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                         GeneralizedBoundaryRisk(
                             parameters, beforeStep_.blues[index]),
                         GeneralizedBoundaryRisk(parameters, after.blues[index]));
+                transition.responsibilities.lowSpeedRisk[index] =
+                    GeneralizedSafetyPenalty(
+                        GeneralizedLowSpeedRisk(
+                            parameters, beforeStep_.blues[index]),
+                        GeneralizedLowSpeedRisk(parameters, after.blues[index]));
             }
         }
 

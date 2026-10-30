@@ -181,6 +181,7 @@ bool TestSafetyRewardChannels()
     transition.responsibilities.blueSeparation[0] = 0.4F;
     transition.responsibilities.restrictedZoneClearance[0] = 0.2F;
     transition.responsibilities.boundaryClearance[1] = 0.6F;
+    transition.responsibilities.lowSpeedRisk[0] = 0.8F;
     GeneralizedCooperativeRewards rewards{};
     if (AggregateGeneralizedCooperativeRewards(
             *roles, transition, {}, rewards)
@@ -195,7 +196,11 @@ bool TestSafetyRewardChannels()
         || !Near(Channel(rewards.team,
             GeneralizedRewardChannel::RestrictedZoneClearance), -0.1F)
         || !Near(Channel(rewards.team,
-            GeneralizedRewardChannel::BoundaryClearance), -0.3F))
+            GeneralizedRewardChannel::BoundaryClearance), -0.3F)
+        || !Near(Channel(rewards.perBlue[0],
+            GeneralizedRewardChannel::LowSpeedRisk), -0.8F)
+        || !Near(Channel(rewards.team,
+            GeneralizedRewardChannel::LowSpeedRisk), -0.4F))
         return false;
     transition.responsibilities.boundaryClearance[1] =
         std::numeric_limits<float>::quiet_NaN();
@@ -204,11 +209,22 @@ bool TestSafetyRewardChannels()
         != GeneralizedRewardStatus::InvalidSignals)
         return false;
     transition.responsibilities.boundaryClearance[1] = 0.F;
+    transition.responsibilities.lowSpeedRisk[0] =
+        std::numeric_limits<float>::quiet_NaN();
+    if (AggregateGeneralizedCooperativeRewards(
+            *roles, transition, {}, rewards)
+        != GeneralizedRewardStatus::InvalidSignals)
+        return false;
+    transition.responsibilities.lowSpeedRisk[0] = 0.F;
     transition.after.blueAlive[1] = false;
     if (AggregateGeneralizedCooperativeRewards(
             *roles, transition, {}, rewards)
         != GeneralizedRewardStatus::Applied
         || !Near(Channel(rewards.team,
+            GeneralizedRewardChannel::BlueSurvival), -0.5F)
+        || !Near(Channel(rewards.perBlue[1],
+            GeneralizedRewardChannel::BlueSurvival), -1.F)
+        || !Near(Channel(rewards.perBlue[0],
             GeneralizedRewardChannel::BlueSurvival), -0.5F))
         return false;
     auto const solo = BlueTeamRoles::Create(1U, 0U);
@@ -222,6 +238,32 @@ bool TestSafetyRewardChannels()
         *solo, transition, {}, rewards) == GeneralizedRewardStatus::Applied
         && Near(Channel(rewards.team,
             GeneralizedRewardChannel::RestrictedZoneClearance), -0.3F);
+}
+
+bool TestSurvivalDominatesDeathShortcut()
+{
+    auto const roles = BlueTeamRoles::Create(4U, 0U);
+    if (!roles)
+        return false;
+    GeneralizedRewardTransition transition{};
+    transition.before = MakeState(4U, 0U);
+    transition.after = transition.before;
+    transition.after.blueAlive[2] = false;
+    GeneralizedRewardSettings weights{};
+    weights.weights.fill(0.F);
+    weights.weights[static_cast<std::size_t>(
+        GeneralizedRewardChannel::BlueSurvival)] = 24.F;
+    GeneralizedCooperativeRewards rewards{};
+    if (AggregateGeneralizedCooperativeRewards(
+            *roles, transition, weights, rewards)
+        != GeneralizedRewardStatus::Applied)
+        return false;
+    // One death costs the dying agent 24, not 24/P; living peers still
+    // share the team cost 24/P and team telemetry remains normalized.
+    return Near(rewards.perBlue[2].Total(weights), -24.F)
+        && Near(rewards.perBlue[1].Total(weights), -6.F)
+        && Near(Channel(rewards.team,
+            GeneralizedRewardChannel::BlueSurvival), -0.25F);
 }
 
 bool TestTwoVersusTwo()
@@ -568,6 +610,8 @@ int main()
         return 2;
     if (!TestSafetyRewardChannels())
         return 23;
+    if (!TestSurvivalDominatesDeathShortcut())
+        return 24;
     if (!TestIndependentRoleAndPursuitWeights())
         return 7;
     if (!TestNineVersusTenAndMaskValidation())
