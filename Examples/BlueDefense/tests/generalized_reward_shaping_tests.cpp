@@ -188,6 +188,20 @@ bool TestSafetyRisks()
         || !Close(outside, 1.F))
         return false;
 
+    // Red-zone band: 1.75 NEZ caution / 1.10 NEZ physical danger.
+    float const nearFacing = patrol::GeneralizedRestrictedZoneProximityRisk(
+        1400.F, 1000.F, 1.F);
+    float const nearReceding = patrol::GeneralizedRestrictedZoneProximityRisk(
+        1400.F, 1000.F, -1.F);
+    if (!Close(patrol::GeneralizedRestrictedZoneProximityRisk(
+            2000.F, 1000.F, 1.F), 0.F)
+        || !Close(patrol::GeneralizedRestrictedZoneProximityRisk(
+            1000.F, 1000.F, -1.F), 1.F)
+        || !(nearFacing > nearReceding && nearReceding > 0.F)
+        || !Close(patrol::GeneralizedRestrictedZoneProximityRisk(
+            1500.F, 0.F, 1.F), 0.F))
+        return false;
+
     return Close(patrol::GeneralizedSafetyPenalty(0.F, 0.F), 0.F)
         && patrol::GeneralizedSafetyPenalty(0.1F, 0.9F)
             > patrol::GeneralizedSafetyPenalty(0.9F, 0.1F)
