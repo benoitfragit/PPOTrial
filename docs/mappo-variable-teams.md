@@ -128,7 +128,10 @@ Mission outcome, Timeout. The old seven-key JSON remains accepted, with
 independent mappings: `Patrol tracking` controls only leader tracking;
 `Formation safety` controls formation error; `Mission outcome` controls
 single-blue loss; `Interception` controls both pursuit progress and sparse
-neutralization. The GUI now publishes ten names and values.
+neutralization. The original 2026-10-29 GUI published ten names and values.
+Since 2026-10-30, three more blue-only safety channels are appended:
+Blue separation, Restricted zone clearance and Boundary clearance,
+for thirteen total. The original ten indices stay unchanged.
 
 Leader tracking includes progress, cross-track error and heading error, using
 existing `patrolProgressWeight`, `patrolCrossTrackWeight` and
