@@ -121,5 +121,14 @@ bool MaximumBlueTeamFitsWorld()
 
 int main()
 {
-    return MaximumBlueTeamFitsWorld() ? 0 : 1;
+    if (!MaximumBlueTeamFitsWorld())
+        return 1;
+
+    // A failed evaluation reset must not poison the following training reset.
+    ppo::examples::bluedefense::InitializerContext recovered{};
+    recovered.patrolGeometrySamplingFailed = true;
+    recovered.episodeLayoutGenerationFailed = true;
+    recovered.ClearEpisodeInitializationFailures();
+    return recovered.patrolGeometrySamplingFailed
+        || recovered.episodeLayoutGenerationFailed ? 2 : 0;
 }
