@@ -188,11 +188,22 @@ jobs:
         env:
           MAPPO_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           PYTHONIOENCODING: utf-8
+          CURRICULUM: ${{ inputs.curriculum }}
         run: |
+          $log = "build/mappo-telemetry/mappo-training.log"
+          if ($env:CURRICULUM -eq "true") {
+            # Cross-level scores are NOT comparable; report only the current level.
+            $stageLogs = @(Get-ChildItem "build/mappo-telemetry/curriculum" -Filter "training.log" -Recurse -ErrorAction SilentlyContinue | Sort-Object FullName)
+            if ($stageLogs.Count -gt 0) { $log = $stageLogs[-1].FullName }
+            $curriculumSummary = "build/mappo-telemetry/curriculum-summary.md"
+            if (Test-Path $curriculumSummary) {
+              Get-Content $curriculumSummary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            }
+          }
           if (Test-Path "tools/ci/mappo_metrics.py") {
             python tools/ci/mappo_metrics.py `
               --csv resources/model/BluePatrol/telemetry/mappo-training.csv `
-              --log build/mappo-telemetry/mappo-training.log `
+              --log $log `
               --out build/mappo-telemetry `
               --summary $env:GITHUB_STEP_SUMMARY
             if ($LASTEXITCODE -ne 0) { Write-Warning "MAPPO telemetry report generation failed" }
