@@ -30,6 +30,8 @@ struct GeneralizedRuntimeState final
                TeamCapacity::MaximumBlueMobiles> lidar{};
     /** @brief True when the corresponding LiDAR row came from the ECS. */
     std::array<bool, TeamCapacity::MaximumBlueMobiles> lidarAvailable{};
+    /** @brief Zone proximity from ECS; excluded from actor observations. */
+    std::array<float, TeamCapacity::MaximumBlueMobiles> restrictedZoneRisk{};
     /** @brief Defended-objective position in metres. */
     float objectiveNorth{};
     float objectiveEast{};
@@ -103,7 +105,10 @@ inline bool Valid(GeneralizedRuntimeState const& state) noexcept
     };
     for (std::size_t index = 0U; index < state.counts.blueMobiles; ++index)
     {
-        if (!finiteMobile(state.blues[index]))
+        if (!finiteMobile(state.blues[index])
+            || !std::isfinite(state.restrictedZoneRisk[index])
+            || state.restrictedZoneRisk[index] < 0.F
+            || state.restrictedZoneRisk[index] > 1.F)
             return false;
         if (state.lidarAvailable[index]
             && !std::all_of(state.lidar[index].begin(), state.lidar[index].end(),
@@ -148,6 +153,11 @@ inline std::string DescribeInvalidGeneralizedRuntimeState(
     for (std::size_t index = 0U; index < state.counts.blueMobiles; ++index)
     {
         Mobile const& mobile = state.blues[index];
+        if (!std::isfinite(state.restrictedZoneRisk[index])
+            || state.restrictedZoneRisk[index] < 0.F
+            || state.restrictedZoneRisk[index] > 1.F)
+            return "blue_" + std::to_string(index + 1U)
+                + ".restrictedZoneRisk";
         if (char const* field = InvalidGeneralizedMobileField(mobile))
             return "blue_" + std::to_string(index + 1U) + "." + field
                 + " north=" + std::to_string(mobile.north)
