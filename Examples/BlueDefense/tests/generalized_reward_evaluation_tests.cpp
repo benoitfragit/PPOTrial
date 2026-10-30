@@ -433,6 +433,20 @@ bool TestSparseDynamicsAdapter()
         && mask.objectiveAvailable;
 }
 
+bool TestEvaluationCadence()
+{
+    return !ShouldEvaluateGeneralizedUpdate(0U, 10U, false)
+        && !ShouldEvaluateGeneralizedUpdate(1U, 10U, false)
+        && !ShouldEvaluateGeneralizedUpdate(9U, 10U, false)
+        && ShouldEvaluateGeneralizedUpdate(10U, 10U, false)
+        && !ShouldEvaluateGeneralizedUpdate(11U, 10U, false)
+        && ShouldEvaluateGeneralizedUpdate(20U, 10U, false)
+        && ShouldEvaluateGeneralizedUpdate(3U, 10U, true)
+        && !ShouldEvaluateGeneralizedUpdate(0U, 10U, true)
+        && !ShouldEvaluateGeneralizedUpdate(5U, 0U, false)
+        && ShouldEvaluateGeneralizedUpdate(5U, 0U, true);
+}
+
 bool TestDeterministicCampaignBoundary()
 {
     PatrolEvaluationSettings settings{};
@@ -505,6 +519,8 @@ int main()
         return 4;
     if (!TestSparseDynamicsAdapter())
         return 5;
+    if (!TestEvaluationCadence())
+        return 22;
     if (!TestDeterministicCampaignBoundary())
         return 6;
     return 0;
