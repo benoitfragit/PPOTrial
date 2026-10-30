@@ -53,7 +53,12 @@ struct InitializerContext {
     /** @brief Preferred fractional phase of the newly generated racetrack. */
     float evaluationPhaseFraction{0.F};
 
-
+    /** @brief Lets a fresh ECS reset recover after a failed evaluation spawn. */
+    void ClearEpisodeInitializationFailures() noexcept
+    {
+        patrolGeometrySamplingFailed = false;
+        episodeLayoutGenerationFailed = false;
+    }
 };
 
 /**
