@@ -32,8 +32,8 @@ struct GeneralizedEvaluationCase final
     std::uint32_t seed{};
     /** @brief Mirrored patrol direction, always -1 or +1. */
     int side{1};
-    /** @brief Leader start arclength on the sampled racetrack, in metres. */
-    float arclength{};
+    /** @brief Desired dimensionless phase on the next sampled racetrack. */
+    float phaseFraction{};
 };
 
 /**
@@ -80,10 +80,9 @@ public:
 
     /**
      * @brief Returns the current reproducible reset case.
-     * @param parameters Patrol geometry used for phase-to-distance conversion.
-     * @return Seed, mirror side and quarter-circuit phase.
+     * @return Seed, mirror side and dimensionless quarter-circuit phase.
      */
-    GeneralizedEvaluationCase CurrentCase(Parameters const& parameters) const
+    GeneralizedEvaluationCase CurrentCase() const
     {
         if (!inProgress_ || episodeIndex_ >= settings_.episodes)
             throw std::logic_error(
@@ -92,8 +91,8 @@ public:
         result.seed = settings_.seed
             + static_cast<std::uint32_t>(episodeIndex_);
         result.side = episodeIndex_ % 2U == 0U ? 1 : -1;
-        result.arclength = CircuitLength(parameters)
-            * static_cast<float>((episodeIndex_ / 2U) % 4U) / 4.F;
+        result.phaseFraction =
+            static_cast<float>((episodeIndex_ / 2U) % 4U) / 4.F;
         return result;
     }
 
