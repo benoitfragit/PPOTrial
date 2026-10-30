@@ -88,6 +88,11 @@ jobs:
           & $exe --example $env:SCENARIO --check-example
           if ($LASTEXITCODE -ne 0) { throw "Scenario bootstrap failed" }
 
+      - name: Validate MAPPO telemetry report logic
+        run: |
+          python -m unittest discover -s tools/ci -p "test_mappo_metrics.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "MAPPO telemetry tests failed" }
+
       - name: Configure independent frequent checkpoints
         env:
           SAVE_EVERY_UPDATES: ${{ inputs.save_every_updates }}
