@@ -84,26 +84,26 @@ class MappoMetricsTests(unittest.TestCase):
             path = root / "training.log"
             path.write_text(
                 "[MAPPO_EVAL_LOSS] update=10 campaign=1 case=1 step=2 "
-                "blue=blue_1 source=unknown speed=1 low_speed=1 fuel_empty=0\\n"
+                "blue=blue_1 source=unknown speed=1 low_speed=1 fuel_empty=0\n"
                 "[MAPPO_EVAL_LOSS] update=20 campaign=2 case=1 seed=42 "
                 "step=7 blue=blue_2 source=unknown speed_before=30 speed=-90 "
                 "accel_cmd=-1 flight_model=1 low_speed=1 fuel_empty=0 "
-                "min_speed=10 low_speed_threshold=5 fuel_remaining=1999000\\n"
+                "min_speed=10 low_speed_threshold=5 fuel_remaining=1999000\n"
                 "[MAPPO_EVAL_LOSS] update=20 campaign=2 case=2 seed=43 "
                 "step=200 blue=blue_1 source=unknown speed=50 "
-                "low_speed=0 fuel_empty=1 fuel_remaining=0\\n"
+                "low_speed=0 fuel_empty=1 fuel_remaining=0\n"
                 "[MAPPO_EVAL_LOSS] update=20 campaign=2 case=2 seed=43 "
                 "step=201 blue=blue_3 source=blue_collision speed=200 "
-                "low_speed=0 fuel_empty=0\\n"
+                "low_speed=0 fuel_empty=0\n"
                 "[MAPPO_EVAL_LOSS] campaign=broken case=2 step=3 "
                 "blue=blue_1 source=unknown speed=nan "
-                "low_speed=1 fuel_empty=0\\n",
+                "low_speed=1 fuel_empty=0\n",
                 encoding="utf-8",
             )
             losses = read_eval_losses(path)
             self.assertEqual(len(losses), 4)
             episodes = [{"campaign": "2"}]
-            diagnostics = "\\n".join(evaluation_loss_summary(losses, episodes))
+            diagnostics = "\n".join(evaluation_loss_summary(losses, episodes))
             self.assertIn("**3** newly destroyed", diagnostics)
             self.assertIn("low_speed=1", diagnostics)
             self.assertIn("fuel_empty=1", diagnostics)
