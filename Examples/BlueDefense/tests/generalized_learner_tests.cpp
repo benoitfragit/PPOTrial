@@ -211,8 +211,10 @@ int main()
         observations, availability);
     auto const repeatedEvaluation = first.EvaluateActions(
         observations, availability);
+    // Evaluation must be read-only: no new PPO update, rollout or sampling.
     if (firstEvaluation != repeatedEvaluation || first.HasPendingAction()
         || first.CollectedTeamSteps() != 0U
+        || first.StepCount() != 1U
         || first.TotalActionsSampled() != counts.blueMobiles)
     {
         return 12;
