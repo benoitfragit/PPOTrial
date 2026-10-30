@@ -60,7 +60,7 @@ class CurriculumTests(unittest.TestCase):
     def args(self) -> SimpleNamespace:
         return SimpleNamespace(binary=str(self.binary),
                                curriculum=str(self.curriculum_path),
-                               max_seconds=240)
+                               max_seconds=240, fresh_start=False)
 
     def fake_checkpoint(self, updates: int) -> None:
         curriculum.LATEST.parent.mkdir(parents=True, exist_ok=True)
@@ -83,6 +83,23 @@ class CurriculumTests(unittest.TestCase):
         invalid["stages"][-1]["blue"] = 3
         with self.assertRaisesRegex(ValueError, "Final stage"):
             curriculum.validate_curriculum(invalid)
+
+    def test_fresh_start_excludes_legacy_blue_seed_only(self) -> None:
+        for path in curriculum.FRESH_SEEDS:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("legacy blue seed")
+        red = Path("resources/model/RLMission/prod/model.pt")
+        red.parent.mkdir(parents=True, exist_ok=True)
+        red.write_text("unchanged red model")
+        curriculum.require_clean_fresh_start()
+        self.assertTrue(all(not path.exists()
+                            for path in curriculum.FRESH_SEEDS))
+        self.assertEqual(red.read_text(), "unchanged red model")
+
+    def test_fresh_start_rejects_existing_curriculum_progress(self) -> None:
+        curriculum.write_json(curriculum.PROGRESS, {"nextStage": 1})
+        with self.assertRaisesRegex(ValueError, "progress"):
+            curriculum.require_clean_fresh_start()
 
     def test_checkpoint_counter_is_authoritative(self) -> None:
         self.assertEqual(curriculum.read_updates(), 0)
