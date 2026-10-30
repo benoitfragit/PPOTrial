@@ -8,6 +8,7 @@ import csv
 import html
 import math
 import os
+import sys
 from pathlib import Path
 from typing import Dict, List
 
@@ -226,6 +227,10 @@ def main() -> None:
     evaluation = read_eval_episodes(args.log) if args.log else None
     result = summary(rows, os.environ.get("MAPPO_RUN_URL", ""), evaluation)
     (args.out / "mappo-summary.md").write_text(result, encoding="utf-8")
+    # GitHub's Windows runner can expose a CP1252 stdout even though the
+    # summary includes Unicode sparkline blocks.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     print(result, flush=True)
     if args.summary:
         args.summary.parent.mkdir(parents=True, exist_ok=True)
