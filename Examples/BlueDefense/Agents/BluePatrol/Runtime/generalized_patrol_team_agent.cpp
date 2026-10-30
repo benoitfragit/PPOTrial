@@ -54,18 +54,14 @@ float GeneralizedRestrictedZoneRisk(
             || !std::isfinite(sna.m_noescapezone)
             || sna.m_noescapezone <= 0.F)
             continue;
-        float const dangerRadius = 1.10F * sna.m_noescapezone;
-        float const cautionRadius = 1.75F * sna.m_noescapezone;
         float const north = zone.m_x - own.m_x;
         float const east = zone.m_y - own.m_y;
         float const distance = std::hypot(north, east);
-        float const proximity = Clamp((cautionRadius - distance)
-            / std::max(cautionRadius - dangerRadius, 1.F), 0.F, 1.F);
         float const alignment = distance > 1.F
-            ? std::max(0.F, (north * std::cos(own.m_rotation)
-                + east * std::sin(own.m_rotation)) / distance) : 1.F;
-        float const candidate = distance <= dangerRadius
-            ? 1.F : proximity * (0.5F + 0.5F * alignment);
+            ? (north * std::cos(own.m_rotation)
+                + east * std::sin(own.m_rotation)) / distance : 1.F;
+        float const candidate = GeneralizedRestrictedZoneProximityRisk(
+            distance, sna.m_noescapezone, alignment);
         risk = std::max(risk, candidate);
     }
     return risk;
