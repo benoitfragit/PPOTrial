@@ -22,6 +22,90 @@ inline float GeneralizedControlEffortPenalty(
            + std::abs(Clamp(action[1], -1.F, 1.F)));
 }
 
+/**
+ * @brief Constant-velocity prediction of near-term friendly separation.
+ *
+ * This reward-only assessment never modifies actions, the flight model or
+ * physical collision resolution. Dead peers cannot produce false penalties.
+ */
+inline float GeneralizedBlueSeparationRisk(
+    Parameters const& parameters, GeneralizedRuntimeState const& state,
+    std::size_t const physicalIndex) noexcept
+{
+    if (physicalIndex >= state.counts.blueMobiles
+        || !state.blues[physicalIndex].available)
+        return 0.F;
+    constexpr float horizonSeconds = 5.F;
+    Mobile const& own = state.blues[physicalIndex];
+    float const ownNorthSpeed = own.speed * std::cos(own.heading);
+    float const ownEastSpeed = own.speed * std::sin(own.heading);
+    float risk = 0.F;
+    for (std::size_t other = 0U; other < state.counts.blueMobiles; ++other)
+    {
+        if (other == physicalIndex || !state.blues[other].available)
+            continue;
+        Mobile const& peer = state.blues[other];
+        float const north = peer.north - own.north;
+        float const east = peer.east - own.east;
+        float const velocityNorth =
+            peer.speed * std::cos(peer.heading) - ownNorthSpeed;
+        float const velocityEast =
+            peer.speed * std::sin(peer.heading) - ownEastSpeed;
+        float const relativeSpeedSquared =
+            velocityNorth * velocityNorth + velocityEast * velocityEast;
+        float const time = relativeSpeedSquared > 1.e-4F
+            ? Clamp(-(north * velocityNorth + east * velocityEast)
+                / relativeSpeedSquared, 0.F, horizonSeconds) : 0.F;
+        float const closestDistance = std::hypot(
+            north + velocityNorth * time,
+            east + velocityEast * time);
+        float const proximity = Clamp(
+            (parameters.cautionDistance - closestDistance)
+                / parameters.cautionDistance, 0.F, 1.F);
+        risk = std::max(risk, proximity / (1.F + time / horizonSeconds));
+    }
+    return risk;
+}
+
+/** @brief Early map-boundary risk, plus a persistent out-of-area cost. */
+inline float GeneralizedBoundaryRisk(
+    Parameters const& parameters, Mobile const& mobile) noexcept
+{
+    if (!mobile.available)
+        return 0.F;
+    constexpr float horizonSeconds = 5.F;
+    float const caution = std::max(
+        parameters.cautionDistance, parameters.maxSpeed * horizonSeconds);
+    float const projectedNorth = mobile.north
+        + mobile.speed * std::cos(mobile.heading) * horizonSeconds;
+    float const projectedEast = mobile.east
+        + mobile.speed * std::sin(mobile.heading) * horizonSeconds;
+    auto const axisRisk = [caution](float const position,
+                                    float const limit) noexcept {
+        return Clamp((std::abs(position) - limit + caution)
+            / caution, 0.F, 1.F);
+    };
+    return std::max({
+        axisRisk(mobile.north, parameters.halfNorth),
+        axisRisk(mobile.east, parameters.halfEast),
+        axisRisk(projectedNorth, parameters.halfNorth),
+        axisRisk(projectedEast, parameters.halfEast)
+    });
+}
+
+/**
+ * @brief Bounded dense safety penalty with an extra worsening-risk term.
+ *
+ * A holding cost discourages prolonged exposure; risk growth is penalized
+ * immediately. Terminal collision/failure rewards remain independent.
+ */
+inline float GeneralizedSafetyPenalty(
+    float const riskBefore, float const riskAfter) noexcept
+{
+    return Clamp(0.15F * std::max(riskBefore, riskAfter)
+        + 0.35F * std::max(riskAfter - riskBefore, 0.F), 0.F, 1.F);
+}
+
 /** @brief Measures a teammate in the physical leader's heading frame. */
 inline float GeneralizedFormationQuality(
     Parameters const& parameters, GeneralizedRuntimeState const& state,
