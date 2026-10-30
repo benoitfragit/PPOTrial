@@ -14,7 +14,8 @@ FIELDS = (
     "elapsed_seconds", "updates", "rollout_steps", "rollout_target",
     "evaluating", "evaluation_progress", "evaluation_cases_done",
     "evaluation_cases_total", "evaluation_steps",
-    "evaluation_steps_per_second", "training",
+    "evaluation_steps_per_second", "training", "eval_completed",
+    "latest_score", "best_score", "eval_success_rate", "instant_reward",
 )
 
 
@@ -52,11 +53,12 @@ def sparkline(values: List[float], width: int = 48) -> str:
 
 def write_chart(rows: List[Dict[str, float]], out: Path) -> None:
     """Two aligned SVG plots: updates and evaluation progress over wall time."""
-    width, height, left, right = 1050, 480, 85, 28
+    width, height, left, right = 1050, 665, 85, 28
     plot_width = width - left - right
     max_time = max(1.0, rows[-1]["elapsed_seconds"]) if rows else 1.0
-    panels = (("updates", "Completed PPO updates", 75, 190),
-              ("evaluation_progress", "Evaluation progress (0–1)", 275, 390))
+    panels = (("updates", "Completed PPO updates", 75, 175),
+              ("evaluation_progress", "Evaluation progress (0–1)", 260, 360),
+              ("latest_score", "Evaluation score (0–100)", 445, 545))
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
         'role="img" aria-label="MAPPO training and evaluation progress">',
@@ -71,6 +73,8 @@ def write_chart(rows: List[Dict[str, float]], out: Path) -> None:
         maximum = max(1.0, max((r[field] for r in rows), default=0.0))
         if field == "evaluation_progress":
             maximum = 1.0
+        if field == "latest_score":
+            maximum = 100.0
         parts.append(f'<text x="{left}" y="{top - 16}">{html.escape(title)}</text>')
         for tick in range(5):
             y = bottom - tick * (bottom - top) / 4.0
@@ -79,13 +83,16 @@ def write_chart(rows: List[Dict[str, float]], out: Path) -> None:
                          f'x2="{width-right}" y2="{y:.1f}"/>')
             parts.append(f'<text x="12" y="{y+5:.1f}">{value:.2f}</text>')
         if rows:
-            points = " ".join(
-                f'{left+plot_width*max(0.0, min(r["elapsed_seconds"]/max_time, 1.0)):.1f},'
-                f'{bottom-(bottom-top)*max(0.0, min(r[field]/maximum, 1.0)):.1f}'
-                for r in rows
-            )
-            parts.append(f'<polyline class="plot" points="{points}"/>')
-    parts.append(f'<text x="{left}" y="435">Wall time: 0 – {max_time:.0f} seconds</text>')
+            visible = [r for r in rows
+                       if field != "latest_score" or r["eval_completed"] > 0.0]
+            if visible:
+                points = " ".join(
+                    f'{left+plot_width*max(0.0, min(r["elapsed_seconds"]/max_time, 1.0)):.1f},'
+                    f'{bottom-(bottom-top)*max(0.0, min(r[field]/maximum, 1.0)):.1f}'
+                    for r in visible
+                )
+                parts.append(f'<polyline class="plot" points="{points}"/>')
+    parts.append(f'<text x="{left}" y="600">Wall time: 0 – {max_time:.0f} seconds</text>')
     if not rows:
         parts.append('<text x="250" y="230">No telemetry samples received</text>')
     parts.append('</svg>')
@@ -117,6 +124,9 @@ def summary(rows: List[Dict[str, float]], run_url: str) -> str:
     ]
     if last:
         lines.extend([
+            f"Latest score: **{last['latest_score']:.2f}** | "
+            f"Best: **{last['best_score']:.2f}** "
+            f"(available after the first evaluation)",
             f"Elapsed sampled: **{last['elapsed_seconds']:.0f} s** | "
             f"Latest rollout: **{int(last['rollout_steps'])}/{int(last['rollout_target'])}**",
             f"Evaluation: **{'active' if last['evaluating'] else 'inactive'}** | "
