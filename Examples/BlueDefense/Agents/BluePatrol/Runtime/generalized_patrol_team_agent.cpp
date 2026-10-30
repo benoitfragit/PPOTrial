@@ -436,9 +436,18 @@ void GeneralizedPatrolMappoAgent::ChooseAction()
     }
     catch (std::exception const& error)
     {
-        std::cerr << "[BLUE MAPPO V8] Action failed: " << error.what() << '\n';
+        std::cerr << "[BLUE MAPPO V8][MAPPO_ERROR] caught_at="
+                  << __FILE__ << ':' << __LINE__
+                  << " phase=ChooseAction update="
+                  << (learner_ ? learner_->StepCount() : 0U)
+                  << " episode_step=" << episodeStep_
+                  << " cause=" << error.what() << '\n';
         if (learner_)
+        {
             learner_->AbortPendingStep();
+            if (learner_->OptimizationFailed())
+                finished_ = true; // Do not replay a possibly partial Adam update.
+        }
         hasBeforeStep_ = false;
         episodeDone_ = true;
     }
@@ -607,15 +616,27 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
     }
     catch (std::exception const& error)
     {
-        std::cerr << "[BLUE MAPPO V8] Feedback failed: "
-                  << error.what() << '\n';
+        std::cerr << "[BLUE MAPPO V8][MAPPO_ERROR] caught_at="
+                  << __FILE__ << ':' << __LINE__
+                  << " phase=SetNewState update="
+                  << (learner_ ? learner_->StepCount() : 0U)
+                  << " episode_step=" << episodeStep_
+                  << " collected="
+                  << (learner_ ? learner_->CollectedTeamSteps() : 0U)
+                  << " capacity="
+                  << (learner_ ? learner_->RolloutSize() : 0U)
+                  << " cause=" << error.what() << '\n';
         if (evaluation_.InProgress())
         {
             evaluation_.Cancel();
             RestoreTrainingInitializer();
         }
         if (learner_)
+        {
             learner_->AbortPendingStep();
+            if (learner_->OptimizationFailed())
+                finished_ = true; // Fail-stop until a valid checkpoint is loaded.
+        }
         hasBeforeStep_ = false;
         episodeDone_ = true;
         return true;
