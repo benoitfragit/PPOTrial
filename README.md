@@ -55,10 +55,12 @@ n'existent plus. La patrouille sans Rouge n'utilise pas d'autre moteur.
 - Capteurs : 61 rayons LiDAR ; zones interdites rouges et enveloppes de
   sécurité autour des Bleus. Les collisions physiques restent terminales.
 
-Les **10 canaux de récompense** du snapshot IHM sont : Patrol tracking,
+Les **13 canaux de récompense** du snapshot IHM sont : Patrol tracking,
 Formation keeping, Pursuit progress, Control effort, Blue survival,
 Red neutralization, Threat containment, Objective survival,
-Mission outcome et Timeout.
+Mission outcome, Timeout, Blue separation, Restricted zone clearance
+et Boundary clearance. Les trois derniers fournissent un signal d'évitement
+anticipé sans modifier l'agent RLMission Rouge.
 
 Les paramètres, le rollout et les poids de récompense sont définis dans
 `resources/settings/Training/BluePatrol.json`.
@@ -79,7 +81,7 @@ Les règles RLMission et les modèles des Rouges restent inchangés.
 Le sélecteur lit les exemples depuis `Examples/src/examplecatalog.cpp`,
 sans cardinalité fixe. Après Play, les voitures sont pilotées par l'ECS
 normal. Le panneau d'entraînement exploite le snapshot du contrôleur
-MAPPO partagé : progression, diagnostics, évaluations et dix rewards.
+MAPPO partagé : progression, diagnostics, évaluations et treize rewards.
 L'overlay de trajectoire peut afficher l'hippodrome.
 
 ## Validation
