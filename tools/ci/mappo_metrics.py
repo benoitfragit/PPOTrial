@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import csv
 import html
 import math
@@ -100,7 +101,57 @@ def write_chart(rows: List[Dict[str, float]], out: Path) -> None:
     out.write_text("\n".join(parts), encoding="utf-8")
 
 
-def summary(rows: List[Dict[str, float]], run_url: str) -> str:
+
+def read_eval_episodes(path: Path) -> List[Dict[str, str]]:
+    """Read evaluation-only key/value rows from the headless training log."""
+    if not path.is_file():
+        return []
+    episodes: List[Dict[str, str]] = []
+    with path.open("r", encoding="utf-8-sig", errors="replace") as stream:
+        for line in stream:
+            if "[MAPPO_EVAL_EPISODE]" not in line:
+                continue
+            payload = line.split("[MAPPO_EVAL_EPISODE]", 1)[1]
+            fields = dict(token.split("=", 1)
+                          for token in payload.split() if "=" in token)
+            if all(key in fields for key in
+                   ("campaign", "case", "blue_alive", "terminal")):
+                try:
+                    int(fields["campaign"])
+                    int(fields["case"])
+                    int(fields["blue_alive"])
+                except ValueError:
+                    continue
+                episodes.append(fields)
+    return episodes
+
+
+def evaluation_summary(episodes: List[Dict[str, str]]) -> List[str]:
+    """Describe the last complete/partial evaluated campaign separately."""
+    if not episodes:
+        return ["No per-episode evaluation diagnostics available."]
+    last_campaign_id = episodes[-1]["campaign"]
+    latest = [episode for episode in episodes
+              if episode["campaign"] == last_campaign_id]
+    terminals = Counter(episode["terminal"] for episode in latest)
+    losses = Counter(value for episode in latest
+                     for key, value in episode.items()
+                     if key.startswith("blue_") and value != "alive")
+    alive = sum(int(episode["blue_alive"]) for episode in latest)
+    return [
+        f"Last evaluation campaign: **#{last_campaign_id}**, "
+        f"**{len(latest)} episodes**; final blue survivors: **{alive}** "
+        "(sum across cases).",
+        "Terminal causes: " + ", ".join(
+            f"{name}={count}" for name, count in sorted(terminals.items())),
+        "Blue loss sources: " + (
+            ", ".join(f"{name}={count}" for name, count in sorted(losses.items()))
+            if losses else "none"),
+        "Unknown sources are reported explicitly; not assumed to be Red.",
+    ]
+
+
+def summary(rows: List[Dict[str, float]], run_url: str, eval_episodes: List[Dict[str, str]] | None = None) -> str:
     last = rows[-1] if rows else None
     updates = int(max((r["updates"] for r in rows), default=0))
     longest_stagnation = 0.0
@@ -144,6 +195,9 @@ def summary(rows: List[Dict[str, float]], run_url: str) -> str:
         ])
     else:
         lines.append("No live status was collected; inspect the headless startup log.")
+    if eval_episodes is not None:
+        lines.extend(["", "### Evaluation episode diagnostics", ""])
+        lines.extend(evaluation_summary(eval_episodes))
     if run_url:
         lines.extend([
             "",
@@ -164,11 +218,13 @@ def main() -> None:
     parser.add_argument("--csv", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--summary", type=Path)
+    parser.add_argument("--log", type=Path)
     args = parser.parse_args()
     rows = read_rows(args.csv)
     args.out.mkdir(parents=True, exist_ok=True)
     write_chart(rows, args.out / "mappo-progress.svg")
-    result = summary(rows, os.environ.get("MAPPO_RUN_URL", ""))
+    evaluation = read_eval_episodes(args.log) if args.log else None
+    result = summary(rows, os.environ.get("MAPPO_RUN_URL", ""), evaluation)
     (args.out / "mappo-summary.md").write_text(result, encoding="utf-8")
     print(result, flush=True)
     if args.summary:
