@@ -56,14 +56,14 @@ class MappoMetricsTests(unittest.TestCase):
             path = Path(directory) / "training.log"
             path.write_text(
                 "[MAPPO_EVAL_EPISODE] campaign=1 case=1 blue_alive=1 "
-                "terminal=timeout blue_1=alive blue_2=unknown\\n"
+                "terminal=timeout blue_1=alive blue_2=unknown\n"
                 "[MAPPO_EVAL_EPISODE] campaign=2 case=1 blue_alive=0 "
                 "terminal=leader_lost blue_1=hostile_zone "
-                "blue_2=blue_collision\\n"
+                "blue_2=blue_collision\n"
                 "[MAPPO_EVAL_EPISODE] campaign=2 case=2 blue_alive=1 "
-                "terminal=timeout blue_1=alive blue_2=unknown\\n"
+                "terminal=timeout blue_1=alive blue_2=unknown\n"
                 "[MAPPO_EVAL_EPISODE] campaign=broken case=0 "
-                "blue_alive=0 terminal=unknown\\n",
+                "blue_alive=0 terminal=unknown\n",
                 encoding="utf-8",
             )
             episodes = read_eval_episodes(path)
