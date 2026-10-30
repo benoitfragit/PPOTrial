@@ -122,6 +122,20 @@ int main()
         }
     }
 
+    // Zero-phase is invalid for this P=9 wedge but another phase fits.
+    auto const evaluationA = patrol::FindGeneralizedEvaluationArclength(
+        *fixedA, fixed, constraints, 9U, 0.F);
+    auto const evaluationB = patrol::FindGeneralizedEvaluationArclength(
+        *fixedB, fixed, constraints, 9U, 0.F);
+    if (!evaluationA || !evaluationB || *evaluationA != *evaluationB
+        || !patrol::GeneralizedFormationFitsBounds(
+            *fixedA, fixed, constraints, 9U, *evaluationA)
+        || patrol::FindGeneralizedEvaluationArclength(
+            *fixedA, fixed, constraints, 9U, -0.1F)
+        || patrol::FindGeneralizedEvaluationArclength(
+            *fixedA, fixed, constraints, 9U, 1.F))
+        return 11;
+
     float const circuit = patrol::CircuitLength(*first);
     for (std::size_t sample = 0U; sample < 128U; ++sample)
     {
