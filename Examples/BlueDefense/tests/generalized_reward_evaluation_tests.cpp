@@ -170,6 +170,60 @@ bool TestIndependentRoleAndPursuitWeights()
         == GeneralizedRewardStatus::InvalidSignals;
 }
 
+bool TestSafetyRewardChannels()
+{
+    auto const roles = BlueTeamRoles::Create(2U, 0U);
+    if (!roles)
+        return false;
+    GeneralizedRewardTransition transition{};
+    transition.before = MakeState(2U, 0U);
+    transition.after = transition.before;
+    transition.responsibilities.blueSeparation[0] = 0.4F;
+    transition.responsibilities.restrictedZoneClearance[0] = 0.2F;
+    transition.responsibilities.boundaryClearance[1] = 0.6F;
+    GeneralizedCooperativeRewards rewards{};
+    if (AggregateGeneralizedCooperativeRewards(
+            *roles, transition, {}, rewards)
+        != GeneralizedRewardStatus::Applied)
+        return false;
+    if (!Near(Channel(rewards.perBlue[0],
+            GeneralizedRewardChannel::BlueSeparation), -0.4F)
+        || !Near(Channel(rewards.perBlue[1],
+            GeneralizedRewardChannel::BoundaryClearance), -0.6F)
+        || !Near(Channel(rewards.team,
+            GeneralizedRewardChannel::BlueSeparation), -0.2F)
+        || !Near(Channel(rewards.team,
+            GeneralizedRewardChannel::RestrictedZoneClearance), -0.1F)
+        || !Near(Channel(rewards.team,
+            GeneralizedRewardChannel::BoundaryClearance), -0.3F))
+        return false;
+    transition.responsibilities.boundaryClearance[1] =
+        std::numeric_limits<float>::quiet_NaN();
+    if (AggregateGeneralizedCooperativeRewards(
+            *roles, transition, {}, rewards)
+        != GeneralizedRewardStatus::InvalidSignals)
+        return false;
+    transition.responsibilities.boundaryClearance[1] = 0.F;
+    transition.after.blueAlive[1] = false;
+    if (AggregateGeneralizedCooperativeRewards(
+            *roles, transition, {}, rewards)
+        != GeneralizedRewardStatus::Applied
+        || !Near(Channel(rewards.team,
+            GeneralizedRewardChannel::BlueSurvival), -0.5F))
+        return false;
+    auto const solo = BlueTeamRoles::Create(1U, 0U);
+    if (!solo)
+        return false;
+    transition = {};
+    transition.before = MakeState(1U, 0U);
+    transition.after = transition.before;
+    transition.responsibilities.restrictedZoneClearance[0] = 0.3F;
+    return AggregateGeneralizedCooperativeRewards(
+        *solo, transition, {}, rewards) == GeneralizedRewardStatus::Applied
+        && Near(Channel(rewards.team,
+            GeneralizedRewardChannel::RestrictedZoneClearance), -0.3F);
+}
+
 bool TestTwoVersusTwo()
 {
     auto const roles = BlueTeamRoles::Create(2U, 1U);
@@ -512,6 +566,8 @@ int main()
         return 1;
     if (!TestTwoVersusTwo())
         return 2;
+    if (!TestSafetyRewardChannels())
+        return 23;
     if (!TestIndependentRoleAndPursuitWeights())
         return 7;
     if (!TestNineVersusTenAndMaskValidation())
