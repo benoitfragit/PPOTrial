@@ -40,6 +40,74 @@ struct GeneralizedTrainingDiagnostics final
 };
 
 /**
+ * @brief Enforces fail-stop behavior if PPO optimization throws.
+ *
+ * A partially updated actor, critic or Adam state must never be used for the
+ * next rollout. The diagnostic location is the detecting/catching call site;
+ * an exception from RLTools may originate deeper in the library.
+ */
+class GeneralizedOptimizationGuard final
+{
+public:
+    static std::string Diagnostic(char const* const file, int const line,
+                                  char const* const phase,
+                                  std::string const& cause)
+    {
+        return std::string{"[MAPPO_ERROR] file="} + file
+            + " line=" + std::to_string(line)
+            + " phase=" + phase + " cause=" + cause;
+    }
+
+    void RequireWritable(std::size_t const collected,
+                         std::size_t const capacity,
+                         char const* const file, int const line) const
+    {
+        if (failed_)
+            throw std::logic_error(Diagnostic(
+                file, line, "rollout",
+                "PPO optimizer previously failed; restart from a valid checkpoint"));
+        if (collected >= capacity)
+            throw std::out_of_range(Diagnostic(
+                file, line, "rollout",
+                "training buffer full: collected=" + std::to_string(collected)
+                    + " capacity=" + std::to_string(capacity)));
+    }
+
+    template<typename Optimizer>
+    void Run(Optimizer&& optimizer,
+             char const* const file, int const line)
+    {
+        if (failed_)
+            throw std::logic_error(Diagnostic(
+                file, line, "OptimizeRollout",
+                "PPO optimizer previously failed; restart required"));
+        try
+        {
+            std::forward<Optimizer>(optimizer)();
+        }
+        catch (std::exception const& error)
+        {
+            failed_ = true;
+            throw std::runtime_error(Diagnostic(
+                file, line, "OptimizeRollout (caught here; origin may be external)",
+                error.what()));
+        }
+        catch (...)
+        {
+            failed_ = true;
+            throw std::runtime_error(Diagnostic(
+                file, line, "OptimizeRollout (caught here; origin may be external)",
+                "unknown non-std exception"));
+        }
+    }
+
+    bool Failed() const noexcept { return failed_; }
+
+private:
+    bool failed_{};
+};
+
+/**
  * @brief One shared-actor MAPPO rollout contract for a runtime P/N blue team.
  *
  * A call to ChooseActions evaluates one actor batch containing exactly the P
@@ -114,9 +182,12 @@ public:
     Actions ChooseActions(Observations const& observations,
                           AvailabilityMask const& availability)
     {
+        optimizationGuard_.RequireWritable(
+            collectedTeamSteps_, rolloutTeamSteps_, __FILE__, __LINE__);
         if (pending_)
-            throw std::logic_error(
-                "Generalized MAPPO: synchronized feedback is missing");
+            throw std::logic_error(GeneralizedOptimizationGuard::Diagnostic(
+                __FILE__, __LINE__, "ChooseActions",
+                "synchronized feedback is missing"));
         ValidateBatch(observations, availability);
 
         TransformObservations(observations);
@@ -152,16 +223,19 @@ public:
                 if (!std::isfinite(mean) || !std::isfinite(deviation)
                     || deviation <= 0.F)
                 {
-                    throw std::runtime_error(
-                        "Invalid generalized MAPPO Gaussian distribution");
+                    throw std::runtime_error(GeneralizedOptimizationGuard::Diagnostic(
+                        __FILE__, __LINE__, "ChooseActions",
+                        "invalid Gaussian distribution for agent="
+                            + std::to_string(agent)));
                 }
                 float const sampled =
                     rlt::random::normal_distribution::sample(
                         typename Device::SPEC::RANDOM{}, mean, deviation,
                         rng_);
                 if (!std::isfinite(sampled))
-                    throw std::runtime_error(
-                        "Nonfinite generalized MAPPO action");
+                    throw std::runtime_error(GeneralizedOptimizationGuard::Diagnostic(
+                        __FILE__, __LINE__, "ChooseActions",
+                        "nonfinite action for agent=" + std::to_string(agent)));
                 float const normalized = (sampled - mean) / deviation;
                 transition.oldLogProbability +=
                     -0.5F * normalized * normalized - logStd
@@ -191,6 +265,10 @@ public:
     Actions EvaluateActions(Observations const& observations,
                             AvailabilityMask const& availability)
     {
+        if (optimizationGuard_.Failed())
+            throw std::logic_error(GeneralizedOptimizationGuard::Diagnostic(
+                __FILE__, __LINE__, "EvaluateActions",
+                "PPO optimizer previously failed; evaluation forbidden"));
         if (pending_ || collectedTeamSteps_ != 0U)
             throw std::logic_error(
                 "Generalized MAPPO evaluation requires an update boundary");
@@ -236,9 +314,12 @@ public:
                  AvailabilityMask const& nextAvailability,
                  bool const terminated, bool const truncated)
     {
+        optimizationGuard_.RequireWritable(
+            collectedTeamSteps_, rolloutTeamSteps_, __FILE__, __LINE__);
         if (!pending_)
-            throw std::logic_error(
-                "Generalized MAPPO: actions are required before feedback");
+            throw std::logic_error(GeneralizedOptimizationGuard::Diagnostic(
+                __FILE__, __LINE__, "Observe",
+                "actions are required before feedback"));
         ValidateBatch(nextObservations, nextAvailability);
 
         TransformObservations(nextObservations);
@@ -249,8 +330,9 @@ public:
         for (std::size_t agent = 0U; agent < counts_.blueMobiles; ++agent)
         {
             if (!std::isfinite(rewards[agent]))
-                throw std::invalid_argument(
-                    "Nonfinite generalized MAPPO reward");
+                throw std::invalid_argument(GeneralizedOptimizationGuard::Diagnostic(
+                    __FILE__, __LINE__, "Observe",
+                    "nonfinite reward for agent=" + std::to_string(agent)));
             auto& transition = transitions_[TransitionIndex(
                 collectedTeamSteps_, agent)];
             transition.nextCentralCritic = nextCritics[agent];
@@ -268,7 +350,10 @@ public:
         if (collectedTeamSteps_ != rolloutTeamSteps_)
             return false;
 
-        OptimizeRollout();
+        // Never advance/reset this rollout if optimizer or Adam updates fail.
+        // Fail-stop prevents indexing a full buffer on the next team step.
+        optimizationGuard_.Run([this] { OptimizeRollout(); },
+                               __FILE__, __LINE__);
         collectedTeamSteps_ = 0U;
         ++completedUpdates_;
         return true;
@@ -285,13 +370,18 @@ public:
     std::size_t RolloutSize() const noexcept { return rolloutTeamSteps_; }
     /** @brief Returns whether Observe still owes feedback for one actor batch. */
     bool HasPendingAction() const noexcept { return pending_; }
+    /** @brief True after a possibly partial/invalid PPO optimizer update. */
+    bool OptimizationFailed() const noexcept
+    {
+        return optimizationGuard_.Failed();
+    }
 
     /**
      * @brief Discards an action batch that cannot receive valid feedback.
      *
      * Collected transitions and optimizer state are preserved. This recovery
-     * path is reserved for a rejected ECS step so the next episode can resume
-     * the partial rollout instead of leaving the learner permanently pending.
+     * path is reserved for a rejected ECS step. It never clears a poisoned
+     * optimizer or resets a full rollout after an optimization failure.
      */
     void AbortPendingStep() noexcept
     {
@@ -656,8 +746,9 @@ private:
                 || metadata.activeRedMobiles != counts_.redMobiles
                 || !Valid(observations[agent]))
             {
-                throw std::invalid_argument(
-                    "Invalid generalized observation batch");
+                throw std::invalid_argument(GeneralizedOptimizationGuard::Diagnostic(
+                    __FILE__, __LINE__, "ValidateBatch",
+                    "invalid observation for agent=" + std::to_string(agent)));
             }
         }
         for (std::size_t agent = counts_.blueMobiles;
@@ -1137,6 +1228,7 @@ private:
     std::size_t rolloutTeamSteps_{};
     std::vector<Transition> transitions_;
     std::vector<std::size_t> trainingOrder_;
+    GeneralizedOptimizationGuard optimizationGuard_{};
     Device device_{};
     Engine rng_{};
     Actor actor_{};
