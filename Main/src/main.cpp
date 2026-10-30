@@ -16,6 +16,7 @@
 #include <iomanip>
 #include <cstdint>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -202,63 +203,69 @@ int main(int argc, char** argv)
                 auto const elapsedSeconds = std::chrono::duration<double>(
                     sampledAt - started).count();
                 bool const heartbeat = sampledAt >= nextHeartbeat;
+                // Hold the ECS snapshot mutex only long enough to copy
+                // scalars; disk I/O and console output happen after unlock.
+                std::optional<ppo::model::sCommonAgentState> stateCopy;
                 environment.ReadSnapshot([&](entt::registry const& snapshot)
                 {
                     snapshot.view<ppo::model::sAgentStateSnaphot>().each(
                         [&](ppo::model::sAgentStateSnaphot const& state)
                         {
-                            if (state.m_name != "Blue generalized shared MAPPO")
-                                return;
-                            observedController = true;
-                            auto const& common = state.m_common;
-                            if (!common.m_training && !common.m_evaluationinprogress)
-                                completed = true;
-                            auto const updates =
-                                static_cast<std::uint64_t>(common.m_version);
-                            if (telemetry)
-                            {
-                                telemetry << std::fixed << std::setprecision(3)
-                                          << elapsedSeconds << ',' << updates << ','
-                                          << common.m_step << ',' << common.m_maxStep << ','
-                                          << (common.m_evaluationinprogress ? 1 : 0) << ','
-                                          << common.m_evaluationprogress << ','
-                                          << common.m_evaluationTestsFinished << ','
-                                          << common.m_latestEvaluationTestCount << ','
-                                          << common.m_evaluationStepsExecuted << ','
-                                          << common.m_evaluationStepsPerSecond << ','
-                                          << (common.m_training ? 1 : 0) << ','
-                                          << (common.m_hasLatestEvaluation ? 1 : 0) << ','
-                                          << common.m_latestEvaluationNotation << ','
-                                          << common.m_notation << ','
-                                          << common.m_latestEvaluationSuccessRate << ','
-                                          << common.m_reward << '\n';
-                                telemetry.flush();
-                            }
-                            if (heartbeat || !haveLastState
-                                || updates != lastUpdates
-                                || common.m_evaluationinprogress != lastEvaluating)
-                            {
-                                std::clog << "[MAPPO_STATUS] elapsed_s="
-                                          << static_cast<std::uint64_t>(elapsedSeconds)
-                                          << " updates=" << updates
-                                          << " rollout=" << common.m_step << '/'
-                                          << common.m_maxStep
-                                          << " evaluation="
-                                          << (common.m_evaluationinprogress ? 1 : 0)
-                                          << " eval_progress="
-                                          << std::fixed << std::setprecision(3)
-                                          << common.m_evaluationprogress
-                                          << " eval_cases="
-                                          << common.m_evaluationTestsFinished << '/'
-                                          << common.m_latestEvaluationTestCount
-                                          << " eval_steps=" << common.m_evaluationStepsExecuted
-                                          << std::endl;
-                            }
-                            lastUpdates = updates;
-                            lastEvaluating = common.m_evaluationinprogress;
-                            haveLastState = true;
+                            if (state.m_name == "Blue generalized shared MAPPO")
+                                stateCopy = state.m_common;
                         });
                 });
+                if (stateCopy)
+                {
+                    observedController = true;
+                    auto const& common = *stateCopy;
+                    if (!common.m_training && !common.m_evaluationinprogress)
+                        completed = true;
+                    auto const updates =
+                        static_cast<std::uint64_t>(common.m_version);
+                    if (telemetry)
+                    {
+                        telemetry << std::fixed << std::setprecision(3)
+                                  << elapsedSeconds << ',' << updates << ','
+                                  << common.m_step << ',' << common.m_maxStep << ','
+                                  << (common.m_evaluationinprogress ? 1 : 0) << ','
+                                  << common.m_evaluationprogress << ','
+                                  << common.m_evaluationTestsFinished << ','
+                                  << common.m_latestEvaluationTestCount << ','
+                                  << common.m_evaluationStepsExecuted << ','
+                                  << common.m_evaluationStepsPerSecond << ','
+                                  << (common.m_training ? 1 : 0) << ','
+                                  << (common.m_hasLatestEvaluation ? 1 : 0) << ','
+                                  << common.m_latestEvaluationNotation << ','
+                                  << common.m_notation << ','
+                                  << common.m_latestEvaluationSuccessRate << ','
+                                  << common.m_reward << '\n';
+                        telemetry.flush();
+                    }
+                    if (heartbeat || !haveLastState
+                        || updates != lastUpdates
+                        || common.m_evaluationinprogress != lastEvaluating)
+                    {
+                        std::clog << "[MAPPO_STATUS] elapsed_s="
+                                  << static_cast<std::uint64_t>(elapsedSeconds)
+                                  << " updates=" << updates
+                                  << " rollout=" << common.m_step << '/'
+                                  << common.m_maxStep
+                                  << " evaluation="
+                                  << (common.m_evaluationinprogress ? 1 : 0)
+                                  << " eval_progress="
+                                  << std::fixed << std::setprecision(3)
+                                  << common.m_evaluationprogress
+                                  << " eval_cases="
+                                  << common.m_evaluationTestsFinished << '/'
+                                  << common.m_latestEvaluationTestCount
+                                  << " eval_steps=" << common.m_evaluationStepsExecuted
+                                  << std::endl;
+                    }
+                    lastUpdates = updates;
+                    lastEvaluating = common.m_evaluationinprogress;
+                    haveLastState = true;
+                }
                 nextSample = sampledAt + std::chrono::seconds(2);
                 if (heartbeat)
                     nextHeartbeat = sampledAt + std::chrono::seconds(15);
