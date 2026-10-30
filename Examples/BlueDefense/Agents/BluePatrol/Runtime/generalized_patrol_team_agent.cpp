@@ -11,6 +11,7 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -836,7 +837,12 @@ GeneralizedPatrolMappoAgent::GetSnapshot() const noexcept
     snapshot.m_common.m_rewardClamp = training_.rewardClamp;
     snapshot.m_common.m_checkpoint = static_cast<unsigned int>(
         training_.checkpointEvery);
-    snapshot.m_common.m_version = GeneralizedObservationLayout::Version;
+    // The renderer uses m_version as the completed PPO update counter.
+    // The observation schema version remains in the V8 policy checkpoint.
+    snapshot.m_common.m_version = learner_
+        ? static_cast<unsigned int>(std::min<std::uint64_t>(
+            learner_->StepCount(), std::numeric_limits<unsigned int>::max()))
+        : 0U;
     snapshot.m_common.m_done = episodeDone_;
     snapshot.m_common.m_training = !finished_ && !evaluation_.InProgress();
     if (learner_)
