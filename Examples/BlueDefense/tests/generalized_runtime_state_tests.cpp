@@ -261,5 +261,17 @@ int main()
     solo.blues[0U].available = false;
     if (!blue::GeneralizedBlueTeamFailed(solo, parameters, 0U))
         return 21;
+
+    // A malformed danger snapshot is rejected with the physical blue index.
+    auto invalidRisk = StateFor(2U, 0U);
+    invalidRisk.restrictedZoneRisk[1U] =
+        std::numeric_limits<float>::quiet_NaN();
+    if (blue::Valid(invalidRisk)
+        || blue::DescribeInvalidGeneralizedRuntimeState(invalidRisk)
+            .find("blue_2.restrictedZoneRisk") == std::string::npos)
+        return 22;
+    invalidRisk.restrictedZoneRisk[1U] = 1.01F;
+    if (blue::Valid(invalidRisk))
+        return 23;
     return 0;
 }
