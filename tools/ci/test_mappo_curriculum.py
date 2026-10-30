@@ -173,6 +173,18 @@ class CurriculumTests(unittest.TestCase):
         self.assertEqual(calls, ["hippodrome", "hippodrome"])
         self.assertEqual(curriculum.read_updates(), 2)
 
+    def test_rejects_progress_ahead_of_checkpoint(self) -> None:
+        config = json.loads(self.curriculum_path.read_text())
+        curriculum.write_json(curriculum.PROGRESS, {
+            "formatVersion": 1,
+            "curriculumHash": curriculum.fingerprint(config),
+            "baselineUpdates": 0,
+            "nextStage": 1,
+        })
+        self.fake_checkpoint(2)  # Stage one requires three updates.
+        with self.assertRaisesRegex(ValueError, "behind completed"):
+            curriculum.run(self.args())
+
     def test_failure_restores_configuration_and_reference_model(self) -> None:
         def fail(binary: Path, stage: dict, seconds: int,
                  log_path: Path) -> None:
