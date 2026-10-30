@@ -67,6 +67,28 @@ inline float GeneralizedBlueSeparationRisk(
     return risk;
 }
 
+/**
+ * @brief Blue-only danger/caution gradient matching the red zone distances.
+ *
+ * dangerRadius=1.10*NEZ, cautionRadius=1.75*NEZ. A facing approach is
+ * slightly more costly; an actual penetration always saturates to one.
+ */
+inline float GeneralizedRestrictedZoneProximityRisk(
+    float const distance, float const noEscapeZone,
+    float const forwardAlignment) noexcept
+{
+    if (!std::isfinite(distance) || !std::isfinite(noEscapeZone)
+        || !std::isfinite(forwardAlignment) || noEscapeZone <= 0.F)
+        return 0.F;
+    float const dangerRadius = 1.10F * noEscapeZone;
+    float const cautionRadius = 1.75F * noEscapeZone;
+    if (distance <= dangerRadius)
+        return 1.F;
+    float const proximity = Clamp((cautionRadius - distance)
+        / std::max(cautionRadius - dangerRadius, 1.F), 0.F, 1.F);
+    return proximity * (0.5F + 0.5F * Clamp(forwardAlignment, 0.F, 1.F));
+}
+
 /** @brief Early map-boundary risk, plus a persistent out-of-area cost. */
 inline float GeneralizedBoundaryRisk(
     Parameters const& parameters, Mobile const& mobile) noexcept
