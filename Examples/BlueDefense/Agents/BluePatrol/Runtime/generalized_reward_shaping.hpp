@@ -8,6 +8,20 @@
 
 namespace ppo::examples::bluedefense::defenders {
 
+/**
+ * @brief Weighted control effort for one active blue trajectory.
+ *
+ * Actions are already normalized; the configured shaping coefficient is
+ * applied exactly once here, before the cooperative reward channel weight.
+ */
+inline float GeneralizedControlEffortPenalty(
+    Parameters const& parameters, Action const& action) noexcept
+{
+    return parameters.controlEffortWeight * 0.5F
+        * (std::abs(Clamp(action[0], -1.F, 1.F))
+           + std::abs(Clamp(action[1], -1.F, 1.F)));
+}
+
 /** @brief Measures a teammate in the physical leader's heading frame. */
 inline float GeneralizedFormationQuality(
     Parameters const& parameters, GeneralizedRuntimeState const& state,
