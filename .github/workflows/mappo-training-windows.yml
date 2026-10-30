@@ -11,7 +11,7 @@ on:
         options:
           - blue-defense
           - blue-patrol
-      curriculum:
+      curriculum_enabled:
         description: "Enable staged curriculum 1v0 through 4v4 (same Release binary)"
         required: true
         type: boolean
@@ -123,7 +123,7 @@ jobs:
           (Get-Item ".mappo-training-start").LastWriteTimeUtc = [DateTime]::UtcNow
 
       - name: Train MAPPO without GUI
-        if: ${{ !inputs.curriculum }}
+        if: ${{ !inputs.curriculum_enabled }}
         env:
           SCENARIO: ${{ inputs.scenario }}
           MAX_SECONDS: ${{ inputs.max_seconds }}
@@ -139,7 +139,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Headless training exited with code $LASTEXITCODE" }
 
       - name: Train staged MAPPO curriculum without recompiling between levels
-        if: ${{ inputs.curriculum }}
+        if: ${{ inputs.curriculum_enabled }}
         env:
           MAX_SECONDS: ${{ inputs.max_seconds }}
         run: |
@@ -188,7 +188,7 @@ jobs:
         env:
           MAPPO_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           PYTHONIOENCODING: utf-8
-          CURRICULUM: ${{ inputs.curriculum }}
+          CURRICULUM: ${{ inputs.curriculum_enabled }}
         run: |
           $log = "build/mappo-telemetry/mappo-training.log"
           if ($env:CURRICULUM -eq "true") {
