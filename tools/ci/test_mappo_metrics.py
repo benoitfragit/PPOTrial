@@ -23,7 +23,8 @@ class MappoMetricsTests(unittest.TestCase):
             source = root / "telemetry.csv"
             def row(t, updates, steps, eval_steps, evaluating):
                 return (t, updates, steps, 2048, evaluating, 0.5 if evaluating else 0,
-                        1 if evaluating else 0, 8, eval_steps, 180, 1)
+                        1 if evaluating else 0, 8, eval_steps, 180, 1,
+                        evaluating, 43.0, 48.0, 0.25, 0.1)
             with source.open("w", newline="", encoding="utf-8") as stream:
                 writer = csv.writer(stream)
                 writer.writerow(FIELDS)
