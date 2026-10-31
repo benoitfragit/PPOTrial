@@ -172,7 +172,8 @@ GeneralizedRewardValues MapGeneralizedRewardWeights(
     result[static_cast<std::size_t>(
         GeneralizedRewardChannel::RestrictedZoneClearance)] = 1.F;
     result[static_cast<std::size_t>(
-        GeneralizedRewardChannel::BoundaryClearance)] = 1.F;
+        GeneralizedRewardChannel::BoundaryClearance)] =
+            kGeneralizedBoundaryClearanceWeight;
     result[static_cast<std::size_t>(
         GeneralizedRewardChannel::LowSpeedRisk)] = training.lowSpeedRiskWeight;
     return result;
