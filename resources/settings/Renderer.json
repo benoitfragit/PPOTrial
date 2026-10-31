@@ -34,6 +34,7 @@
         "showMetaCatalog": false,
         "showMinimap": false,
         "showPatrolTrack": true,
+        "showHardBoundary": false,
         "showPseudoLidar": true,
         "showSimulation": true,
         "trailDuration": 3.0999999046325684
