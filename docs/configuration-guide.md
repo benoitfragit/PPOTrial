@@ -14,9 +14,8 @@ resources/settings/
 │   ├── RLMission.json            PPO, récompenses et version du modèle
 │   └── RLSNA.json
 ├── Scenarios/
-│   ├── BluePatrol.json           curriculum de patrouille sans rouge
 │   ├── Playground.json           composition du monde principal
-│   ├── BlueDefense.json           défense MAPPO P/N (P=4, N=4 par défaut)
+│   ├── BlueDefense.json          défense MAPPO P/N (P=4, N=4 par défaut)
 │   └── Evaluation/
 │       ├── RLMission.json        composition et limites des tests
 │       └── RLSNA.json
@@ -212,12 +211,14 @@ interne V6) sont enregistrés sous `resources/model/BluePatrol/latest/`.
 Les anciens fichiers V4/V7 sont uniquement des sources de migration
 de poids compatibles, et ne démarrent pas un autre entraîneur.
 
-Les deux scénarios lancés depuis l'IHM utilisent exactement
-`GeneralizedPatrolMappoAgent` : `blue-patrol` (P/N=2/0 par défaut)
-et `blue-defense` (4/4 par défaut). La progression, les commandes
-du panneau d'agent et les dix rewards sont publiés par l'API
-habituelle de snapshot ECS. Les tests de simulation et la CI Desktop
-doivent être validés avant fusion.
+Les deux modes lancés depuis l'IHM utilisent exactement la scène
+`Scenarios/BlueDefense.json` : `blue-defense` entraîne le MAPPO généralisé,
+tandis que `blue-defense-inference` exécute l'acteur de production de façon
+déterministe. Ce second mode ne possède ni rollout, ni optimiseur, ni campagne
+d'évaluation périodique. La progression, les commandes du panneau d'agent et
+les quinze rewards du mode entraînement sont publiés par l'API habituelle de
+snapshot ECS. Les tests de simulation et la CI Desktop doivent être validés
+avant fusion.
 
 ### Géométrie aléatoire P/N
 
@@ -265,11 +266,11 @@ remplacée par la pénétration déterministe exacte pour les bleus.
 
 ### Équipes P/N — contrôleur MAPPO unique
 
-Les deux scénarios `Scenarios/BluePatrol.json` et
-`Scenarios/BlueDefense.json` utilisent exactement le même moteur
-`GeneralizedPatrolMappoAgent`. Le sélecteur IHM expose
-`blue-patrol` (P=2/N=0 par défaut) et `blue-defense` (P=4/N=4 par défaut).
-Les effectifs sont déclarés sous `blueDefense` :
+Les entrées IHM `blue-defense` et `blue-defense-inference` chargent toutes
+deux `Scenarios/BlueDefense.json`, avec P=4/N=4 par défaut. La première utilise
+le learner `GeneralizedPatrolMappoAgent`; la seconde utilise uniquement son
+acteur de production, sans capacité d'apprentissage. Les effectifs sont
+déclarés sous `blueDefense` :
 
 ~~~json
 {

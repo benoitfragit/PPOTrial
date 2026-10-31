@@ -1,6 +1,6 @@
 /**
  * @file Examples/BlueDefense/Scenario/bluedefenseexample.hpp
- * @brief Chargement BlueDefense et BluePatrol et composition des entités et agents.
+ * @brief Chargement des modes entraînement et inférence de BlueDefense.
  * @details Référence de l'unité, de ses types et de ses fonctions C++.
  * Les implémentations sont accessibles via le navigateur de sources Doxygen.
  */
@@ -12,7 +12,7 @@ namespace ppo::examples::bluedefense {
  */
 ppo::app::ExampleDefinition Definition();
 /**
- * @brief Réalise l'opération BluePatrolDefinition; voir les préconditions et effets dans son corps C++.
+ * @brief Définit le scénario BlueDefense exécuté avec la politique de production.
  */
-ppo::app::ExampleDefinition BluePatrolDefinition();
+ppo::app::ExampleDefinition InferenceDefinition();
 }

@@ -21,6 +21,7 @@
 
 #include "environment.hpp"
 #include "ppo/core/learning_monitor.hpp"
+#include "tactical_view_layout.hpp"
 
 namespace ppo::renderer {
 
@@ -281,6 +282,22 @@ public:
     };
 
 private:
+    /** @brief Render target and camera state owned by one blue viewport. */
+    struct TacticalCameraView final
+    {
+        RenderTexture2D m_texture{};
+        Camera3D m_camera{};
+        entt::entity m_blue{entt::null};
+        bool m_hasTexture{false};
+    };
+
+    /** @brief Fixed-capacity ordered blue entity set for one frame. */
+    struct BlueCameraTargets final
+    {
+        std::array<entt::entity, kMaximumTacticalCameraViews> m_entities{};
+        std::size_t m_count{};
+    };
+
     /**
     * @brief Creates the renderer singleton.
     * @param title Window title.
@@ -313,6 +330,16 @@ private:
     * @param height Render target height.
     */
     void EnsureTacticalTexture(int width, int height);
+    /**
+    * @brief Ensures one blue-camera render texture matches its cell.
+    * @param view Camera view owning the render target.
+    * @param width Requested texture width.
+    * @param height Requested texture height.
+    */
+    void EnsureTacticalTexture(TacticalCameraView& view,
+                               int width, int height);
+    /** @brief Releases every allocated per-blue render target. */
+    void ReleaseMultipleCameraTextures(void) noexcept;
     /**
     * @brief Builds the root docking layout.
     */
@@ -351,6 +378,21 @@ private:
     * @param snapshot Read-only environment snapshot.
     */
     void UpdateAttachedCamera(entt::registry const& snapshot);
+    /**
+    * @brief Updates one blue-follow camera from shared camera parameters.
+    * @param snapshot Read-only environment snapshot.
+    * @param blue Blue mobile followed by this camera.
+    * @param camera Camera state to update.
+    */
+    void UpdateBlueCamera(entt::registry const& snapshot,
+                          entt::entity blue, Camera3D& camera) const;
+    /**
+    * @brief Collects friendly mobile entities in deterministic display order.
+    * @param snapshot Read-only environment snapshot.
+    * @return Fixed-capacity blue camera targets.
+    */
+    BlueCameraTargets CollectBlueCameraTargets(
+        entt::registry const& snapshot) const;
     /**
     * @brief Updates free-camera controls from user input.
     * @param snapshot Read-only environment snapshot.
@@ -434,10 +476,25 @@ private:
     /**
     * @brief Renders the full tactical 3D scene into the render texture.
     * @param snapshot Read-only environment snapshot.
-    * @param width Render width.
-    * @param height Render height.
+    * @param target Render target receiving the scene.
+    * @param camera Camera used for this view.
+    * @param focusEntity Entity supplying target and pseudo-lidar overlays.
+    * @param reducedDetail True for the bounded multi-camera rendering path.
     */
-    void RenderTacticalScene(entt::registry const& snapshot, int width, int height);
+    void RenderTacticalScene(entt::registry const& snapshot,
+                             RenderTexture2D const& target,
+                             Camera3D const& camera,
+                             entt::entity focusEntity,
+                             bool reducedDetail);
+    /**
+    * @brief Draws one automatically fitted viewport for every blue mobile.
+    * @param snapshot Read-only environment snapshot.
+    * @param targets Ordered blue entities to follow.
+    * @param availableSize Total ImGui content area.
+    */
+    void DrawMultipleTacticalViews(entt::registry const& snapshot,
+                                   BlueCameraTargets const& targets,
+                                   ImVec2 availableSize);
 
     /**
     * @brief Attached simulation environment.
@@ -460,6 +517,11 @@ private:
     * @brief True when the tactical render target is allocated.
     */
     bool m_hasTacticalTexture{ false };
+    /** @brief Fixed render targets and cameras for P blue mobiles. */
+    std::array<TacticalCameraView, kMaximumTacticalCameraViews>
+        m_tacticalCameraViews{};
+    /** @brief First blue camera refreshed during the next UI frame. */
+    std::size_t m_tacticalCameraRenderCursor{};
     /**
     * @brief Active 3D camera.
     */
@@ -525,6 +587,8 @@ private:
     * @brief True while the camera auto-attaches to the tracked entity.
     */
     bool m_autoAttachCamera{ true };
+    /** @brief True when the tactical window displays one view per blue. */
+    bool m_multipleCameras{ true };
     /**
     * @brief True when the tactical grid is visible.
     */

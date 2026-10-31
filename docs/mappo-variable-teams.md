@@ -1,10 +1,12 @@
 # MAPPO defender teams: architecture and migration
 
 This document describes the generalized Blue P/N learner introduced on 2026-10-29.
-Both blue-patrol (P/0) and blue-defense (P/N) execute this generalized
-learner. The historical two-blue controller has been removed; only the
-compatible V4/V7 checkpoint import readers remain to migrate existing
-parameters once. Red RLMission agents remain unchanged.
+`blue-defense` trains it and `blue-defense-inference` runs the promoted actor
+on the exact same P/N scene. The inference runner owns only actor inference
+state: it cannot collect rollouts, optimize, save, or start an evaluation.
+The historical two-blue controller has been removed; only compatible V4/V7
+checkpoint import readers remain to migrate existing parameters once. Red
+RLMission agents remain unchanged.
 
 ## Team sizes and shared model
 

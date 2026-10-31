@@ -10,10 +10,12 @@ Les ressources actives sont sous `resources/settings` et utilisent `formatVersio
 
 | Fichier | Contenu |
 | --- | --- |
-| `Scenarios/BlueDefense.json` | Défense opérationnelle : objectif, templates bleu/rouge, zones, P=4/N=4 par défaut, paramètres de placement et retards. |
-| `Scenarios/BluePatrol.json` | Patrouille d'apprentissage : objectif, template bleu, zones, P=2/N=0 par défaut, `patrolOnly=true`. |
+| `Scenarios/BlueDefense.json` | Défense opérationnelle partagée entre entraînement et inférence : objectif, templates bleu/rouge, zones, P=4/N=4 par défaut, paramètres de placement et retards. |
 | `Scenarios/Playground.json` | Scénario d'exemple Airspace. |
 | `Scenarios/Evaluation/RLMission.json`, `RLSNA.json` | Cas/campagnes historiques Airspace. |
+
+Le catalogue C++ sélectionne le mode : `blue-defense` instancie le learner,
+tandis que `blue-defense-inference` charge uniquement l'acteur de production.
 
 Une entité déclarative contient notamment `type`, `platform`, `side`, `target` si nécessaire, et `agents`. Les types courants sont `Mobile`, `RestrictedZone`, `Objective`. `AgentProfiles.json` relie les modes `training`/`production` de `RLSNA` et `RLMission` aux types C++ enregistrés.
 

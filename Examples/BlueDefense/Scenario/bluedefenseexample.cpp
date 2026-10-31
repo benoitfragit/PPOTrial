@@ -100,8 +100,10 @@ bool SameGeneralizedBlueTemplate(
 /**
  * @brief Lit et vérifie des données depuis l'état ou les entrées.
  */
-bool LoadScenario(std::filesystem::path const& path,
-                  ppo::model::Environment& environment)
+bool LoadScenario(
+    std::filesystem::path const& path,
+    ppo::model::Environment& environment,
+    defenders::GeneralizedPatrolExecutionMode const executionMode)
 {
     if (!environment.SetEntityInitializer(&InitializeEntity)
         || !environment.SetWorldRules(std::make_unique<BlueDefenseWorldRules>()))
@@ -386,7 +388,7 @@ bool LoadScenario(std::filesystem::path const& path,
                 defenders::GeneralizedPatrolMappoAgent>(
                     guards, configuredBlueCount, attackers, redCount,
                     *entities.at("blue_objective"), patrolParameters,
-                    patrolTraining, generalizedLatest,
+                    patrolTraining, executionMode, generalizedLatest,
                     generalizedTraining, generalizedProduction,
                     trainingCheckpoint, latestCheckpoint,
                     productionCheckpoint);
@@ -406,6 +408,34 @@ bool LoadScenario(std::filesystem::path const& path,
     return true;
 }
 
+/**
+ * @brief Loads the standard BlueDefense MAPPO training scenario.
+ * @param path BlueDefense scenario document.
+ * @param environment Destination ECS environment.
+ * @return True when every entity and agent was created.
+ */
+bool LoadTrainingScenario(std::filesystem::path const& path,
+                          ppo::model::Environment& environment)
+{
+    return LoadScenario(
+        path, environment,
+        defenders::GeneralizedPatrolExecutionMode::Training);
+}
+
+/**
+ * @brief Loads the same BlueDefense scenario with the promoted blue actor.
+ * @param path BlueDefense scenario document.
+ * @param environment Destination ECS environment.
+ * @return True when the production policy and all entities were created.
+ */
+bool LoadInferenceScenario(std::filesystem::path const& path,
+                           ppo::model::Environment& environment)
+{
+    return LoadScenario(
+        path, environment,
+        defenders::GeneralizedPatrolExecutionMode::ProductionInference);
+}
+
 } // namespace
 
 /**
@@ -419,24 +449,24 @@ ppo::app::ExampleDefinition Definition()
         "BLUE DEFENSE - MAPPO P/N vs RLMission",
         std::filesystem::path("Scenarios") / "BlueDefense.json",
         &ppo::examples::airspace::RegisterAirspaceMeta,
-        &LoadScenario,
+        &LoadTrainingScenario,
         "P blue defenders protect an objective against N RLMission attackers."
     };
 }
 
 /**
- * @brief Réalise l'opération BluePatrolDefinition; voir les préconditions et effets dans son corps C++.
- * @details Utilise des fichiers ou chemins.
+ * @brief Définit le scénario BlueDefense exécuté avec la politique de production.
+ * @details Réutilise la même scène que l'entraînement sans rollout ni évaluation.
  */
-ppo::app::ExampleDefinition BluePatrolDefinition()
+ppo::app::ExampleDefinition InferenceDefinition()
 {
     return {
-        "blue-patrol",
-        "BLUE PATROL ONLY - NO RED",
-        std::filesystem::path("Scenarios") / "BluePatrol.json",
+        "blue-defense-inference",
+        "BLUE DEFENSE - INFERENCE",
+        std::filesystem::path("Scenarios") / "BlueDefense.json",
         &ppo::examples::airspace::RegisterAirspaceMeta,
-        &LoadScenario,
-        "P blue defenders learn the racetrack and formation without attackers."
+        &LoadInferenceScenario,
+        "Run the promoted blue production model without training or evaluation."
     };
 }
 

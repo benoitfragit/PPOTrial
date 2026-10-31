@@ -235,7 +235,6 @@ Les fichiers suivants ne sont **pas des symboles C++**. Ils sont inventoriés po
 - `resources/settings/Platforms/RestrictedZone/sam.json`
 - `resources/settings/Renderer.json`
 - `resources/settings/Scenarios/BlueDefense.json`
-- `resources/settings/Scenarios/BluePatrol.json`
 - `resources/settings/Scenarios/Evaluation/RLMission.json`
 - `resources/settings/Scenarios/Evaluation/RLSNA.json`
 - `resources/settings/Scenarios/Playground.json`

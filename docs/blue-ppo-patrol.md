@@ -4,9 +4,9 @@ Ce document décrit uniquement le **MAPPO généralisé**.
 
 Le pilote à deux Bleus, les anciennes interfaces d'entraînement et le scénario
 `two-vs-two` ont été retirés. L'entrée actuelle du sélecteur est
-`blue-defense` ; le scénario de patrouille sans Rouge reste `blue-patrol`.
-Ces deux exemples utilisent une unique instance de
-`GeneralizedPatrolMappoAgent`, P compris entre 1 et 9 et N entre 0 et 10.
+`blue-defense` pour l'entraînement. `blue-defense-inference` réutilise la même
+scène P/N avec l'acteur de production déterministe, sans apprentissage ni
+évaluation périodique. P reste compris entre 1 et 9 et N entre 0 et 10.
 
 Pour les fichiers de configuration, les observations, les rewards et le pilotage
 de l'IHM, consulter [le guide BlueDefense](blue-defense-example.md).

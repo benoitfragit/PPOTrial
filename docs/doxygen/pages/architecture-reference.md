@@ -50,7 +50,7 @@ Ce diagramme exprime les responsabilités architecturales, pas les appels de cha
 | `Framework/Support/Serialization` | JSON, sérialisation, validation des paramètres d'entraînement. |
 | `Framework/Support/Renderer` | Contrat de rendu. |
 | `Examples/Airspace` | Exemple historique (RLMission, interception RLSNA, évaluateur, renderer). |
-| `Examples/BlueDefense` | Exemples blue-defense/blue-patrol, MAPPO, rôles, règles de monde, évaluations et tests. |
+| `Examples/BlueDefense` | Modes entraînement/inférence de blue-defense, MAPPO, rôles, règles de monde, évaluations et tests. |
 | `Tests/` et `*/tests/` | Tests des contrats, physiques, réseaux, reproductibilité, checkpoints et scénarios. |
 | `resources/settings` | Paramètres de scène, véhicules, environnements, récompenses, entraînement. |
 | `tools/ci`, `.github/workflows` | Orchestration curriculum, métriques, campagnes Windows et vérifications. |

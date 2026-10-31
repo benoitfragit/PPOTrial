@@ -6,7 +6,7 @@
 
 `GeneralizedPatrolMappoAgent` représente **un contrôleur commun pour les Bleus** et implémente `IAgent`. `TeamCapacity` fixe **P=1..9** Bleus et **N=0..10** Rouges, avec tableaux de capacité fixe. Les Rouges instanciés portent chacun le contrôleur de production historique `RLMission`; la politique rouge n'est pas modifiée par l'apprentissage bleu.
 
-Deux exemples utilisent le même moteur : `blue-patrol` (par défaut P=2, N=0) et `blue-defense` (par défaut P=4, N=4). Ces valeurs sont chargées depuis `Scenarios/BluePatrol.json` et `Scenarios/BlueDefense.json`. `blue_template`, `red_template`, `blue_objective` et les zones fournissent les paramètres d'entités. `bluedefenseexample.cpp` choisit et instancie les agents avec `BlueDefenseWorldRules`.
+Deux modes utilisent la même scène `Scenarios/BlueDefense.json` (par défaut P=4, N=4) : `blue-defense` instancie le learner MAPPO, tandis que `blue-defense-inference` charge uniquement l'acteur de production déterministe, sans rollout, optimiseur ni évaluation périodique. `blue_template`, `red_template`, `blue_objective` et les zones fournissent les paramètres d'entités. `bluedefenseexample.cpp` choisit le mode et instancie les agents avec `BlueDefenseWorldRules`.
 
 ## Reset et rôles de formation
 

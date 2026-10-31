@@ -87,6 +87,7 @@ add_library(BlueDefensePatrolRuntime STATIC
     ../../Evaluation/generalized_evaluation_metrics.hpp
     ../../Evaluation/patrol_evaluation_settings.hpp
     Runtime/generalized_patrol_team_agent.hpp
+    Runtime/generalized_patrol_production_policy.hpp
     Runtime/generalized_runtime_state.hpp
     Runtime/generalized_reward_shaping.hpp
     Runtime/generalized_patrol_team_agent.cpp

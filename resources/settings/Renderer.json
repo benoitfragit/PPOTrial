@@ -20,22 +20,23 @@
                 0.0
             ]
         },
-        "cameraDistance": 45.35300064086914,
-        "cameraHeight": 24.687000274658203,
+        "cameraDistance": 39.375,
+        "cameraHeight": 17.0,
         "domainHeight": 2.318000078201294,
         "focusSelectionInMinimap": false,
         "minimapZoom": 1.0,
+        "multipleCameras": true,
         "scaleLevel": 1,
         "showDestroyed": true,
         "showDomains": true,
         "showEntities": false,
         "showGrid": false,
+        "showHardBoundary": false,
         "showInspection": false,
         "showMetaCatalog": false,
         "showMinimap": false,
         "showPatrolTrack": true,
-        "showHardBoundary": false,
-        "showPseudoLidar": true,
+        "showPseudoLidar": false,
         "showSimulation": true,
         "trailDuration": 3.0999999046325684
     }

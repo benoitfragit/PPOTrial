@@ -377,3 +377,4 @@ resources/model/BluePatrol/latest/*.txt
 resources/model/BluePatrol/latest/*.txt.tmp
 resources/model/BluePatrol/latest/*.txt.bak
 resources/model/BluePatrol/archive/*.txt
+/build/**

@@ -47,6 +47,9 @@ constexpr float CAMERA_ATTACH_SMOOTHING = 0.12F;
 constexpr float AIRCRAFT_MODEL_EXTENT = 2.45F;
 constexpr float OBJECTIVE_MODEL_EXTENT = 5.80F;
 constexpr float AIRCRAFT_MODEL_YAW_OFFSET_DEG = 180.F;
+constexpr std::size_t MULTI_CAMERA_RENDERS_PER_FRAME = 2U;
+constexpr int MULTI_CAMERA_MAX_TEXTURE_WIDTH = 960;
+constexpr int MULTI_CAMERA_MAX_TEXTURE_HEIGHT = 540;
 
 /**
 * @brief Linearly interpolates between two 3D vectors.
@@ -762,9 +765,10 @@ void DrawDefendedArea3D(ppo::model::sDefendedArea const& area, float scale,
  * @brief Draws the sampled leader view of the analytical patrol curve.
  * @param overlay Snapshot-only curve samples.
  * @param scale World-to-render scale.
+ * @param reducedDetail True to use sparse, inexpensive line primitives.
  */
 void DrawPatrolTrack3D(ppo::model::sPatrolTrackOverlay const& overlay,
-                       float scale)
+                       float scale, bool const reducedDetail)
 {
     std::size_t const count = std::min(
         overlay.m_sampleCount,
@@ -773,17 +777,23 @@ void DrawPatrolTrack3D(ppo::model::sPatrolTrackOverlay const& overlay,
         return;
 
     Color const color{70, 190, 255, 225};
-    for (std::size_t sample = 1U; sample < count; ++sample)
+    std::size_t const stride = reducedDetail ? 4U : 1U;
+    for (std::size_t sample = stride; sample < count; sample += stride)
     {
         Vector3 const previous = ToWorld3D(
-            overlay.m_north[sample - 1U],
-            overlay.m_east[sample - 1U], -0.09F * scale, scale);
+            overlay.m_north[sample - stride],
+            overlay.m_east[sample - stride], -0.09F * scale, scale);
         Vector3 const current = ToWorld3D(
             overlay.m_north[sample],
             overlay.m_east[sample], -0.09F * scale, scale);
-        DrawLineEx3D(previous, current, 0.075F, color);
+        if (reducedDetail)
+            DrawLine3D(previous, current, color);
+        else
+            DrawLineEx3D(previous, current, 0.075F, color);
     }
-    for (std::size_t sample = 16U; sample + 1U < count; sample += 16U)
+    std::size_t const arrowStride = reducedDetail ? 32U : 16U;
+    for (std::size_t sample = arrowStride;
+         sample + 1U < count; sample += arrowStride)
     {
         Vector3 const tip = ToWorld3D(
             overlay.m_north[sample], overlay.m_east[sample],
@@ -794,10 +804,18 @@ void DrawPatrolTrack3D(ppo::model::sPatrolTrackOverlay const& overlay,
         Vector3 const forward = VectorNormalizeSafe(VectorSub(tip, previous));
         Vector3 const side{-forward.z, 0.F, forward.x};
         Vector3 const base = VectorSub(tip, VectorScale(forward, 0.8F));
-        DrawLineEx3D(tip, VectorAdd(base, VectorScale(side, 0.35F)),
-                     0.06F, color);
-        DrawLineEx3D(tip, VectorSub(base, VectorScale(side, 0.35F)),
-                     0.06F, color);
+        Vector3 const left = VectorAdd(base, VectorScale(side, 0.35F));
+        Vector3 const right = VectorSub(base, VectorScale(side, 0.35F));
+        if (reducedDetail)
+        {
+            DrawLine3D(tip, left, color);
+            DrawLine3D(tip, right, color);
+        }
+        else
+        {
+            DrawLineEx3D(tip, left, 0.06F, color);
+            DrawLineEx3D(tip, right, 0.06F, color);
+        }
     }
 }
 
@@ -916,15 +934,17 @@ DrawPrimaryTargetAura3D(ppo::model::sEntityState const& state, float scale)
 void
 DrawTrail3D(std::deque<ppo::renderer::EnvironmentRenderer::TrailPoint> const& trail,
             float duration,
-            Color color)
+            Color color,
+            bool const reducedDetail)
 {
     if (trail.size() < 2 || duration <= 0.F)
         return;
 
     double const now = GetTime();
-    for (std::size_t index = 1; index < trail.size(); ++index)
+    std::size_t const stride = reducedDetail ? 2U : 1U;
+    for (std::size_t index = stride; index < trail.size(); index += stride)
     {
-        auto const& previous = trail[index - 1];
+        auto const& previous = trail[index - stride];
         auto const& current = trail[index];
         float const age = static_cast<float>(now - current.m_timestamp);
         float const fade = std::clamp(1.F - age / duration, 0.F, 1.F);
@@ -933,7 +953,11 @@ DrawTrail3D(std::deque<ppo::renderer::EnvironmentRenderer::TrailPoint> const& tr
 
         Color const segmentColor{ color.r, color.g, color.b, static_cast<unsigned char>(180.F * fade) };
         DrawLine3D(previous.m_position, current.m_position, segmentColor);
-        DrawSphere(current.m_position, 0.04F + 0.015F * fade, Fade(segmentColor, 0.35F));
+        if (!reducedDetail)
+        {
+            DrawSphere(current.m_position, 0.04F + 0.015F * fade,
+                       Fade(segmentColor, 0.35F));
+        }
     }
 }
 
@@ -1028,7 +1052,8 @@ DrawEngagementCone3D(Vector3 const& center,
                      float radius,
                      float apexHeight,
                      Color fillColor,
-                     Color edgeColor)
+                     Color edgeColor,
+                     int const detailSlices)
 {
     if (radius <= 0.05F || halfAngle <= 0.01F)
         return;
@@ -1045,22 +1070,23 @@ DrawEngagementCone3D(Vector3 const& center,
         center.z + forward.z * 0.12F
     };
 
-    constexpr int slices = 40;
-    std::vector<Vector3> arc{};
-    arc.reserve(static_cast<std::size_t>(slices) + 1U);
+    constexpr int maximumSlices = 40;
+    int const slices = std::clamp(detailSlices, 8, maximumSlices);
+    std::array<Vector3, static_cast<std::size_t>(maximumSlices) + 1U> arc{};
 
     for (int index = 0; index <= slices; ++index)
     {
         float const t = static_cast<float>(index) / static_cast<float>(slices);
         float const angle = heading - halfAngle + t * (2.F * halfAngle);
-        arc.push_back(Vector3{
+        arc[static_cast<std::size_t>(index)] = Vector3{
             center.x + radius * std::sin(angle),
             center.y + 0.02F,
             center.z - radius * std::cos(angle)
-        });
+        };
     }
 
-    for (std::size_t index = 1; index < arc.size(); ++index)
+    for (std::size_t index = 1U;
+         index <= static_cast<std::size_t>(slices); ++index)
     {
         DrawTriangle3D(apex, arc[index - 1], arc[index], fillColor);
         DrawTriangle3D(origin, arc[index - 1], arc[index], Fade(fillColor, 0.20F));
@@ -1079,9 +1105,11 @@ DrawEngagementCone3D(Vector3 const& center,
         DrawTriangle3D(apex, p0, p1, innerFill);
     }
 
-    DrawLineEx3D(apex, arc.front(), 0.055F, edgeColor);
-    DrawLineEx3D(apex, arc.back(), 0.055F, edgeColor);
-    for (std::size_t index = 1; index < arc.size(); ++index)
+    DrawLineEx3D(apex, arc[0], 0.055F, edgeColor);
+    DrawLineEx3D(
+        apex, arc[static_cast<std::size_t>(slices)], 0.055F, edgeColor);
+    for (std::size_t index = 1U;
+         index <= static_cast<std::size_t>(slices); ++index)
         DrawLineEx3D(arc[index - 1], arc[index], 0.045F, Fade(edgeColor, 0.92F));
 }
 
@@ -1577,6 +1605,8 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
     m_camera.up = Vector3{ 0.F, 1.F, 0.F };
     m_camera.fovy = 45.F;
     m_camera.projection = CAMERA_PERSPECTIVE;
+    for (auto& view : m_tacticalCameraViews)
+        view.m_camera = m_camera;
     ApplyScaleLevel(m_currentScaleLevel);
 
     auto& serializer = ppo::serialization::Serializer::GetInstance();
@@ -1591,6 +1621,8 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
 
             ApplyScaleLevel(section.value("scaleLevel", m_currentScaleLevel));
             m_autoAttachCamera = section.value("autoAttachCamera", m_autoAttachCamera);
+            m_multipleCameras = section.value(
+                "multipleCameras", m_multipleCameras);
             m_showGrid = section.value("showGrid", m_showGrid);
             m_showDomains = section.value("showDomains", m_showDomains);
             m_showDestroyed = section.value("showDestroyed", m_showDestroyed);
@@ -1648,6 +1680,7 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
             auto& section = ar["renderer"];
             section["scaleLevel"] = m_currentScaleLevel;
             section["autoAttachCamera"] = m_autoAttachCamera;
+            section["multipleCameras"] = m_multipleCameras;
             section["showGrid"] = m_showGrid;
             section["showDomains"] = m_showDomains;
             section["showDestroyed"] = m_showDestroyed;
@@ -1685,6 +1718,7 @@ EnvironmentRenderer::~EnvironmentRenderer(void)
 
     if (m_hasTacticalTexture)
         UnloadRenderTexture(m_tacticalTexture);
+    ReleaseMultipleCameraTextures();
 
     ImPlot::DestroyContext();
     rlImGuiShutdown();
@@ -1847,6 +1881,46 @@ EnvironmentRenderer::EnsureTacticalTexture(int width, int height)
 
     m_tacticalTexture = LoadRenderTexture(width, height);
     m_hasTacticalTexture = true;
+}
+
+/**
+* @brief Resizes or creates one render target used by a blue camera.
+* @param view Blue camera view owning the target.
+* @param width Requested texture width.
+* @param height Requested texture height.
+*/
+void EnvironmentRenderer::EnsureTacticalTexture(
+    TacticalCameraView& view, int width, int height)
+{
+    width = std::max(width, 32);
+    height = std::max(height, 32);
+    if (view.m_hasTexture
+        && view.m_texture.texture.width == width
+        && view.m_texture.texture.height == height)
+    {
+        return;
+    }
+    if (view.m_hasTexture)
+        UnloadRenderTexture(view.m_texture);
+    view.m_texture = LoadRenderTexture(width, height);
+    view.m_hasTexture = true;
+    BeginTextureMode(view.m_texture);
+    ClearBackground(Color{10, 16, 22, 255});
+    EndTextureMode();
+}
+
+/** @brief Releases all per-blue render textures without touching cameras. */
+void EnvironmentRenderer::ReleaseMultipleCameraTextures(void) noexcept
+{
+    for (auto& view : m_tacticalCameraViews)
+    {
+        if (view.m_hasTexture)
+            UnloadRenderTexture(view.m_texture);
+        view.m_texture = {};
+        view.m_hasTexture = false;
+        view.m_blue = entt::null;
+    }
+    m_tacticalCameraRenderCursor = 0U;
 }
 
 /**
@@ -2165,6 +2239,86 @@ EnvironmentRenderer::UpdateAttachedCamera(entt::registry const& snapshot)
 }
 
 /**
+* @brief Updates one blue-follow camera from the renderer's shared settings.
+* @param snapshot Snapshot containing the blue state.
+* @param blue Blue mobile followed by the camera.
+* @param camera Camera state to update.
+*/
+void EnvironmentRenderer::UpdateBlueCamera(
+    entt::registry const& snapshot, entt::entity const blue,
+    Camera3D& camera) const
+{
+    if (blue == entt::null || !snapshot.valid(blue)
+        || !snapshot.any_of<ppo::model::sEntityState>(blue))
+    {
+        return;
+    }
+    auto const& state = snapshot.get<ppo::model::sEntityState>(blue);
+    Vector3 const focus = ToWorld3D(
+        state.m_x, state.m_y, 0.F, m_worldScale);
+    Vector3 const forward = HeadingForward(state.m_rotation);
+    Vector3 const desiredTarget{
+        focus.x + forward.x * 1.4F,
+        focus.y + 0.35F,
+        focus.z + forward.z * 1.4F
+    };
+    Vector3 const desiredPosition{
+        focus.x - forward.x * m_cameraDistance,
+        focus.y + m_cameraHeight,
+        focus.z - forward.z * m_cameraDistance
+    };
+    camera.target = VectorLerpLocal(
+        camera.target, desiredTarget, CAMERA_ATTACH_SMOOTHING);
+    camera.position = VectorLerpLocal(
+        camera.position, desiredPosition, CAMERA_ATTACH_SMOOTHING);
+    camera.up = m_camera.up;
+    camera.fovy = m_camera.fovy;
+    camera.projection = m_camera.projection;
+}
+
+/**
+* @brief Collects friendly mobiles in stable metadata-name order.
+* @param snapshot Snapshot registry used for rendering.
+* @return At most nine blue camera targets.
+*/
+EnvironmentRenderer::BlueCameraTargets
+EnvironmentRenderer::CollectBlueCameraTargets(
+    entt::registry const& snapshot) const
+{
+    BlueCameraTargets result{};
+    result.m_entities.fill(entt::null);
+    auto const entities = snapshot.view<ppo::model::sEntityState>();
+    for (entt::entity const entity : entities)
+    {
+        auto const& state = entities.get<ppo::model::sEntityState>(entity);
+        if (state.m_type != ppo::model::eEntityType::Mobile
+            || state.m_side != ppo::model::eEntitySide::Friend
+            || result.m_count >= result.m_entities.size())
+        {
+            continue;
+        }
+        result.m_entities[result.m_count++] = entity;
+    }
+    std::sort(
+        result.m_entities.begin(),
+        result.m_entities.begin()
+            + static_cast<std::ptrdiff_t>(result.m_count),
+        [&snapshot](entt::entity const left, entt::entity const right)
+        {
+            auto const* leftMetadata =
+                snapshot.try_get<ppo::model::sEntityMetadata>(left);
+            auto const* rightMetadata =
+                snapshot.try_get<ppo::model::sEntityMetadata>(right);
+            if (leftMetadata != nullptr && rightMetadata != nullptr)
+                return leftMetadata->m_name < rightMetadata->m_name;
+            if (leftMetadata != nullptr || rightMetadata != nullptr)
+                return leftMetadata != nullptr;
+            return entt::to_integral(left) < entt::to_integral(right);
+        });
+    return result;
+}
+
+/**
 * @brief Updates free-camera orbit, pan, and zoom interactions.
 * @param snapshot Snapshot registry used for rendering.
 * @param hovered True when the tactical viewport is hovered.
@@ -2374,6 +2528,7 @@ EnvironmentRenderer::DrawSimulationControls(entt::registry const& snapshot)
     }
 
     ImGui::SeparatorText("Visuals");
+    ImGui::Checkbox("Multiple blue cameras", &m_multipleCameras);
     ImGui::Checkbox("Auto-attach camera", &m_autoAttachCamera);
     ImGui::Checkbox("Show grid", &m_showGrid);
     ImGui::Checkbox("Show domains", &m_showDomains);
@@ -2388,6 +2543,8 @@ EnvironmentRenderer::DrawSimulationControls(entt::registry const& snapshot)
 
     ImGui::SliderFloat("Camera distance", &m_cameraDistance, 5.F, 60.F);
     ImGui::SliderFloat("Camera height", &m_cameraHeight, 2.F, 25.F);
+    ImGui::SliderFloat("Camera field of view", &m_camera.fovy,
+                       20.F, 90.F, "%.0f deg");
     ImGui::SliderFloat("Trail duration", &m_trailDuration, 2.F, 30.F, "%.1f s");
     ImGui::SliderFloat("Mobile domain height", &m_domainHeight, 0.3F, 5.F);
     ImGui::SliderFloat("Minimap zoom", &m_mapZoom, 0.3F, 4.F);
@@ -2785,19 +2942,21 @@ EnvironmentRenderer::DrawLearningProgress(std::shared_ptr<AgentController> const
 /**
 * @brief Renders the full 3D tactical scene into the off-screen target.
 * @param snapshot Snapshot registry used for rendering.
-* @param width Render target width.
-* @param height Render target height.
+* @param target Render target receiving the scene.
+* @param camera Camera used for this view.
+* @param focusEntity Entity supplying target and pseudo-lidar overlays.
+* @param reducedDetail True for the bounded multi-camera rendering path.
 */
 void
-EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int width, int height)
+EnvironmentRenderer::RenderTacticalScene(
+    entt::registry const& snapshot, RenderTexture2D const& target,
+    Camera3D const& camera, entt::entity const focusEntity,
+    bool const reducedDetail)
 {
-    EnsureTacticalTexture(width, height);
-    UpdateAttachedCamera(snapshot);
-
-    BeginTextureMode(m_tacticalTexture);
+    BeginTextureMode(target);
     ClearBackground(Color{ 10, 16, 22, 255 });
 
-    BeginMode3D(m_camera);
+    BeginMode3D(camera);
     if (m_showGrid)
     {
         DrawGrid(24, 5.F);
@@ -2821,16 +2980,17 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
         && snapshot.ctx().contains<ppo::model::sPatrolTrackOverlay>())
         DrawPatrolTrack3D(
             snapshot.ctx().get<ppo::model::sPatrolTrackOverlay>(),
-            m_worldScale);
+            m_worldScale, reducedDetail);
 
     entt::entity primaryTarget = entt::null;
     entt::entity pseudoLidarEntity = entt::null;
-    if (m_trackedEntity != entt::null
-    &&  snapshot.valid(m_trackedEntity)
-    &&  snapshot.any_of<ppo::model::sSNAState>(m_trackedEntity))
+    if (focusEntity != entt::null
+    &&  snapshot.valid(focusEntity)
+    &&  snapshot.any_of<ppo::model::sSNAState>(focusEntity))
     {
-        pseudoLidarEntity = m_trackedEntity;
-        auto const& trackedSna = snapshot.get<ppo::model::sSNAState>(m_trackedEntity);
+        pseudoLidarEntity = focusEntity;
+        auto const& trackedSna =
+            snapshot.get<ppo::model::sSNAState>(focusEntity);
         if (trackedSna.m_target != entt::null
         &&  snapshot.valid(trackedSna.m_target)
         &&  snapshot.any_of<ppo::model::sEntityState>(trackedSna.m_target))
@@ -2851,7 +3011,8 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
         auto const& [state] = entityView.get(entity);
         auto trailIt = m_entityTrails.find(static_cast<unsigned long long>(state.m_entityId));
         if (trailIt != m_entityTrails.end())
-            DrawTrail3D(trailIt->second, m_trailDuration, ColorForSide(state.m_side, 180));
+            DrawTrail3D(trailIt->second, m_trailDuration,
+                        ColorForSide(state.m_side, 180), reducedDetail);
 
         Color const baseColor = ColorForSide(state.m_side);
         bool const useDestroyedLook =
@@ -2907,8 +3068,14 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
                                                : Color{ 248, 86, 76, 42 };
                 Color const outline = isBlueArea ? Color{ 139, 188, 255, 165 }
                                                   : Color{ 255, 156, 120, 165 };
-                DrawHemisphere(center, radius, fill);
-                DrawSphereWires(center, radius, 18, 10, outline);
+                DrawHemisphere(
+                    center, radius, fill,
+                    reducedDetail ? 14 : 28,
+                    reducedDetail ? 6 : 12);
+                DrawSphereWires(
+                    center, radius,
+                    reducedDetail ? 10 : 18,
+                    reducedDetail ? 6 : 10, outline);
             }
             else
             {
@@ -2925,7 +3092,8 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
                                      radius,
                                      m_domainHeight,
                                      fill,
-                                     outline);
+                                     outline,
+                                     reducedDetail ? 16 : 40);
             }
 
             if (m_showPseudoLidar
@@ -2968,13 +3136,119 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
   }
 
 /**
+* @brief Draws one fitted child viewport per blue mobile.
+* @param snapshot Snapshot registry used for rendering.
+* @param targets Stable blue entity ordering for this frame.
+* @param availableSize Total ImGui area available to the grid.
+*/
+void EnvironmentRenderer::DrawMultipleTacticalViews(
+    entt::registry const& snapshot, BlueCameraTargets const& targets,
+    ImVec2 const availableSize)
+{
+    constexpr int gap = 6;
+    TacticalViewGrid const grid = MakeTacticalViewGrid(
+        targets.m_count,
+        static_cast<int>(availableSize.x),
+        static_cast<int>(availableSize.y), gap);
+    if (!grid.Valid())
+        return;
+
+    std::array<bool, kMaximumTacticalCameraViews> renderThisFrame{};
+    std::size_t const renderCount = std::min(
+        targets.m_count, MULTI_CAMERA_RENDERS_PER_FRAME);
+    m_tacticalCameraRenderCursor %= targets.m_count;
+    for (std::size_t offset = 0U; offset < renderCount; ++offset)
+    {
+        renderThisFrame[(m_tacticalCameraRenderCursor + offset)
+                        % targets.m_count] = true;
+    }
+
+    for (std::size_t index = 0U; index < targets.m_count; ++index)
+    {
+        if (index % grid.columns != 0U)
+            ImGui::SameLine(0.F, static_cast<float>(gap));
+
+        ImGui::PushID(static_cast<int>(index));
+        ImGui::BeginChild(
+            "##blue-tactical-camera",
+            ImVec2{static_cast<float>(grid.cellWidth),
+                   static_cast<float>(grid.cellHeight)},
+            true,
+            ImGuiWindowFlags_NoScrollbar
+                | ImGuiWindowFlags_NoScrollWithMouse);
+
+        entt::entity const blue = targets.m_entities[index];
+        auto const* metadata =
+            snapshot.try_get<ppo::model::sEntityMetadata>(blue);
+        if (metadata != nullptr && !metadata->m_name.empty())
+            ImGui::TextUnformatted(metadata->m_name.c_str());
+        else
+            ImGui::Text("Blue %u", static_cast<unsigned>(index + 1U));
+
+        TacticalCameraView& view = m_tacticalCameraViews[index];
+        view.m_blue = blue;
+        UpdateBlueCamera(snapshot, blue, view.m_camera);
+        ImVec2 const imageSize = ImGui::GetContentRegionAvail();
+        int const imageWidth = std::max(32, static_cast<int>(imageSize.x));
+        int const imageHeight = std::max(32, static_cast<int>(imageSize.y));
+        float const textureScale = std::min(
+            {1.F,
+             static_cast<float>(MULTI_CAMERA_MAX_TEXTURE_WIDTH)
+                 / static_cast<float>(imageWidth),
+             static_cast<float>(MULTI_CAMERA_MAX_TEXTURE_HEIGHT)
+                 / static_cast<float>(imageHeight)});
+        int const textureWidth = std::max(
+            32, static_cast<int>(std::lround(
+                    static_cast<float>(imageWidth) * textureScale)));
+        int const textureHeight = std::max(
+            32, static_cast<int>(std::lround(
+                    static_cast<float>(imageHeight) * textureScale)));
+        EnsureTacticalTexture(view, textureWidth, textureHeight);
+        if (renderThisFrame[index])
+        {
+            RenderTacticalScene(
+                snapshot, view.m_texture, view.m_camera, blue, true);
+        }
+        rlImGuiImageRect(
+            &view.m_texture.texture, imageWidth, imageHeight,
+            Rectangle{0.F, 0.F,
+                      static_cast<float>(view.m_texture.texture.width),
+                      -static_cast<float>(view.m_texture.texture.height)});
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+        {
+            m_selectedEntity = blue;
+            m_trackedEntity = blue;
+        }
+        ImGui::EndChild();
+        ImGui::PopID();
+    }
+
+    for (std::size_t index = targets.m_count;
+         index < m_tacticalCameraViews.size(); ++index)
+    {
+        auto& view = m_tacticalCameraViews[index];
+        if (view.m_hasTexture)
+            UnloadRenderTexture(view.m_texture);
+        view.m_texture = {};
+        view.m_hasTexture = false;
+        view.m_blue = entt::null;
+    }
+    m_tacticalCameraRenderCursor =
+        (m_tacticalCameraRenderCursor + renderCount) % targets.m_count;
+}
+
+/**
 * @brief Draws the tactical 3D viewport window.
 * @param snapshot Snapshot registry used for rendering.
 */
 void
 EnvironmentRenderer::DrawTacticalWindow(entt::registry const& snapshot)
 {
-    ImGui::Begin("3D Tactical View");
+    if (!ImGui::Begin("3D Tactical View"))
+    {
+        ImGui::End();
+        return;
+    }
 
     if (m_selectedEntity != entt::null && snapshot.valid(m_selectedEntity) && snapshot.any_of<ppo::model::sEntityState>(m_selectedEntity))
     {
@@ -2998,6 +3272,8 @@ EnvironmentRenderer::DrawTacticalWindow(entt::registry const& snapshot)
     {
         m_cameraDistance = 12.F;
         m_cameraHeight = 4.5F;
+        for (auto& view : m_tacticalCameraViews)
+            view.m_camera = m_camera;
     }
 
     ImGui::SameLine();
@@ -3017,22 +3293,45 @@ EnvironmentRenderer::DrawTacticalWindow(entt::registry const& snapshot)
     ImGui::Text("Episodes %u", m_missionTelemetry.m_totalEpisodes);
     ImGui::SameLine();
     ImGui::Text("%s", m_missionTelemetry.m_lastEpisodeSuccess ? "Last: Success" : "Last: Pending/Fail");
-    ImVec2 const size = ImGui::GetContentRegionAvail();
-    RenderTacticalScene(snapshot, static_cast<int>(size.x), static_cast<int>(size.y));
-
-    if (m_hasTacticalTexture)
+    BlueCameraTargets const cameraTargets =
+        CollectBlueCameraTargets(snapshot);
+    if (m_multipleCameras && cameraTargets.m_count != 0U)
     {
-        rlImGuiImageRenderTextureFit(&m_tacticalTexture, true);
-        bool const hovered = ImGui::IsItemHovered();
-        ImVec2 const itemMin = ImGui::GetItemRectMin();
-        ImVec2 const itemSize = ImGui::GetItemRectSize();
-        UpdateFreeCamera(snapshot,
-                         hovered,
-                         Vector2{ itemMin.x, itemMin.y },
-                         Vector2{ itemSize.x, itemSize.y });
+        if (m_hasTacticalTexture)
+        {
+            UnloadRenderTexture(m_tacticalTexture);
+            m_tacticalTexture = {};
+            m_hasTacticalTexture = false;
+        }
+        ImGui::TextDisabled(
+            "All blue cameras share distance, height and field of view.");
+        DrawMultipleTacticalViews(
+            snapshot, cameraTargets, ImGui::GetContentRegionAvail());
+    }
+    else
+    {
+        ReleaseMultipleCameraTextures();
+        ImVec2 const size = ImGui::GetContentRegionAvail();
+        EnsureTacticalTexture(
+            static_cast<int>(size.x), static_cast<int>(size.y));
+        UpdateAttachedCamera(snapshot);
+        RenderTacticalScene(
+            snapshot, m_tacticalTexture, m_camera, m_trackedEntity, false);
 
-        if (!m_autoAttachCamera)
-            ImGui::TextDisabled("Free cam: RMB orbit | MMB pan | Wheel zoom on cursor | LMB focus point | WASD move | Q/E vertical | F focus | R reset");
+        if (m_hasTacticalTexture)
+        {
+            rlImGuiImageRenderTextureFit(&m_tacticalTexture, true);
+            bool const hovered = ImGui::IsItemHovered();
+            ImVec2 const itemMin = ImGui::GetItemRectMin();
+            ImVec2 const itemSize = ImGui::GetItemRectSize();
+            UpdateFreeCamera(snapshot,
+                             hovered,
+                             Vector2{ itemMin.x, itemMin.y },
+                             Vector2{ itemSize.x, itemSize.y });
+
+            if (!m_autoAttachCamera)
+                ImGui::TextDisabled("Free cam: RMB orbit | MMB pan | Wheel zoom on cursor | LMB focus point | WASD move | Q/E vertical | F focus | R reset");
+        }
     }
 
     ImGui::End();

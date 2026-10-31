@@ -6,15 +6,15 @@ simulateur ECS. Les N Rouges (0 à 10) restent pilotés individuellement
 par RLMission en mode production. Il n'existe plus d'agent PPO distinct
 pour un scénario figé à deux Bleus.
 
-## Deux scénarios, un seul moteur
+## Une scène, deux modes d'exécution
 
-| Exemple (sélecteur IHM / CLI) | Scénario | Défaut |
+| Exemple (sélecteur IHM / CLI) | Politique bleue | Scénario |
 |---|---|---|
-| `blue-patrol` | `Scenarios/BluePatrol.json` | P=2, N=0 |
-| `blue-defense` | `Scenarios/BlueDefense.json` | P=4, N=4 |
+| `blue-defense` | learner MAPPO `latest`, entraînement et évaluations périodiques | `Scenarios/BlueDefense.json` |
+| `blue-defense-inference` | acteur déterministe promu `prod`, sans entraînement ni évaluation | `Scenarios/BlueDefense.json` |
 
-Les deux JSON déclarent `blueDefense.blueTeam.activeCount` et
-`blueDefense.redTeam.activeCount`. Le loader instancie
+Le JSON déclare `blueDefense.blueTeam.activeCount` et
+`blueDefense.redTeam.activeCount`. Le loader instancie dans les deux modes
 `blue_1..blue_P` et `red_1..red_N` à partir de templates
 `blue_template` et `red_template`. Le nombre de membres n'est
 pas codé en dur dans l'IHM ni dans les classes du contrôleur.
@@ -22,12 +22,12 @@ pas codé en dur dans l'IHM ni dans les classes du contrôleur.
 ### Exécution
 
 ```sh
-PPO.exe --example blue-patrol
 PPO.exe --example blue-defense
+PPO.exe --example blue-defense-inference
 PPO.exe --example blue-defense --check-example
 ```
 
-Sans option, le sélecteur graphique d'exemples propose les deux entrées
+Sans option, le sélecteur graphique d'exemples propose les deux modes
 et l'exemple Airspace. Ses cartes proviennent de `ExampleCatalog`,
 sans logique spéciale pour une équipe de deux.
 
@@ -42,22 +42,26 @@ sans logique spéciale pour une équipe de deux.
 - Défense : protection de l'objectif, neutralisation, survie, collisions et
   zones interdites.
 
-Les **13 canaux** du snapshot sont : Patrol tracking, Formation keeping,
+Les **15 canaux** du snapshot sont : Patrol tracking, Formation keeping,
 Pursuit progress, Control effort, Blue survival, Red neutralization,
 Threat containment, Objective survival, Mission outcome, Timeout,
-Blue separation, Restricted zone clearance, Boundary clearance.
+Blue separation, Restricted zone clearance, Boundary clearance,
+Low speed risk et Own loss.
 
 Les poids des canaux restent lus de `Training/BluePatrol.json`
 et sont convertis explicitement au runtime généralisé.
 
 ## Intégration IHM
 
-Le bouton Play utilise l'exécution ECS habituelle. Un seul `IAgent`
-Bleu publie son snapshot, le nombre de rewards, l'état de l'entraînement
-et les évaluations. Les fonctions de rendu et le sélecteur utilisent le
-catalogue commun ; les rouges restent visibles comme entités indépendantes.
-Les tests de fumée utilisent les deux vrais scénarios et vérifient les
-13 noms/valeurs de récompenses du snapshot.
+Le bouton Play utilise l'exécution ECS habituelle. Le mode est immuable dès le
+chargement : Play entraîne dans `blue-defense` et lance l'acteur de production
+dans `blue-defense-inference`. Le runner de production ne contient ni critic,
+ni optimizer, ni buffer de rollout, ni API d'évaluation ou de sauvegarde.
+
+La vue tactique multi-caméras, active par défaut, affiche une vue ajustée par
+Bleu dans une grille bornée à neuf cellules. Les paramètres distance, hauteur
+et champ de vision sont communs à toutes les vues. `Multiple blue cameras`
+permet de revenir à la caméra unique historique.
 
 ## Compatibilité de checkpoints
 
