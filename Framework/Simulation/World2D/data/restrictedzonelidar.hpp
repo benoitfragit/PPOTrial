@@ -18,14 +18,17 @@ inline constexpr std::size_t kRestrictedZoneLidarBins = 61U;
  * @param mobileSide Only mobiles owned by this side are refreshed.
  * @param friendlyMobileSafetyRadius Nonlethal safety radius in metres;
  *        zero preserves legacy zone-and-boundary-only sensing.
+ * @param boundaryScale Scale of sensed rectangle relative to work bounds;
+ *        1 retains legacy behavior, 2 observes the MAPPO hard boundary.
  *
  * Each beam keeps the nearest hit between hostile active restricted zones and
- * the rectangular world boundary and optional nearby same-side mobiles.
+ * the selected rectangular boundary and optional nearby same-side mobiles.
  * No heap allocation occurs in this update.
  */
 void UpdateRestrictedZonePseudoLidars(entt::registry& registry,
                                       eEntitySide mobileSide,
-                                      float friendlyMobileSafetyRadius = 0.F) noexcept;
+                                      float friendlyMobileSafetyRadius = 0.F,
+                                      float boundaryScale = 1.F) noexcept;
 
 void BuildRestrictedZonePseudoLidar(
     entt::registry& registry,
@@ -47,6 +50,7 @@ void BuildZoneBoundaryPseudoLidar(
     sEntityState const& ownState,
     sEnvironmentState const& envState,
     std::array<float, kRestrictedZoneLidarBins>& nearestCollisionRanges,
-    std::array<float, kRestrictedZoneLidarBins>& nearestCollisionDistances) noexcept;
+    std::array<float, kRestrictedZoneLidarBins>& nearestCollisionDistances,
+    float boundaryScale = 1.F) noexcept;
 
 } // namespace ppo::model
