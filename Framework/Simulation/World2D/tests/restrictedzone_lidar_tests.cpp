@@ -93,6 +93,30 @@ int main()
     auto const halfDiagonal = std::sqrt(200.F * 200.F + 200.F * 200.F);
     RequireNear(ranges[30], 200.F / (200.F + halfDiagonal),
                 "World boundary normalization changed");
+
+    // Historical sensing is unchanged at scale=1. MAPPO senses the
+    // outer failure boundary instead, including its native normalization.
+    ranges.fill(1.F);
+    distances.fill(0.F);
+    BuildZoneBoundaryPseudoLidar(ownState, bounds, ranges, distances, 2.F);
+    RequireNear(distances[30], 400.F,
+                "MAPPO must detect the hard North boundary");
+    RequireNear(ranges[30], 400.F / (400.F + 2.F * halfDiagonal),
+                "Hard-boundary normalization changed");
+    ownState.m_rotation = 1.5707963267948966F;
+    ranges.fill(1.F);
+    distances.fill(0.F);
+    BuildZoneBoundaryPseudoLidar(ownState, bounds, ranges, distances, 2.F);
+    RequireNear(distances[30], 400.F,
+                "MAPPO must detect the hard East boundary");
+    ownState.m_rotation = 0.F;
+    ranges.fill(1.F);
+    distances.fill(0.F);
+    BuildZoneBoundaryPseudoLidar(ownState, bounds, ranges, distances, 0.F);
+    RequireNear(distances[30], 0.F,
+                "Invalid boundary scale must not emit an intersection");
+    RequireNear(ranges[30], 1.F,
+                "Invalid boundary scale must retain empty rays");
     // Preserve angle-sensitive mobile elimination and angle-free stationary
     // restricted zone elimination, including historical side/type gates.
     auto const victimId = registry.create();
@@ -167,6 +191,9 @@ int main()
     UpdateRestrictedZonePseudoLidars(registry, eEntitySide::Friend, 20.F);
     RequireNear(published.m_nearestCollisionDistances[30], 200.F,
                 "Hostiles must not count as friendly safety obstacles");
+    UpdateRestrictedZonePseudoLidars(registry, eEntitySide::Friend, 20.F, 2.F);
+    RequireNear(published.m_nearestCollisionDistances[30], 400.F,
+                "Blue ECS LiDAR must publish outer-boundary range");
 
     farBlue.m_side = eEntitySide::Friend;
     farBlue.m_x = 0.F;
