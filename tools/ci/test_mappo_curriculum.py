@@ -350,32 +350,87 @@ class CurriculumTests(unittest.TestCase):
         self.assertEqual(curriculum.SCENARIO_FILE.read_bytes(),
                          self.original_scenario)
 
-    def test_v2_resume_same_block_after_partial_training(self) -> None:
+    def test_v2_partial_block_keeps_training_within_same_run(self) -> None:
+        # Regression for run 41192579957: 494 -> 499 stopped before the
+        # phase's update 500 despite most of the budget remaining.
+        cfg = {
+            "formatVersion": 2, "totalUpdates": 8,
+            "rehearsal": {"primaryUpdates": 2, "priorUpdates": 1},
+            "stages": [
+                {"id": "hippodrome", "blue": 1, "red": 0,
+                 "hostileZones": False, "updates": 6},
+                {"id": "reference-4v4", "blue": 4, "red": 4,
+                 "hostileZones": True, "updates": 2},
+            ],
+        }
+        curriculum.write_json(self.curriculum_path, cfg)
+        curriculum.write_json(curriculum.PROGRESS, {
+            "formatVersion": 2,
+            "curriculumHash": curriculum.fingerprint(cfg),
+            "baselineUpdates": 494, "nextStage": 0,
+            "targetUpdates": 8,
+        })
+        self.fake_checkpoint(494)
+        seen = []
+
+        def partial(binary: Path, stage: dict, seconds: int,
+                    log_path: Path) -> None:
+            current = curriculum.read_updates()
+            target = json.loads(
+                curriculum.TRAINING_FILE.read_text())["training"]["maxUpdates"]
+            self.assertEqual(seconds, self.args().max_seconds)
+            next_update = min(target, current + 5)
+            seen.append((stage["id"], current, next_update))
+            self.fake_checkpoint(next_update)
+            return None
+
+        with patch.object(curriculum, "run_stage", side_effect=partial):
+            self.assertEqual(curriculum.run(self.args()), 0)
+        self.assertEqual(seen, [
+            ("hippodrome", 494, 499),
+            ("hippodrome", 499, 500),
+            ("reference-4v4", 500, 502),
+        ])
+        self.assertEqual(curriculum.read_updates(), 502)
+        self.assertEqual(
+            json.loads(curriculum.PROGRESS.read_text())["nextStage"], 2)
+        self.assertEqual(curriculum.TRAINING_FILE.read_bytes(),
+                         self.original_training)
+        self.assertEqual(curriculum.SCENARIO_FILE.read_bytes(),
+                         self.original_scenario)
+
+    def test_v2_resume_same_block_after_time_budget_exhaustion(self) -> None:
         curriculum.write_json(self.curriculum_path, self.v2_config())
         seen = []
+        clock = [0.0]
 
         def partial(binary: Path, stage: dict, seconds: int,
                     log_path: Path) -> None:
             seen.append(stage["id"])
             self.fake_checkpoint(curriculum.read_updates() + 1)
+            clock[0] = 240.0
             return None
 
-        with patch.object(curriculum, "run_stage", side_effect=partial):
-            self.assertEqual(curriculum.run(self.args()), 0)
-        self.assertEqual(curriculum.read_updates(), 1)
-        self.assertEqual(
-            json.loads(curriculum.PROGRESS.read_text())["nextStage"], 0)
+        with patch.object(curriculum.time, "monotonic",
+                          side_effect=lambda: clock[0]):
+            with patch.object(curriculum, "run_stage", side_effect=partial):
+                self.assertEqual(curriculum.run(self.args()), 0)
+            self.assertEqual(curriculum.read_updates(), 1)
+            self.assertEqual(
+                json.loads(curriculum.PROGRESS.read_text())["nextStage"], 0)
 
-        def complete(binary: Path, stage: dict, seconds: int,
-                     log_path: Path) -> None:
-            seen.append(stage["id"])
-            target = json.loads(
-                curriculum.TRAINING_FILE.read_text())["training"]["maxUpdates"]
-            self.fake_checkpoint(target)
-            return None
+            clock[0] = 0.0
 
-        with patch.object(curriculum, "run_stage", side_effect=complete):
-            self.assertEqual(curriculum.run(self.args()), 0)
+            def complete(binary: Path, stage: dict, seconds: int,
+                         log_path: Path) -> None:
+                seen.append(stage["id"])
+                target = json.loads(
+                    curriculum.TRAINING_FILE.read_text())["training"]["maxUpdates"]
+                self.fake_checkpoint(target)
+                return None
+
+            with patch.object(curriculum, "run_stage", side_effect=complete):
+                self.assertEqual(curriculum.run(self.args()), 0)
         self.assertEqual(seen[0:2], ["hippodrome", "hippodrome"])
         self.assertEqual(curriculum.read_updates(), 15)
         self.assertEqual(
