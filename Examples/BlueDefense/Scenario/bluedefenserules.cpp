@@ -83,7 +83,8 @@ void BlueDefenseWorldRules::BeforeStep(ppo::model::WorldEntities& entities)
         {
             ppo::model::UpdateRestrictedZonePseudoLidars(
                 *entity->registry(), ppo::model::eEntitySide::Friend,
-                defenders::Parameters{}.cautionDistance);
+                defenders::Parameters{}.cautionDistance,
+                defenders::Parameters{}.hardBoundaryScale);
             break;
         }
 }
@@ -101,7 +102,8 @@ void BlueDefenseWorldRules::Resolve(ppo::model::WorldEntities& entities)
         {
             ppo::model::UpdateRestrictedZonePseudoLidars(
                 *entity->registry(), ppo::model::eEntitySide::Friend,
-                defenders::Parameters{}.cautionDistance);
+                defenders::Parameters{}.cautionDistance,
+                defenders::Parameters{}.hardBoundaryScale);
             break;
         }
 
@@ -281,6 +283,11 @@ void BlueDefenseWorldRules::CopySnapshot(entt::registry& source, entt::registry&
             ppo::model::sDefendedArea{0.F, 0.F,
                                       0.5F * world.m_maxNorth,
                                       0.5F * world.m_maxEast});
+        float const hardScale = defenders::Parameters{}.hardBoundaryScale;
+        target.ctx().emplace<ppo::model::sHardBoundaryOverlay>(
+            ppo::model::sHardBoundaryOverlay{
+                0.5F * world.m_maxNorth * hardScale,
+                0.5F * world.m_maxEast * hardScale});
     }
     if (source.ctx().contains<InitializerContext>())
     {
