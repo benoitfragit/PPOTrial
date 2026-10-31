@@ -1,0 +1,74 @@
+{
+  "formatVersion": 2,
+  "description": "Curriculum V2: 1000 PPO updates, progressive stage rehearsal (24 current / 6 prior), fresh training by default, explicit V2 checkpoint resume only.",
+  "totalUpdates": 1000,
+  "rehearsal": {
+    "primaryUpdates": 24,
+    "priorUpdates": 6
+  },
+  "stages": [
+    {
+      "id": "01-hippodrome",
+      "blue": 1,
+      "red": 0,
+      "hostileZones": false,
+      "updates": 32
+    },
+    {
+      "id": "02-hippodrome-wedge",
+      "blue": 2,
+      "red": 0,
+      "hostileZones": false,
+      "updates": 48
+    },
+    {
+      "id": "03-one-vs-one",
+      "blue": 1,
+      "red": 1,
+      "hostileZones": false,
+      "updates": 72
+    },
+    {
+      "id": "04-one-vs-two",
+      "blue": 1,
+      "red": 2,
+      "hostileZones": false,
+      "updates": 72
+    },
+    {
+      "id": "05-one-vs-zones",
+      "blue": 1,
+      "red": 0,
+      "hostileZones": true,
+      "updates": 64
+    },
+    {
+      "id": "06-two-vs-one-zones",
+      "blue": 2,
+      "red": 1,
+      "hostileZones": true,
+      "updates": 88
+    },
+    {
+      "id": "07-two-vs-two-zones",
+      "blue": 2,
+      "red": 2,
+      "hostileZones": true,
+      "updates": 100
+    },
+    {
+      "id": "08-three-vs-three-zones",
+      "blue": 3,
+      "red": 3,
+      "hostileZones": true,
+      "updates": 124
+    },
+    {
+      "id": "09-four-vs-four",
+      "blue": 4,
+      "red": 4,
+      "hostileZones": true,
+      "updates": 400
+    }
+  ]
+}
