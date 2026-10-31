@@ -272,7 +272,10 @@ bool TestSafetyRisks()
         || !(midwayOutside < terminal) || !Close(terminal, 1.F)
         || !Close(beyond, 1.F) || !Close(dead, 0.F)
         || !(patrol::GeneralizedSafetyPenalty(
-                justOutside, midwayOutside) < 0.5F))
+                justOutside, midwayOutside) < 0.5F)
+        || !(patrol::kGeneralizedBoundaryClearanceWeight
+                * patrol::GeneralizedSafetyPenalty(0.F, 1.F)
+             < 0.25F * 2.F))
         return false;
 
     // Red-zone band: 1.75 NEZ caution / 1.10 NEZ physical danger.
