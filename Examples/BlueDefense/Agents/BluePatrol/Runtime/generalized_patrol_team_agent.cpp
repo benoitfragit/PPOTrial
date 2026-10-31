@@ -5,6 +5,7 @@
  * Les implémentations sont accessibles via le navigateur de sources Doxygen.
  */
 #include "generalized_patrol_team_agent.hpp"
+#include "generalized_patrol_production_policy.hpp"
 
 #include "generalized_cooperative_reward.hpp"
 #include "generalized_patrol_learner.hpp"
@@ -209,6 +210,7 @@ GeneralizedPatrolMappoAgent::GeneralizedPatrolMappoAgent(
     ppo::model::BaseEntity& objective,
     Parameters parameters,
     PatrolTrainingSettings training,
+    GeneralizedPatrolExecutionMode const executionMode,
     std::filesystem::path actorCheckpoint,
     std::filesystem::path trainingCheckpoint,
     std::filesystem::path productionCheckpoint,
@@ -217,7 +219,8 @@ GeneralizedPatrolMappoAgent::GeneralizedPatrolMappoAgent(
     std::filesystem::path legacyProductionV7)
     : registry_(objective.registry()), objectiveId_(objective.uniqid()),
       counts_{blueCount, redCount}, parameters_(parameters),
-      training_(training), actorCheckpoint_(std::move(actorCheckpoint)),
+      training_(training), executionMode_(executionMode),
+      actorCheckpoint_(std::move(actorCheckpoint)),
       trainingCheckpoint_(std::move(trainingCheckpoint)),
       productionCheckpoint_(std::move(productionCheckpoint)),
       evaluation_(training.evaluation)
@@ -248,68 +251,79 @@ GeneralizedPatrolMappoAgent::GeneralizedPatrolMappoAgent(
     }
 
     rewardWeights_ = MapGeneralizedRewardWeights(training_);
-    learner_ = std::make_unique<GeneralizedPatrolLearner>(
-        counts_, training_.seed, training_.rolloutSteps);
-    if (std::filesystem::exists(trainingCheckpoint_))
+    if (executionMode_ == GeneralizedPatrolExecutionMode::ProductionInference)
     {
-        // A V5 value function cannot be resumed with the new per-blue input.
-        // Keep an untouched backup and migrate only the compatible actor.
-        std::ifstream probe{trainingCheckpoint_};
-        std::string magic;
-        probe >> magic;
-        if (magic == "BLUE_TEAM_TRAINING_V5")
-        {
-            auto backup = trainingCheckpoint_;
-            backup += ".v5.bak";
-            if (!std::filesystem::exists(backup))
-                std::filesystem::copy_file(trainingCheckpoint_, backup);
-            learner_->MigrateV5TrainingActor(trainingCheckpoint_);
-            std::cout << "[BLUE MAPPO V8] Migrated V5 actor; old state backed up "
-                      << backup.string()
-                      << ". New 256-wide critic and optimizers start fresh.\n";
-        }
-        else
-        {
-            learner_->LoadTrainingState(trainingCheckpoint_);
-            std::cout << "[BLUE MAPPO V8] Resumed V6 generalized training update "
-                      << learner_->StepCount() << ".\n";
-        }
-    }
-    else if (std::filesystem::exists(actorCheckpoint_))
-    {
-        learner_->LoadActor(actorCheckpoint_);
-        std::cout << "[BLUE MAPPO V8] Loaded generalized actor.\n";
+        productionPolicy_ =
+            std::make_unique<GeneralizedPatrolProductionPolicy>(
+                counts_, productionCheckpoint_);
+        std::cout << "[BLUE MAPPO V8] Loaded promoted production actor for "
+                     "deterministic inference.\n";
     }
     else
     {
-        if (std::filesystem::exists(legacyTrainingV4))
+        learner_ = std::make_unique<GeneralizedPatrolLearner>(
+            counts_, training_.seed, training_.rolloutSteps);
+        if (std::filesystem::exists(trainingCheckpoint_))
         {
-            GeneralizedTrainingMigrationReport const report =
-                learner_->MigrateV4TrainingState(
-                    legacyTrainingV4, training_.seed);
-            std::cout << "[BLUE MAPPO V8] Migrated v4 actor parameters="
-                      << report.actorParametersMigrated
-                      << " compatible-Adam-moments="
-                      << report.compatibleActorMomentsMigrated
-                      << "; critic, optimizer scalars, RNG, update counter "
-                         "and rollout reset for generalized training.\n";
+            // A V5 value function cannot be resumed with the new per-blue input.
+            // Keep an untouched backup and migrate only the compatible actor.
+            std::ifstream probe{trainingCheckpoint_};
+            std::string magic;
+            probe >> magic;
+            if (magic == "BLUE_TEAM_TRAINING_V5")
+            {
+                auto backup = trainingCheckpoint_;
+                backup += ".v5.bak";
+                if (!std::filesystem::exists(backup))
+                    std::filesystem::copy_file(trainingCheckpoint_, backup);
+                learner_->MigrateV5TrainingActor(trainingCheckpoint_);
+                std::cout << "[BLUE MAPPO V8] Migrated V5 actor; old state backed up "
+                          << backup.string()
+                          << ". New 256-wide critic and optimizers start fresh.\n";
+            }
+            else
+            {
+                learner_->LoadTrainingState(trainingCheckpoint_);
+                std::cout << "[BLUE MAPPO V8] Resumed V6 generalized training update "
+                          << learner_->StepCount() << ".\n";
+            }
+        }
+        else if (std::filesystem::exists(actorCheckpoint_))
+        {
+            learner_->LoadActor(actorCheckpoint_);
+            std::cout << "[BLUE MAPPO V8] Loaded generalized actor.\n";
         }
         else
         {
-            std::filesystem::path const legacy =
-                std::filesystem::exists(legacyLatestV7)
-                ? legacyLatestV7 : legacyProductionV7;
-            if (std::filesystem::exists(legacy))
+            if (std::filesystem::exists(legacyTrainingV4))
             {
-                learner_->LoadV7Actor(legacy);
-                std::cout << "[BLUE MAPPO V8] Migrated compatible v7 actor "
-                             "weights; critic and optimizer state start fresh.\n";
+                GeneralizedTrainingMigrationReport const report =
+                    learner_->MigrateV4TrainingState(
+                        legacyTrainingV4, training_.seed);
+                std::cout << "[BLUE MAPPO V8] Migrated v4 actor parameters="
+                          << report.actorParametersMigrated
+                          << " compatible-Adam-moments="
+                          << report.compatibleActorMomentsMigrated
+                          << "; critic, optimizer scalars, RNG, update counter "
+                             "and rollout reset for generalized training.\n";
+            }
+            else
+            {
+                std::filesystem::path const legacy =
+                    std::filesystem::exists(legacyLatestV7)
+                    ? legacyLatestV7 : legacyProductionV7;
+                if (std::filesystem::exists(legacy))
+                {
+                    learner_->LoadV7Actor(legacy);
+                    std::cout << "[BLUE MAPPO V8] Migrated compatible v7 actor "
+                                 "weights; critic and optimizer state start fresh.\n";
+                }
             }
         }
+        lastSavedUpdate_ = learner_->StepCount();
+        finished_ = learner_->StepCount() >= training_.maxUpdates;
+        LoadPromotedScore();
     }
-    lastSavedUpdate_ = learner_->StepCount();
-    finished_ = learner_->StepCount() >= training_.maxUpdates;
-    LoadPromotedScore();
 }
 
 /**
@@ -318,7 +332,8 @@ GeneralizedPatrolMappoAgent::GeneralizedPatrolMappoAgent(
  */
 GeneralizedPatrolMappoAgent::~GeneralizedPatrolMappoAgent()
 {
-    SaveAtUpdateBoundary();
+    if (executionMode_ == GeneralizedPatrolExecutionMode::Training)
+        SaveAtUpdateBoundary();
 }
 
 void GeneralizedPatrolMappoAgent::Init()
@@ -554,7 +569,10 @@ GeneralizedPatrolMappoAgent::BuildEvaluationSample(
  */
 void GeneralizedPatrolMappoAgent::ChooseAction()
 {
-    if (episodeDone_ || (finished_ && !evaluation_.InProgress())
+    bool const trainingMode =
+        executionMode_ == GeneralizedPatrolExecutionMode::Training;
+    if (episodeDone_
+        || (trainingMode && finished_ && !evaluation_.InProgress())
         || registry_ == nullptr)
         return;
     try
@@ -568,9 +586,19 @@ void GeneralizedPatrolMappoAgent::ChooseAction()
         beforeAvailability_.fill(false);
         for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
             beforeAvailability_[index] = beforeStep_.blues[index].available;
-        lastActions_ = evaluation_.InProgress()
-            ? learner_->EvaluateActions(observations, beforeAvailability_)
-            : learner_->ChooseActions(observations, beforeAvailability_);
+        if (!trainingMode)
+        {
+            if (!productionPolicy_)
+                throw std::logic_error("Missing generalized production policy");
+            lastActions_ = productionPolicy_->Evaluate(
+                observations, beforeAvailability_);
+        }
+        else
+        {
+            lastActions_ = evaluation_.InProgress()
+                ? learner_->EvaluateActions(observations, beforeAvailability_)
+                : learner_->ChooseActions(observations, beforeAvailability_);
+        }
         for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
         {
             ppo::model::BaseEntity blue{registry_, guardIds_[index]};
@@ -593,7 +621,7 @@ void GeneralizedPatrolMappoAgent::ChooseAction()
             evaluation_.Cancel();
             RestoreTrainingInitializer();
         }
-        if (learner_)
+        if (trainingMode && learner_)
         {
             learner_->AbortPendingStep();
             if (learner_->OptimizationFailed())
@@ -605,7 +633,7 @@ void GeneralizedPatrolMappoAgent::ChooseAction()
 }
 
 /**
- * @brief Traite le résultat du pas ECS, détecte la terminaison ou la troncature, produit quinze canaux de reward, fournit P retours au learner et déclenche les frontières d'évaluation ou checkpoint.
+ * @brief Traite le résultat ECS; l'entraînement produit les rewards et transitions, tandis que l'inférence ne conserve que la terminaison.
  * @details Consulte ou modifie des composants ECS.
  */
 bool GeneralizedPatrolMappoAgent::SetNewState()
@@ -642,6 +670,19 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             ? training_.evaluation.maxSteps : parameters.episodeSteps;
         bool const truncated = !terminated
             && episodeStep_ >= episodeLimit;
+
+        if (executionMode_
+            == GeneralizedPatrolExecutionMode::ProductionInference)
+        {
+            // Production inference owns no reward, rollout, optimizer,
+            // checkpoint, or evaluation path. The ECS still controls mission
+            // termination and resets exactly as it does during training.
+            hasBeforeStep_ = false;
+            episodeDone_ = terminated || truncated;
+            currentReward_ = 0.F;
+            lastRewardChannels_.fill(0.F);
+            return episodeDone_;
+        }
 
         if (evaluation_.InProgress())
         {
@@ -1103,7 +1144,9 @@ void GeneralizedPatrolMappoAgent::SavePromotedScore()
 void GeneralizedPatrolMappoAgent::ProcessCommand(
     ppo::model::sAgentRealTimeCommand const& command) noexcept
 {
-    if (command.m_id != id_)
+    if (command.m_id != id_
+        || executionMode_
+            == GeneralizedPatrolExecutionMode::ProductionInference)
         return;
     if (command.m_type
         == ppo::model::sAgentRealTimeCommand::eTypeCommand::RewardClamp
@@ -1133,13 +1176,18 @@ GeneralizedPatrolMappoAgent::GetSnapshot() const noexcept
 {
     ppo::model::sAgentStateSnaphot snapshot{};
     snapshot.m_id = id_;
-    snapshot.m_name = "Blue generalized shared MAPPO";
+    bool const trainingMode =
+        executionMode_ == GeneralizedPatrolExecutionMode::Training;
+    snapshot.m_name = trainingMode
+        ? "Blue generalized shared MAPPO"
+        : "Blue generalized MAPPO production inference";
     snapshot.m_common.m_step = static_cast<long long>(episodeStep_);
-    snapshot.m_common.m_maxStep = static_cast<long long>(training_.rolloutSteps);
+    snapshot.m_common.m_maxStep = static_cast<long long>(
+        trainingMode ? training_.rolloutSteps : parameters_.episodeSteps);
     snapshot.m_common.m_reward = currentReward_;
     snapshot.m_common.m_rewardClamp = training_.rewardClamp;
     snapshot.m_common.m_checkpoint = static_cast<unsigned int>(
-        training_.checkpointEvery);
+        trainingMode ? training_.checkpointEvery : 0U);
     // The renderer uses m_version as the completed PPO update counter.
     // The observation schema version remains in the V8 policy checkpoint.
     snapshot.m_common.m_version = learner_
@@ -1147,38 +1195,42 @@ GeneralizedPatrolMappoAgent::GetSnapshot() const noexcept
             learner_->StepCount(), std::numeric_limits<unsigned int>::max()))
         : 0U;
     snapshot.m_common.m_done = episodeDone_;
-    snapshot.m_common.m_training = !finished_ && !evaluation_.InProgress();
-    if (learner_)
+    snapshot.m_common.m_training = trainingMode
+        && !finished_ && !evaluation_.InProgress();
+    if (trainingMode && learner_)
     {
         snapshot.m_common.m_step = static_cast<long long>(
             learner_->CollectedTeamSteps());
     }
-    GeneralizedEvaluationMetrics const metrics = evaluation_.Metrics();
-    snapshot.m_common.m_notation = evaluation_.BestScore();
-    snapshot.m_common.m_latestEvaluationNotation = metrics.score;
-    snapshot.m_common.m_completedEvaluations =
-        evaluation_.CompletedCampaigns();
-    snapshot.m_common.m_hasLatestEvaluation = evaluation_.HasLatest();
-    snapshot.m_common.m_latestEvaluationSuccessRate =
-        metrics.missionSuccessRate;
-    snapshot.m_common.m_latestEvaluationSurvivalRate =
-        metrics.blueSurvivalRate;
-    snapshot.m_common.m_latestEvaluationTestCount = static_cast<unsigned int>(
-        evaluation_.TestCount());
-    snapshot.m_common.m_evaluationTestsFinished = static_cast<unsigned int>(
-        evaluation_.TestsFinished());
-    snapshot.m_common.m_evaluationTimeoutTests = static_cast<unsigned int>(
-        std::lround(metrics.timeoutRate
-            * static_cast<float>(metrics.episodes)));
-    snapshot.m_common.m_latestEvaluationTimeoutRate = metrics.timeoutRate;
-    snapshot.m_common.m_evaluationStepsExecuted =
-        evaluation_.StepsExecuted();
-    snapshot.m_common.m_evaluationStepsPerSecond =
-        evaluation_.StepsPerSecond();
-    snapshot.m_common.m_evaluationElapsedSeconds =
-        evaluation_.ElapsedSeconds();
-    snapshot.m_common.m_evaluationprogress = evaluation_.Progress();
-    snapshot.m_common.m_evaluationinprogress = evaluation_.InProgress();
+    if (trainingMode)
+    {
+        GeneralizedEvaluationMetrics const metrics = evaluation_.Metrics();
+        snapshot.m_common.m_notation = evaluation_.BestScore();
+        snapshot.m_common.m_latestEvaluationNotation = metrics.score;
+        snapshot.m_common.m_completedEvaluations =
+            evaluation_.CompletedCampaigns();
+        snapshot.m_common.m_hasLatestEvaluation = evaluation_.HasLatest();
+        snapshot.m_common.m_latestEvaluationSuccessRate =
+            metrics.missionSuccessRate;
+        snapshot.m_common.m_latestEvaluationSurvivalRate =
+            metrics.blueSurvivalRate;
+        snapshot.m_common.m_latestEvaluationTestCount =
+            static_cast<unsigned int>(evaluation_.TestCount());
+        snapshot.m_common.m_evaluationTestsFinished =
+            static_cast<unsigned int>(evaluation_.TestsFinished());
+        snapshot.m_common.m_evaluationTimeoutTests =
+            static_cast<unsigned int>(std::lround(
+                metrics.timeoutRate * static_cast<float>(metrics.episodes)));
+        snapshot.m_common.m_latestEvaluationTimeoutRate = metrics.timeoutRate;
+        snapshot.m_common.m_evaluationStepsExecuted =
+            evaluation_.StepsExecuted();
+        snapshot.m_common.m_evaluationStepsPerSecond =
+            evaluation_.StepsPerSecond();
+        snapshot.m_common.m_evaluationElapsedSeconds =
+            evaluation_.ElapsedSeconds();
+        snapshot.m_common.m_evaluationprogress = evaluation_.Progress();
+        snapshot.m_common.m_evaluationinprogress = evaluation_.InProgress();
+    }
     snapshot.m_scalings.assign(
         rewardWeights_.begin(), rewardWeights_.end());
     snapshot.m_rewards.assign(

@@ -5,6 +5,7 @@
  * Les implémentations sont accessibles via le navigateur de sources Doxygen.
  */
 #include "generalized_patrol_learner.hpp"
+#include "generalized_patrol_production_policy.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -430,6 +431,24 @@ int main()
     std::filesystem::remove(training, ignored);
     first.SaveActor(policy);
     first.SaveTrainingState(training);
+
+    blue::GeneralizedPatrolProductionPolicy production{counts, policy};
+    auto const productionActions = production.Evaluate(
+        observations, availability);
+    auto const repeatedProductionActions = production.Evaluate(
+        observations, availability);
+    if (productionActions != firstEvaluation
+        || repeatedProductionActions != productionActions)
+    {
+        return 22;
+    }
+    if (!ThrowsRuntimeError([&] {
+            blue::GeneralizedPatrolProductionPolicy missing{
+                counts, policy.string() + ".missing"};
+        }))
+    {
+        return 23;
+    }
 
     blue::GeneralizedPatrolLearner resumed{counts, 123U, 1U};
     resumed.LoadActor(policy);

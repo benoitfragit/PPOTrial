@@ -18,10 +18,11 @@ supprimés du build.
   zones interdites, collisions et scénarios.
 - `Examples/src/examplecatalog.cpp` : déclaration des cartes du sélecteur IHM.
 
-Une même politique est utilisée dans `blue-patrol` (N=0) et
-`blue-defense` (N paramétrable). L'acteur dispose d'entrées masquées
-indépendantes du nombre d'agents. Le learner gère simultanément toutes
-les transitions Bleues.
+Une même scène `BlueDefense.json` alimente `blue-defense` pour l'entraînement
+et `blue-defense-inference` pour l'exécution déterministe de l'acteur de
+production. L'acteur dispose d'entrées masquées indépendantes du nombre
+d'agents. Le learner gère simultanément toutes les transitions Bleues dans le
+seul mode entraînement.
 
 La migration V4/V7 reste disponible en lecture mais ne constitue pas
 un second contrôleur.

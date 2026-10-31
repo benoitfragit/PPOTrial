@@ -10,8 +10,8 @@ contrôleur MAPPO P/N**. Les attaquants rouges utilisent RLMission en production
 cmake -S . -B build/desktop -G "Visual Studio 17 2022" -A x64 -DPPO_BUILD_DESKTOP=ON
 cmake --build build/desktop --config Debug
 build/desktop/Main/Debug/PPO.exe --list-examples
-build/desktop/Main/Debug/PPO.exe --example blue-patrol
 build/desktop/Main/Debug/PPO.exe --example blue-defense
+build/desktop/Main/Debug/PPO.exe --example blue-defense-inference
 ```
 
 Les chemins de l'exécutable dépendent du générateur et du preset sélectionné.
@@ -23,18 +23,22 @@ Sans `--example`, l'application affiche le sélecteur graphique. Avec
 | ID CLI / sélection IHM | Description | Configuration |
 |---|---|---|
 | `airspace` | Environnement historique d'agents LibTorch | `Scenarios/Playground.json` |
-| `blue-patrol` | Patrouille MAPPO sans adversaire, P=2/N=0 par défaut | `Scenarios/BluePatrol.json` |
-| `blue-defense` | Défense de l'objectif contre RLMission, P=4/N=4 par défaut | `Scenarios/BlueDefense.json` |
+| `blue-defense` | Entraînement MAPPO P/N contre RLMission | `Scenarios/BlueDefense.json` |
+| `blue-defense-inference` | Inférence déterministe avec l'acteur promu `prod` | `Scenarios/BlueDefense.json` |
 
-Les deux scénarios bleus ont **exactement le même agent** :
-`GeneralizedPatrolMappoAgent`. Leur section JSON `blueDefense` exige
+Les deux modes BlueDefense utilisent **exactement la même scène**, la même
+physique et le même contrôleur ECS `GeneralizedPatrolMappoAgent`. La section
+JSON `blueDefense` exige
 `blueTeam.activeCount` de 1 à 9 et `redTeam.activeCount` de 0 à 10.
 Les entités sont créées dynamiquement depuis les templates
 `blue_template` et `red_template` ; un seul contrôleur distribue toutes
 les actions Bleues.
 
-L'ancien scénario `two-vs-two` et le contrôleur spécifique à deux Bleus
-n'existent plus. La patrouille sans Rouge n'utilise pas d'autre moteur.
+Le mode `blue-defense` charge l'état d'entraînement `latest`. Le mode
+`blue-defense-inference` charge uniquement l'acteur promu dans `prod`, produit
+des actions déterministes et ne possède aucun rollout, critic, optimizer,
+reward d'apprentissage, sauvegarde ou campagne d'évaluation. Dans les deux
+cas, les Rouges conservent leur contrôleur RLMission production historique.
 
 ## Apprentissage MAPPO
 
@@ -55,12 +59,11 @@ n'existent plus. La patrouille sans Rouge n'utilise pas d'autre moteur.
 - Capteurs : 61 rayons LiDAR ; zones interdites rouges et enveloppes de
   sécurité autour des Bleus. Les collisions physiques restent terminales.
 
-Les **13 canaux de récompense** du snapshot IHM sont : Patrol tracking,
+Les **15 canaux de récompense** du snapshot IHM sont : Patrol tracking,
 Formation keeping, Pursuit progress, Control effort, Blue survival,
 Red neutralization, Threat containment, Objective survival,
 Mission outcome, Timeout, Blue separation, Restricted zone clearance
-et Boundary clearance. Les trois derniers fournissent un signal d'évitement
-anticipé sans modifier l'agent RLMission Rouge.
+Boundary clearance, Low speed risk et Own loss.
 
 Les paramètres, le rollout et les poids de récompense sont définis dans
 `resources/settings/Training/BluePatrol.json`.
@@ -80,9 +83,13 @@ Les règles RLMission et les modèles des Rouges restent inchangés.
 
 Le sélecteur lit les exemples depuis `Examples/src/examplecatalog.cpp`,
 sans cardinalité fixe. Après Play, les voitures sont pilotées par l'ECS
-normal. Le panneau d'entraînement exploite le snapshot du contrôleur
-MAPPO partagé : progression, diagnostics, évaluations et treize rewards.
-L'overlay de trajectoire peut afficher l'hippodrome.
+normal. Dans l'entrée `blue-defense-inference`, le bouton Play existant lance
+directement l'acteur de production sans apprentissage ni évaluation.
+
+Le mode multi-caméras est activé par défaut : la vue tactique est découpée en
+P vues, une par Bleu, dans une grille 1×1 à 3×3. La distance, la hauteur et le
+champ de vision sont partagés par toutes les caméras. La case
+`Multiple blue cameras` permet de retrouver la vue tactique unique.
 
 ## Validation
 
@@ -105,7 +112,7 @@ une campagne de validation distincte.
 
 ## Documentation
 
-- [Guide des scénarios BlueDefense / BluePatrol](docs/blue-defense-example.md)
+- [Guide des modes BlueDefense](docs/blue-defense-example.md)
 - [Architecture MAPPO à effectifs variables](docs/mappo-variable-teams.md)
 - [Configuration JSON et paramètres](docs/configuration-guide.md)
 - [Instructions pour les contributions](AGENTS.md)

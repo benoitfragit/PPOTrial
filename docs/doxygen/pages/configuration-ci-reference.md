@@ -4,7 +4,7 @@
 
 ## Points d'entrée
 
-`Main/src/main.cpp` accepte la sélection interactive ou les options : `--list-examples`, `--example <id>`, `--check-example`, `--no-gui`, `--max-seconds <1..86400>`. Le mode `--no-gui` impose explicitement `blue-patrol` ou `blue-defense` et n'instancie aucun renderer. `--check-example` valide le bootstrap puis sort; cela ne constitue ni un entraînement ni une évaluation de convergence.
+`Main/src/main.cpp` accepte la sélection interactive ou les options : `--list-examples`, `--example <id>`, `--check-example`, `--no-gui`, `--max-seconds <1..86400>`. Le mode `--no-gui` est réservé à `blue-defense` et n'instancie aucun renderer. `blue-defense-inference` est lancé depuis l'IHM avec le bouton Play. `--check-example` valide le bootstrap puis sort; cela ne constitue ni un entraînement ni une évaluation de convergence.
 
 Le mode headless :
 1. charge scénario et JSON,
@@ -23,7 +23,7 @@ Aucune fenêtre graphique n'est ouverte; aucune recompilation entre deux phases 
 | Monde, limites, `timeStep` | `Environment.json` | `Environment`, `ReadParameters` et initialisation d'épisode. |
 | Paramètres physiques et capacités SNA | `Platforms/Mobile/*.json` | Entités et `FlightModelSystem` / `SNASystem`. |
 | Zones | `Platforms/RestrictedZone/*.json` | Entité de zone et pseudo-LiDAR. |
-| P/N, objectifs, rouges, zones et spawn | `Scenarios/BlueDefense.json`, `BluePatrol.json` | `LoadScenario`, `ParseSpawnSettings`, `InitializerContext`. |
+| P/N, objectifs, rouges, zones et spawn | `Scenarios/BlueDefense.json` | `LoadScenario`, `ParseSpawnSettings`, `InitializerContext`. |
 | Hippodrome, wedge, défenses, poids | `Training/BluePatrol.json` | `patrol_config.hpp`, contrôleur MAPPO et learner. |
 | Séquences d'entraînement V1/V2 | `Training/BluePatrolCurriculum*.json` | `tools/ci/mappo_curriculum.py` (orchestration entre exécutions). |
 | Profils agents | `AgentProfiles.json` | Catalogue/Meta/Serializer. |

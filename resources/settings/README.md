@@ -7,7 +7,7 @@ Toutes les configurations utilisent **formatVersion: 2**, avec un unique lecteur
 | Choisir les entités, leurs cibles et leurs agents | Scenarios/Playground.json |
 | Définir les profils d'agents et leur mode | AgentProfiles.json |
 | Régler PPO, rewards, rollout, fréquence d'évaluation | Training/RLMission.json, Training/RLSNA.json ou Training/BluePatrol.json |
-| Composer la patrouille bleue ou le combat 2v2 | Scenarios/BluePatrol.json ou Scenarios/TwoVsTwo.json |
+| Composer l'équipe P/N commune à l'entraînement et à l'inférence | Scenarios/BlueDefense.json |
 | Modifier les caractéristiques physiques | Platforms/Mobile/*.json ou Platforms/RestrictedZone/*.json |
 | Régler les limites du monde et son pas | Environment.json |
 | Régler l'IHM et la caméra | Renderer.json |
@@ -29,16 +29,17 @@ Les poids des récompenses sont identifiés par leur **nom**, puis remis dans l'
 
 **checkpointEvery: 5** signifie une demande d'évaluation toutes les cinq mises à jour PPO. Les paramètres des campagnes d'évaluation (nbTests, nbSteps) sont dans Scenarios/Evaluation/.
 
-Pour les deux défenseurs RLTools, **Training/BluePatrol.json** règle le nombre
+Pour le contrôleur bleu généralisé, **Training/BluePatrol.json** règle le nombre
 de pas d'équipe par rollout (2048 par défaut), la limite de mises à jour, la
-graine, la campagne d'évaluation intégrée et les sept récompenses MAPPO. Deux
-bleus produisent deux transitions
+graine, la campagne d'évaluation intégrée et les quinze récompenses MAPPO. P
+Bleus produisent P transitions
 par pas d'équipe. Le mini-batch interne de 128 n'est pas la longueur du
-rollout. `checkpointEvery` déclenche les cas déterministes 2v1/2v2 ; le
+rollout. `checkpointEvery` déclenche la campagne déterministe configurée ; le
 checkpoint de production n'est remplacé qu'après un meilleur score.
 
-Après une mise à jour PPO, `model/BluePatrol/latest/` contient l'acteur v7 et
-`blue_patrol_training_v4.txt`. Ce dernier permet une vraie reprise de l'acteur,
+Après une mise à jour PPO, `model/BluePatrol/latest/` contient l'acteur v8 et
+`blue_patrol_generalized_training_v5.txt` (état interne V6). Ce dernier permet
+une vraie reprise de l'acteur,
 du critique, d'Adam, du compteur et du RNG ; le buffer de rollout repart vide.
 `model/BluePatrol/prod/` ne contient que le meilleur acteur évalué.
 
@@ -52,7 +53,7 @@ reprennent celles de `trainingaircraft` : 0,700000596 rad/s,
 3,147198 rad. Ces paramètres ne modifient pas
 `attacker_car` ni RLMission.
 
-`Scenarios/TwoVsTwo.json` contient aussi `redSpawn`, `threatCurriculum` et
+`Scenarios/BlueDefense.json` contient aussi `redSpawn`, `threatCurriculum` et
 `restrictedZoneSpawn`. Le premier règle l'arc extérieur avant/latéral, le
 recul hors du monde et la séparation minimale des deux rouges. Le curriculum
 règle les probabilités de zéro, une ou deux menaces et les plages d'activation

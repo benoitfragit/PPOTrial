@@ -47,8 +47,8 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_test(NAME BlueDefenseGeneralizedInitializerTests
         COMMAND BlueDefenseGeneralizedInitializerTests)
 
-    # Regression: Play advances every P/N agent through the actual desktop ECS
-    # without requiring a pre-existing trained actor checkpoint.
+    # Regression: Play advances the promoted actor without training/evaluation,
+    # while the training scenario retains its existing ECS behavior.
     add_executable(BlueDefensePatrolRuntimeSmokeTest tests/patrol_runtime_smoke.cpp)
     target_compile_features(BlueDefensePatrolRuntimeSmokeTest PRIVATE cxx_std_17)
     target_link_libraries(BlueDefensePatrolRuntimeSmokeTest PRIVATE
@@ -61,7 +61,8 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
                 "${CMAKE_BINARY_DIR}/libtorch/lib"
                 "$<TARGET_FILE_DIR:BlueDefensePatrolRuntimeSmokeTest>")
     endif()
-    add_test(NAME BlueDefensePatrolRuntimeSmoke COMMAND BlueDefensePatrolRuntimeSmokeTest)
+    add_test(NAME BlueDefenseInferenceRuntimeSmoke
+        COMMAND BlueDefensePatrolRuntimeSmokeTest blue-defense-inference)
     add_test(NAME BlueDefenseCombatRuntimeSmoke
         COMMAND BlueDefensePatrolRuntimeSmokeTest blue-defense)
 

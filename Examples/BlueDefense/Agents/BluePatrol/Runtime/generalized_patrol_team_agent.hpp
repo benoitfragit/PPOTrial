@@ -24,13 +24,24 @@ namespace ppo::examples::bluedefense::defenders {
 
 /** @brief Déclare le type GeneralizedPatrolLearner, utilisé par Contrôleur ECS MAPPO partagé des Bleus : états, observations, actions, récompenses, évaluations et checkpoints. */
 class GeneralizedPatrolLearner;
+/** @brief Déclare l'acteur de production déterministe sans apprentissage. */
+class GeneralizedPatrolProductionPolicy;
+
+/** @brief Selects the immutable execution contract of the blue controller. */
+enum class GeneralizedPatrolExecutionMode : std::uint8_t
+{
+    Training,
+    ProductionInference
+};
 
 /**
  * @brief Cooperative generalized MAPPO controller for P blue ECS mobiles.
  *
- * One controller samples all P actions before physics and records exactly P
- * same-instant transitions after world resolution. Red mobiles remain owned
- * exclusively by their historical RLMission agents.
+ * In training mode, one controller samples all P actions before physics and
+ * records exactly P same-instant transitions after world resolution. In
+ * production-inference mode it evaluates only the promoted deterministic
+ * actor. Red mobiles remain owned exclusively by their historical RLMission
+ * agents.
  */
 class GeneralizedPatrolMappoAgent final : public ppo::model::IAgent
 {
@@ -44,6 +55,7 @@ public:
      * @param objective Fixed defended objective.
      * @param parameters Patrol, vehicle, and world parameters.
      * @param training Embedded learner settings.
+     * @param executionMode Training or promoted-production inference.
      * @param actorCheckpoint New generalized v8 actor path.
      * @param trainingCheckpoint New generalized v5 full-state path.
      * @param productionCheckpoint Separate promoted generalized v8 actor path.
@@ -61,6 +73,7 @@ public:
         ppo::model::BaseEntity& objective,
         Parameters parameters,
         PatrolTrainingSettings training,
+        GeneralizedPatrolExecutionMode executionMode,
         std::filesystem::path actorCheckpoint,
         std::filesystem::path trainingCheckpoint,
         std::filesystem::path productionCheckpoint,
@@ -174,6 +187,9 @@ private:
     ActiveTeamCounts counts_{};
     Parameters parameters_{};
     PatrolTrainingSettings training_{};
+    /** @brief Immutable training or production-inference execution mode. */
+    GeneralizedPatrolExecutionMode executionMode_{
+        GeneralizedPatrolExecutionMode::Training};
     /** @brief Live independent weights for the generalized UI reward channels. */
     GeneralizedRewardValues rewardWeights_{};
     /** @brief Most recent unweighted team reward channels displayed by the IHM. */
@@ -182,6 +198,7 @@ private:
     std::filesystem::path trainingCheckpoint_{};
     std::filesystem::path productionCheckpoint_{};
     std::unique_ptr<GeneralizedPatrolLearner> learner_{};
+    std::unique_ptr<GeneralizedPatrolProductionPolicy> productionPolicy_{};
     GeneralizedEvaluationCampaign evaluation_;
     std::mt19937 trainingRng_{};
 

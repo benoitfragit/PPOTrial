@@ -24,10 +24,11 @@ cmake --build build/release --config Release --target PPO --parallel 2
 & build/release/Main/Release/PPO.exe --no-gui --example blue-defense --max-seconds 14400
 ```
 
-Use `--example blue-patrol` for N=0. Only these two generalized MAPPO
-scenarios are accepted in headless mode. The ordinary desktop behavior remains
-unchanged. The mode stops at its time limit or when `maxUpdates` is reached,
-and returns an error when no resumable training-state checkpoint exists.
+Only `--example blue-defense` is accepted in headless training mode.
+`blue-defense-inference` is a desktop production run and never enters the
+headless learner monitor. Training stops at its time limit or when
+`maxUpdates` is reached, and returns an error when no resumable training-state
+checkpoint exists.
 
 ## Checkpoints
 

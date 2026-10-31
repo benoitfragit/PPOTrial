@@ -96,6 +96,7 @@ void CheckAdditionalAssets(fs::path const& root)
     auto const& renderer = display.at("renderer");
     Require(renderer.at("scaleLevel").get<int>() == 1
         && renderer.at("autoAttachCamera").get<bool>()
+        && renderer.at("multipleCameras").get<bool>()
         && !renderer.at("showGrid").get<bool>()
         && renderer.at("showPseudoLidar").get<bool>()
         && renderer.at("camera").at("fovy").get<float>() == 45.F,

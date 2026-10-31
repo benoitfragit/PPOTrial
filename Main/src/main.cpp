@@ -92,9 +92,9 @@ int main(int argc, char** argv)
 
     if ((durationSpecified && !noGui)
         || (noGui && (checkExample || !explicitExample
-            || (requested != "blue-patrol" && requested != "blue-defense"))))
+            || requested != "blue-defense")))
     {
-        std::cerr << "--no-gui requires --example blue-patrol|blue-defense; "
+        std::cerr << "--no-gui requires --example blue-defense; "
                      "--max-seconds requires --no-gui\n";
         return 2;
     }

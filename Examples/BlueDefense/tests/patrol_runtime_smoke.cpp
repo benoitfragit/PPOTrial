@@ -40,11 +40,14 @@ struct Sample
     unsigned unmodifiedRedPlatforms = 0U;
     unsigned redsTargetingObjective = 0U;
     bool trainingPresent = false;
+    bool inferencePresent = false;
     bool rewardsPresent = false;
     bool nonzeroRewardChannel = false;
     bool generalizedController = false;
     bool evaluationInProgress = false;
     std::uint64_t completedEvaluations = 0U;
+    unsigned checkpointInterval = 0U;
+    unsigned evaluationTestCount = 0U;
     long long rollout = 0;
     unsigned long long controllerId{};
     float formationWeight{};
@@ -169,11 +172,16 @@ Sample Capture(
         world.view<ppo::model::sAgentStateSnaphot>().each(
             [&](auto const& snapshot) {
                 std::string_view const name{snapshot.m_name};
-                if (name == "Blue generalized shared MAPPO")
+                bool const trainingController =
+                    name == "Blue generalized shared MAPPO";
+                bool const inferenceController =
+                    name == "Blue generalized MAPPO production inference";
+                if (trainingController || inferenceController)
                 {
                     ++result.controllers;
                     result.generalizedController = true;
                     result.trainingPresent |= snapshot.m_common.m_training;
+                    result.inferencePresent |= inferenceController;
                     result.rewardsPresent |= snapshot.m_rewards.size() ==
                             ppo::examples::bluedefense::defenders::kGeneralizedRewardChannelCount
                         && snapshot.m_scalings.size() == snapshot.m_rewards.size()
@@ -193,6 +201,12 @@ Sample Capture(
                     result.completedEvaluations = std::max(
                         result.completedEvaluations,
                         snapshot.m_common.m_completedEvaluations);
+                    result.checkpointInterval = std::max(
+                        result.checkpointInterval,
+                        snapshot.m_common.m_checkpoint);
+                    result.evaluationTestCount = std::max(
+                        result.evaluationTestCount,
+                        snapshot.m_common.m_latestEvaluationTestCount);
                     result.rollout = snapshot.m_common.m_maxStep;
                     result.controllerId = snapshot.m_id;
                     if (snapshot.m_scalings.size() > 1U)
@@ -205,7 +219,8 @@ Sample Capture(
 /**
  * @brief Lit et vérifie des données depuis l'état ou les entrées.
  */
-bool Ready(Sample const& s, ExpectedTeam const expected)
+bool Ready(Sample const& s, ExpectedTeam const expected,
+           bool const expectInference)
 {
     if (expected.blueCount == 0U || expected.blueCount > s.present.size()
         || s.blueEntities != expected.blueCount
@@ -213,9 +228,11 @@ bool Ready(Sample const& s, ExpectedTeam const expected)
         || s.finiteReds != expected.redCount
         || s.redsTargetingObjective != expected.redCount
         || s.unmodifiedRedPlatforms != expected.redCount
-        || s.controllers != 1U || !s.trainingPresent || !s.rewardsPresent
+        || s.controllers != 1U || !s.rewardsPresent
         || !s.generalizedController
-        || s.rollout != 2048)
+        || s.trainingPresent == expectInference
+        || s.inferencePresent != expectInference
+        || s.rollout != (expectInference ? 4096 : 2048))
         return false;
     for (std::size_t i = 0U; i < expected.blueCount; ++i)
     {
@@ -234,9 +251,13 @@ bool Ready(Sample const& s, ExpectedTeam const expected)
 int main(int argc, char** argv)
 {
     bool const combat = argc >= 2 && std::string{argv[1]} == "blue-defense";
+    bool const inference = argc == 1
+        || (argc >= 2
+            && std::string{argv[1]} == "blue-defense-inference");
     bool const evaluationSmoke = argc == 3
         && std::string{argv[2]} == "evaluation-smoke";
-    if (argc > 3 || (argc >= 2 && !combat) || (argc == 3 && !evaluationSmoke))
+    if (argc > 3 || (!combat && !inference)
+        || (argc == 3 && (!combat || !evaluationSmoke)))
         return 3;
     auto const patrolParameters =
         ppo::examples::bluedefense::defenders::LoadPatrolParameters(RESOURCE_PATH);
@@ -246,7 +267,7 @@ int main(int argc, char** argv)
         return 5;
     auto const definition = combat
         ? ppo::examples::bluedefense::Definition()
-        : ppo::examples::bluedefense::BluePatrolDefinition();
+        : ppo::examples::bluedefense::InferenceDefinition();
     ExpectedTeam const expected = ScenarioTeam(
         std::filesystem::path{RESOURCE_PATH} / definition.defaultScenario);
     definition.registerTypes();
@@ -285,28 +306,44 @@ int main(int argc, char** argv)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         auto const current = Capture(environment, patrolParameters);
-        if (!foundFirst && Ready(current, expected))
+        if (!foundFirst && Ready(current, expected, inference))
         {
             first = current;
             foundFirst = true;
-            ppo::model::sAgentRealTimeCommand command{};
-            command.m_id = current.controllerId;
-            command.m_type =
-                ppo::model::sAgentRealTimeCommand::eTypeCommand::RewardScaling;
-            command.m_rewardScalingType = 1U;
-            command.m_rewardScaling = 2.5F;
-            environment.AddAgentCommand(command);
+            if (!inference)
+            {
+                ppo::model::sAgentRealTimeCommand command{};
+                command.m_id = current.controllerId;
+                command.m_type = ppo::model::sAgentRealTimeCommand::
+                    eTypeCommand::RewardScaling;
+                command.m_rewardScalingType = 1U;
+                command.m_rewardScaling = 2.5F;
+                environment.AddAgentCommand(command);
+            }
             continue;
         }
-        if (!foundFirst || !Ready(current, expected))
+        if (!foundFirst || !Ready(current, expected, inference))
             continue;
         later = current;
         moved = true;
         for (std::size_t role = 0; role < expected.blueCount; ++role)
             moved &= std::hypot(later.north[role] - first.north[role],
                                 later.east[role] - first.east[role]) > 32.F;
-        moved &= std::abs(current.formationWeight - 2.5F) < 1.e-4F;
-        moved &= current.nonzeroRewardChannel;
+        if (inference)
+        {
+            moved &= !current.trainingPresent
+                && current.inferencePresent
+                && !current.evaluationInProgress
+                && current.completedEvaluations == 0U
+                && current.checkpointInterval == 0U
+                && current.evaluationTestCount == 0U
+                && !current.nonzeroRewardChannel;
+        }
+        else
+        {
+            moved &= std::abs(current.formationWeight - 2.5F) < 1.e-4F;
+            moved &= current.nonzeroRewardChannel;
+        }
         if (moved)
             break;
     }
@@ -322,6 +359,7 @@ int main(int argc, char** argv)
                   << " generalized=" << later.generalizedController
                   << " controllers=" << later.controllers
                   << " training=" << later.trainingPresent
+                  << " inference=" << later.inferencePresent
                   << " rewards=" << later.rewardsPresent
                   << " rollout=" << later.rollout << '\n';
     }
