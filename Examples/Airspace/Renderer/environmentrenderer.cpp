@@ -740,7 +740,8 @@ void DrawCarGlyph3D(ppo::model::sEntityState const& state, float scale, Color bo
 /**
 * @brief Draws a north/east rectangle on the tactical ground plane.
 */
-void DrawDefendedArea3D(ppo::model::sDefendedArea const& area, float scale)
+void DrawDefendedArea3D(ppo::model::sDefendedArea const& area, float scale,
+                        Color const color = Color{79, 145, 245, 225})
 {
     float const n0 = area.m_north - area.m_halfNorth;
     float const n1 = area.m_north + area.m_halfNorth;
@@ -750,7 +751,6 @@ void DrawDefendedArea3D(ppo::model::sDefendedArea const& area, float scale)
     auto b = ToWorld3D(n0, e1, -0.06F * scale, scale);
     auto c = ToWorld3D(n1, e1, -0.06F * scale, scale);
     auto d = ToWorld3D(n1, e0, -0.06F * scale, scale);
-    Color const color{79, 145, 245, 225};
     DrawLineEx3D(a, b, 0.055F, color);
     DrawLineEx3D(b, c, 0.055F, color);
     DrawLineEx3D(c, d, 0.055F, color);
@@ -1597,6 +1597,7 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
             m_showSimulation = section.value("showSimulation", m_showSimulation);
             m_showPseudoLidar = section.value("showPseudoLidar", m_showPseudoLidar);
             m_showPatrolTrack = section.value("showPatrolTrack", m_showPatrolTrack);
+            m_showHardBoundary = section.value("showHardBoundary", m_showHardBoundary);
             m_focusSelectionInMinimap = section.value("focusSelectionInMinimap", m_focusSelectionInMinimap);
             m_cameraDistance = std::clamp(section.value("cameraDistance", m_cameraDistance), 5.F, 60.F);
             m_cameraHeight = std::clamp(section.value("cameraHeight", m_cameraHeight), 2.F, 25.F);
@@ -1653,6 +1654,7 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
             section["showSimulation"] = m_showSimulation;
             section["showPseudoLidar"] = m_showPseudoLidar;
             section["showPatrolTrack"] = m_showPatrolTrack;
+            section["showHardBoundary"] = m_showHardBoundary;
             section["focusSelectionInMinimap"] = m_focusSelectionInMinimap;
             section["cameraDistance"] = m_cameraDistance;
             section["cameraHeight"] = m_cameraHeight;
@@ -2314,7 +2316,7 @@ EnvironmentRenderer::UpdateFreeCamera(entt::registry const& snapshot, bool hover
 * @brief Draws the play, pause, and stop transport controls.
 */
 void
-EnvironmentRenderer::DrawSimulationControls(void)
+EnvironmentRenderer::DrawSimulationControls(entt::registry const& snapshot)
 {
     if (p_environment == nullptr)
         return;
@@ -2372,6 +2374,10 @@ EnvironmentRenderer::DrawSimulationControls(void)
     ImGui::Checkbox("Show grid", &m_showGrid);
     ImGui::Checkbox("Show domains", &m_showDomains);
     ImGui::Checkbox("Show pseudo lidar", &m_showPseudoLidar);
+    if (snapshot.ctx().contains<ppo::model::sPatrolTrackOverlay>())
+        ImGui::Checkbox("Show patrol track", &m_showPatrolTrack);
+    if (snapshot.ctx().contains<ppo::model::sHardBoundaryOverlay>())
+        ImGui::Checkbox("Show outer failure boundary", &m_showHardBoundary);
     ImGui::Checkbox("Show destroyed markers", &m_showDestroyed);
     ImGui::Checkbox("Show meta catalog", &m_showMetaCatalog);
     ImGui::Checkbox("Center minimap on selection", &m_focusSelectionInMinimap);
@@ -2797,6 +2803,16 @@ EnvironmentRenderer::RenderTacticalScene(entt::registry const& snapshot, int wid
     DrawPlane(Vector3{ 0.F, -0.02F, 0.F }, Vector2{ 320.F, 320.F }, Color{ 14, 21, 30, 255 });
     if (snapshot.ctx().contains<ppo::model::sDefendedArea>())
         DrawDefendedArea3D(snapshot.ctx().get<ppo::model::sDefendedArea>(), m_worldScale);
+    if (m_showHardBoundary
+        && snapshot.ctx().contains<ppo::model::sHardBoundaryOverlay>())
+    {
+        auto const& outside =
+            snapshot.ctx().get<ppo::model::sHardBoundaryOverlay>();
+        DrawDefendedArea3D(
+            ppo::model::sDefendedArea{0.F, 0.F,
+                                      outside.m_halfNorth, outside.m_halfEast},
+            m_worldScale, Color{255, 166, 77, 230});
+    }
     if (m_showPatrolTrack
         && snapshot.ctx().contains<ppo::model::sPatrolTrackOverlay>())
         DrawPatrolTrack3D(
@@ -2997,12 +3013,6 @@ EnvironmentRenderer::DrawTacticalWindow(entt::registry const& snapshot)
     ImGui::Text("Episodes %u", m_missionTelemetry.m_totalEpisodes);
     ImGui::SameLine();
     ImGui::Text("%s", m_missionTelemetry.m_lastEpisodeSuccess ? "Last: Success" : "Last: Pending/Fail");
-    if (snapshot.ctx().contains<ppo::model::sPatrolTrackOverlay>())
-    {
-        ImGui::SameLine();
-        ImGui::Checkbox("Show patrol track", &m_showPatrolTrack);
-    }
-
     ImVec2 const size = ImGui::GetContentRegionAvail();
     RenderTacticalScene(snapshot, static_cast<int>(size.x), static_cast<int>(size.y));
 
@@ -3080,6 +3090,20 @@ EnvironmentRenderer::DrawMinimapWindow(entt::registry const& snapshot)
 
     draw->AddRectFilled(workMin, workMax, IM_COL32(20, 30, 40, 85), 6.F);
     draw->AddRect(workMin, workMax, IM_COL32(235, 210, 120, 220), 6.F, 0, 2.0F);
+    if (m_showHardBoundary
+        && snapshot.ctx().contains<ppo::model::sHardBoundaryOverlay>())
+    {
+        auto const& outside =
+            snapshot.ctx().get<ppo::model::sHardBoundaryOverlay>();
+        ImVec2 const farNorthEast = toMinimap(
+            outside.m_halfNorth, outside.m_halfEast);
+        ImVec2 const farSouthWest = toMinimap(
+            -outside.m_halfNorth, -outside.m_halfEast);
+        draw->AddRect(
+            ImVec2{farSouthWest.x, farNorthEast.y},
+            ImVec2{farNorthEast.x, farSouthWest.y},
+            IM_COL32(255, 166, 77, 235), 0.F, 0, 2.F);
+    }
 
     for (int ring = 1; ring <= 4; ++ring)
     {
@@ -3664,7 +3688,7 @@ EnvironmentRenderer::Run(void)
         {
             if (ImGui::Begin("Simulation", &m_showSimulation))
             {
-                DrawSimulationControls();
+                DrawSimulationControls(snapshot);
                 if (ImGui::CollapsingHeader("Scene details"))
                     DrawStatusBar(snapshot);
                 if (p_pinnedPlot != nullptr && ImGui::CollapsingHeader("Pinned diagnostics"))
