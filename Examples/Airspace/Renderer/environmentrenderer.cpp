@@ -3059,8 +3059,20 @@ EnvironmentRenderer::DrawMinimapWindow(entt::registry const& snapshot)
 
     float const centerX = (mapMin.x + mapMax.x) * 0.5F;
     float const centerY = (mapMin.y + mapMax.y) * 0.5F;
-    float const visibleEastRange = std::max(m_eastRange, 1.F) / std::max(m_mapZoom, 0.001F);
-    float const visibleNorthRange = std::max(m_northRange, 1.F) / std::max(m_mapZoom, 0.001F);
+    float visibleEastRange = std::max(m_eastRange, 1.F) / std::max(m_mapZoom, 0.001F);
+    float visibleNorthRange = std::max(m_northRange, 1.F) / std::max(m_mapZoom, 0.001F);
+    if (m_showHardBoundary
+        && snapshot.ctx().contains<ppo::model::sHardBoundaryOverlay>())
+    {
+        // Fit the entire terminal rectangle even when a previous zoom level
+        // would clip it; no camera or historical Airspace scale is changed.
+        auto const& outside =
+            snapshot.ctx().get<ppo::model::sHardBoundaryOverlay>();
+        visibleEastRange = std::max(
+            visibleEastRange, 1.08F * outside.m_halfEast);
+        visibleNorthRange = std::max(
+            visibleNorthRange, 1.08F * outside.m_halfNorth);
+    }
     float const scaleX = (size * 0.5F) / visibleEastRange;
     float const scaleY = (size * 0.5F) / visibleNorthRange;
     float const scale = std::min(scaleX, scaleY);
