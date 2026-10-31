@@ -362,7 +362,7 @@ private:
     /**
     * @brief Draws simulation play, pause, and stop controls.
     */
-    void DrawSimulationControls(void);
+    void DrawSimulationControls(entt::registry const& snapshot);
     /**
     * @brief Draws the top-level simulation status bar.
     * @param snapshot Read-only environment snapshot.
@@ -550,6 +550,8 @@ private:
     bool m_showPseudoLidar{ false };
     /** @brief True when the TwoVsTwo analytical patrol overlay is visible. */
     bool m_showPatrolTrack{ false };
+    /** @brief Toggle the MAPPO hard failure boundary from the world/scene UI. */
+    bool m_showHardBoundary{ false };
     /**
     * @brief True when the minimap follows the current selection.
     */
