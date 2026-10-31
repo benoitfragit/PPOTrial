@@ -292,7 +292,9 @@ def run_v2(args: argparse.Namespace, config: dict) -> int:
     if updates < completed_target:
         raise ValueError("Checkpoint behind completed V2 curriculum phase")
     if next_stage == len(stages):
-        print("[CURRICULUM_V2] All 1000 updates already completed.")
+        if updates != baseline_updates + config["totalUpdates"]:
+            raise ValueError("Completed V2 progress contradicts checkpoint update")
+        print("[CURRICULUM_V2] All curriculum updates already completed.")
         return 0
 
     OUTPUT.mkdir(parents=True, exist_ok=True)
