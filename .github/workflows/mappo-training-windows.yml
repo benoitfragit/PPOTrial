@@ -12,16 +12,17 @@ on:
           - blue-defense
           - blue-patrol
       curriculum_enabled:
-        description: "Enable MAPPO staged curriculum with optional rehearsal (V2)"
+        description: "Enable MAPPO staged curriculum and run-16 V3 extension"
         required: true
         type: boolean
         default: false
       curriculum_version:
-        description: "V2 progressive rehearsal (1000 updates), or legacy sequential V1"
+        description: "V3 run-16 continuation (+1200), V2 initial curriculum, or V1 legacy"
         required: true
         type: choice
-        default: v2
+        default: v3
         options:
+          - v3
           - v2
           - v1
       max_seconds:
@@ -159,11 +160,20 @@ jobs:
           if (-not [int]::TryParse($env:MAX_SECONDS, [ref]$seconds) -or $seconds -lt 1 -or $seconds -gt 18000) {
             throw "max_seconds must be an integer in [1, 18000]"
           }
+          if ($env:CURRICULUM_VERSION -eq "v3" -and
+              [string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) {
+            throw "V3 preserves the run-16 optimizer: set resume_run_id (41196771606 initially)."
+          }
           $fresh = @()
           if ([string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) {
+            # The checked-in V2 progress is a development example, not
+            # evidence that fresh training should silently resume.
+            Remove-Item "resources/model/BluePatrol/curriculum-progress.json" -Force -ErrorAction SilentlyContinue
             $fresh = @("--fresh-start")
           }
-          $curriculumConfig = if ($env:CURRICULUM_VERSION -eq "v2") {
+          $curriculumConfig = if ($env:CURRICULUM_VERSION -eq "v3") {
+            "resources/settings/Training/BluePatrolCurriculumV3.json"
+          } elseif ($env:CURRICULUM_VERSION -eq "v2") {
             "resources/settings/Training/BluePatrolCurriculumV2.json"
           } else {
             "resources/settings/Training/BluePatrolCurriculum.json"

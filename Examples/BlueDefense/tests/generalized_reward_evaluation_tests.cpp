@@ -126,6 +126,7 @@ bool TestOneVersusZero()
     GeneralizedEvaluationSample sample{};
     sample.finalState = transition.after;
     sample.leaderPatrolQuality = 0.8F;
+    sample.patrolCompleted = true;
     GeneralizedEvaluationAccumulator evaluation{};
     if (evaluation.Record(*roles, sample)
         != GeneralizedEvaluationStatus::Recorded)
@@ -146,6 +147,43 @@ bool TestOneVersusZero()
 /**
  * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
  */
+bool TestNoRedNeedsCompletedLap()
+{
+    auto const roles = BlueTeamRoles::Create(2U, 1U);
+    if (!roles)
+        return false;
+    GeneralizedRewardTransition transition{};
+    transition.before = MakeState(2U, 0U);
+    transition.after = transition.before;
+    GeneralizedCooperativeRewards rewards{};
+    if (AggregateGeneralizedCooperativeRewards(*roles, transition, {}, rewards)
+            != GeneralizedRewardStatus::Applied
+        || !Near(Channel(rewards.team,
+                GeneralizedRewardChannel::MissionOutcome), 0.F))
+        return false;
+
+    GeneralizedEvaluationSample sample{};
+    sample.finalState = transition.after;
+    sample.leaderPatrolQuality = 1.F;
+    sample.formationSlotQuality[0] = 1.F;
+    GeneralizedEvaluationAccumulator evaluation{};
+    if (evaluation.Record(*roles, sample) != GeneralizedEvaluationStatus::Recorded
+        || !Near(evaluation.Metrics().missionSuccessRate, 0.F))
+        return false;
+
+    transition.patrolCompleted = true;
+    if (AggregateGeneralizedCooperativeRewards(*roles, transition, {}, rewards)
+            != GeneralizedRewardStatus::Applied
+        || !Near(Channel(rewards.team,
+                GeneralizedRewardChannel::MissionOutcome), 1.F))
+        return false;
+    sample.patrolCompleted = true;
+    evaluation.Reset();
+    return evaluation.Record(*roles, sample)
+            == GeneralizedEvaluationStatus::Recorded
+        && Near(evaluation.Metrics().missionSuccessRate, 1.F);
+}
+
 bool TestIndependentRoleAndPursuitWeights()
 {
     auto const roles = BlueTeamRoles::Create(2U, 0U);
@@ -660,6 +698,7 @@ bool TestDeterministicCampaignBoundary()
         GeneralizedEvaluationSample sample{};
         sample.finalState = MakeState(1U, 0U);
         sample.leaderPatrolQuality = 0.8F;
+        sample.patrolCompleted = true; // Qualified Pvs0 success, not empty N.
         bool const firstHasMore = first.FinishEpisode(*roles, sample);
         bool const secondHasMore = second.FinishEpisode(*roles, sample);
         if (firstHasMore != (episode + 1U < settings.episodes)
@@ -692,6 +731,8 @@ int main()
         return 21;
     if (!TestOneVersusZero())
         return 1;
+    if (!TestNoRedNeedsCompletedLap())
+        return 26;
     if (!TestDelayedMissionCredit())
         return 25;
     if (!TestTwoVersusTwo())

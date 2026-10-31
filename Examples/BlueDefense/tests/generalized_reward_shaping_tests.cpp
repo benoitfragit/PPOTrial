@@ -337,6 +337,129 @@ bool TestSafetyRisks()
         && patrol::GeneralizedSafetyPenalty(0.9F, 0.1F) > 0.F;
 }
 
+/**
+ * @brief Pvs0 leader laps require progress, position, speed and heading.
+ */
+bool TestNoThreatPatrolLap()
+{
+    patrol::Parameters parameters{};
+    parameters.cruiseSpeed = 300.F;
+    parameters.maxSpeed = 750.F;
+    auto roles = patrol::BlueTeamRoles::Create(1U, 0U);
+    if (!roles)
+        return false;
+    patrol::PatrolNoThreatSettings settings{};
+    settings.enabled = true;
+    settings.stepRewardScale = 0.0005F;
+    auto previous = MakeState(1U, 0U);
+    auto next = previous;
+    patrol::GeneralizedPatrolLapProgress lap{};
+    float const circuit = patrol::CircuitLength(parameters.geometry);
+    constexpr std::size_t segments = 2000U;
+    float const step = circuit / static_cast<float>(segments);
+    bool completed = false;
+    for (std::size_t index = 0U; index < segments; ++index)
+    {
+        auto const from = patrol::EvaluatePatrolCurve(
+            parameters.geometry, 1000.F + step * static_cast<float>(index));
+        auto const to = patrol::EvaluatePatrolCurve(
+            parameters.geometry, 1000.F + step * static_cast<float>(index + 1U));
+        previous.blues[0] = {from.north, from.east, from.heading,
+                             parameters.cruiseSpeed, 0.F, true};
+        next.blues[0] = {to.north, to.east, to.heading,
+                         parameters.cruiseSpeed, 0.F, true};
+        completed = lap.Observe(parameters, previous, next, *roles, settings);
+        if (completed != (index + 1U == segments))
+            return false;
+    }
+    if (!completed || !lap.Completed()
+        || patrol::GeneralizedNoThreatShaping(
+               parameters, next, *roles, 0U, settings) <= 0.F)
+        return false;
+
+    // A stationary leader cannot earn another lap, even on the curve.
+    lap.Reset();
+    if (lap.Observe(parameters, next, next, *roles, settings)
+        || lap.Completed())
+        return false;
+    // The shaping must retain a recovery gradient far beyond tolerance.
+    patrol::GeneralizedPatrolError const moderatelyOff{2.F, 0.F, 0.F};
+    patrol::GeneralizedPatrolError const severelyOff{6.F, 0.F, 0.F};
+    if (!(moderatelyOff.BoundedCost() < severelyOff.BoundedCost())
+        || !(severelyOff.BoundedCost() < 1.F))
+        return false;
+    auto stopped = next;
+    stopped.blues[0].speed = 0.F;
+    if (patrol::GeneralizedNoThreatError(
+            parameters, stopped, *roles, 0U, settings).InTolerance()
+        || patrol::GeneralizedNoThreatShaping(
+            parameters, stopped, *roles, 0U, settings) >= 0.F)
+        return false;
+    return true;
+}
+
+/** @brief Follower slots use projected racetrack, never a drifting leader. */
+bool TestProjectedWedgeAndInactiveRedMask()
+{
+    patrol::Parameters parameters{};
+    parameters.cruiseSpeed = 300.F;
+    parameters.maxSpeed = 750.F;
+    patrol::PatrolNoThreatSettings settings{};
+    settings.enabled = true;
+    auto roles = patrol::BlueTeamRoles::Create(2U, 0U);
+    if (!roles)
+        return false;
+    auto state = MakeState(2U, 1U);
+    state.reds[0].available = false; // Delayed activation.
+    if (patrol::GeneralizedHasActiveRed(state))
+        return false;
+
+    auto const leader = patrol::EvaluatePatrolCurve(
+        parameters.geometry, 2000.F);
+    state.blues[0] = {leader.north + 4000.F, leader.east,
+                      leader.heading, parameters.cruiseSpeed, 0.F, true};
+    auto const target = patrol::GeneralizedNoThreatTarget(
+        parameters, state, *roles, 1U);
+    state.blues[1] = {target.pose.north, target.pose.east,
+        target.pose.heading, target.speed, 0.F, true};
+
+    std::array<patrol::GeneralizedObservation,
+               patrol::TeamCapacity::MaximumBlueMobiles> projected{};
+    std::array<patrol::GeneralizedObservation,
+               patrol::TeamCapacity::MaximumBlueMobiles> historical{};
+    if (!patrol::BuildGeneralizedObservations(
+            parameters, state, *roles, projected, true)
+        || !patrol::BuildGeneralizedObservations(
+            parameters, state, *roles, historical))
+        return false;
+    std::size_t const index =
+        patrol::GeneralizedObservationLayout::PatrolOffset + 6U;
+    if (!Close(projected[1].values[index], 0.F, 0.02F)
+        || !Close(projected[1].values[index + 1U], 0.F, 0.02F)
+        || (Close(historical[1].values[index], 0.F, 0.02F)
+            && Close(historical[1].values[index + 1U], 0.F, 0.02F))
+        || !patrol::GeneralizedNoThreatError(
+            parameters, state, *roles, 1U, settings).InTolerance()
+        || patrol::GeneralizedNoThreatError(
+            parameters, state, *roles, 0U, settings).InTolerance())
+        return false;
+
+    // On a turn, a wedge slot has its own tangent and speed.
+    auto const turn = patrol::EvaluatePatrolCurve(
+        parameters.geometry,
+        parameters.geometry.length - parameters.geometry.width
+            + 0.25F * patrol::kPatrolPi * parameters.geometry.width);
+    state.blues[0] = {turn.north, turn.east, turn.heading,
+                      parameters.cruiseSpeed, 0.F, true};
+    auto const turningTarget = patrol::GeneralizedNoThreatTarget(
+        parameters, state, *roles, 1U);
+    if (Close(turningTarget.speed, parameters.cruiseSpeed, 1.F))
+        return false;
+
+    state.reds[0].available = true;
+    return patrol::GeneralizedHasActiveRed(state);
+}
+
 } // namespace
 
 /**
@@ -351,5 +474,7 @@ int main()
     if (!TestControlEffortPenalty()) return 5;
     if (!TestSafetyRisks()) return 6;
     if (!TestFormationAndLowSpeed()) return 7;
+    if (!TestNoThreatPatrolLap()) return 8;
+    if (!TestProjectedWedgeAndInactiveRedMask()) return 9;
     return 0;
 }

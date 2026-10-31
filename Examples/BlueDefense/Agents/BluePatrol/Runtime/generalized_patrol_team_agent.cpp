@@ -339,6 +339,7 @@ GeneralizedPatrolMappoAgent::~GeneralizedPatrolMappoAgent()
 void GeneralizedPatrolMappoAgent::Init()
 {
     episodeStep_ = 0U;
+    noThreatLap_.Reset();
     currentReward_ = 0.F;
     lastRewardChannels_.fill(0.F);
     hasBeforeStep_ = false;
@@ -501,7 +502,9 @@ void GeneralizedPatrolMappoAgent::BuildObservations(
     }
 
     if (BuildGeneralizedObservations(
-            parameters, state, roles, observations))
+            parameters, state, roles, observations,
+            training_.noThreatPatrol.enabled
+                && !GeneralizedHasActiveRed(state)))
     {
         return;
     }
@@ -525,12 +528,14 @@ void GeneralizedPatrolMappoAgent::BuildObservations(
 GeneralizedEvaluationSample
 GeneralizedPatrolMappoAgent::BuildEvaluationSample(
     Parameters const& parameters, GeneralizedRuntimeState const& state,
-    bool const missionFailed, bool const timeout) const
+    bool const missionFailed, bool const timeout,
+    bool const patrolCompleted) const
 {
     GeneralizedEvaluationSample result{};
     result.finalState = CombatMask(state);
     result.missionFailed = missionFailed;
     result.timeout = timeout;
+    result.patrolCompleted = patrolCompleted;
 
     BlueTeamRoles const& roles = Roles();
     Mobile const& leader = state.blues[roles.LeaderPhysicalIndex()];
@@ -663,9 +668,22 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         }
         bool const noThreatRemains = counts_.redMobiles > 0U
             && AliveCount(after.reds, counts_.redMobiles) == 0U
-            && !pendingThreats;
-        bool const terminated = after.failed || !after.objectiveAvailable
-            || noThreatRemains;
+            && AliveCount(after.blues, counts_.blueMobiles) > 0U
+            && after.objectiveAvailable && !pendingThreats;
+        // N=0 can end successfully after one correctly flown lap.
+        // Pending red activations never trigger the no-red mission outcome.
+        bool const patrolCompleted = counts_.redMobiles == 0U
+            && !pendingThreats && !after.failed && after.objectiveAvailable
+            && noThreatLap_.Observe(
+                parameters, beforeStep_, after, Roles(),
+                training_.noThreatPatrol);
+        // If the last red is destroyed in the same step as a hard-boundary
+        // excursion, neutralization takes precedence while the objective
+        // and at least one blue survive.
+        bool const missionFailed = (after.failed && !noThreatRemains)
+            || !after.objectiveAvailable;
+        bool const terminated = missionFailed || noThreatRemains
+            || patrolCompleted;
         std::size_t const episodeLimit = evaluation_.InProgress()
             ? training_.evaluation.maxSteps : parameters.episodeSteps;
         bool const truncated = !terminated
@@ -743,8 +761,9 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                 char const* const outcome = !after.objectiveAvailable
                     ? "objective_lost"
                     : livingBlue == 0U ? "all_blues_lost"
-                    : after.failed ? "boundary_failure"
                     : noThreatRemains ? "reds_cleared"
+                    : after.failed ? "boundary_failure"
+                    : patrolCompleted ? "patrol_complete"
                     : truncated ? "timeout" : "unknown";
                 std::cout << "[MAPPO_EVAL_EPISODE] update="
                           << learner_->StepCount()
@@ -770,7 +789,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                 bool const hasMore = evaluation_.FinishEpisode(
                     Roles(), BuildEvaluationSample(
                         parameters, after,
-                        after.failed || !after.objectiveAvailable, truncated));
+                        missionFailed, truncated, patrolCompleted));
                 if (hasMore)
                 {
                     PrepareEvaluationCase();
@@ -801,9 +820,10 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         GeneralizedRewardTransition transition{};
         transition.before = CombatMask(beforeStep_);
         transition.after = CombatMask(after);
-        transition.missionFailed = after.failed || !after.objectiveAvailable;
+        transition.missionFailed = missionFailed;
         transition.pendingThreats = pendingThreats;
         transition.timeout = truncated;
+        transition.patrolCompleted = patrolCompleted;
         // Dense shared signal: interception of an imminent attacker reduces
         // objective danger more than neutralizing a distant attacker.
         transition.responsibilities.threatContainment = Clamp(
@@ -814,8 +834,14 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             beforeStep_.blues[roles.LeaderPhysicalIndex()].available
             && after.blues[roles.LeaderPhysicalIndex()].available
             ? GeneralizedCooperationWeight(parameters, beforeStep_) : 0.F;
-        transition.responsibilities.leaderPatrol = cooperation
-            * GeneralizedLeaderTrackingReward(
+        bool const noActiveThreat = training_.noThreatPatrol.enabled
+            && !GeneralizedHasActiveRed(beforeStep_)
+            && !GeneralizedHasActiveRed(after);
+        transition.responsibilities.leaderPatrol = noActiveThreat
+            ? GeneralizedNoThreatShaping(
+                parameters, after, roles, roles.LeaderPhysicalIndex(),
+                training_.noThreatPatrol)
+            : cooperation * GeneralizedLeaderTrackingReward(
                 parameters, beforeStep_, after, roles);
         transition.responsibilities.pursuitProgress =
             GeneralizedEngagementWeight(parameters, beforeStep_)
@@ -826,8 +852,11 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             if (assignment.role == BlueRole::Teammate)
             {
                 transition.responsibilities.formationSlots[
-                    assignment.formationSlot] = cooperation
-                    * GeneralizedFormationProgressReward(
+                    assignment.formationSlot] = noActiveThreat
+                    ? GeneralizedNoThreatShaping(
+                        parameters, after, roles, index,
+                        training_.noThreatPatrol)
+                    : cooperation * GeneralizedFormationProgressReward(
                         parameters, beforeStep_, after, roles, index);
             }
             transition.responsibilities.controlEffort[index] =

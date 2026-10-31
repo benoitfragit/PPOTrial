@@ -9,6 +9,7 @@
 #include "generalized_evaluation_campaign.hpp"
 #include "generalized_runtime_state.hpp"
 #include "generalized_cooperative_reward.hpp"
+#include "generalized_reward_shaping.hpp"
 #include "patrol_training_settings.hpp"
 #include "baseentity.hpp"
 #include "iagent.hpp"
@@ -143,7 +144,7 @@ private:
  */
     GeneralizedEvaluationSample BuildEvaluationSample(
         Parameters const& parameters, GeneralizedRuntimeState const& state,
-        bool missionFailed, bool timeout) const;
+        bool missionFailed, bool timeout, bool patrolCompleted) const;
 /**
  * @brief Sérialise ou écrit les données associées à SaveAtUpdateBoundary selon les garanties implémentées.
  * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
@@ -209,6 +210,7 @@ private:
     std::uint64_t lastSavedUpdate_{};
     unsigned long long id_{ppo::model::GetNewUniqId()};
     float currentReward_{};
+    GeneralizedPatrolLapProgress noThreatLap_{};
     bool hasBeforeStep_{};
     bool episodeDone_{};
     bool finished_{};

@@ -1,0 +1,83 @@
+{
+  "formatVersion": 3,
+  "description": "Run-16 full-optimizer continuation: 796 PPO updates retained; add 1200 updates with Pvs0 patrol/wedge repairs and periodic 4v4 combat rehearsal.",
+  "resumeFromV2Hash": "78ce4f0dbc645fb7e5c0bb7e606b9813db10548968ee115e36d549b2936646ab",
+  "minimumResumeUpdate": 796,
+  "totalUpdates": 1200,
+  "rehearsal": {
+    "primaryUpdates": 24,
+    "priorUpdates": 6
+  },
+  "stages": [
+    {
+      "id": "01-protect-combat-4v4",
+      "blue": 4,
+      "red": 4,
+      "hostileZones": true,
+      "updates": 150
+    },
+    {
+      "id": "02-relearn-hippodrome",
+      "blue": 1,
+      "red": 0,
+      "hostileZones": false,
+      "updates": 150
+    },
+    {
+      "id": "03-relearn-wedge",
+      "blue": 2,
+      "red": 0,
+      "hostileZones": false,
+      "updates": 180
+    },
+    {
+      "id": "04-multiple-slots",
+      "blue": 3,
+      "red": 0,
+      "hostileZones": false,
+      "updates": 80
+    },
+    {
+      "id": "05-combat-one-vs-one",
+      "blue": 1,
+      "red": 1,
+      "hostileZones": false,
+      "updates": 120
+    },
+    {
+      "id": "06-combat-one-vs-two",
+      "blue": 1,
+      "red": 2,
+      "hostileZones": false,
+      "updates": 80
+    },
+    {
+      "id": "07-patrol-hostile-zones",
+      "blue": 1,
+      "red": 0,
+      "hostileZones": true,
+      "updates": 90
+    },
+    {
+      "id": "08-combat-two-vs-two",
+      "blue": 2,
+      "red": 2,
+      "hostileZones": true,
+      "updates": 90
+    },
+    {
+      "id": "09-combat-three-vs-three",
+      "blue": 3,
+      "red": 3,
+      "hostileZones": true,
+      "updates": 100
+    },
+    {
+      "id": "10-reference-four-vs-four",
+      "blue": 4,
+      "red": 4,
+      "hostileZones": true,
+      "updates": 160
+    }
+  ]
+}

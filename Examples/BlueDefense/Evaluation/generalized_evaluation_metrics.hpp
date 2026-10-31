@@ -35,6 +35,8 @@ struct GeneralizedEvaluationSample final
     bool missionFailed{};
     /** @brief True when the episode exhausted its deterministic step limit. */
     bool timeout{};
+    /** @brief Qualified Pvs0 patrol success, not a mere empty hostile set. */
+    bool patrolCompleted{};
 };
 
 /** @brief Final normalized metrics of a deterministic evaluation campaign. */
@@ -162,7 +164,8 @@ public:
         bool const objectiveSurvived =
             sample.finalState.objectiveAvailable;
         bool const success = objectiveSurvived && !sample.missionFailed
-            && survivingRed == 0U;
+            && survivingBlue > 0U && survivingRed == 0U
+            && (redCount > 0U || sample.patrolCompleted);
 
         ++episodes_;
         blueSurvivalSum_ += blueSurvival;

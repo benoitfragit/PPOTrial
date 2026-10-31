@@ -7,6 +7,7 @@
 #pragma once
 
 #include "generalized_runtime_state.hpp"
+#include "patrol_training_settings.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -368,6 +369,227 @@ inline float GeneralizedEngagementWeight(
         state, parameters);
     return std::max(close, pressure);
 }
+
+/**
+ * @brief Whether any actually active hostile requires combat attention.
+ *
+ * Delayed/inactive tracks do not cancel patrol shaping. This only inspects
+ * the runtime availability masks; no red controller or target is changed.
+ */
+inline bool GeneralizedHasActiveRed(
+    GeneralizedRuntimeState const& state) noexcept
+{
+    for (std::size_t index = 0U; index < state.counts.redMobiles; ++index)
+        if (state.reds[index].available)
+            return true;
+    return false;
+}
+
+/** @brief A Blue-specific theoretical reference, never an autopilot command. */
+struct GeneralizedPatrolTarget final
+{
+    PatrolCurvePose pose{};
+    float speed{};
+};
+
+/**
+ * @brief Leader: racetrack projection. Teammate: projected leader wedge slot.
+ *
+ * Differentiate the follower's offset curve to obtain its own tangent and
+ * turn-speed ratio. This is necessary in the turns; copying the leader's
+ * heading and speed would reward a geometrically incorrect wedge.
+ */
+inline GeneralizedPatrolTarget GeneralizedNoThreatTarget(
+    Parameters const& parameters, GeneralizedRuntimeState const& state,
+    BlueTeamRoles const& roles, std::size_t const physicalIndex) noexcept
+{
+    Mobile const& leader = state.blues[roles.LeaderPhysicalIndex()];
+    PatrolCurvePose const projected = ProjectOnPatrolCurve(
+        parameters.geometry, leader.north, leader.east).pose;
+    BlueRoleAssignment const assignment = *roles.Assignment(physicalIndex);
+    if (assignment.role == BlueRole::Leader)
+        return {projected, parameters.cruiseSpeed};
+
+    float constexpr derivativeHalfWidth = 10.F;
+    PatrolCurvePose pose = EvaluateFormationPose(
+        parameters.geometry, projected, assignment.formationSlot);
+    PatrolCurvePose const previous = EvaluateFormationPose(
+        parameters.geometry,
+        EvaluatePatrolCurve(parameters.geometry,
+            projected.arclength - derivativeHalfWidth),
+        assignment.formationSlot);
+    PatrolCurvePose const next = EvaluateFormationPose(
+        parameters.geometry,
+        EvaluatePatrolCurve(parameters.geometry,
+            projected.arclength + derivativeHalfWidth),
+        assignment.formationSlot);
+    float const north = next.north - previous.north;
+    float const east = next.east - previous.east;
+    float const length = std::hypot(north, east);
+    if (length > 1.e-3F)
+        pose.heading = std::atan2(east, north);
+    float const nominalSpeed = parameters.cruiseSpeed
+        * length / (2.F * derivativeHalfWidth);
+    return {pose, Clamp(nominalSpeed,
+        0.5F * parameters.cruiseSpeed, parameters.maxSpeed)};
+}
+
+/** @brief Individually normalized position, speed and heading errors. */
+struct GeneralizedPatrolError final
+{
+    float position{};
+    float speed{};
+    float heading{};
+
+    bool InTolerance() const noexcept
+    {
+        return position <= 1.F && speed <= 1.F && heading <= 1.F;
+    }
+
+    float BoundedCost() const noexcept
+    {
+        // A flat clip at one tolerance would remove all guidance for a
+        // distant leader or follower. Rational saturation stays bounded
+        // while preserving a gradient until recovery.
+        auto const saturate = [](float const error) noexcept {
+            return 1.F - 1.F / (1.F + std::max(error, 0.F));
+        };
+        return 0.5F * saturate(position)
+            + 0.3F * saturate(speed)
+            + 0.2F * saturate(heading);
+    }
+};
+
+/** @brief Errors refer only to the appropriate role's projected target. */
+inline GeneralizedPatrolError GeneralizedNoThreatError(
+    Parameters const& parameters, GeneralizedRuntimeState const& state,
+    BlueTeamRoles const& roles, std::size_t const physicalIndex,
+    PatrolNoThreatSettings const& settings) noexcept
+{
+    GeneralizedPatrolTarget const target = GeneralizedNoThreatTarget(
+        parameters, state, roles, physicalIndex);
+    Mobile const& blue = state.blues[physicalIndex];
+    return {
+        std::hypot(blue.north - target.pose.north,
+                   blue.east - target.pose.east)
+            / settings.positionToleranceMeters,
+        std::abs(blue.speed - target.speed)
+            / std::max(settings.speedToleranceFraction * target.speed, 1.F),
+        std::abs(std::remainder(
+            blue.heading - target.pose.heading, kPatrolTwoPi))
+            / settings.headingToleranceRadians
+    };
+}
+
+/**
+ * @brief Weak bounded no-threat reward; positive only inside all tolerances.
+ * A dead mobile never receives a synthetic position-based reward.
+ */
+inline float GeneralizedNoThreatShaping(
+    Parameters const& parameters, GeneralizedRuntimeState const& state,
+    BlueTeamRoles const& roles, std::size_t const physicalIndex,
+    PatrolNoThreatSettings const& settings) noexcept
+{
+    if (!settings.enabled || !state.blues[physicalIndex].available)
+        return 0.F;
+    GeneralizedPatrolError const error = GeneralizedNoThreatError(
+        parameters, state, roles, physicalIndex, settings);
+    return error.InTolerance() ? 0.25F * settings.stepRewardScale
+        : -settings.stepRewardScale * error.BoundedCost();
+}
+
+/** @brief All living participants must remain outside each other's sphere. */
+inline bool GeneralizedPatrolSpacingSafe(
+    GeneralizedRuntimeState const& state,
+    float const minimumSeparationMeters) noexcept
+{
+    for (std::size_t i = 0U; i < state.counts.blueMobiles; ++i)
+    {
+        if (!state.blues[i].available)
+            return false;
+        for (std::size_t j = i + 1U; j < state.counts.blueMobiles; ++j)
+        {
+            Mobile const& first = state.blues[i];
+            Mobile const& second = state.blues[j];
+            if (!second.available ||
+                std::hypot(first.north - second.north,
+                           first.east - second.east) < minimumSeparationMeters)
+                return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * @brief Accumulates one full physically attainable correctly flown lap.
+ *
+ * Bad position/velocity/heading, unsafe separation, reversing direction or
+ * an implausible arc jump reset the qualifying distance. No fixed-timestep
+ * stationary hold or nearest-point wrap-around can yield mission success.
+ */
+class GeneralizedPatrolLapProgress final
+{
+public:
+    void Reset() noexcept
+    {
+        distanceMeters_ = 0.F;
+        completed_ = false;
+    }
+
+    bool Completed() const noexcept { return completed_; }
+
+    bool Observe(
+        Parameters const& parameters,
+        GeneralizedRuntimeState const& before,
+        GeneralizedRuntimeState const& after,
+        BlueTeamRoles const& roles,
+        PatrolNoThreatSettings const& settings) noexcept
+    {
+        if (!settings.enabled || !GeneralizedPatrolSpacingSafe(
+                after, std::max(settings.minimumSeparationMeters,
+                                parameters.collisionDistance)))
+        {
+            Reset();
+            return false;
+        }
+        for (std::size_t i = 0U; i < after.counts.blueMobiles; ++i)
+        {
+            if (!GeneralizedNoThreatError(
+                    parameters, after, roles, i, settings).InTolerance())
+            {
+                Reset();
+                return false;
+            }
+        }
+        std::size_t const leaderIndex = roles.LeaderPhysicalIndex();
+        Mobile const& leaderBefore = before.blues[leaderIndex];
+        Mobile const& leaderAfter = after.blues[leaderIndex];
+        float const circuit = CircuitLength(parameters.geometry);
+        float const oldArc = ProjectOnPatrolCurve(
+            parameters.geometry, leaderBefore.north, leaderBefore.east)
+            .pose.arclength;
+        float const newArc = ProjectOnPatrolCurve(
+            parameters.geometry, leaderAfter.north, leaderAfter.east)
+            .pose.arclength;
+        float const forward = std::remainder(newArc - oldArc, circuit);
+        float const maximumPhysicalProgress =
+            1.5F * parameters.maxSpeed * parameters.dt;
+        if (forward <= 0.F || forward > maximumPhysicalProgress)
+        {
+            Reset();
+            return false;
+        }
+        distanceMeters_ += forward;
+        // Float integration over thousands of steps can be slightly below
+        // the exact analytical circumference at the finish line.
+        completed_ = distanceMeters_ >= circuit - 0.25F;
+        return completed_;
+    }
+
+private:
+    float distanceMeters_{};
+    bool completed_{};
+};
 
 /** @brief Retain patrol outside engagement and relax it under pressure. */
 inline float GeneralizedCooperationWeight(

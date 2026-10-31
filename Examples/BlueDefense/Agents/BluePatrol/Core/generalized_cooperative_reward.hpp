@@ -172,6 +172,8 @@ struct GeneralizedRewardTransition final
     bool pendingThreats{};
     /** @brief True when the episode exhausted its step budget. */
     bool timeout{};
+    /** @brief Completed a qualified full lap in a scenario with N=0. */
+    bool patrolCompleted{};
 };
 
 /** @brief Weighted channel decomposition for one trajectory or the team. */
@@ -397,8 +399,9 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
     float outcome = 0.F;
     if (transition.missionFailed || !transition.after.objectiveAvailable)
         outcome = -1.F;
-    else if (redCount > 0U && remainingReds == 0U
-             && !transition.pendingThreats)
+    else if ((redCount > 0U && remainingReds == 0U
+              && !transition.pendingThreats)
+             || (redCount == 0U && transition.patrolCompleted))
         outcome = 1.F;
     float const timeout = transition.timeout
         && (remainingReds > 0U || transition.pendingThreats) ? -1.F : 0.F;

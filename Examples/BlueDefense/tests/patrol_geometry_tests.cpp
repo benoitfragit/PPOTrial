@@ -239,5 +239,21 @@ int main()
     {
     }
 
+    // Two physical exclusion spheres must not overlap nominal wedge slots.
+    patrol::PatrolGeometry closeWedge{};
+    closeWedge.separationDistance = 6000.F;
+    closeWedge.separationAngle = 0.17453293F; // 10 degrees: 2084 m apart.
+    patrol::PatrolGeometrySettings wideSettings{};
+    wideSettings.boundaryMarginMeters = 0.F;
+    patrol::PatrolSamplingConstraints wideConstraints{
+        200000.F, 200000.F, 300.F, 0.8F, 1000.F};
+    if (patrol::GeneralizedFormationFitsBounds(
+            closeWedge, wideSettings, wideConstraints, 3U, 0.F))
+        return 15;
+    closeWedge.separationAngle = 0.35F;
+    if (!patrol::GeneralizedFormationFitsBounds(
+            closeWedge, wideSettings, wideConstraints, 3U, 0.F))
+        return 16;
+
     return 0;
 }

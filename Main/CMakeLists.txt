@@ -57,8 +57,8 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         COMMAND $<TARGET_FILE:${PROJECT_NAME}>
                 --example blue-defense-inference --check-example)
     set_tests_properties(BlueDefenseInferenceExampleBootstrap PROPERTIES
-        PASS_REGULAR_EXPRESSION
-            "Bootstrapped example: blue-defense-inference")
+        PASS_REGULAR_EXPRESSION "Bootstrapped example: blue-defense-inference"
+        FIXTURES_REQUIRED BlueInferenceActor)
 
     add_test(NAME UnknownExampleRejected
         COMMAND $<TARGET_FILE:${PROJECT_NAME}> --example unknown-example)
