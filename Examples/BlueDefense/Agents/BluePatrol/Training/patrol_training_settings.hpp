@@ -28,12 +28,47 @@ inline constexpr bool IsSupportedRolloutSize(std::size_t steps) noexcept
 }
 
 /**
+ * @brief Optional Blue-only P-versus-zero patrol task.
+ *
+ * Disabled in legacy configurations to preserve the Run 16 actor's input and
+ * reward contract unless the new training configuration explicitly opts in.
+ * These settings are runtime state, never serialized in the V6 optimizer.
+ */
+struct PatrolNoThreatSettings final
+{
+    bool enabled{false};
+    float positionToleranceMeters{2500.F};
+    float speedToleranceFraction{0.20F};
+    float headingToleranceRadians{0.35F};
+    float stepRewardScale{0.002F};
+    float minimumSeparationMeters{2500.F};
+};
+
+/** @brief Validate dimensioned patrol tolerances and bounded shaping. */
+inline bool Valid(PatrolNoThreatSettings const& settings) noexcept
+{
+    return std::isfinite(settings.positionToleranceMeters)
+        && settings.positionToleranceMeters > 0.F
+        && std::isfinite(settings.speedToleranceFraction)
+        && settings.speedToleranceFraction > 0.F
+        && settings.speedToleranceFraction <= 1.F
+        && std::isfinite(settings.headingToleranceRadians)
+        && settings.headingToleranceRadians > 0.F
+        && settings.headingToleranceRadians <= 3.14159265358979323846F
+        && std::isfinite(settings.stepRewardScale)
+        && settings.stepRewardScale >= 0.F
+        && settings.stepRewardScale <= 0.02F
+        && std::isfinite(settings.minimumSeparationMeters)
+        && settings.minimumSeparationMeters > 0.F;
+}
+
+/**
  * @brief Runtime settings for the embedded blue MAPPO trainer.
  */
 struct PatrolTrainingSettings final
 {
     std::size_t rolloutSteps{2048U};
-    std::uint64_t maxUpdates{300U};
+    std::uint64_t maxUpdates{1000U};
     std::uint64_t checkpointEvery{10U}; // Deterministic evaluation cadence.
     std::uint64_t saveEveryUpdates{10U}; // Independent full-state checkpoint cadence.
     std::uint32_t seed{42U};
@@ -43,6 +78,7 @@ struct PatrolTrainingSettings final
     float lowSpeedRiskWeight{5.F};
     RewardValues rewardWeights{1.F, 1.F, 1.F, 1.F, 1.F, 1.F, 1.F};
     PatrolEvaluationSettings evaluation{};
+    PatrolNoThreatSettings noThreatPatrol{};
 };
 
 /**
@@ -58,7 +94,7 @@ inline bool Valid(PatrolTrainingSettings const& settings) noexcept
         || !std::isfinite(settings.rewardClamp) || settings.rewardClamp <= 0.F
         || !std::isfinite(settings.ownLossWeight) || settings.ownLossWeight < 0.F
         || !std::isfinite(settings.lowSpeedRiskWeight) || settings.lowSpeedRiskWeight < 0.F
-        || !Valid(settings.evaluation))
+        || !Valid(settings.evaluation) || !Valid(settings.noThreatPatrol))
         return false;
     return std::all_of(settings.rewardWeights.begin(), settings.rewardWeights.end(),
         [](float weight) { return std::isfinite(weight) && weight >= 0.F; });

@@ -443,15 +443,35 @@ inline bool GeneralizedFormationFitsBounds(
 
     PatrolCurvePose const leader = EvaluatePatrolCurve(
         geometry, arclength);
-    if (!insideBounds(leader))
+    if (!insideBounds(leader)
+        || !std::isfinite(constraints.collisionDistance)
+        || constraints.collisionDistance <= 0.F)
         return false;
+
+    // Validate the full wedge, not only independent world-boundary checks.
+    // Two physical exclusion spheres must never overlap at a nominal slot:
+    // the 2.25x physical collision radius also leaves a small clearance
+    // around the 2x caution radius in the default BlueDefense scenario.
+    std::array<PatrolCurvePose, TeamCapacity::MaximumBlueMobiles> poses{};
+    poses[0] = leader;
     for (std::size_t formationSlot = 0U;
          formationSlot + 1U < activeBlueCount; ++formationSlot)
     {
-        if (!insideBounds(EvaluateFormationPose(
-                geometry, leader, formationSlot)))
-        {
+        poses[formationSlot + 1U] = EvaluateFormationPose(
+            geometry, leader, formationSlot);
+        if (!insideBounds(poses[formationSlot + 1U]))
             return false;
+    }
+    float const minimumSpacing = 2.25F * constraints.collisionDistance;
+    for (std::size_t first = 0U; first < activeBlueCount; ++first)
+    {
+        for (std::size_t second = first + 1U;
+             second < activeBlueCount; ++second)
+        {
+            if (std::hypot(poses[first].north - poses[second].north,
+                           poses[first].east - poses[second].east)
+                < minimumSpacing)
+                return false;
         }
     }
     return true;

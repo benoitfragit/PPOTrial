@@ -438,5 +438,105 @@ class CurriculumTests(unittest.TestCase):
             json.loads(curriculum.PROGRESS.read_text())["nextStage"], 2)
 
 
+    def test_v3_run16_extension_preserves_optimizer_counter(self) -> None:
+        cfg = {
+            "formatVersion": 3, "totalUpdates": 12,
+            "resumeFromV2Hash": "verified-v2-run16",
+            "minimumResumeUpdate": 796,
+            "rehearsal": {"primaryUpdates": 2, "priorUpdates": 1},
+            "stages": [
+                {"id": "combat-4v4", "blue": 4, "red": 4,
+                 "hostileZones": True, "updates": 8},
+                {"id": "reference-4v4", "blue": 4, "red": 4,
+                 "hostileZones": True, "updates": 4},
+            ],
+        }
+        curriculum.write_json(self.curriculum_path, cfg)
+        curriculum.write_json(curriculum.PROGRESS, {
+            "formatVersion": 2, "curriculumHash": "verified-v2-run16",
+            "baselineUpdates": 0, "nextStage": 8, "targetUpdates": 1000,
+        })
+        self.fake_checkpoint(796)
+        clock = [0.0]
+
+        def partial(binary: Path, stage: dict, seconds: int,
+                    log_path: Path) -> None:
+            self.assertEqual(curriculum.read_updates(), 796)
+            self.fake_checkpoint(797)
+            clock[0] = 240.0
+            return None
+
+        with patch.object(curriculum.time, "monotonic",
+                          side_effect=lambda: clock[0]):
+            with patch.object(curriculum, "run_stage", side_effect=partial):
+                self.assertEqual(curriculum.run(self.args()), 0)
+        progress = json.loads(curriculum.PROGRESS.read_text())
+        self.assertEqual(progress["formatVersion"], 3)
+        self.assertEqual(progress["baselineUpdates"], 796)
+        self.assertEqual(progress["targetUpdates"], 12)
+        self.assertEqual(progress["nextStage"], 0)
+        self.assertEqual(curriculum.read_updates(), 797)
+        self.assertEqual(curriculum.TRAINING_FILE.read_bytes(),
+                         self.original_training)
+
+    def test_v3_refuses_unknown_or_older_checkpoint(self) -> None:
+        cfg = {
+            "formatVersion": 3, "totalUpdates": 2,
+            "resumeFromV2Hash": "verified-v2-run16",
+            "minimumResumeUpdate": 796,
+            "rehearsal": {"primaryUpdates": 1, "priorUpdates": 1},
+            "stages": [
+                {"id": "reference-4v4", "blue": 4, "red": 4,
+                 "hostileZones": True, "updates": 2},
+            ],
+        }
+        curriculum.write_json(self.curriculum_path, cfg)
+        progress = {
+            "formatVersion": 2, "curriculumHash": "wrong-v2",
+            "baselineUpdates": 0, "nextStage": 8, "targetUpdates": 1000,
+        }
+        curriculum.write_json(curriculum.PROGRESS, progress)
+        self.fake_checkpoint(796)
+        with self.assertRaisesRegex(ValueError, "verified run-16"):
+            curriculum.run(self.args())
+        self.assertEqual(json.loads(curriculum.PROGRESS.read_text()), progress)
+        progress["curriculumHash"] = "verified-v2-run16"
+        curriculum.write_json(curriculum.PROGRESS, progress)
+        self.fake_checkpoint(795)
+        with self.assertRaisesRegex(ValueError, "verified run-16"):
+            curriculum.run(self.args())
+
+    def test_v3_never_silently_restarts_without_run16_progress(self) -> None:
+        cfg = {
+            "formatVersion": 3, "totalUpdates": 2,
+            "resumeFromV2Hash": "verified-v2-run16",
+            "minimumResumeUpdate": 796,
+            "rehearsal": {"primaryUpdates": 1, "priorUpdates": 1},
+            "stages": [
+                {"id": "reference-4v4", "blue": 4, "red": 4,
+                 "hostileZones": True, "updates": 2},
+            ],
+        }
+        curriculum.write_json(self.curriculum_path, cfg)
+        self.fake_checkpoint(796)
+        with self.assertRaisesRegex(ValueError, "never start"):
+            curriculum.run(self.args())
+        self.assertEqual(curriculum.read_updates(), 796)
+        self.assertFalse(curriculum.PROGRESS.exists())
+
+    def test_v3_repository_budget_and_combat_rehearsal(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        cfg = json.loads((repository / "resources/settings/Training/"
+                          "BluePatrolCurriculumV3.json").read_text())
+        stages, primary, prior = curriculum.validate_curriculum_v2(cfg)
+        self.assertEqual(cfg["totalUpdates"], 1200)
+        self.assertEqual(sum(stage["updates"] for stage in stages), 1200)
+        self.assertEqual(stages[0]["id"], "01-protect-combat-4v4")
+        self.assertEqual((stages[-1]["blue"], stages[-1]["red"]), (4, 4))
+        self.assertEqual((primary, prior), (24, 6))
+        self.assertGreaterEqual(sum(s["updates"] for s in stages
+                                    if s["red"] > 0), 700)
+
+
 if __name__ == "__main__":
     unittest.main()

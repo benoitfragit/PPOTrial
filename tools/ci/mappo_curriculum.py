@@ -197,8 +197,8 @@ def require_clean_fresh_start() -> None:
 
 def validate_curriculum_v2(document: dict) -> tuple[list[dict], int, int]:
     """Validate an independently versioned, explicit 1000-update curriculum."""
-    if document.get("formatVersion") != 2:
-        raise ValueError("V2 curriculum requires formatVersion 2")
+    if document.get("formatVersion") not in (2, 3):
+        raise ValueError("Staged curriculum requires formatVersion 2 or 3")
     stages = validate_curriculum({
         "formatVersion": 1, "stages": document.get("stages")
     })
@@ -245,8 +245,9 @@ def choose_rehearsal_block(stages: list[dict], phase_index: int,
 
 
 def run_v2(args: argparse.Namespace, config: dict) -> int:
-    """Fresh V2 training, or explicit V2 checkpoint resume; never import V1 progress."""
+    """V2/V3 training with strict, explicitly authorized V2-to-V3 migration."""
     stages, primary_updates, prior_updates = validate_curriculum_v2(config)
+    version = config["formatVersion"]
     binary = Path(args.binary)
     if not binary.is_file():
         raise FileNotFoundError(f"Missing built PPO executable: {binary}")
@@ -258,23 +259,53 @@ def run_v2(args: argparse.Namespace, config: dict) -> int:
         require_clean_fresh_start()
     updates = read_updates()
     config_hash = fingerprint(config)
+    if version == 3 and not PROGRESS.is_file():
+        raise ValueError(
+            "V3 requires a restored V2/V3 checkpoint and curriculum progress; "
+            "never start run-16 continuation from scratch")
     if PROGRESS.exists():
         progress = json.loads(PROGRESS.read_text(encoding="utf-8"))
-        if (progress.get("formatVersion") != 2
+        if version == 3 and progress.get("formatVersion") == 2:
+            # Preserve the learned actor, critic and Adam optimizer. Only
+            # curriculum metadata changes after a verified run-16 restore.
+            source_hash = config.get("resumeFromV2Hash")
+            minimum_update = config.get("minimumResumeUpdate")
+            if (not isinstance(source_hash, str)
+                    or progress.get("curriculumHash") != source_hash
+                    or type(minimum_update) is not int
+                    or updates < minimum_update
+                    or progress.get("nextStage") != 8
+                    or progress.get("baselineUpdates") != 0
+                    or progress.get("targetUpdates") != 1000):
+                raise ValueError(
+                    "V3 requires the verified run-16 V2 checkpoint; "
+                    "refusing to discard optimizer state")
+            progress = {
+                "formatVersion": 3,
+                "curriculumHash": config_hash,
+                "baselineUpdates": updates,
+                "nextStage": 0,
+                "targetUpdates": config["totalUpdates"],
+            }
+            write_json(PROGRESS, progress)
+            print(f"[CURRICULUM_V3] Full V6 optimizer resumed at "
+                  f"update {updates}; curriculum extension begins.",
+                  flush=True)
+        if (progress.get("formatVersion") != version
                 or progress.get("curriculumHash") != config_hash
                 or type(progress.get("baselineUpdates")) is not int
                 or type(progress.get("nextStage")) is not int
                 or progress.get("targetUpdates") != config["totalUpdates"]):
             raise ValueError(
-                "Incompatible V1 or modified V2 curriculum progress; "
-                "start V2 fresh, or resume with its exact V2 configuration")
+                "Incompatible V1 or modified V2/V3 curriculum progress; "
+                "resume with its exact version and configuration")
     else:
         if updates != 0:
             raise ValueError(
-                "Existing training checkpoint has no V2 progress; "
-                "use a fresh start or restore a complete V2 run artifact")
+                "Existing training checkpoint has no compatible progress; "
+                "use a fresh start or restore a complete run artifact")
         progress = {
-            "formatVersion": 2,
+            "formatVersion": version,
             "curriculumHash": config_hash,
             "baselineUpdates": updates,
             "nextStage": 0,
@@ -302,7 +333,7 @@ def run_v2(args: argparse.Namespace, config: dict) -> int:
     stage_root.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + args.max_seconds
     summary = [
-        "# Blue MAPPO curriculum V2 — interleaved rehearsal",
+        f"# Blue MAPPO curriculum V{version} — interleaved rehearsal",
         "",
         f"Start update: {updates}; target: "
         f"{baseline_updates + config['totalUpdates']}.",
@@ -397,7 +428,7 @@ def run_v2(args: argparse.Namespace, config: dict) -> int:
 
 def run(args: argparse.Namespace) -> int:
     config = json.loads(Path(args.curriculum).read_text(encoding="utf-8"))
-    if config.get("formatVersion") == 2:
+    if config.get("formatVersion") in (2, 3):
         return run_v2(args, config)
     stages = validate_curriculum(config)
     config_hash = fingerprint(config)

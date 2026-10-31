@@ -251,6 +251,32 @@ ParsePatrolTrainingSettings(nlohmann::json const& document)
             *generalized, "lowSpeedRiskWeight");
     }
 
+    // Explicit opt-in: historical JSON retains its former reward contract.
+    auto const noThreat = rewards.find("noThreatPatrol");
+    if (noThreat != rewards.end())
+    {
+        if (!noThreat->is_object()
+            || !noThreat->contains("enabled")
+            || !(*noThreat)["enabled"].is_boolean())
+            throw std::invalid_argument("Invalid no-threat patrol configuration");
+        result.noThreatPatrol.enabled = noThreat->at("enabled").get<bool>();
+        result.noThreatPatrol.positionToleranceMeters =
+            patrol_config_detail::FiniteNumber(
+                *noThreat, "positionToleranceMeters");
+        result.noThreatPatrol.speedToleranceFraction =
+            patrol_config_detail::FiniteNumber(
+                *noThreat, "speedToleranceFraction");
+        result.noThreatPatrol.headingToleranceRadians =
+            patrol_config_detail::FiniteNumber(
+                *noThreat, "headingToleranceRadians");
+        result.noThreatPatrol.stepRewardScale =
+            patrol_config_detail::FiniteNumber(
+                *noThreat, "stepRewardScale");
+        result.noThreatPatrol.minimumSeparationMeters =
+            patrol_config_detail::FiniteNumber(
+                *noThreat, "minimumSeparationMeters");
+    }
+
     if (!Valid(result) || !weights.is_object()
         || weights.size() != kRewardChannelNames.size())
         throw std::invalid_argument("Invalid BluePatrol MAPPO training settings");

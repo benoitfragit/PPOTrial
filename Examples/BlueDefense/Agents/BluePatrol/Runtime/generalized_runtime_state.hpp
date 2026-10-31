@@ -286,7 +286,8 @@ inline bool BuildGeneralizedObservations(
     Parameters const& parameters, GeneralizedRuntimeState const& state,
     BlueTeamRoles const& roles,
     std::array<GeneralizedObservation,
-               TeamCapacity::MaximumBlueMobiles>& observations) noexcept
+               TeamCapacity::MaximumBlueMobiles>& observations,
+    bool const theoreticalPatrolSlots = false) noexcept
 {
     observations = {};
     if (!Valid(parameters) || !Valid(state) || !roles.IsValid()
@@ -421,14 +422,18 @@ inline bool BuildGeneralizedObservations(
                 assignment.formationSlot,
                 parameters.geometry.separationDistance,
                 parameters.geometry.separationAngle);
-            float const cosHeading = std::cos(leader.heading);
-            float const sinHeading = std::sin(leader.heading);
+            PatrolCurvePose const target = theoreticalPatrolSlots
+                ? projection.pose
+                : PatrolCurvePose{leader.north, leader.east,
+                    leader.heading, 0.F, 0.F, 0.F};
+            float const cosHeading = std::cos(target.heading);
+            float const sinHeading = std::sin(target.heading);
             float const inward = static_cast<float>(
                 parameters.geometry.direction) * slot.inwardMeters;
-            float const expectedNorth = leader.north
+            float const expectedNorth = target.north
                 + slot.longitudinalMeters * cosHeading
                 - inward * sinHeading;
-            float const expectedEast = leader.east
+            float const expectedEast = target.east
                 + slot.longitudinalMeters * sinHeading
                 + inward * cosHeading;
             float const errorNorth = own.north - expectedNorth;

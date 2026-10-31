@@ -3,53 +3,53 @@
   "patrol": {
     "racetrack": {
       "lengthMeters": {
-        "min": 50000.0,
-        "max": 60000.0
+        "min": 50000,
+        "max": 60000
       },
       "widthMeters": {
-        "min": 16000.0,
-        "max": 20000.0
+        "min": 16000,
+        "max": 20000
       },
       "headingDegrees": {
-        "min": 80.0,
-        "max": 100.0
+        "min": 80,
+        "max": 100
       },
       "anchorNorthMeters": {
-        "min": -1500.0,
-        "max": 1500.0
+        "min": -1500,
+        "max": 1500
       },
       "anchorEastMeters": {
-        "min": -2000.0,
-        "max": 2000.0
+        "min": -2000,
+        "max": 2000
       },
       "clockwise": false,
-      "boundaryMarginMeters": 2000.0,
+      "boundaryMarginMeters": 2000,
       "maximumSamplingAttempts": 128
     },
     "formation": {
       "separationDistanceMeters": {
-        "min": 6000.0,
-        "max": 9000.0
+        "min": 6000,
+        "max": 9000
       },
       "separationAngleDegrees": {
-        "min": 10.0,
-        "max": 25.0
+        "min": 10,
+        "max": 25
       }
     },
     "defense": {
       "activationRisk": 0.25,
-      "deactivationRisk": 0.10,
-      "activationDistanceMeters": 90000.0,
-      "deactivationDistanceMeters": 110000.0,
-      "protectedRadiusMeters": 12000.0,
-      "timeToIntrusionSeconds": 300.0,
-      "teammateThreatDistanceMeters": 30000.0,
+      "deactivationRisk": 0.1,
+      "activationDistanceMeters": 90000,
+      "deactivationDistanceMeters": 110000,
+      "protectedRadiusMeters": 12000,
+      "timeToIntrusionSeconds": 300,
+      "teammateThreatDistanceMeters": 30000,
       "teammateVulnerabilityWeight": 0.75
     }
   },
   "training": {
     "rolloutSteps": 2048,
-    "maxUpdates": 1000,
+    "maxUpdates": 2000,
     "checkpointEvery": 10,
     "seed": 42
   },
@@ -60,27 +60,35 @@
     "minimumTrackingFraction": 0.8
   },
   "rewards": {
-    "clamp": 100.0,
+    "clamp": 100,
     "generalized": {
-      "ownLossWeight": 24.0,
-      "lowSpeedRiskWeight": 5.0
+      "ownLossWeight": 24,
+      "lowSpeedRiskWeight": 5
     },
     "shaping": {
       "patrolProgressWeight": 0.5,
       "patrolCrossTrackWeight": 0.75,
-      "patrolCrossTrackScaleMeters": 4000.0,
-      "formationErrorWeight": 2.0,
+      "patrolCrossTrackScaleMeters": 4000,
+      "formationErrorWeight": 2,
       "formationToleranceFraction": 0.03,
       "controlEffortWeight": 0.002
     },
     "weights": {
-      "Patrol tracking": 1.0,
-      "Formation safety": 4.0,
-      "Control effort": 1.0,
-      "Zone protection": 2.0,
-      "Interception": 2.0,
+      "Patrol tracking": 1,
+      "Formation safety": 4,
+      "Control effort": 1,
+      "Zone protection": 2,
+      "Interception": 2,
       "Mission outcome": 1.5,
       "Timeout": 1.5
+    },
+    "noThreatPatrol": {
+      "enabled": true,
+      "positionToleranceMeters": 2500,
+      "speedToleranceFraction": 0.2,
+      "headingToleranceRadians": 0.35,
+      "stepRewardScale": 0.0005,
+      "minimumSeparationMeters": 2500
     }
   }
 }

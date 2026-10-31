@@ -43,6 +43,31 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     target_compile_features(BlueDefenseGeneralizedActorTests PRIVATE cxx_std_17)
     add_test(NAME BlueDefenseGeneralizedActorTests
         COMMAND BlueDefenseGeneralizedActorTests)
+    # The promoted actor is a runtime artifact, not a tracked source file.
+    # Supply a deterministic, untrained actor only for inference smoke tests.
+    # CTest fixtures preserve any existing user's production checkpoint.
+    add_executable(BlueDefenseInferenceCheckpointFixture
+        ../../tests/inference_checkpoint_fixture.cpp)
+    target_link_libraries(BlueDefenseInferenceCheckpointFixture PRIVATE
+        BlueDefenseDefenderBackend)
+    target_compile_features(BlueDefenseInferenceCheckpointFixture PRIVATE
+        cxx_std_17)
+    set(_blue_inference_model
+        "${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/prod/blue_patrol_generalized_v8.txt")
+    set(_blue_inference_marker
+        "${CMAKE_BINARY_DIR}/blue_inference_fixture.marker")
+    add_test(NAME BlueDefenseInferenceFixtureSetup
+        COMMAND $<TARGET_FILE:BlueDefenseInferenceCheckpointFixture>
+            prepare "${_blue_inference_model}" "${_blue_inference_marker}")
+    set_tests_properties(BlueDefenseInferenceFixtureSetup PROPERTIES
+        FIXTURES_SETUP BlueInferenceActor)
+    add_test(NAME BlueDefenseInferenceFixtureCleanup
+        COMMAND $<TARGET_FILE:BlueDefenseInferenceCheckpointFixture>
+            cleanup "${_blue_inference_model}" "${_blue_inference_marker}")
+    set_tests_properties(BlueDefenseInferenceFixtureCleanup PROPERTIES
+        FIXTURES_CLEANUP BlueInferenceActor)
+    unset(_blue_inference_model)
+    unset(_blue_inference_marker)
     add_executable(BlueDefenseGeneralizedRuntimeStateTests
         ../../tests/generalized_runtime_state_tests.cpp)
     add_executable(BlueDefenseGeneralizedRewardShapingTests
