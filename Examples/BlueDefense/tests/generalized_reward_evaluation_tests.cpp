@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/tests/generalized_reward_evaluation_tests.cpp
+ * @brief Tests et assertions déterministes pour generalized reward evaluation tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "generalized_evaluation_campaign.hpp"
 
 #include <array>
@@ -11,6 +17,9 @@ namespace {
 
 constexpr float kTolerance = 1.0e-6F;
 
+/**
+ * @brief Réalise l'opération Near; voir les préconditions et effets dans son corps C++.
+ */
 bool Near(float const first, float const second) noexcept
 {
     return std::abs(first - second) <= kTolerance;
@@ -34,6 +43,9 @@ GeneralizedCombatStateMask MakeState(std::size_t const blueCount,
     return state;
 }
 
+/**
+ * @brief Réalise l'opération Channel; voir les préconditions et effets dans son corps C++.
+ */
 float Channel(GeneralizedRewardBreakdown const& breakdown,
               GeneralizedRewardChannel const channel) noexcept
 {
@@ -74,6 +86,9 @@ bool TestObjectiveThreatPriority()
             GeneralizedRewardChannel::ThreatContainment), -expected);
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestOneVersusZero()
 {
     auto const roles = BlueTeamRoles::Create(1U, 0U);
@@ -128,6 +143,9 @@ bool TestOneVersusZero()
         && Near(metrics.score, 97.F);
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestIndependentRoleAndPursuitWeights()
 {
     auto const roles = BlueTeamRoles::Create(2U, 0U);
@@ -170,6 +188,9 @@ bool TestIndependentRoleAndPursuitWeights()
         == GeneralizedRewardStatus::InvalidSignals;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestSafetyRewardChannels()
 {
     auto const roles = BlueTeamRoles::Create(2U, 0U);
@@ -240,6 +261,9 @@ bool TestSafetyRewardChannels()
             GeneralizedRewardChannel::RestrictedZoneClearance), -0.3F);
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestOwnLossNotDiluted()
 {
     auto const roles = BlueTeamRoles::Create(4U, 0U);
@@ -266,6 +290,9 @@ bool TestOwnLossNotDiluted()
             GeneralizedRewardChannel::BlueSurvival), -0.25F);
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestDelayedMissionCredit()
 {
     for (std::size_t const count : {1U, 4U, 9U})
@@ -302,6 +329,9 @@ bool TestDelayedMissionCredit()
     return kGeneralizedRewardChannelNames.size() == kGeneralizedRewardChannelCount;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestTwoVersusTwo()
 {
     auto const roles = BlueTeamRoles::Create(2U, 1U);
@@ -393,6 +423,9 @@ bool TestTwoVersusTwo()
         && Near(metrics.timeoutRate, 1.F);
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestNineVersusTenAndMaskValidation()
 {
     auto const roles = BlueTeamRoles::Create(9U, 4U);
@@ -467,6 +500,9 @@ bool TestNineVersusTenAndMaskValidation()
         == GeneralizedRewardStatus::InvalidMasks;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestPermutationInvarianceAndInvalidQuality()
 {
     auto const firstRoles = BlueTeamRoles::Create(3U, 0U);
@@ -549,6 +585,9 @@ bool TestPermutationInvarianceAndInvalidQuality()
         && firstEvaluation.Metrics().episodes == 1U;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestSparseDynamicsAdapter()
 {
     GeneralizedBlueTeamState blue{};
@@ -570,6 +609,9 @@ bool TestSparseDynamicsAdapter()
         && mask.objectiveAvailable;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestEvaluationCadence()
 {
     return !ShouldEvaluateGeneralizedUpdate(0U, 10U, false)
@@ -641,6 +683,9 @@ bool TestDeterministicCampaignBoundary()
 
 } // namespace
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     if (!TestObjectiveThreatPriority())

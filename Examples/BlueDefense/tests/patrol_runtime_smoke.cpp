@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/tests/patrol_runtime_smoke.cpp
+ * @brief Tests et assertions déterministes pour patrol runtime smoke.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "bluedefenseexample.hpp"
 #include "patrol_config.hpp"
 #include "generalized_cooperative_reward.hpp"
@@ -18,6 +24,7 @@
 #include <thread>
 
 namespace {
+/** @brief Déclare le type Sample, utilisé par Tests et assertions déterministes pour patrol runtime smoke. */
 struct Sample
 {
     static constexpr std::size_t kBlueCapacity = 9U;
@@ -43,6 +50,7 @@ struct Sample
     float formationWeight{};
 };
 
+/** @brief Déclare le type ExpectedTeam, utilisé par Tests et assertions déterministes pour patrol runtime smoke. */
 struct ExpectedTeam final
 {
     std::size_t blueCount{};
@@ -50,6 +58,10 @@ struct ExpectedTeam final
 };
 
 // Resolve dynamic entity names without depending on fixed 2v2 slot names.
+/**
+ * @brief Réalise l'opération NumberedIndex; voir les préconditions et effets dans son corps C++.
+ * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
+ */
 int NumberedIndex(std::string_view const name, std::string_view const prefix,
                   std::size_t const maximum) noexcept
 {
@@ -68,6 +80,10 @@ int NumberedIndex(std::string_view const name, std::string_view const prefix,
     return number > 0U ? static_cast<int>(number - 1U) : -1;
 }
 
+/**
+ * @brief Réalise l'opération ScenarioTeam; voir les préconditions et effets dans son corps C++.
+ * @details Consulte ou modifie des composants ECS.
+ */
 ExpectedTeam ScenarioTeam(std::filesystem::path const& scenarioPath)
 {
     auto const document = ppo::serialization::Serializer::Parse(scenarioPath);
@@ -78,6 +94,10 @@ ExpectedTeam ScenarioTeam(std::filesystem::path const& scenarioPath)
     return result;
 }
 
+/**
+ * @brief Réalise l'opération Capture; voir les préconditions et effets dans son corps C++.
+ * @details Consulte ou modifie des composants ECS.
+ */
 Sample Capture(
     ppo::model::Environment const& environment,
     ppo::examples::bluedefense::defenders::Parameters const& parameters)
@@ -182,6 +202,9 @@ Sample Capture(
     });
     return result;
 }
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ */
 bool Ready(Sample const& s, ExpectedTeam const expected)
 {
     if (expected.blueCount == 0U || expected.blueCount > s.present.size()
@@ -204,6 +227,10 @@ bool Ready(Sample const& s, ExpectedTeam const expected)
 }
 }
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ * @details Utilise des fichiers ou chemins.
+ */
 int main(int argc, char** argv)
 {
     bool const combat = argc >= 2 && std::string{argv[1]} == "blue-defense";

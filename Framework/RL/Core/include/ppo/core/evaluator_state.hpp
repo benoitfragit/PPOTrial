@@ -1,3 +1,9 @@
+/**
+ * @file Framework/RL/Core/include/ppo/core/evaluator_state.hpp
+ * @brief Interface ou implémentation du composant evaluator state.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include <cstdint>
@@ -5,6 +11,7 @@
 namespace ppo::model {
 
 // Retains the legacy public type/fields used by ECS, evaluator and UI.
+/** @brief Déclare le type sEvaluatorState, utilisé par Interface ou implémentation du composant evaluator state. */
 struct sEvaluatorState {
     unsigned int m_nbstep{ 0 };
     unsigned int m_nbtests{ 0 };

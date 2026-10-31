@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Core/patrol_core.hpp
+ * @brief Interface ou implémentation du composant patrol core.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 // Deterministic 2D patrol and protection domain used by the blue MAPPO team.
@@ -19,6 +25,7 @@ namespace ppo::examples::bluedefense::defenders {
 constexpr float kPi = 3.14159265358979323846F;
 constexpr float kTwoPi = 2.F * kPi;
 
+/** @brief Déclare le type ObservationLayout, utilisé par Interface ou implémentation du composant patrol core. */
 struct ObservationLayout final
 {
     static constexpr std::size_t Own = 7;
@@ -51,6 +58,7 @@ struct ObservationLayout final
 using Observation = std::array<float, ObservationLayout::Size>;
 using Action = std::array<float, ObservationLayout::ActionSize>;
 
+/** @brief Déclare le type Parameters, utilisé par Interface ou implémentation du composant patrol core. */
 struct Parameters
 {
     float halfNorth = 22329.375F;
@@ -76,6 +84,9 @@ struct Parameters
     PatrolGeometry geometry{};
 };
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 inline bool Valid(Parameters const& p) noexcept
 {
     return std::isfinite(p.halfNorth) && std::isfinite(p.halfEast)
@@ -120,12 +131,16 @@ inline float Clamp(float x, float a, float b) noexcept
     return std::max(a, std::min(x, b));
 }
 
+/**
+ * @brief Réalise l'opération PositiveModulo; voir les préconditions et effets dans son corps C++.
+ */
 inline float PositiveModulo(float value, float period) noexcept
 {
     float const result = std::fmod(value, period);
     return result < 0.F ? result + period : result;
 }
 
+/** @brief Déclare le type Mobile, utilisé par Interface ou implémentation du composant patrol core. */
 struct Mobile
 {
     float north, east;
@@ -134,6 +149,7 @@ struct Mobile
     bool available;
 };
 
+/** @brief Déclare le type Reference, utilisé par Interface ou implémentation du composant patrol core. */
 struct Reference
 {
     float north = 0.F, east = 0.F;
@@ -141,6 +157,9 @@ struct Reference
     float distanceToTurn = 0.F;
 };
 
+/**
+ * @brief Réalise l'opération Radius; voir les préconditions et effets dans son corps C++.
+ */
 inline float Radius(Parameters const& p) noexcept
 {
     return 0.5F * p.geometry.width;
@@ -151,6 +170,9 @@ inline float StraightHalfLength(Parameters const& p) noexcept
     return 0.5F * (p.geometry.length - p.geometry.width);
 }
 
+/**
+ * @brief Réalise l'opération CircuitLength; voir les préconditions et effets dans son corps C++.
+ */
 inline float CircuitLength(Parameters const& p) noexcept
 {
     return CircuitLength(p.geometry);
@@ -198,6 +220,9 @@ inline Reference WingmanReference(Parameters const& p,
     return {pose.north, pose.east, pose.heading, pose.phase, 0.F};
 }
 
+/**
+ * @brief Réalise l'opération OnReference; voir les préconditions et effets dans son corps C++.
+ */
 inline Mobile OnReference(Parameters const& p, Reference const& ref) noexcept
 {
     return {ref.north, ref.east, ref.heading, p.cruiseSpeed, 0.F, true};
@@ -207,6 +232,9 @@ inline Mobile OnReference(Parameters const& p, Reference const& ref) noexcept
 // acceleration are scaled by the platform's maxima, then position is
 // integrated using the NEW heading and speed. Revisit as a shared kernel
 // before adding another vehicle model.
+/**
+ * @brief Exécute une étape d'évolution ou de calcul du composant.
+ */
 inline Mobile Advance(Parameters const& p, Mobile current, Action const& action) noexcept
 {
     float const turn = std::isfinite(action[0]) ? Clamp(action[0], -1.F, 1.F) : 0.F;
@@ -220,6 +248,7 @@ inline Mobile Advance(Parameters const& p, Mobile current, Action const& action)
     return current;
 }
 
+/** @brief Déclare le type State, utilisé par Interface ou implémentation du composant patrol core. */
 struct State
 {
     std::array<Mobile, 2> guards;
@@ -371,6 +400,9 @@ inline float PatrolProgressDelta(Parameters const& p,
 
 // Check the relative path over the entire step: two fast cars can cross
 // between discrete observations without ending inside the collision radius.
+/**
+ * @brief Réalise l'opération MinimumGuardSeparation; voir les préconditions et effets dans son corps C++.
+ */
 inline float MinimumGuardSeparation(State const& before,
                                     State const& after) noexcept
 {
@@ -441,6 +473,9 @@ static_assert(std::is_trivially_copyable_v<State>,
 // Build a deterministic initial team state. The embedded MAPPO controller
 // advances both defenders; controlledRole remains useful to the single-role
 // headless environment and reference-controller tests.
+/**
+ * @brief Initialise ou rétablit l'état selon le contexte courant.
+ */
 inline State InitialState(Parameters const& p, int side,
                           std::size_t controlledRole, float phase) noexcept
 {
@@ -455,6 +490,9 @@ inline State InitialState(Parameters const& p, int side,
     return state;
 }
 
+/**
+ * @brief Exécute une étape d'évolution ou de calcul du composant.
+ */
 inline State Advance(Parameters const& p, State const& prev,
                      Action const& action) noexcept
 {
@@ -495,6 +533,10 @@ inline State AdvanceBoth(Parameters const& p, State const& previous,
     return next;
 }
 
+/**
+ * @brief Réalise l'opération RayDistanceToBounds; voir les préconditions et effets dans son corps C++.
+ * @details Applique des bornes numériques.
+ */
 inline float RayDistanceToBounds(Parameters const& p, Mobile const& car,
                                 float angle) noexcept
 {
@@ -523,6 +565,9 @@ inline float RayDistanceToBounds(Parameters const& p, Mobile const& car,
     return std::isfinite(best) ? best : -1.F;
 }
 
+/**
+ * @brief Réalise l'opération Observe; voir les préconditions et effets dans son corps C++.
+ */
 inline Observation Observe(Parameters const& p, State const& state) noexcept
 {
     Observation obs{};  // Red-track slots remain exactly zero: absent/masked.
@@ -748,6 +793,9 @@ inline bool HasActiveThreat(State const& state) noexcept
                        [](Mobile const& attacker) { return attacker.available; });
 }
 
+/**
+ * @brief Réalise l'opération DistanceToObjective; voir les préconditions et effets dans son corps C++.
+ */
 inline float DistanceToObjective(Parameters const& p, State const& state,
                                  Mobile const& mobile) noexcept
 {
@@ -1050,6 +1098,9 @@ inline RoleRewards TotalRoleRewards(
     return result;
 }
 
+/**
+ * @brief Réalise l'opération TeamReward; voir les préconditions et effets dans son corps C++.
+ */
 inline float TeamReward(Parameters const& p, State const& before,
                         Action const& action, State const& after) noexcept
 {

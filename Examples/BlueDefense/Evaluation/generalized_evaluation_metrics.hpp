@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Evaluation/generalized_evaluation_metrics.hpp
+ * @brief Comptabilisation des scores et métriques par épisode et campagne.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "generalized_cooperative_reward.hpp"

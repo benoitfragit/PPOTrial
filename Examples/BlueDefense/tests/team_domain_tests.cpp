@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/tests/team_domain_tests.cpp
+ * @brief Tests et assertions déterministes pour team domain tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "blue_team_roles.hpp"
 #include "team_capacity.hpp"
 
@@ -10,6 +16,9 @@ namespace patrol = ppo::examples::bluedefense::defenders;
 
 namespace {
 
+/**
+ * @brief Réalise l'opération Near; voir les préconditions et effets dans son corps C++.
+ */
 bool Near(float const first, float const second) noexcept
 {
     return std::abs(first - second) <= 1.0e-5F;
@@ -63,6 +72,9 @@ bool ValidAssignmentForEveryTeamSize() noexcept
     return true;
 }
 
+/**
+ * @brief Réalise l'opération DistinctFormationGeometryForEveryTeamSize; voir les préconditions et effets dans son corps C++.
+ */
 bool DistinctFormationGeometryForEveryTeamSize() noexcept
 {
     constexpr float distance = 6000.F;
@@ -98,6 +110,9 @@ bool DistinctFormationGeometryForEveryTeamSize() noexcept
 
 } // namespace
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     using patrol::ActiveTeamCounts;

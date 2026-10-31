@@ -1,3 +1,9 @@
+/**
+ * @file Main/src/exampleselector.cpp
+ * @brief Interface ou implémentation du composant exampleselector.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "exampleselector.hpp"
 
 #include <imgui.h>
@@ -13,6 +19,9 @@
 namespace ppo::app {
 namespace {
 
+/**
+ * @brief Réalise l'opération DrawLabel; voir les préconditions et effets dans son corps C++.
+ */
 void DrawLabel(ImDrawList& draw, ImVec2 position, float size,
                ImU32 color, std::string_view value, float wrapWidth = 0.F)
 {

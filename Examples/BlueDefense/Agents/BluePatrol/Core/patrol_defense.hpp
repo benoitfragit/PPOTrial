@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Core/patrol_defense.hpp
+ * @brief Interface ou implémentation du composant patrol defense.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include <algorithm>
@@ -67,6 +73,10 @@ inline bool Valid(DefenseSettings const& settings) noexcept
 
 namespace patrol_defense_detail {
 
+/**
+ * @brief Réalise l'opération Clamp01; voir les préconditions et effets dans son corps C++.
+ * @details Applique des bornes numériques.
+ */
 inline float Clamp01(float value) noexcept
 {
     return std::max(0.F, std::min(value, 1.F));
@@ -79,12 +89,20 @@ inline float Distance(DefenseTrack const& first,
                       first.east - second.east);
 }
 
+/**
+ * @brief Réalise l'opération Velocity; voir les préconditions et effets dans son corps C++.
+ * @details Applique des bornes numériques.
+ */
 inline std::array<float, 2> Velocity(DefenseTrack const& track) noexcept
 {
     return {track.speed * std::cos(track.heading),
             track.speed * std::sin(track.heading)};
 }
 
+/**
+ * @brief Réalise l'opération ClosingSpeed; voir les préconditions et effets dans son corps C++.
+ * @details Applique des bornes numériques.
+ */
 inline float ClosingSpeed(DefenseTrack const& source,
                           DefenseTrack const& target) noexcept
 {

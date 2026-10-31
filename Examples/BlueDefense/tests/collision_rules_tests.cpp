@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/tests/collision_rules_tests.cpp
+ * @brief Tests et assertions déterministes pour collision rules tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "bluedefenserules.hpp"
 #include "initializer.hpp"
 
@@ -15,6 +21,10 @@
 
 namespace {
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Consulte ou modifie des composants ECS. Peut signaler un état invalide par exception.
+ */
 void Require(bool condition, char const* message)
 {
     if (!condition)
@@ -67,6 +77,10 @@ void TestSweptBlueCollision()
             "blue collision did not publish both explosion events");
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void TestBlueNearMiss()
 {
     using namespace ppo::model;
@@ -97,6 +111,10 @@ void TestBlueNearMiss()
             "1.2 km blue near miss was treated as a collision");
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void TestGeneralizedBluePairCoverage()
 {
     using namespace ppo::model;
@@ -141,6 +159,10 @@ void TestGeneralizedBluePairCoverage()
     }
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void TestDeterministicRestrictedZonePenetration()
 {
     using namespace ppo::model;
@@ -196,6 +218,10 @@ void TestDeterministicRestrictedZonePenetration()
             "a disabled restricted zone destroyed a blue mobile");
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void TestFriendlyRestrictedZoneStillAffectsRed()
 {
     using namespace ppo::model;
@@ -227,6 +253,10 @@ void TestFriendlyRestrictedZoneStillAffectsRed()
             "historical friendly-zone attribution changed");
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void TestDelayedThreatActivation()
 {
     using namespace ppo::model;
@@ -278,6 +308,10 @@ void TestDelayedThreatActivation()
             "an activated threat remained pending after its ECS step");
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void TestGeneralizedThreatActivationByMetadataIndex()
 {
     using namespace ppo::model;
@@ -330,6 +364,10 @@ void TestGeneralizedThreatActivationByMetadataIndex()
             "a friendly mobile consumed a red activation slot");
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void TestPatrolOverlaySnapshot()
 {
     using namespace ppo::model;
@@ -374,6 +412,9 @@ void TestPatrolOverlaySnapshot()
             "leader patrol overlay is not closed");
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 void TestBlueRolePermutationContract()
 {
     namespace defenders = ppo::examples::bluedefense::defenders;
@@ -417,6 +458,9 @@ void TestBlueRolePermutationContract()
 
 } // namespace
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     try

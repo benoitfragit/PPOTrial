@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Training/generalized_critic_network.hpp
+ * @brief Implémentation des calculs et contrats d'entraînement generalized critic network.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "generalized_critic_observation.hpp"

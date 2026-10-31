@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Runtime/generalized_patrol_team_agent.hpp
+ * @brief Contrôleur ECS MAPPO partagé des Bleus : états, observations, actions, récompenses, évaluations et checkpoints.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "generalized_evaluation_campaign.hpp"
@@ -16,6 +22,7 @@
 
 namespace ppo::examples::bluedefense::defenders {
 
+/** @brief Déclare le type GeneralizedPatrolLearner, utilisé par Contrôleur ECS MAPPO partagé des Bleus : états, observations, actions, récompenses, évaluations et checkpoints. */
 class GeneralizedPatrolLearner;
 
 /**
@@ -66,30 +73,98 @@ public:
     GeneralizedPatrolMappoAgent& operator=(
         GeneralizedPatrolMappoAgent const&) = delete;
 
+/**
+ * @brief Initialise ou rétablit l'état selon le contexte courant.
+ * @details Consulte ou modifie des composants ECS.
+ */
     void Init() override;
+/**
+ * @brief Réalise l'opération ChooseAction; voir les préconditions et effets dans son corps C++.
+ * @details Consulte ou modifie des composants ECS.
+ */
     void ChooseAction() override;
+/**
+ * @brief Met à jour ou enregistre les données sous la responsabilité.
+ * @details Consulte ou modifie des composants ECS.
+ */
     bool SetNewState() override;
+/**
+ * @brief Traite les entrées et applique les effets associés à ProcessCommand.
+ * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
+ */
     void ProcessCommand(
         ppo::model::sAgentRealTimeCommand const& command) noexcept override;
+/**
+ * @brief Retourne une vue ou une valeur calculée depuis l'état courant.
+ * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
+ */
     ppo::model::sAgentStateSnaphot GetSnapshot() const noexcept override;
 
 private:
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
+ */
     Parameters ReadParameters() const;
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
+ */
     GeneralizedRuntimeState ReadState(Parameters const& parameters) const;
+/**
+ * @brief Réalise l'opération Roles; voir les préconditions et effets dans son corps C++.
+ * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
+ */
     BlueTeamRoles const& Roles() const;
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par BuildObservations.
+ * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
+ */
     void BuildObservations(
         Parameters const& parameters, GeneralizedRuntimeState const& state,
         std::array<GeneralizedObservation,
                    TeamCapacity::MaximumBlueMobiles>& observations) const;
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par BuildEvaluationSample.
+ * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
+ */
     GeneralizedEvaluationSample BuildEvaluationSample(
         Parameters const& parameters, GeneralizedRuntimeState const& state,
         bool missionFailed, bool timeout) const;
+/**
+ * @brief Sérialise ou écrit les données associées à SaveAtUpdateBoundary selon les garanties implémentées.
+ * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
+ */
     void SaveAtUpdateBoundary(bool force = false) noexcept;
+/**
+ * @brief Change ou contrôle l'étape de cycle de vie.
+ * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
+ */
     void StartEvaluation();
+/**
+ * @brief Réalise l'opération PrepareEvaluationCase; voir les préconditions et effets dans son corps C++.
+ * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
+ */
     void PrepareEvaluationCase();
+/**
+ * @brief Initialise ou rétablit l'état selon le contexte courant.
+ * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
+ */
     void RestoreTrainingInitializer() noexcept;
+/**
+ * @brief Réalise l'opération PromoteEvaluatedActor; voir les préconditions et effets dans son corps C++.
+ * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
+ */
     void PromoteEvaluatedActor() noexcept;
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
+ */
     void LoadPromotedScore() noexcept;
+/**
+ * @brief Sérialise ou écrit les données associées à SavePromotedScore selon les garanties implémentées.
+ * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
+ */
     void SavePromotedScore();
 
     entt::registry* registry_{};

@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Training/generalized_patrol_learner.hpp
+ * @brief Collecte de transitions multi-agents, optimisation PPO et sérialisation des états d'entraînement.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "generalized_training_checkpoint.hpp"
@@ -52,6 +58,10 @@ struct GeneralizedTrainingDiagnostics final
 class GeneralizedOptimizationGuard final
 {
 public:
+/**
+ * @brief Réalise l'opération Diagnostic; voir les préconditions et effets dans son corps C++.
+ * @details Peut signaler un état invalide par exception.
+ */
     static std::string Diagnostic(char const* const file, int const line,
                                   char const* const phase,
                                   std::string const& cause)
@@ -61,6 +71,10 @@ public:
             + " phase=" + phase + " cause=" + cause;
     }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Peut signaler un état invalide par exception.
+ */
     void RequireWritable(std::size_t const collected,
                          std::size_t const capacity,
                          char const* const file, int const line) const
@@ -104,6 +118,9 @@ public:
         }
     }
 
+/**
+ * @brief Réalise l'opération Failed; voir les préconditions et effets dans son corps C++.
+ */
     bool Failed() const noexcept { return failed_; }
 
 private:
@@ -673,6 +690,7 @@ private:
     using ActorOptimizer = TrainingConfig::NN::ACTOR_OPTIMIZER;
     using CriticOptimizer = TrainingConfig::NN::CRITIC_OPTIMIZER;
 
+/** @brief Déclare le type Transition, utilisé par Collecte de transitions multi-agents, optimisation PPO et sérialisation des états d'entraînement. */
     struct Transition final
     {
         GeneralizedRawObservation observation{};
@@ -712,6 +730,10 @@ private:
     using TrainingValueSpecification = rlt::matrix::Specification<
         float, Index, kTrainingBatch, 1>;
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Peut signaler un état invalide par exception.
+ */
     static std::size_t CheckedTransitionCapacity(
         ActiveTeamCounts const counts, std::size_t const rolloutTeamSteps)
     {
@@ -727,6 +749,10 @@ private:
         return rolloutTeamSteps * counts.blueMobiles;
     }
 
+/**
+ * @brief Réalise l'opération TransitionIndex; voir les préconditions et effets dans son corps C++.
+ * @details Peut signaler un état invalide par exception.
+ */
     std::size_t TransitionIndex(std::size_t const teamStep,
                                 std::size_t const agent) const noexcept
     {
@@ -738,6 +764,10 @@ private:
         return {counts_.blueMobiles, counts_.redMobiles};
     }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Peut signaler un état invalide par exception.
+ */
     void ValidateBatch(Observations const& observations,
                        AvailabilityMask const& availability) const
     {
@@ -762,6 +792,10 @@ private:
         }
     }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Peut signaler un état invalide par exception.
+ */
     void RequireUpdateBoundary(char const* const operation) const
     {
         if (pending_ || collectedTeamSteps_ != 0U)
@@ -769,6 +803,9 @@ private:
                                    + " during a rollout");
     }
 
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par TransformObservations.
+ */
     void TransformObservations(Observations const& observations)
     {
         rlt::set_all(device_, inferenceRaw_, 0.F);
@@ -788,6 +825,10 @@ private:
             device_, actor_, inferenceRaw_, inferenceCompact_);
     }
 
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par BuildAgentCriticObservations.
+ * @details Applique des bornes numériques.
+ */
     void BuildAgentCriticObservations(
         AvailabilityMask const& availability,
         std::array<CentralCriticObservation,
@@ -843,6 +884,10 @@ private:
         }
     }
 
+/**
+ * @brief Exécute une étape d'évolution ou de calcul du composant.
+ * @details Applique des bornes numériques.
+ */
     void OptimizeRollout()
     {
         using Clock = std::chrono::steady_clock;
@@ -904,6 +949,9 @@ private:
                   << " total_ms=" << millis(ended - started) << std::endl;
     }
 
+/**
+ * @brief Réalise l'opération BatchTransition; voir les préconditions et effets dans son corps C++.
+ */
     Transition* BatchTransition(std::size_t const offset,
                                 Index const row) noexcept
     {
@@ -944,6 +992,9 @@ private:
         }
     }
 
+/**
+ * @brief Calcule EvaluateCriticBaselines à partir des entrées et des formules présentes dans le code.
+ */
     void EvaluateCriticBaselines()
     {
         std::iota(trainingOrder_.begin(), trainingOrder_.end(), 0U);
@@ -974,6 +1025,9 @@ private:
         }
     }
 
+/**
+ * @brief Calcule EstimateGeneralizedAdvantages à partir des entrées et des formules présentes dans le code.
+ */
     std::size_t EstimateGeneralizedAdvantages() noexcept
     {
         std::size_t learnable = 0U;
@@ -1007,6 +1061,9 @@ private:
         return learnable;
     }
 
+/**
+ * @brief Calcule NormalizeAdvantages à partir des entrées et des formules présentes dans le code.
+ */
     void NormalizeAdvantages(std::size_t const learnable) noexcept
     {
         float mean = 0.F;
@@ -1031,6 +1088,9 @@ private:
                     (transition.advantage - mean) * scale;
     }
 
+/**
+ * @brief Retourne une vue ou une valeur calculée depuis l'état courant.
+ */
     std::size_t CountLearnableBatch(std::size_t const offset) noexcept
     {
         std::size_t count = 0U;
@@ -1043,6 +1103,10 @@ private:
         return count;
     }
 
+/**
+ * @brief Exécute une étape d'évolution ou de calcul du composant.
+ * @details Applique des bornes numériques.
+ */
     void TrainActorBatch(std::size_t const offset,
                          std::size_t const batchLearnable)
     {
@@ -1120,6 +1184,9 @@ private:
         rlt::step(device_, actorOptimizer_, actor_);
     }
 
+/**
+ * @brief Exécute une étape d'évolution ou de calcul du composant.
+ */
     void TrainCriticBatch(std::size_t const offset,
                           std::size_t const criticRows)
     {
@@ -1144,6 +1211,9 @@ private:
         rlt::step(device_, criticOptimizer_, critic_);
     }
 
+/**
+ * @brief Réalise l'opération Allocate; voir les préconditions et effets dans son corps C++.
+ */
     void Allocate()
     {
         rlt::malloc(device_, actor_);

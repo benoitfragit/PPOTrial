@@ -1,3 +1,9 @@
+/**
+ * @file Framework/Simulation/World2D/data/restrictedzonelidar.hpp
+ * @brief Échantillonnage des rayons de pseudo-LiDAR à proximité des zones.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 // Shared pseudo-LiDAR geometry for stationary zones, friendly safety envelopes and world bounds.
 // The calculation and 61-bin layout are unchanged from historical RLMission.
@@ -30,6 +36,10 @@ void UpdateRestrictedZonePseudoLidars(entt::registry& registry,
                                       float friendlyMobileSafetyRadius = 0.F,
                                       float boundaryScale = 1.F) noexcept;
 
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par BuildRestrictedZonePseudoLidar.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void BuildRestrictedZonePseudoLidar(
     entt::registry& registry,
     BaseEntity& ownEntity,
@@ -46,6 +56,9 @@ void BuildFriendlyMobilePseudoLidar(
     std::array<float, kRestrictedZoneLidarBins>& nearestCollisionRanges,
     std::array<float, kRestrictedZoneLidarBins>& nearestCollisionDistances) noexcept;
 
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par BuildZoneBoundaryPseudoLidar.
+ */
 void BuildZoneBoundaryPseudoLidar(
     sEntityState const& ownState,
     sEnvironmentState const& envState,

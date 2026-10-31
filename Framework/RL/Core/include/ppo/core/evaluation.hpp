@@ -1,3 +1,9 @@
+/**
+ * @file Framework/RL/Core/include/ppo/core/evaluation.hpp
+ * @brief Interface ou implémentation du composant evaluation.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include <algorithm>
@@ -7,6 +13,7 @@ namespace ppo::core {
 
 // Domain-independent evaluation campaign status. A partial campaign must
 // never be mistaken for a valid comparison or model-promotion decision.
+/** @brief Déclare le type EvaluationResult, utilisé par Interface ou implémentation du composant evaluation. */
 struct EvaluationResult
 {
     int finishedTests = 0;
@@ -16,6 +23,10 @@ struct EvaluationResult
 // Progress within one test is an upper-bound work fraction, not the
 // score nor a completion criterion. Short-circuited tests count as complete
 // only after finishTest has run.
+/**
+ * @brief Réalise l'opération EvaluationProgress; voir les préconditions et effets dans son corps C++.
+ * @details Applique des bornes numériques.
+ */
 inline float EvaluationProgress(int completedTests,
                                 int stepsInCurrentTest,
                                 int totalTests,

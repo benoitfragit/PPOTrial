@@ -1,9 +1,18 @@
+/**
+ * @file Examples/BlueDefense/tests/generalized_advantage_tests.cpp
+ * @brief Tests et assertions déterministes pour generalized advantage tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "generalized_advantage.hpp"
 
 #include <cmath>
 
 namespace blue = ppo::examples::bluedefense::defenders;
 namespace {
+/**
+ * @brief Réalise l'opération Near; voir les préconditions et effets dans son corps C++.
+ */
 bool Near(float const value, float const expected) noexcept
 {
     return std::abs(value - expected) < 1.e-5F;

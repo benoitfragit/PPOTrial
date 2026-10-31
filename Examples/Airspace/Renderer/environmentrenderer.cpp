@@ -291,6 +291,7 @@ ColorForSideUi(ppo::model::eEntitySide side, float alpha = 1.F)
     };
 }
 
+/** @brief Déclare le type eSimulationControlGlyph, utilisé par Inspection et représentation graphique de l'environnement ECS. */
 enum class eSimulationControlGlyph : unsigned char
 {
     Play,
@@ -1542,6 +1543,9 @@ DrawComponentIfPresent(entt::registry const& snapshot, entt::entity entity)
 * @return Shared renderer instance.
 */
 EnvironmentRenderer&
+/**
+ * @brief Retourne une vue ou une valeur calculée depuis l'état courant de EnvironmentRenderer.
+ */
 EnvironmentRenderer::GetInstance(std::string const& title)
 {
     static EnvironmentRenderer renderer{ title };

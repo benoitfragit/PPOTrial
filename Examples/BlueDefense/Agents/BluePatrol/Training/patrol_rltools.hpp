@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Training/patrol_rltools.hpp
+ * @brief Implémentation des calculs et contrats d'entraînement patrol rltools.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 // RLtools CPU adapter. All simulation/reward equations stay in patrol_core.hpp;
@@ -12,6 +18,7 @@
 
 namespace rl_tools::rl::environments {
 template<typename Scalar, typename Index>
+/** @brief Déclare le type BluePatrol, utilisé par Implémentation des calculs et contrats d'entraînement patrol rltools. */
 struct BluePatrol
 {
     using T = Scalar;
@@ -30,12 +37,21 @@ namespace rl_tools {
 // Deliberately declared before PPO's on-policy runner is included: its
 // templated dispatch must resolve the exact environment overloads.
 template<typename DEVICE, typename T, typename TI>
+/**
+ * @brief Réalise l'opération malloc; voir les préconditions et effets dans son corps C++.
+ */
 void malloc(DEVICE&, rl::environments::BluePatrol<T, TI> const&) {}
 
 template<typename DEVICE, typename T, typename TI>
+/**
+ * @brief Réalise l'opération init; voir les préconditions et effets dans son corps C++.
+ */
 void init(DEVICE&, rl::environments::BluePatrol<T, TI> const&, bool = false) {}
 
 template<typename DEVICE, typename T, typename TI, typename RNG>
+/**
+ * @brief Réalise l'opération sample_initial_state; voir les préconditions et effets dans son corps C++.
+ */
 void sample_initial_state(DEVICE&, rl::environments::BluePatrol<T, TI> const& env,
                           typename rl::environments::BluePatrol<T, TI>::State& state,
                           RNG& rng)
@@ -49,6 +65,9 @@ void sample_initial_state(DEVICE&, rl::environments::BluePatrol<T, TI> const& en
 }
 
 template<typename DEVICE, typename T, typename TI, typename ACTION_SPEC, typename RNG>
+/**
+ * @brief Réalise l'opération step; voir les préconditions et effets dans son corps C++.
+ */
 T step(DEVICE&, rl::environments::BluePatrol<T, TI> const& env,
        typename rl::environments::BluePatrol<T, TI>::State const& state,
        Matrix<ACTION_SPEC> const& actions,
@@ -63,6 +82,9 @@ T step(DEVICE&, rl::environments::BluePatrol<T, TI> const& env,
 }
 
 template<typename DEVICE, typename T, typename TI, typename ACTION_SPEC, typename RNG>
+/**
+ * @brief Réalise l'opération reward; voir les préconditions et effets dans son corps C++.
+ */
 T reward(DEVICE&, rl::environments::BluePatrol<T, TI> const& env,
          typename rl::environments::BluePatrol<T, TI>::State const& before,
          Matrix<ACTION_SPEC> const& actions,
@@ -75,6 +97,9 @@ T reward(DEVICE&, rl::environments::BluePatrol<T, TI> const& env,
 }
 
 template<typename DEVICE, typename T, typename TI, typename OBS_SPEC, typename RNG>
+/**
+ * @brief Réalise l'opération observe; voir les préconditions et effets dans son corps C++.
+ */
 void observe(DEVICE&, rl::environments::BluePatrol<T, TI> const& env,
              typename rl::environments::BluePatrol<T, TI>::State const& state,
              Matrix<OBS_SPEC>& target, RNG&)
@@ -97,6 +122,9 @@ void observe_privileged(DEVICE& device, rl::environments::BluePatrol<T, TI> cons
 }
 
 template<typename DEVICE, typename T, typename TI, typename RNG>
+/**
+ * @brief Réalise l'opération terminated; voir les préconditions et effets dans son corps C++.
+ */
 bool terminated(DEVICE&, rl::environments::BluePatrol<T, TI> const& env,
                 typename rl::environments::BluePatrol<T, TI>::State const& state,
                 RNG&)
@@ -119,6 +147,7 @@ using Index = typename Device::index_t;
 using Engine = decltype(rlt::random::default_engine(typename Device::SPEC::RANDOM{}));
 using Environment = rlt::rl::environments::BluePatrol<float, Index>;
 
+/** @brief Déclare le type PPOParameters, utilisé par Implémentation des calculs et contrats d'entraînement patrol rltools. */
 struct PPOParameters : rlt::rl::algorithms::ppo::DefaultParameters<float, Index>
 {
     static constexpr Index N_EPOCHS = 4;
@@ -130,6 +159,7 @@ struct PPOParameters : rlt::rl::algorithms::ppo::DefaultParameters<float, Index>
 };
 
 template<Index RolloutSteps>
+/** @brief Déclare le type TrainingParametersFor, utilisé par Implémentation des calculs et contrats d'entraînement patrol rltools. */
 struct TrainingParametersFor
     : rlt::rl::algorithms::ppo::loop::core::Parameters<float, Index, Environment>
 {
@@ -149,6 +179,7 @@ struct TrainingParametersFor
 };
 
 template<typename T,typename TI,typename ENV,typename PARAMETERS>
+/** @brief Déclare le type AttentionApproximators, utilisé par Implémentation des calculs et contrats d'entraînement patrol rltools. */
 struct AttentionApproximators
     : rlt::rl::algorithms::ppo::loop::core::ConfigApproximatorsMLP<T,TI,ENV,PARAMETERS>
 {

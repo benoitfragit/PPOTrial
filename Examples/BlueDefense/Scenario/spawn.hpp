@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Scenario/spawn.hpp
+ * @brief Placement physique des Bleus, Rouges et zones selon le scénario.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "team_capacity.hpp"
@@ -173,6 +179,9 @@ struct EpisodeSpawnLayout final
 {
     /** @brief Sentinel outside the permitted finite activation-step range. */
     static constexpr std::size_t NeverActivate =
+/**
+ * @brief Réalise l'opération max; voir les préconditions et effets dans son corps C++.
+ */
         std::numeric_limits<std::size_t>::max();
 
     int side{1};

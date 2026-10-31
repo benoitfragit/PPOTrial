@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Scenario/initializer.cpp
+ * @brief Initialisation des épisodes, objectifs, rôles et générateur de dispositions.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "initializer.hpp"
 #include "spawn.hpp"
 #include "components.hpp"
@@ -64,6 +70,10 @@ void BuildPatrolTrackOverlay(InitializerContext& config) noexcept
 
 } // namespace
 
+/**
+ * @brief Initialise ou rétablit l'état selon le contexte courant.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void InitializeEntity(ppo::model::Entity& entity)
 {
     auto* registry = entity.registry();

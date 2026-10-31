@@ -1,3 +1,9 @@
+/**
+ * @file Examples/Airspace/Scenario/airspacemeta.cpp
+ * @brief Construction, données et arbitrage du scénario airspacemeta.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "airspacemeta.hpp"
 #include "metaregistry.hpp"
 #include "mobile.hpp"
@@ -155,6 +161,9 @@ CreateTargetSelectorProdAgent(ppo::model::Environment& environment,
 }
 
 
+/**
+ * @brief Met à jour ou enregistre les données sous la responsabilité.
+ */
 void RegisterAirspaceEnums()
 {
     entt::meta_factory<ppo::model::eEntityType>{}
@@ -166,6 +175,9 @@ void RegisterAirspaceEnums()
         .data<ppo::model::eEntityType::SAM>("SAM"_hs);
 }
 
+/**
+ * @brief Met à jour ou enregistre les données sous la responsabilité.
+ */
 void RegisterAirspaceComponents()
 {
     entt::meta_factory<ppo::model::sSNAState>{}
@@ -225,6 +237,9 @@ void RegisterAirspaceComponents()
         .custom<sMetaDescriptor>(eMetaCategory::Component, "MissionStateModel");
 }
 
+/**
+ * @brief Met à jour ou enregistre les données sous la responsabilité.
+ */
 void RegisterAirspaceEntities()
 {
     RegisterEntityType<ppo::model::Mobile>("Mobile", &CreateMobile);
@@ -243,6 +258,9 @@ void RegisterAirspaceEntities()
 
 }
 
+/**
+ * @brief Met à jour ou enregistre les données sous la responsabilité.
+ */
 void RegisterAirspaceAgents()
 {
     RegisterAgentType<rl::SNATrainingAgent>("SNATrainingAgent", &CreateSNATrainingAgent);
@@ -260,6 +278,9 @@ void RegisterAirspaceAgents()
 }
 } // namespace
 
+/**
+ * @brief Met à jour ou enregistre les données sous la responsabilité.
+ */
 void RegisterAirspaceMeta()
 {
     ppo::reflection::RegisterAllMeta();

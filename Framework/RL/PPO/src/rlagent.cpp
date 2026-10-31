@@ -367,6 +367,10 @@ RLAgent::GetCurrentStep(void) const noexcept
 * @return Maximum number of steps stored in one rollout.
 */
 long long
+/**
+ * @brief Retourne une vue ou une valeur calculée depuis l'état courant de RLAgent.
+ * @details Utilise des fichiers ou chemins.
+ */
 RLAgent::GetMaxStep(void) const noexcept
 {
     if (p_impl == nullptr)

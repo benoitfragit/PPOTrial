@@ -118,6 +118,9 @@ public:
     {
         m_generators.push_back([this, &attr, min, max]()
         {
+/**
+ * @brief Réalise l'opération dist; voir les préconditions et effets dans son corps C++.
+ */
             std::uniform_int_distribution<T> dist(min, max);
             attr = dist(m_rng);
         });
@@ -136,6 +139,9 @@ public:
     {
         m_generators.push_back([this, &attr, min, max]()
         {
+/**
+ * @brief Réalise l'opération dist; voir les préconditions et effets dans son corps C++.
+ */
             std::uniform_real_distribution<T> dist(min, max);
             attr = dist(m_rng);
         });
@@ -153,6 +159,9 @@ public:
     {
         m_generators.push_back([this, &attr, probability]()
         {
+/**
+ * @brief Réalise l'opération dist; voir les préconditions et effets dans son corps C++.
+ */
             std::bernoulli_distribution dist(probability);
             attr = dist(m_rng);
         });

@@ -1,9 +1,16 @@
+/**
+ * @file Examples/data/example.hpp
+ * @brief Interface ou implémentation du composant example.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include <filesystem>
 #include <string_view>
 
 namespace ppo::model {
+/** @brief Déclare le type Environment, utilisé par Interface ou implémentation du composant example. */
 class Environment;
 }
 
@@ -11,6 +18,7 @@ namespace ppo::app {
 
 // A compiled example provides its startup without coupling the host to its
 // entity types, agent types or scenario semantics.
+/** @brief Déclare le type ExampleDefinition, utilisé par Interface ou implémentation du composant example. */
 struct ExampleDefinition
 {
     std::string_view id;
@@ -25,6 +33,9 @@ struct ExampleDefinition
     std::string_view description{};
 };
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 inline bool IsValid(ExampleDefinition const& example) noexcept
 {
     return !example.id.empty()

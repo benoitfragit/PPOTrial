@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Training/attention_actor.hpp
+ * @brief Implémentation des calculs et contrats d'entraînement attention actor.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 // Fully differentiable RLtools masked track attention. Separate hostile/friendly
 // branches, shared per-track encoders, learned query, softmax, mean/max pool.
@@ -14,6 +20,7 @@ namespace ppo::examples::bluedefense::defenders {
 namespace rlt = rl_tools;
 
 template<typename T, typename TI, TI F, TI N, TI D>
+/** @brief Déclare le type TrackAttention, utilisé par Implémentation des calculs et contrats d'entraînement attention actor. */
 struct TrackAttention {
     static constexpr TI Features=F, Tracks=N, Width=D, OutputWidth=3*D;
     template<TI R, TI C, typename KIND>
@@ -28,6 +35,7 @@ struct TrackAttention {
     Param<D,ObservationLayout::Own,W> queryW{};
     Param<1,D,B> queryB{};
     using Vector=std::array<T,D>;
+/** @brief Déclare le type Cache, utilisé par Implémentation des calculs et contrats d'entraînement attention actor. */
     struct Cache {
         std::array<Vector,N> features{};
         std::array<T,N> probabilities{};
@@ -36,6 +44,10 @@ struct TrackAttention {
         TI count=0;
     };
     template<typename IN,typename OUT>
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par Transform.
+ * @details Applique des bornes numériques.
+ */
     Cache Transform(IN const& src,TI row,TI offset,OUT& dst) const {
         Cache c{};
         T const scale=T(1)/std::sqrt(T(D));
@@ -90,6 +102,9 @@ struct TrackAttention {
         return c;
     }
     template<typename IN,typename DERIV>
+/**
+ * @brief Réalise l'opération Differentiate; voir les préconditions et effets dans son corps C++.
+ */
     void Differentiate(IN const& input,TI row,TI offset,
                        DERIV const& deriv,Cache const& c) {
         if(!c.count)return;
@@ -129,6 +144,7 @@ struct TrackAttention {
 };
 
 template<typename SPEC>
+/** @brief Déclare le type AttentionActor, utilisé par Implémentation des calculs et contrats d'entraînement attention actor. */
 struct AttentionActor : rlt::nn_models::mlp_unconditional_stddev::NeuralNetworkAdam<SPEC> {
     using Base=rlt::nn_models::mlp_unconditional_stddev::NeuralNetworkAdam<SPEC>;
     using T=typename SPEC::T;
@@ -142,6 +158,9 @@ struct AttentionActor : rlt::nn_models::mlp_unconditional_stddev::NeuralNetworkA
 
 namespace rl_tools {
 namespace blue_attention_detail {
+/**
+ * @brief Réalise l'opération malloc; voir les préconditions et effets dans son corps C++.
+ */
 template<typename DEVICE,typename BLOCK> void malloc(DEVICE& d,BLOCK& b){
     rl_tools::malloc(d,b.encoderW);rl_tools::malloc(d,b.encoderB);
     rl_tools::malloc(d,b.queryW);rl_tools::malloc(d,b.queryB);
@@ -150,6 +169,9 @@ template<typename DEVICE,typename BLOCK> void free(DEVICE& d,BLOCK& b){
     rl_tools::free(d,b.encoderW);rl_tools::free(d,b.encoderB);
     rl_tools::free(d,b.queryW);rl_tools::free(d,b.queryB);
 }
+/**
+ * @brief Réalise l'opération zero; voir les préconditions et effets dans son corps C++.
+ */
 template<typename DEVICE,typename BLOCK> void zero(DEVICE& d,BLOCK& b){
     rl_tools::set_all(d,b.encoderW.gradient,0);rl_tools::set_all(d,b.encoderB.gradient,0);
     rl_tools::set_all(d,b.queryW.gradient,0);rl_tools::set_all(d,b.queryB.gradient,0);
@@ -162,6 +184,9 @@ void reset(DEVICE& d,BLOCK& b,OPT& opt){
     rl_tools::_reset_optimizer_state(d,b.queryB,opt);
 }
 template<typename DEVICE,typename BLOCK,typename OPT>
+/**
+ * @brief Réalise l'opération update; voir les préconditions et effets dans son corps C++.
+ */
 void update(DEVICE& d,BLOCK& b,OPT& opt){
     rl_tools::update(d,b.encoderW,opt);rl_tools::update(d,b.encoderB,opt);
     rl_tools::update(d,b.queryW,opt);rl_tools::update(d,b.queryB,opt);
@@ -180,6 +205,9 @@ void initialize(DEVICE& d,BLOCK& b,RNG& rng){
     fill(b.queryW.parameters,true);fill(b.queryB.parameters,false);
 }
 template<typename DEVICE,typename ACTOR,typename IN,typename OUT>
+/**
+ * @brief Réalise l'opération transform; voir les préconditions et effets dans son corps C++.
+ */
 void transform(DEVICE& d,ACTOR const& actor,IN const& input,OUT& output){
     rl_tools::copy(d,d,input,output);
     using L=ppo::examples::bluedefense::defenders::ObservationLayout;
@@ -199,6 +227,9 @@ void transform(DEVICE& d,ACTOR const& actor,IN const& input,OUT& output){
 } // namespace blue_attention_detail
 
 template<typename DEVICE,typename SPEC>
+/**
+ * @brief Réalise l'opération malloc; voir les préconditions et effets dans son corps C++.
+ */
 void malloc(DEVICE& d,ppo::examples::bluedefense::defenders::AttentionActor<SPEC>& a){
     using B=typename ppo::examples::bluedefense::defenders::AttentionActor<SPEC>::Base;
     rl_tools::malloc(d,static_cast<B&>(a));
@@ -211,6 +242,9 @@ void free(DEVICE& d,ppo::examples::bluedefense::defenders::AttentionActor<SPEC>&
     rl_tools::free(d,static_cast<B&>(a));
 }
 template<typename DEVICE,typename SPEC,typename RNG>
+/**
+ * @brief Réalise l'opération init_weights; voir les préconditions et effets dans son corps C++.
+ */
 void init_weights(DEVICE& d,ppo::examples::bluedefense::defenders::AttentionActor<SPEC>& a,RNG& rng){
     using B=typename ppo::examples::bluedefense::defenders::AttentionActor<SPEC>::Base;
     rl_tools::init_weights(d,static_cast<B&>(a),rng);
@@ -224,6 +258,9 @@ void zero_gradient(DEVICE& d,ppo::examples::bluedefense::defenders::AttentionAct
     blue_attention_detail::zero(d,a.red);blue_attention_detail::zero(d,a.friendlies);
 }
 template<typename DEVICE,typename SPEC,typename IN_SPEC,typename OUT_SPEC,typename BUF>
+/**
+ * @brief Réalise l'opération evaluate; voir les préconditions et effets dans son corps C++.
+ */
 void evaluate(DEVICE& d,ppo::examples::bluedefense::defenders::AttentionActor<SPEC> const& a,
               Matrix<IN_SPEC> const& input,Matrix<OUT_SPEC>& output,BUF& buffer){
     MatrixDynamic<matrix::Specification<typename SPEC::T,typename SPEC::TI,
@@ -235,6 +272,9 @@ void evaluate(DEVICE& d,ppo::examples::bluedefense::defenders::AttentionActor<SP
     rl_tools::free(d,transformed);
 }
 template<typename DEVICE,typename SPEC,typename IN_SPEC,typename OUT_SPEC>
+/**
+ * @brief Réalise l'opération forward; voir les préconditions et effets dans son corps C++.
+ */
 void forward(DEVICE& d,ppo::examples::bluedefense::defenders::AttentionActor<SPEC>& a,
              Matrix<IN_SPEC> const& input,Matrix<OUT_SPEC>& output){
     MatrixDynamic<matrix::Specification<typename SPEC::T,typename SPEC::TI,
@@ -246,6 +286,9 @@ void forward(DEVICE& d,ppo::examples::bluedefense::defenders::AttentionActor<SPE
     rl_tools::free(d,transformed);
 }
 template<typename DEVICE,typename SPEC,typename IN_SPEC,typename OUT_SPEC,typename BUF>
+/**
+ * @brief Réalise l'opération backward; voir les préconditions et effets dans son corps C++.
+ */
 void backward(DEVICE& d,ppo::examples::bluedefense::defenders::AttentionActor<SPEC>& a,
               Matrix<IN_SPEC> const& input,Matrix<OUT_SPEC>& d_output,BUF& buffer){
     using T=typename SPEC::T;using TI=typename SPEC::TI;
@@ -270,6 +313,9 @@ void backward(DEVICE& d,ppo::examples::bluedefense::defenders::AttentionActor<SP
 // rl_tools causes MSVC C2668 ambiguity during PPO optimizer instantiation.
 namespace ppo::examples::bluedefense::defenders {
 template<typename DEVICE,typename SPEC,typename OPT>
+/**
+ * @brief Réalise l'opération update; voir les préconditions et effets dans son corps C++.
+ */
 void update(DEVICE& device,AttentionActor<SPEC>& actor,OPT& optimizer)
 {
     using Base = typename AttentionActor<SPEC>::Base;

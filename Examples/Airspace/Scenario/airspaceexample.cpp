@@ -1,3 +1,9 @@
+/**
+ * @file Examples/Airspace/Scenario/airspaceexample.cpp
+ * @brief Construction, données et arbitrage du scénario airspaceexample.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "airspaceexample.hpp"
 #include "airspaceworldrules.hpp"
 #include "airspacemeta.hpp"
@@ -116,6 +122,10 @@ LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment&
 
 } // namespace
 
+/**
+ * @brief Réalise l'opération Definition; voir les préconditions et effets dans son corps C++.
+ * @details Utilise des fichiers ou chemins.
+ */
 ppo::app::ExampleDefinition Definition()
 {
     return {

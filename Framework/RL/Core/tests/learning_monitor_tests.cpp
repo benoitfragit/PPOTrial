@@ -1,3 +1,9 @@
+/**
+ * @file Framework/RL/Core/tests/learning_monitor_tests.cpp
+ * @brief Tests et assertions déterministes pour learning monitor tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "ppo/core/learning_monitor.hpp"
 
 #include <stdexcept>
@@ -6,6 +12,10 @@
 #include <limits>
 
 namespace {
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Peut signaler un état invalide par exception.
+ */
 void Check(bool condition)
 {
     if (!condition)

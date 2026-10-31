@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/tests/team_dynamics_tests.cpp
+ * @brief Tests et assertions déterministes pour team dynamics tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "generalized_team_dynamics.hpp"
 
 #include <cmath>
@@ -9,6 +15,9 @@ namespace {
 
 constexpr float kPi = 3.14159265358979323846F;
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 blue::Parameters TestParameters() noexcept
 {
     blue::Parameters parameters{};
@@ -23,12 +32,18 @@ blue::Parameters TestParameters() noexcept
     return parameters;
 }
 
+/**
+ * @brief Réalise l'opération MobileAt; voir les préconditions et effets dans son corps C++.
+ */
 blue::Mobile MobileAt(float const north, float const east,
                       float const heading, float const speed) noexcept
 {
     return {north, east, heading, speed, 0.F, true};
 }
 
+/**
+ * @brief Réalise l'opération Near; voir les préconditions et effets dans son corps C++.
+ */
 bool Near(float const first, float const second,
           float const tolerance = 1.0e-4F) noexcept
 {
@@ -84,6 +99,9 @@ bool SingletonUsesExactlyOneActionAndTransition() noexcept
         == blue::GeneralizedTeamStepStatus::InvalidActionCount;
 }
 
+/**
+ * @brief Réalise l'opération CrossingPairIsDetectedBetweenEndpoints; voir les préconditions et effets dans son corps C++.
+ */
 bool CrossingPairIsDetectedBetweenEndpoints() noexcept
 {
     blue::GeneralizedBlueTeamState state{};
@@ -111,6 +129,9 @@ bool CrossingPairIsDetectedBetweenEndpoints() noexcept
                     - result.next.mobiles[8U].north) > 10.F;
 }
 
+/**
+ * @brief Réalise l'opération ParallelPairDoesNotCollide; voir les préconditions et effets dans son corps C++.
+ */
 bool ParallelPairDoesNotCollide() noexcept
 {
     blue::GeneralizedBlueTeamState state{};
@@ -130,6 +151,9 @@ bool ParallelPairDoesNotCollide() noexcept
         && !result.next.failed && result.collisions.collisionCount == 0U;
 }
 
+/**
+ * @brief Réalise l'opération NineWayConvergenceChecksEveryPair; voir les préconditions et effets dans son corps C++.
+ */
 bool NineWayConvergenceChecksEveryPair() noexcept
 {
     blue::GeneralizedBlueTeamState state{};
@@ -182,6 +206,9 @@ bool NineWayConvergenceChecksEveryPair() noexcept
     return observedPair == blue::kMaximumBlueCollisionPairs;
 }
 
+/**
+ * @brief Réalise l'opération DestroyedParticipantKeepsStableNoOpTransition; voir les préconditions et effets dans son corps C++.
+ */
 bool DestroyedParticipantKeepsStableNoOpTransition() noexcept
 {
     blue::GeneralizedBlueTeamState state{};
@@ -212,6 +239,9 @@ bool DestroyedParticipantKeepsStableNoOpTransition() noexcept
         && !result.next.failed && result.collisions.collisionCount == 0U;
 }
 
+/**
+ * @brief Réalise l'opération DestroyedParticipantIsExcludedFromSweptCollisions; voir les préconditions et effets dans son corps C++.
+ */
 bool DestroyedParticipantIsExcludedFromSweptCollisions() noexcept
 {
     blue::GeneralizedBlueTeamState state{};
@@ -240,6 +270,9 @@ bool DestroyedParticipantIsExcludedFromSweptCollisions() noexcept
 
 } // namespace
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     if (!SingletonUsesExactlyOneActionAndTransition())

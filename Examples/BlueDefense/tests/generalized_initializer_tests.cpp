@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/tests/generalized_initializer_tests.cpp
+ * @brief Tests et assertions déterministes pour generalized initializer tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "initializer.hpp"
 
 #include "components.hpp"
@@ -119,6 +125,9 @@ bool MaximumBlueTeamFitsWorld()
 
 } // namespace
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     if (!MaximumBlueTeamFitsWorld())

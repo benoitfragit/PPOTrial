@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Training/generalized_checkpoint.hpp
+ * @brief Implémentation des calculs et contrats d'entraînement generalized checkpoint.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "generalized_attention_actor.hpp"
@@ -51,6 +57,9 @@ constexpr bool Valid(GeneralizedCheckpointMetadata const metadata) noexcept
 namespace generalized_checkpoint_detail {
 
 template<typename Source, typename Destination>
+/**
+ * @brief Réalise l'opération CopyMatrix; voir les préconditions et effets dans son corps C++.
+ */
 void CopyMatrix(Source const& source, Destination& destination)
 {
     static_assert(Source::SPEC::ROWS == Destination::SPEC::ROWS);
@@ -69,6 +78,9 @@ void CopyMatrix(Source const& source, Destination& destination)
 }
 
 template<typename Source, typename Destination>
+/**
+ * @brief Réalise l'opération CopyParameter; voir les préconditions et effets dans son corps C++.
+ */
 void CopyParameter(Source const& source, Destination& destination)
 {
     CopyMatrix(source.parameters, destination.parameters);
@@ -88,6 +100,9 @@ void CopyParameter(Source const& source, Destination& destination)
 }
 
 template<typename Source, typename Destination>
+/**
+ * @brief Réalise l'opération CopyLayer; voir les préconditions et effets dans son corps C++.
+ */
 void CopyLayer(Source const& source, Destination& destination)
 {
     CopyParameter(source.weights, destination.weights);
@@ -104,6 +119,10 @@ void CopyAttention(Source const& source, Destination& destination)
 }
 
 template<typename Parameter>
+/**
+ * @brief Initialise ou rétablit l'état selon le contexte courant.
+ * @details Peut signaler un état invalide par exception.
+ */
 void ClearParameterColumn(Parameter& parameter, std::size_t const column)
 {
     using Matrix = typename Parameter::CONTAINER;
@@ -121,6 +140,10 @@ void ClearParameterColumn(Parameter& parameter, std::size_t const column)
     }
 }
 
+/**
+ * @brief Sérialise ou écrit les données associées à WriteMetadata selon les garanties implémentées.
+ * @details Peut signaler un état invalide par exception.
+ */
 inline void WriteMetadata(std::ostream& stream,
                           GeneralizedCheckpointMetadata const metadata)
 {
@@ -174,6 +197,9 @@ inline GeneralizedCheckpointMetadata ReadMetadata(std::istream& stream)
  * @param migrated Allocated v8 actor receiving compatible state.
  */
 template<typename LegacyActor, typename NewActor>
+/**
+ * @brief Réalise l'opération MigrateV7Actor; voir les préconditions et effets dans son corps C++.
+ */
 void MigrateV7Actor(LegacyActor const& legacy, NewActor& migrated)
 {
     generalized_checkpoint_detail::CopyAttention(legacy.red, migrated.red);
@@ -213,6 +239,10 @@ void MigrateV7Actor(LegacyActor const& legacy, NewActor& migrated)
  * @param metadata Active P/N and compiled capacities.
  */
 template<typename Actor>
+/**
+ * @brief Sérialise ou écrit les données associées à WriteGeneralizedPolicy selon les garanties implémentées.
+ * @details Peut signaler un état invalide par exception.
+ */
 void WriteGeneralizedPolicy(std::ostream& stream, Actor const& actor,
                             GeneralizedCheckpointMetadata const metadata)
 {
@@ -284,6 +314,10 @@ GeneralizedCheckpointMetadata ReadGeneralizedPolicyParameters(
  * @return Validated P/N metadata.
  */
 template<typename Actor>
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ * @details Utilise des fichiers ou chemins. Peut signaler un état invalide par exception.
+ */
 GeneralizedCheckpointMetadata ReadGeneralizedPolicy(std::istream& stream,
                                                      Actor& actor)
 {

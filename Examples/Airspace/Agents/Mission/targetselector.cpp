@@ -353,6 +353,10 @@ StatesAndActionsForMission::SetNewState(STATES& state) noexcept
     pseudoLidarState.m_angleSpanRadians = kPseudoLidarAngleSpan;
 }
 
+/**
+ * @brief Initialise ou rétablit l'état de TargetSelectorTrainingAgent selon le contexte courant.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void
 TargetSelectorTrainingAgent::Init(void)
 {
@@ -606,6 +610,9 @@ TargetSelectorTrainingAgent::RewardFunction(void) noexcept
     return done;
 }
 
+/**
+ * @brief Initialise ou rétablit l'état de TargetSelectorProdAgent selon le contexte courant.
+ */
 void
 TargetSelectorProdAgent::Init()
 {

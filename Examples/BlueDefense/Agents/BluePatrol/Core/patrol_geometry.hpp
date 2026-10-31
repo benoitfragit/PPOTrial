@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Core/patrol_geometry.hpp
+ * @brief Échantillonnage, projection et géométrie analytique de l'hippodrome.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "blue_team_roles.hpp"
@@ -97,6 +103,10 @@ struct PatrolProjection final
 
 namespace patrol_geometry_detail {
 
+/**
+ * @brief Réalise l'opération Clamp; voir les préconditions et effets dans son corps C++.
+ * @details Applique des bornes numériques.
+ */
 inline float Clamp(float value, float minimum, float maximum) noexcept
 {
     return std::max(minimum, std::min(value, maximum));
@@ -108,6 +118,9 @@ inline float PositiveModulo(float value, float period) noexcept
     return result < 0.F ? result + period : result;
 }
 
+/**
+ * @brief Réalise l'opération FiniteRange; voir les préconditions et effets dans son corps C++.
+ */
 inline bool FiniteRange(PatrolRange const& range) noexcept
 {
     return std::isfinite(range.minimum) && std::isfinite(range.maximum)
@@ -122,6 +135,7 @@ inline float Sample(PatrolRange const& range, std::mt19937& rng)
         range.minimum, range.maximum}(rng);
 }
 
+/** @brief Déclare le type LocalPose, utilisé par Échantillonnage, projection et géométrie analytique de l'hippodrome. */
 struct LocalPose final
 {
     float major{};
@@ -131,6 +145,9 @@ struct LocalPose final
     float curvature{};
 };
 
+/**
+ * @brief Réalise l'opération Radius; voir les préconditions et effets dans son corps C++.
+ */
 inline float Radius(PatrolGeometry const& geometry) noexcept
 {
     return 0.5F * geometry.width;
@@ -141,6 +158,9 @@ inline float StraightHalfLength(PatrolGeometry const& geometry) noexcept
     return 0.5F * (geometry.length - geometry.width);
 }
 
+/**
+ * @brief Réalise l'opération CircuitLength; voir les préconditions et effets dans son corps C++.
+ */
 inline float CircuitLength(PatrolGeometry const& geometry) noexcept
 {
     return 4.F * StraightHalfLength(geometry)
@@ -194,6 +214,9 @@ inline LocalPose EvaluateCanonical(PatrolGeometry const& geometry,
     return result;
 }
 
+/**
+ * @brief Réalise l'opération ToWorld; voir les préconditions et effets dans son corps C++.
+ */
 inline std::array<float, 2> ToWorld(PatrolGeometry const& geometry,
                                     float major, float minor) noexcept
 {
@@ -207,6 +230,9 @@ inline std::array<float, 2> ToWorld(PatrolGeometry const& geometry,
     };
 }
 
+/**
+ * @brief Réalise l'opération ToLocal; voir les préconditions et effets dans son corps C++.
+ */
 inline std::array<float, 2> ToLocal(PatrolGeometry const& geometry,
                                     float north, float east) noexcept
 {
@@ -220,6 +246,9 @@ inline std::array<float, 2> ToLocal(PatrolGeometry const& geometry,
     };
 }
 
+/**
+ * @brief Réalise l'opération DistanceSquared; voir les préconditions et effets dans son corps C++.
+ */
 inline float DistanceSquared(float firstMajor, float firstMinor,
                              float secondMajor, float secondMinor) noexcept
 {
@@ -228,12 +257,16 @@ inline float DistanceSquared(float firstMajor, float firstMinor,
     return major * major + minor * minor;
 }
 
+/** @brief Déclare le type ProjectionCandidate, utilisé par Échantillonnage, projection et géométrie analytique de l'hippodrome. */
 struct ProjectionCandidate final
 {
     float canonicalArclength{};
     float distanceSquared{std::numeric_limits<float>::infinity()};
 };
 
+/**
+ * @brief Réalise l'opération KeepCloser; voir les préconditions et effets dans son corps C++.
+ */
 inline void KeepCloser(ProjectionCandidate candidate,
                        ProjectionCandidate& best) noexcept
 {
@@ -550,6 +583,9 @@ inline PatrolProjection ProjectOnPatrolCurve(PatrolGeometry const& geometry,
     float const length = patrol_geometry_detail::CircuitLength(geometry);
     float directedArclength = geometry.direction >= 0
         ? best.canonicalArclength
+/**
+ * @brief Réalise l'opération PositiveModulo; voir les préconditions et effets dans son corps C++.
+ */
         : PositiveModulo(length - best.canonicalArclength, length);
     PatrolCurvePose const pose = EvaluatePatrolCurve(
         geometry, directedArclength);

@@ -268,6 +268,10 @@ RegisterAllMeta(void)
 
 
 // Concrete examples register their factories before any simulation worker starts.
+/**
+ * @brief Met à jour ou enregistre les données sous la responsabilité.
+ * @details Utilise la synchronisation.
+ */
 void RegisterEntityFactory(std::string_view name, EntityFactory factory)
 {
     RegisterAllMeta();
@@ -282,6 +286,10 @@ void RegisterTypeAlias(std::string_view legacyName, std::string_view canonicalNa
     TypeAliases()[ToTypeId(legacyName)] = ToTypeId(canonicalName);
 }
 
+/**
+ * @brief Met à jour ou enregistre les données sous la responsabilité.
+ * @details Utilise la synchronisation.
+ */
 void RegisterAgentFactory(std::string_view name, AgentFactory factory)
 {
     RegisterAllMeta();

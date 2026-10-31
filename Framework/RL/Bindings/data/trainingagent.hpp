@@ -24,6 +24,7 @@ namespace ppo::model {
 * @tparam Model Domain model exposing state, action, and reward definitions.
 */
 template<typename Policy, typename Model>
+/** @brief Déclare le type TrainingAgent, utilisé par Interface ou implémentation du composant trainingagent. */
 class TrainingAgent :
     public IAgent
 {
@@ -38,6 +39,9 @@ public:
     using ActionVector = typename Model::ACTIONS;
 
     // Optional descriptor; no change to the PPO execution path or agent ABI.
+/**
+ * @brief Réalise l'opération Contract; voir les préconditions et effets dans son corps C++.
+ */
     static constexpr ppo::core::AgentContract Contract() noexcept
     {
         return ppo::core::AgentContractOf<Model>();

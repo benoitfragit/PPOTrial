@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/tests/spawn_tests.cpp
+ * @brief Tests et assertions déterministes pour spawn tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "spawn_config.hpp"
 #include "team_capacity.hpp"
 
@@ -13,6 +19,9 @@ namespace defense = ppo::examples::bluedefense;
 
 namespace {
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 nlohmann::json ValidScenario()
 {
     return {
@@ -50,6 +59,9 @@ nlohmann::json ValidScenario()
     };
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool Same(defense::Spawn const& left, defense::Spawn const& right)
 {
     return left.north == right.north && left.east == right.east
@@ -78,6 +90,9 @@ bool Same(defense::EpisodeSpawnLayout const& left,
     return true;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool CheckTeam(std::size_t const blueCount, std::size_t const redCount)
 {
     auto document = ValidScenario();
@@ -152,6 +167,9 @@ bool CheckTeam(std::size_t const blueCount, std::size_t const redCount)
     return true;
 }
 
+/**
+ * @brief Réalise l'opération RejectInvalidSettings; voir les préconditions et effets dans son corps C++.
+ */
 bool RejectInvalidSettings()
 {
     auto document = ValidScenario();
@@ -210,6 +228,9 @@ bool RejectInvalidSettings()
 
 } // namespace
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     if (!CheckTeam(1U, 0U)) return 1;

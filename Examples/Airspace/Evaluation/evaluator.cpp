@@ -188,6 +188,7 @@ RegisterAgentFactory(std::string_view name, AgentFactory factory)
     AgentFactories()[std::string(name)] = std::move(factory);
 }
 
+/** @brief Déclare le type Evaluator, utilisé par Évaluation des politiques historiques dans l'exemple Airspace. */
 struct Evaluator::Impl
 {
     entt::registry                           m_world{};
@@ -253,6 +254,9 @@ Evaluator::Impl::UpdateDoubleBuffer(void)
     m_snapshot = state;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération de Evaluator::Impl.
+ */
 bool
 Evaluator::Impl::ValidateScenario(void) const
 {
@@ -298,6 +302,9 @@ Evaluator::Impl::ValidateScenario(void) const
     return false;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération de Evaluator::Impl.
+ */
 bool
 Evaluator::Impl::ValidateBuffer(void) const
 {
@@ -333,6 +340,9 @@ Evaluator::Impl::ValidateBuffer(void) const
     return true;
 }
 
+/**
+ * @brief Traite les entrées et applique les effets associés à ResolveTargets.
+ */
 bool
 Evaluator::Impl::ResolveTargets(void)
 {
@@ -381,6 +391,9 @@ Evaluator::Impl::ResolveTargets(void)
     return true;
 }
 
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par CreateAgents.
+ */
 bool
 Evaluator::Impl::CreateAgents(void)
 {
@@ -410,6 +423,10 @@ Evaluator::Impl::CreateAgents(void)
     return true;
 }
 
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées de Evaluator::Impl.
+ * @details Consulte ou modifie des composants ECS. Utilise la synchronisation.
+ */
 bool
 Evaluator::Impl::LoadScenario(std::string const& name)
 {
@@ -489,6 +506,9 @@ Evaluator::Impl::LoadScenario(std::string const& name)
     return true;
 }
 
+/**
+ * @brief Initialise ou rétablit l'état de Evaluator::Impl selon le contexte courant.
+ */
 bool
 Evaluator::Impl::ResetEntitiesForTest(std::size_t testIndex)
 {
@@ -519,6 +539,9 @@ Evaluator::Impl::ResetEntitiesForTest(std::size_t testIndex)
     return true;
 }
 
+/**
+ * @brief Traite les entrées et applique les effets associés à ResolveDestructions.
+ */
 void
 Evaluator::Impl::ResolveDestructions(void)
 {
@@ -557,6 +580,10 @@ Evaluator::Impl::ResolveDestructions(void)
     }
 }
 
+/**
+ * @brief Change ou contrôle l'étape de cycle de vie de Evaluator::Impl.
+ * @details Utilise des fichiers ou chemins.
+ */
 void
 Evaluator::Impl::Stop(void)
 {
@@ -573,6 +600,10 @@ Evaluator::Impl::Stop(void)
     }
 }
 
+/**
+ * @brief Change ou contrôle l'étape de cycle de vie de Evaluator::Impl.
+ * @details Utilise des fichiers ou chemins.
+ */
 void
 Evaluator::Impl::Start(std::string const& name, std::filesystem::path const& modelpath)
 {
@@ -607,6 +638,9 @@ Evaluator::Impl::Start(std::string const& name, std::filesystem::path const& mod
     m_thread = std::thread(&Evaluator::Impl::Run, this);
 }
 
+/**
+ * @brief Exécute une étape d'évolution ou de calcul du composant de Evaluator::Impl.
+ */
 void
 Evaluator::Impl::Run(void)
 {
@@ -804,6 +838,10 @@ Evaluator::Impl::Run(void)
     m_running.store(false, std::memory_order_release);
 }
 
+/**
+ * @brief Réalise l'opération Evaluator de Evaluator; voir les préconditions et effets dans son corps C++.
+ * @details Utilise des fichiers ou chemins. Utilise la synchronisation.
+ */
 Evaluator::Evaluator(void) :
     p_impl{ std::make_unique<Impl>() }
 {
@@ -812,6 +850,10 @@ Evaluator::Evaluator(void) :
 Evaluator::~Evaluator(void) = default;
 
 ppo::model::sEvaluatorState
+/**
+ * @brief Retourne une vue ou une valeur calculée depuis l'état courant de Evaluator.
+ * @details Utilise des fichiers ou chemins. Utilise la synchronisation.
+ */
 Evaluator::GetSnapshot(void) const noexcept
 {
     if (p_impl == nullptr)
@@ -821,6 +863,9 @@ Evaluator::GetSnapshot(void) const noexcept
     return p_impl->m_snapshot;
 }
 
+/**
+ * @brief Change ou contrôle l'étape de cycle de vie de Evaluator.
+ */
 void
 Evaluator::Start(std::string const& name, std::filesystem::path const& modelpath)
 {

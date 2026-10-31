@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Core/generalized_cooperative_reward.hpp
+ * @brief Quinze canaux de récompenses coopératives et individuelles, avec masques et normalisation P/N.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "blue_team_roles.hpp"
@@ -216,6 +222,9 @@ enum class GeneralizedRewardStatus : std::uint8_t
 namespace generalized_reward_detail {
 
 template<std::size_t Capacity>
+/**
+ * @brief Retourne une vue ou une valeur calculée depuis l'état courant.
+ */
 inline std::size_t Count(std::array<bool, Capacity> const& mask) noexcept
 {
     return static_cast<std::size_t>(std::count(mask.begin(), mask.end(), true));
@@ -232,6 +241,9 @@ inline bool IsSubset(std::array<bool, Capacity> const& subset,
 }
 
 template<std::size_t Capacity>
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 inline bool Same(std::array<bool, Capacity> const& first,
                  std::array<bool, Capacity> const& second) noexcept
 {
@@ -264,6 +276,9 @@ inline bool ValidMasks(GeneralizedCombatStateMask const& before,
     return true;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 inline bool ValidSignals(GeneralizedResponsibilitySignals const& signals,
                          std::size_t const blueCount) noexcept
 {
@@ -297,6 +312,9 @@ inline bool ValidSignals(GeneralizedResponsibilitySignals const& signals,
     return true;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 inline bool ValidSettings(GeneralizedRewardSettings const& settings) noexcept
 {
     if (!std::isfinite(settings.clampMagnitude)

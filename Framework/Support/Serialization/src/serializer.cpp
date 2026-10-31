@@ -34,6 +34,10 @@ LogConfigEvent(std::string const& code, std::filesystem::path const& file, std::
 * @brief Parses one JSON file with robust error handling.
 */
 json 
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées de Serializer.
+ * @details Utilise des fichiers ou chemins.
+ */
 Serializer::Parse(std::filesystem::path file)
 {
     std::ifstream stream(file);
@@ -97,6 +101,10 @@ Serializer::Serializer(void) :
 * @brief Returns the serializer singleton.
 */
 Serializer& 
+/**
+ * @brief Retourne une vue ou une valeur calculée depuis l'état courant de Serializer.
+ * @details Utilise des fichiers ou chemins.
+ */
 Serializer::GetInstance(void)
 {
     static Serializer instance{};

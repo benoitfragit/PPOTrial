@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/tests/restricted_zone_snapshot_tests.cpp
+ * @brief Tests et assertions déterministes pour restricted zone snapshot tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "bluedefenserules.hpp"
 
 #include "components.hpp"
@@ -108,6 +114,9 @@ SnapshotResult Capture(ppo::model::Environment const& environment)
 
 } // namespace
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     using namespace ppo::model;

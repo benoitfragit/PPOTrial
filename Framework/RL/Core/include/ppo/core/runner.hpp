@@ -1,3 +1,9 @@
+/**
+ * @file Framework/RL/Core/include/ppo/core/runner.hpp
+ * @brief Interface ou implémentation du composant runner.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "ppo/core/environment.hpp"
@@ -9,6 +15,7 @@ namespace ppo::core {
 
 // Single-agent adapter for future environments. It does not alter PPO's existing
 // terminal/bootstrap semantics. An adapter defines what its domain 'done' means.
+/** @brief Déclare le type EpisodeRunner, utilisé par Interface ou implémentation du composant runner. */
 class EpisodeRunner {
 public:
     // Inference-only. Passing an ILearner instead selects the overload below,
@@ -20,6 +27,10 @@ public:
     EpisodeRunner(IEnvironment& environment, ILearner& learner)
         : environment_(environment), policy_(learner), learner_(&learner) {}
 
+/**
+ * @brief Initialise ou rétablit l'état selon le contexte courant.
+ * @details Peut signaler un état invalide par exception.
+ */
     Observation const& Reset() {
         // Reset can fail after mutating the world. Never keep old observations valid.
         initialized_ = false;
@@ -52,10 +63,22 @@ public:
         return transition_;
     }
 
+/**
+ * @brief Change ou contrôle l'étape de cycle de vie.
+ * @details Peut signaler un état invalide par exception.
+ */
     bool Finished() const noexcept { return finished_; }
+/**
+ * @brief Retourne une vue ou une valeur calculée depuis l'état courant.
+ * @details Peut signaler un état invalide par exception.
+ */
     Observation const& CurrentObservation() const noexcept { return observation_; }
 
 private:
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Peut signaler un état invalide par exception.
+ */
     void ValidateObservation(Observation const& value) const {
         if (value.size() != environment_.ObservationSize())
             throw std::invalid_argument("EpisodeRunner: invalid observation size");

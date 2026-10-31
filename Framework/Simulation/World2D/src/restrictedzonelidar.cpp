@@ -1,3 +1,9 @@
+/**
+ * @file Framework/Simulation/World2D/src/restrictedzonelidar.cpp
+ * @brief Échantillonnage des rayons de pseudo-LiDAR à proximité des zones.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "restrictedzonelidar.hpp"
 #include "restrictedzonegeometry.hpp"
 #include "utils.hpp"
@@ -21,6 +27,10 @@ constexpr float kRestrictedZoneDangerMultiplier =
 constexpr float kNoEscapeEpsilon = 1.0e-4F;
 constexpr float kRayEpsilon = 1.0e-5F;
 
+/**
+ * @brief Calcule NormalizeRange à partir des entrées et des formules présentes dans le code.
+ * @details Applique des bornes numériques.
+ */
 float NormalizeRange(float distance, float rangeReference) noexcept
 {
     return distance / (distance + std::max(rangeReference, 1.F));
@@ -273,6 +283,10 @@ BuildZoneBoundaryPseudoLidar(ppo::model::sEntityState const& ownState,
     }
 }
 
+/**
+ * @brief Exécute une étape d'évolution ou de calcul du composant.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void UpdateRestrictedZonePseudoLidars(entt::registry& registry,
                                       eEntitySide mobileSide,
                                       float const friendlyMobileSafetyRadius,

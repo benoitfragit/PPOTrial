@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Runtime/generalized_reward_shaping.hpp
+ * @brief Façonnage dense de patrouille, formation, proximité, frontière et basse vitesse.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "generalized_runtime_state.hpp"

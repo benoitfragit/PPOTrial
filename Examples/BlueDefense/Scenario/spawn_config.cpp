@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Scenario/spawn_config.cpp
+ * @brief Lecture et validation des contraintes de placement.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "spawn_config.hpp"
 
 #include <nlohmann/json.hpp>
@@ -13,6 +19,9 @@ namespace {
 
 constexpr float kDegreesToRadians = 0.017453292519943295F;
 
+/**
+ * @brief Réalise l'opération Number; voir les préconditions et effets dans son corps C++.
+ */
 std::optional<float> Number(nlohmann::json const& object,
                             std::string_view key)
 {
@@ -23,6 +32,9 @@ std::optional<float> Number(nlohmann::json const& object,
     return std::isfinite(value) ? std::optional<float>{value} : std::nullopt;
 }
 
+/**
+ * @brief Exécute une étape d'évolution ou de calcul du composant.
+ */
 std::optional<std::size_t> Step(nlohmann::json const& object,
                                 std::string_view key)
 {
@@ -32,6 +44,9 @@ std::optional<std::size_t> Step(nlohmann::json const& object,
     return item->get<std::size_t>();
 }
 
+/**
+ * @brief Réalise l'opération OnlyKeys; voir les préconditions et effets dans son corps C++.
+ */
 bool OnlyKeys(nlohmann::json const& object,
               std::initializer_list<std::string_view> allowed,
               std::string_view path,
@@ -50,6 +65,9 @@ bool OnlyKeys(nlohmann::json const& object,
     return true;
 }
 
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ */
 std::optional<SpawnRange> ParseRange(nlohmann::json const& object,
                                      std::string_view path,
                                      std::string& diagnostic)
@@ -68,6 +86,9 @@ std::optional<SpawnRange> ParseRange(nlohmann::json const& object,
     return SpawnRange{*minimum, *maximum};
 }
 
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ */
 bool ParseRestrictedZones(nlohmann::json const& settings,
                           SpawnSettings& result,
                           std::string& diagnostic)
@@ -191,6 +212,9 @@ bool ParseRestrictedZones(nlohmann::json const& settings,
     return true;
 }
 
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ */
 bool ParseRedTeam(nlohmann::json const& settings,
                   SpawnSettings& result,
                   std::string& diagnostic)
@@ -255,6 +279,9 @@ bool ParseRedTeam(nlohmann::json const& settings,
     return true;
 }
 
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ */
 bool ParseBlueTeam(nlohmann::json const& settings,
                    SpawnSettings& result,
                    std::string& diagnostic)
@@ -288,6 +315,9 @@ bool ParseBlueTeam(nlohmann::json const& settings,
 
 } // namespace
 
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ */
 std::optional<SpawnSettings> ParseSpawnSettings(
     nlohmann::json const& settings,
     std::string* diagnostic)

@@ -63,6 +63,7 @@ public:
     * @tparam N Maximum number of samples kept in memory.
     */
     template<std::size_t N>
+/** @brief Déclare le type CircularBuffer, utilisé par Inspection et représentation graphique de l'environnement ECS. */
     struct CircularBuffer
     {
         /**

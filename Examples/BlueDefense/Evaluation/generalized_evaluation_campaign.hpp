@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Evaluation/generalized_evaluation_campaign.hpp
+ * @brief Orchestration reproductible des campagnes d'évaluation.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "generalized_evaluation_metrics.hpp"
@@ -51,6 +57,10 @@ public:
      * @param settings Valid evaluation cadence and finite episode limits.
      */
     explicit GeneralizedEvaluationCampaign(PatrolEvaluationSettings settings)
+/**
+ * @brief Réalise l'opération settings_; voir les préconditions et effets dans son corps C++.
+ * @details Peut signaler un état invalide par exception.
+ */
         : settings_(settings)
     {
         if (!Valid(settings_))

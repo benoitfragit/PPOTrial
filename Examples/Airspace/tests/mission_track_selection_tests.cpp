@@ -1,3 +1,9 @@
+/**
+ * @file Examples/Airspace/tests/mission_track_selection_tests.cpp
+ * @brief Tests et assertions déterministes pour mission track selection tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "missionlayout.hpp"
 #include "missiontrackfilter.hpp"
 
@@ -28,6 +34,9 @@ sEntityState Candidate(unsigned int id, eEntityType type) noexcept
 
 } // namespace
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     static_assert(rl::MissionObservationLayout::kMaxTracks == 10U,

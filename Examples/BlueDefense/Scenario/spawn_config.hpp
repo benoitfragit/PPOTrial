@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Scenario/spawn_config.hpp
+ * @brief Lecture et validation des contraintes de placement.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "spawn.hpp"
