@@ -244,10 +244,13 @@ void
 BuildZoneBoundaryPseudoLidar(ppo::model::sEntityState const& ownState,
                              ppo::model::sEnvironmentState const& envState,
                              std::array<float, kPseudoLidarBinCount>& nearestCollisionRanges,
-                             std::array<float, kPseudoLidarBinCount>& nearestCollisionDistances) noexcept
+                             std::array<float, kPseudoLidarBinCount>& nearestCollisionDistances,
+                             float const boundaryScale) noexcept
 {
-    float const northLimit = 0.5F * envState.m_maxNorth;
-    float const eastLimit = 0.5F * envState.m_maxEast;
+    if (!std::isfinite(boundaryScale) || boundaryScale <= 0.F)
+        return;
+    float const northLimit = 0.5F * envState.m_maxNorth * boundaryScale;
+    float const eastLimit = 0.5F * envState.m_maxEast * boundaryScale;
     float const zoneRangeReference =
         std::max(std::sqrt(northLimit * northLimit + eastLimit * eastLimit), 1.F);
 
@@ -272,7 +275,8 @@ BuildZoneBoundaryPseudoLidar(ppo::model::sEntityState const& ownState,
 
 void UpdateRestrictedZonePseudoLidars(entt::registry& registry,
                                       eEntitySide mobileSide,
-                                      float const friendlyMobileSafetyRadius) noexcept
+                                      float const friendlyMobileSafetyRadius,
+                                      float const boundaryScale) noexcept
 {
     if (!registry.ctx().contains<ppo::model::sEnvironmentState>())
         return;
@@ -294,7 +298,7 @@ void UpdateRestrictedZonePseudoLidars(entt::registry& registry,
             sensor.m_nearestCollisionDistances);
         BuildZoneBoundaryPseudoLidar(
             state, environment, sensor.m_nearestCollisionRanges,
-            sensor.m_nearestCollisionDistances);
+            sensor.m_nearestCollisionDistances, boundaryScale);
         BuildFriendlyMobilePseudoLidar(
             registry, own, state, friendlyMobileSafetyRadius,
             sensor.m_nearestCollisionRanges,
