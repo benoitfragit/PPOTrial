@@ -1,3 +1,9 @@
+/**
+ * @file Framework/RL/Core/include/ppo/core/learning_monitor.hpp
+ * @brief Interface ou implémentation du composant learning monitor.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include <algorithm>
@@ -11,15 +17,18 @@ namespace ppo::core {
 
 // Observational history only: neither the PPO update nor evaluation policy
 // depends on this class. One sample represents one COMPLETED evaluation.
+/** @brief Déclare le type LearningHistory, utilisé par Interface ou implémentation du composant learning monitor. */
 class LearningHistory
 {
 public:
+/** @brief Déclare le type Sample, utilisé par Interface ou implémentation du composant learning monitor. */
     struct Sample
     {
         std::uint64_t campaign{ 0 };
         double score{ 0.0 };
     };
 
+/** @brief Déclare le type Trend, utilisé par Interface ou implémentation du composant learning monitor. */
     enum class Trend
     {
         NotEnoughData,
@@ -28,6 +37,10 @@ public:
         Declining
     };
 
+/**
+ * @brief Réalise l'opération LearningHistory; voir les préconditions et effets dans son corps C++.
+ * @details Applique des bornes numériques.
+ */
     explicit LearningHistory(std::size_t capacity = 256)
         : m_capacity{ std::max<std::size_t>(capacity, 6U) }
     {
@@ -35,6 +48,9 @@ public:
     }
 
     // Ignore duplicate, out-of-order and non-finite evaluator snapshots.
+/**
+ * @brief Réalise l'opération Record; voir les préconditions et effets dans son corps C++.
+ */
     bool Record(std::uint64_t campaign, double score)
     {
         if (campaign == 0 || !std::isfinite(score)
@@ -48,6 +64,10 @@ public:
         return true;
     }
 
+/**
+ * @brief Initialise ou rétablit l'état selon le contexte courant.
+ * @details Applique des bornes numériques.
+ */
     void Clear() noexcept
     {
         m_samples.clear();
@@ -55,10 +75,18 @@ public:
     }
 
     std::vector<Sample> const& Samples() const noexcept { return m_samples; }
+/**
+ * @brief Retourne une vue ou une valeur calculée depuis l'état courant.
+ * @details Applique des bornes numériques.
+ */
     std::uint64_t LastCampaign() const noexcept { return m_lastCampaign; }
 
     // Two non-overlapping groups of three campaigns. This is a heuristic,
     // NOT a statistical significance test or evidence of generalization.
+/**
+ * @brief Réalise l'opération RecentTrend; voir les préconditions et effets dans son corps C++.
+ * @details Applique des bornes numériques.
+ */
     Trend RecentTrend() const noexcept
     {
         if (m_samples.size() < 6U)
@@ -80,6 +108,10 @@ public:
         return Trend::Flat;
     }
 
+/**
+ * @brief Réalise l'opération RecentMean; voir les préconditions et effets dans son corps C++.
+ * @details Applique des bornes numériques.
+ */
     double RecentMean() const noexcept
     {
         if (m_samples.empty())

@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Training/generalized_training_checkpoint.hpp
+ * @brief Implémentation des calculs et contrats d'entraînement generalized training checkpoint.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "generalized_checkpoint.hpp"
@@ -43,6 +49,9 @@ struct GeneralizedTrainingMigrationReport final
  * @return Report documenting every deliberately reset training component.
  */
 template<typename LegacyActor, typename NewActor>
+/**
+ * @brief Réalise l'opération MigrateV7TrainingActor; voir les préconditions et effets dans son corps C++.
+ */
 GeneralizedTrainingMigrationReport MigrateV7TrainingActor(
     LegacyActor const& legacy, NewActor& migrated)
 {
@@ -68,6 +77,9 @@ GeneralizedTrainingMigrationReport MigrateV7TrainingActor(
  */
 template<typename Actor, typename Critic, typename ActorOptimizer,
          typename CriticOptimizer, typename RandomEngine>
+/**
+ * @brief Sérialise ou écrit les données associées à WriteGeneralizedTrainingState selon les garanties implémentées.
+ */
 void WriteGeneralizedTrainingState(
     std::ostream& stream, Actor const& actor, Critic const& critic,
     ActorOptimizer const& actorOptimizer,
@@ -216,6 +228,9 @@ std::uint64_t ReadGeneralizedTrainingState(
  */
 template<typename Actor, typename Critic, typename ActorOptimizer,
          typename CriticOptimizer, typename RandomEngine>
+/**
+ * @brief Sérialise ou écrit les données associées à SaveGeneralizedTrainingState selon les garanties implémentées.
+ */
 void SaveGeneralizedTrainingState(
     std::filesystem::path const& path, Actor const& actor,
     Critic const& critic, ActorOptimizer const& actorOptimizer,

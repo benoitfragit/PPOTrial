@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Training/generalized_attention_actor.hpp
+ * @brief Acteur partagé utilisant l'attention masquée et l'agrégation des pistes.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "generalized_observation.hpp"
@@ -24,6 +30,7 @@ namespace rlt = rl_tools;
  * @tparam D Learned embedding width.
  */
 template<typename T, typename TI, TI F, TI N, TI D>
+/** @brief Déclare le type GeneralizedTrackAttention, utilisé par Acteur partagé utilisant l'attention masquée et l'agrégation des pistes. */
 struct GeneralizedTrackAttention final
 {
     static constexpr TI Features = F;
@@ -46,6 +53,7 @@ struct GeneralizedTrackAttention final
     Parameter<1, D, Biases> queryB{};
 
     using Vector = std::array<T, D>;
+/** @brief Déclare le type Cache, utilisé par Acteur partagé utilisant l'attention masquée et l'agrégation des pistes. */
     struct Cache final
     {
         std::array<Vector, N> features{};
@@ -68,6 +76,9 @@ struct GeneralizedTrackAttention final
      * @return Forward cache used by the attention backward pass.
      */
     template<typename Input, typename Output>
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par Transform.
+ */
     Cache Transform(Input const& source, TI const row,
                     TI const sourceOffset, Output& destination,
                     TI const destinationOffset) const
@@ -165,6 +176,9 @@ struct GeneralizedTrackAttention final
      * @param cache Matching forward cache.
      */
     template<typename Input, typename Derivative>
+/**
+ * @brief Réalise l'opération Differentiate; voir les préconditions et effets dans son corps C++.
+ */
     void Differentiate(Input const& input, TI const row,
                        TI const sourceOffset, Derivative const& derivative,
                        TI const destinationOffset, Cache const& cache)
@@ -256,6 +270,7 @@ struct GeneralizedTrackAttention final
  */
 template<typename Specification, typename Specification::TI Batch,
          typename ContainerTag = rlt::MatrixDynamicTag>
+/** @brief Déclare le type GeneralizedAttentionActorBuffer, utilisé par Acteur partagé utilisant l'attention masquée et l'agrégation des pistes. */
 struct GeneralizedAttentionActorBuffer
     : rlt::nn_models::mlp_unconditional_stddev::NeuralNetworkAdam<
           Specification>::template Buffer<Batch, ContainerTag>
@@ -283,6 +298,7 @@ struct GeneralizedAttentionActorBuffer
  * v7, enabling an output-preserving migration.
  */
 template<typename Specification>
+/** @brief Déclare le type GeneralizedAttentionActor, utilisé par Acteur partagé utilisant l'attention masquée et l'agrégation des pistes. */
 struct GeneralizedAttentionActor
     : rlt::nn_models::mlp_unconditional_stddev::NeuralNetworkAdam<
           Specification>
@@ -338,6 +354,9 @@ namespace rl_tools {
 namespace blue_generalized_attention_detail {
 
 template<typename Device, typename Block>
+/**
+ * @brief Réalise l'opération malloc; voir les préconditions et effets dans son corps C++.
+ */
 void malloc(Device& device, Block& block)
 {
     rl_tools::malloc(device, block.encoderW);
@@ -356,6 +375,9 @@ void free(Device& device, Block& block)
 }
 
 template<typename Device, typename Block>
+/**
+ * @brief Réalise l'opération zero_gradient; voir les préconditions et effets dans son corps C++.
+ */
 void zero_gradient(Device& device, Block& block)
 {
     rl_tools::set_all(device, block.encoderW.gradient, 0);
@@ -374,6 +396,9 @@ void reset_optimizer(Device& device, Block& block, Optimizer& optimizer)
 }
 
 template<typename Device, typename Block, typename Optimizer>
+/**
+ * @brief Réalise l'opération update; voir les préconditions et effets dans son corps C++.
+ */
 void update(Device& device, Block& block, Optimizer& optimizer)
 {
     rl_tools::update(device, block.encoderW, optimizer);
@@ -409,6 +434,9 @@ void initialize(Device&, Block& block, RandomEngine& randomEngine)
 }
 
 template<typename Device, typename Actor, typename Input, typename Output>
+/**
+ * @brief Réalise l'opération transform; voir les préconditions et effets dans son corps C++.
+ */
 void transform(Device& device, Actor const& actor, Input const& input,
                Output& compact)
 {
@@ -460,6 +488,9 @@ void transform(Device& device, Actor const& actor, Input const& input,
 } // namespace blue_generalized_attention_detail
 
 template<typename Device, typename Specification>
+/**
+ * @brief Réalise l'opération malloc; voir les préconditions et effets dans son corps C++.
+ */
 void malloc(
     Device& device,
     ppo::examples::bluedefense::defenders::GeneralizedAttentionActor<
@@ -489,6 +520,9 @@ void free(
 
 template<typename Device, typename Specification,
          typename Specification::TI Batch, typename ContainerTag>
+/**
+ * @brief Réalise l'opération malloc; voir les préconditions et effets dans son corps C++.
+ */
 void malloc(
     Device& device,
     ppo::examples::bluedefense::defenders::GeneralizedAttentionActorBuffer<
@@ -516,6 +550,9 @@ void free(
 }
 
 template<typename Device, typename Specification, typename RandomEngine>
+/**
+ * @brief Réalise l'opération init_weights; voir les préconditions et effets dans son corps C++.
+ */
 void init_weights(
     Device& device,
     ppo::examples::bluedefense::defenders::GeneralizedAttentionActor<
@@ -548,6 +585,9 @@ void zero_gradient(
 
 template<typename Device, typename Specification, typename InputSpecification,
          typename OutputSpecification, typename Buffer>
+/**
+ * @brief Réalise l'opération evaluate; voir les préconditions et effets dans son corps C++.
+ */
 void evaluate(
     Device& device,
     ppo::examples::bluedefense::defenders::GeneralizedAttentionActor<
@@ -576,6 +616,9 @@ void evaluate(
 
 template<typename Device, typename Specification, typename InputSpecification,
          typename OutputSpecification>
+/**
+ * @brief Réalise l'opération forward; voir les préconditions et effets dans son corps C++.
+ */
 void forward(
     Device& device,
     ppo::examples::bluedefense::defenders::GeneralizedAttentionActor<
@@ -600,6 +643,9 @@ void forward(
 
 template<typename Device, typename Specification, typename InputSpecification,
          typename OutputSpecification, typename Buffer>
+/**
+ * @brief Réalise l'opération backward; voir les préconditions et effets dans son corps C++.
+ */
 void backward(
     Device& device,
     ppo::examples::bluedefense::defenders::GeneralizedAttentionActor<
@@ -649,6 +695,9 @@ void backward(
 namespace ppo::examples::bluedefense::defenders {
 
 template<typename Device, typename Specification, typename Optimizer>
+/**
+ * @brief Réalise l'opération update; voir les préconditions et effets dans son corps C++.
+ */
 void update(Device& device, GeneralizedAttentionActor<Specification>& actor,
             Optimizer& optimizer)
 {

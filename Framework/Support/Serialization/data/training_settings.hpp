@@ -11,6 +11,7 @@
 
 namespace ppo::serialization {
 
+/** @brief Déclare le type TrainingSettings, utilisé par Interface ou implémentation du composant training settings. */
 struct TrainingSettings
 {
     long long rolloutSteps{ 0 };

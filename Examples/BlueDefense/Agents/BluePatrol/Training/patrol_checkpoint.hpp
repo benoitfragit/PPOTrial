@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Training/patrol_checkpoint.hpp
+ * @brief Implémentation des calculs et contrats d'entraînement patrol checkpoint.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 // Canonical checkpoint serialization shared by GUI learning and the
 // optional headless utility. Version 7 removes external target assignments
@@ -16,6 +22,10 @@
 #include <utility>
 
 namespace ppo::examples::bluedefense::defenders {
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ * @details Peut signaler un état invalide par exception.
+ */
 template<typename MATRIX> void ReadPatrolMatrix(std::istream& stream, MATRIX& matrix)
 {
     for (typename MATRIX::SPEC::TI i = 0; i < MATRIX::SPEC::ROWS; ++i)
@@ -27,6 +37,9 @@ template<typename MATRIX> void ReadPatrolMatrix(std::istream& stream, MATRIX& ma
             rlt::set(matrix, i, j, value);
         }
 }
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ */
 template<typename LAYER> void ReadPatrolLayer(std::istream& stream, LAYER& layer)
 {
     ReadPatrolMatrix(stream, layer.weights.parameters);
@@ -50,6 +63,10 @@ template<typename BLOCK> void ReadPatrolAttention(std::istream& stream, BLOCK& b
  * @param actor Destination Actor whose parameters are replaced.
  */
 template<typename ACTOR>
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ * @details Peut signaler un état invalide par exception.
+ */
 void ReadPatrolPolicyParameters(std::istream& stream, ACTOR& actor)
 {
     std::string magic;
@@ -87,6 +104,10 @@ template<typename ACTOR> void ReadPatrolPolicy(std::istream& stream, ACTOR& acto
         throw std::runtime_error("Trailing data in blue MAPPO checkpoint");
 }
 
+/**
+ * @brief Sérialise ou écrit les données associées à WritePatrolMatrix selon les garanties implémentées.
+ * @details Peut signaler un état invalide par exception.
+ */
 template<typename MATRIX> void WritePatrolMatrix(std::ostream& os, MATRIX const& m)
 {
     for (typename MATRIX::SPEC::TI i=0;i<MATRIX::SPEC::ROWS;++i)
@@ -99,6 +120,10 @@ template<typename LAYER> void WritePatrolLayer(std::ostream& os,LAYER const& lay
     WritePatrolMatrix(os,layer.weights.parameters);
     WritePatrolMatrix(os,layer.biases.parameters);
 }
+/**
+ * @brief Sérialise ou écrit les données associées à WritePatrolAttention selon les garanties implémentées.
+ * @details Utilise des fichiers ou chemins. Peut signaler un état invalide par exception.
+ */
 template<typename BLOCK> void WritePatrolAttention(std::ostream& os,BLOCK const& block)
 {
     WritePatrolMatrix(os,block.encoderW.parameters);
@@ -129,6 +154,10 @@ template<typename ACTOR> void WritePatrolPolicy(std::ostream& os,ACTOR const& ac
  * @param writer Serialization callback.
  */
 template<typename Writer>
+/**
+ * @brief Sérialise ou écrit les données associées à SavePatrolAtomically selon les garanties implémentées.
+ * @details Utilise des fichiers ou chemins. Peut signaler un état invalide par exception.
+ */
 void SavePatrolAtomically(std::filesystem::path const& path, Writer&& writer)
 {
     if (path.has_parent_path())
@@ -173,6 +202,9 @@ void SavePatrolAtomically(std::filesystem::path const& path, Writer&& writer)
 }
 
 template<typename ACTOR>
+/**
+ * @brief Sérialise ou écrit les données associées à SavePatrolPolicy selon les garanties implémentées.
+ */
 void SavePatrolPolicy(std::filesystem::path const& path,ACTOR const& actor)
 {
     SavePatrolAtomically(path, [&](std::ostream& stream) {

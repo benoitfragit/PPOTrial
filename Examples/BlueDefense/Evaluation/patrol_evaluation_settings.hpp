@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Evaluation/patrol_evaluation_settings.hpp
+ * @brief Évaluation, campagnes et indicateurs patrol evaluation settings.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include <cmath>

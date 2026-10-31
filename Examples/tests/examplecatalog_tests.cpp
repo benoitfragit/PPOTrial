@@ -1,3 +1,9 @@
+/**
+ * @file Examples/tests/examplecatalog_tests.cpp
+ * @brief Tests et assertions déterministes pour examplecatalog tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "examplecatalog.hpp"
 
 #include <filesystem>
@@ -7,8 +13,16 @@
 
 namespace {
 
+/**
+ * @brief Met à jour ou enregistre les données sous la responsabilité.
+ * @details Utilise des fichiers ou chemins. Peut signaler un état invalide par exception.
+ */
 void RegisterTypes() {}
 
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ * @details Peut signaler un état invalide par exception.
+ */
 bool LoadScenario(std::filesystem::path const&, ppo::model::Environment&)
 {
     return true;
@@ -20,6 +34,10 @@ ppo::app::ExampleDefinition MakeDefinition(std::string_view id)
 }
 
 template<typename Function>
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Peut signaler un état invalide par exception.
+ */
 void RequireInvalid(Function&& function)
 {
     try
@@ -35,6 +53,10 @@ void RequireInvalid(Function&& function)
 
 } // namespace
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ * @details Peut signaler un état invalide par exception.
+ */
 int main()
 {
     using ppo::app::ExampleCatalog;

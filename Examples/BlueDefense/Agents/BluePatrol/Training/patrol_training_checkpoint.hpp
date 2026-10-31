@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Training/patrol_training_checkpoint.hpp
+ * @brief Implémentation des calculs et contrats d'entraînement patrol training checkpoint.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "patrol_checkpoint.hpp"
@@ -19,6 +25,10 @@ inline constexpr unsigned kPatrolTrainingCheckpointVersion = 4U;
 
 namespace training_checkpoint_detail {
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Peut signaler un état invalide par exception.
+ */
 inline void RequirePatrolCheckpointToken(std::istream& stream,
                                          char const* expected)
 {
@@ -29,6 +39,9 @@ inline void RequirePatrolCheckpointToken(std::istream& stream,
 }
 
 template<typename PARAMETER>
+/**
+ * @brief Sérialise ou écrit les données associées à WritePatrolMoments selon les garanties implémentées.
+ */
 void WritePatrolMoments(std::ostream& stream, PARAMETER const& parameter)
 {
     WritePatrolMatrix(stream, parameter.gradient_first_order_moment);
@@ -43,6 +56,9 @@ void ReadPatrolMoments(std::istream& stream, PARAMETER& parameter)
 }
 
 template<typename LAYER>
+/**
+ * @brief Sérialise ou écrit les données associées à WritePatrolLayerMoments selon les garanties implémentées.
+ */
 void WritePatrolLayerMoments(std::ostream& stream, LAYER const& layer)
 {
     WritePatrolMoments(stream, layer.weights);
@@ -57,6 +73,9 @@ void ReadPatrolLayerMoments(std::istream& stream, LAYER& layer)
 }
 
 template<typename ATTENTION>
+/**
+ * @brief Sérialise ou écrit les données associées à WritePatrolAttentionMoments selon les garanties implémentées.
+ */
 void WritePatrolAttentionMoments(std::ostream& stream,
                                  ATTENTION const& attention)
 {
@@ -76,6 +95,9 @@ void ReadPatrolAttentionMoments(std::istream& stream, ATTENTION& attention)
 }
 
 template<typename NETWORK>
+/**
+ * @brief Sérialise ou écrit les données associées à WritePatrolMlpState selon les garanties implémentées.
+ */
 void WritePatrolMlpState(std::ostream& stream, NETWORK const& network)
 {
     WritePatrolLayer(stream, network.input_layer);
@@ -90,6 +112,10 @@ void WritePatrolMlpState(std::ostream& stream, NETWORK const& network)
 }
 
 template<typename NETWORK>
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ * @details Peut signaler un état invalide par exception.
+ */
 void ReadPatrolMlpState(std::istream& stream, NETWORK& network)
 {
     ReadPatrolLayer(stream, network.input_layer);
@@ -104,6 +130,10 @@ void ReadPatrolMlpState(std::istream& stream, NETWORK& network)
 }
 
 template<typename OPTIMIZER>
+/**
+ * @brief Sérialise ou écrit les données associées à WritePatrolOptimizer selon les garanties implémentées.
+ * @details Peut signaler un état invalide par exception.
+ */
 void WritePatrolOptimizer(std::ostream& stream, OPTIMIZER const& optimizer)
 {
     auto const& p = optimizer.parameters;
@@ -166,6 +196,9 @@ void ReadPatrolOptimizer(std::istream& stream, OPTIMIZER& optimizer)
  */
 template<typename ACTOR, typename CRITIC, typename ACTOR_OPTIMIZER,
          typename CRITIC_OPTIMIZER, typename RNG>
+/**
+ * @brief Sérialise ou écrit les données associées à WritePatrolTrainingState selon les garanties implémentées.
+ */
 void WritePatrolTrainingState(std::ostream& stream,
                               ACTOR const& actor,
                               CRITIC const& critic,

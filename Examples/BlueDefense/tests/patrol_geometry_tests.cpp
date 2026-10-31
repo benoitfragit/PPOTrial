@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/tests/patrol_geometry_tests.cpp
+ * @brief Tests et assertions déterministes pour patrol geometry tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "patrol_config.hpp"
 #include "patrol_geometry.hpp"
 
@@ -10,6 +16,9 @@ namespace patrol = ppo::examples::bluedefense::defenders;
 
 namespace {
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 nlohmann::json ValidDocument()
 {
     return {
@@ -32,6 +41,9 @@ nlohmann::json ValidDocument()
     };
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestGeneralizedRewardConfiguration()
 {
     nlohmann::json document{
@@ -67,6 +79,9 @@ bool TestGeneralizedRewardConfiguration()
     return true;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool Same(patrol::PatrolGeometry const& first,
           patrol::PatrolGeometry const& second) noexcept
 {

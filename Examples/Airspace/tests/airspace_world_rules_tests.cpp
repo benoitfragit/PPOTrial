@@ -1,3 +1,9 @@
+/**
+ * @file Examples/Airspace/tests/airspace_world_rules_tests.cpp
+ * @brief Tests et assertions déterministes pour airspace world rules tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "airspaceworldrules.hpp"
 
 #include "entity.hpp"
@@ -11,6 +17,10 @@
 
 namespace {
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Consulte ou modifie des composants ECS. Peut signaler un état invalide par exception.
+ */
 void Require(bool condition, char const* message)
 {
     if (!condition)
@@ -77,6 +87,9 @@ void TestAirspaceWorldRules()
 
 } // namespace
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     try

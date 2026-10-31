@@ -19,6 +19,10 @@ using ppo::config::ScenarioDefinition;
 using Json = ppo::serialization::json;
 
 namespace {
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Peut signaler un état invalide par exception.
+ */
 void Require(bool ok, std::string const& what)
 {
     if (!ok)
@@ -66,6 +70,10 @@ void CheckScenario(fs::path const& path, std::size_t entityCount,
                 "evaluation case entity count changed");
 }
 
+/**
+ * @brief Sérialise ou écrit les données associées à WriteJson selon les garanties implémentées.
+ * @details Utilise des fichiers ou chemins.
+ */
 void WriteJson(fs::path const& path, Json const& doc)
 {
     std::ofstream out(path);
@@ -194,6 +202,9 @@ void CheckAdditionalAssets(fs::path const& root)
 }
 } // namespace
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     fs::path temporary{};

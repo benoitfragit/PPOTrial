@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Scenario/initializer.hpp
+ * @brief Initialisation des épisodes, objectifs, rôles et générateur de dispositions.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 #include "entity.hpp"
 #include "blue_team_roles.hpp"

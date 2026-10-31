@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Core/patrol_config.hpp
+ * @brief Chargement JSON et validation des réglages de patrouille et MAPPO.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "patrol_core.hpp"
@@ -14,6 +20,10 @@ namespace ppo::examples::bluedefense::defenders {
 
 namespace patrol_config_detail {
 
+/**
+ * @brief Réalise l'opération FiniteNumber; voir les préconditions et effets dans son corps C++.
+ * @details Utilise des fichiers ou chemins. Peut signaler un état invalide par exception.
+ */
 inline float FiniteNumber(nlohmann::json const& object, char const* key)
 {
     auto const item = object.find(key);
@@ -27,6 +37,10 @@ inline float FiniteNumber(nlohmann::json const& object, char const* key)
     return value;
 }
 
+/**
+ * @brief Réalise l'opération Range; voir les préconditions et effets dans son corps C++.
+ * @details Utilise des fichiers ou chemins. Peut signaler un état invalide par exception.
+ */
 inline PatrolRange Range(nlohmann::json const& object, char const* key)
 {
     auto const item = object.find(key);
@@ -43,6 +57,10 @@ inline PatrolRange Range(nlohmann::json const& object, char const* key)
 
 } // namespace patrol_config_detail
 
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ * @details Utilise des fichiers ou chemins. Peut signaler un état invalide par exception.
+ */
 inline nlohmann::json ReadPatrolJson(std::filesystem::path const& path)
 {
     std::ifstream stream{path};
@@ -121,6 +139,9 @@ LoadPatrolGeometrySettings(std::filesystem::path const& settings)
         ReadPatrolJson(settings / "Training/BluePatrol.json"));
 }
 
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ */
 inline Parameters LoadPatrolParameters(std::filesystem::path const& settings)
 {
     auto const world = ReadPatrolJson(settings / "Environment.json").at("environment");

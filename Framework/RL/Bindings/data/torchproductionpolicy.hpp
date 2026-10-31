@@ -1,3 +1,9 @@
+/**
+ * @file Framework/RL/Bindings/data/torchproductionpolicy.hpp
+ * @brief Interface ou implémentation du composant torchproductionpolicy.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "ppo/core/environment.hpp"
@@ -17,6 +23,7 @@ namespace ppo::model {
 // owned float observations/actions. Existing Policy::load/forward semantics
 // and checkpoint structure are not modified.
 template<typename Policy>
+/** @brief Déclare le type TorchProductionPolicy, utilisé par Interface ou implémentation du composant torchproductionpolicy. */
 class TorchProductionPolicy final : public ppo::core::IPolicy
 {
 public:
@@ -38,8 +45,16 @@ public:
     TorchProductionPolicy(TorchProductionPolicy&&) = delete;
     TorchProductionPolicy& operator=(TorchProductionPolicy&&) = delete;
 
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ * @details Peut signaler un état invalide par exception.
+ */
     void Load(std::filesystem::path const& path) { policy_->load(path); }
 
+/**
+ * @brief Réalise l'opération ChooseAction; voir les préconditions et effets dans son corps C++.
+ * @details Peut signaler un état invalide par exception.
+ */
     ppo::core::Action ChooseAction(ppo::core::Observation const& observation) override
     {
         if (observation.size() != observation_.size())

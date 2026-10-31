@@ -1,3 +1,9 @@
+/**
+ * @file Examples/Airspace/Scenario/airspaceworldrules.cpp
+ * @brief Construction, données et arbitrage du scénario airspaceworldrules.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "airspaceworldrules.hpp"
 
 #include "entity.hpp"
@@ -203,6 +209,10 @@ AirspaceWorldRules::AfterStep(void)
 }
 
 
+/**
+ * @brief Traite les entrées et applique les effets associés à Resolve.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void AirspaceWorldRules::Resolve(WorldEntities& entities)
 {
     ResolveDestructions(entities);

@@ -17,6 +17,10 @@ using ppo::serialization::Serializer;
 using Json = ppo::serialization::json;
 
 namespace {
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Utilise des fichiers ou chemins. Peut signaler un état invalide par exception.
+ */
 void Check(bool valid, std::string const& message)
 {
     if (!valid)
@@ -40,6 +44,10 @@ void Same(TrainingSettings const& a, TrainingSettings const& b, std::string cons
         name + ": typed settings are not stable across serialization");
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Utilise des fichiers ou chemins.
+ */
 void Test(std::string const& name,
           std::vector<std::string> const& rewardNames,
           std::vector<float> const& expectedRewards,
@@ -102,6 +110,9 @@ void Test(std::string const& name,
 }
 }
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     try

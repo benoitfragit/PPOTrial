@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/tests/generalized_actor_tests.cpp
+ * @brief Tests et assertions déterministes pour generalized actor tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "generalized_training_checkpoint.hpp"
 
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
@@ -18,6 +24,9 @@ namespace rlt = rl_tools;
 namespace {
 
 template<typename Callable>
+/**
+ * @brief Réalise l'opération ThrowsRuntimeError; voir les préconditions et effets dans son corps C++.
+ */
 bool ThrowsRuntimeError(Callable&& callable)
 {
     try
@@ -32,6 +41,9 @@ bool ThrowsRuntimeError(Callable&& callable)
 }
 
 template<typename Matrix>
+/**
+ * @brief Réalise l'opération CopyObservationToMatrix; voir les préconditions et effets dans son corps C++.
+ */
 void CopyObservationToMatrix(blue::GeneralizedRawObservation const& source,
                              Matrix& destination)
 {
@@ -57,6 +69,9 @@ void SwapRawTracks(Matrix& matrix, std::size_t const first,
     }
 }
 
+/**
+ * @brief Réalise l'opération Excluded; voir les préconditions et effets dans son corps C++.
+ */
 bool Excluded(std::size_t const column,
               std::initializer_list<std::size_t> const excluded)
 {
@@ -84,6 +99,9 @@ void SeedMoments(Parameter& parameter, float const seed)
 }
 
 template<typename Source, typename Destination>
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool SameMigratedParameter(
     Source const& source, Destination const& destination,
     std::initializer_list<std::size_t> const excluded = {})
@@ -115,6 +133,9 @@ bool SameMigratedParameter(
 }
 
 template<typename Parameter>
+/**
+ * @brief Réalise l'opération ZeroParameterColumn; voir les préconditions et effets dans son corps C++.
+ */
 bool ZeroParameterColumn(Parameter const& parameter,
                          std::size_t const column)
 {
@@ -137,6 +158,9 @@ bool ZeroParameterColumn(Parameter const& parameter,
 }
 
 template<typename Source, typename Destination>
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool SameParameterColumn(Source const& source, Destination const& destination,
                          std::size_t const column)
 {
@@ -160,6 +184,9 @@ bool SameParameterColumn(Source const& source, Destination const& destination,
 }
 
 template<typename Attention>
+/**
+ * @brief Réalise l'opération SeedAttentionMoments; voir les préconditions et effets dans son corps C++.
+ */
 void SeedAttentionMoments(Attention& attention, float const seed)
 {
     SeedMoments(attention.encoderW, seed);
@@ -178,6 +205,9 @@ bool SameAttention(Source const& source, Destination const& destination)
 }
 
 template<typename Layer>
+/**
+ * @brief Réalise l'opération SeedLayerMoments; voir les préconditions et effets dans son corps C++.
+ */
 void SeedLayerMoments(Layer& layer, float const seed)
 {
     SeedMoments(layer.weights, seed);
@@ -193,6 +223,9 @@ bool SameLayer(Source const& source, Destination const& destination)
 
 } // namespace
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     using RawLayout = blue::GeneralizedObservationLayout;

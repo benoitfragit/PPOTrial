@@ -104,6 +104,10 @@ public:
     bool SetWorldRules(std::unique_ptr<IWorldRules> rules);
 
     // Optional initializer supplied by the example before entities are created.
+/**
+ * @brief Met à jour ou enregistre les données sous la responsabilité.
+ * @details Consulte ou modifie des composants ECS.
+ */
     bool SetEntityInitializer(Entity::InitializerSystem initializer) noexcept;
 
     /**
@@ -159,6 +163,9 @@ private:
     */
     entt::registry* GetRegistry(void) noexcept;
 
+/**
+ * @brief Retourne une vue ou une valeur calculée depuis l'état courant.
+ */
     Entity::InitializerSystem GetEntityInitializer(void) const noexcept;
 
     /**

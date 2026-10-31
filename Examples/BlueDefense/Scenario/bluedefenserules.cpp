@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Scenario/bluedefenserules.cpp
+ * @brief Règles de monde ECS : collisions, zones, destruction et activation des menaces.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "bluedefenserules.hpp"
 #include "initializer.hpp"
 #include "airspacecomponents.hpp"
@@ -74,6 +80,9 @@ std::optional<std::size_t> RedEntityIndex(std::string_view name) noexcept
 } // namespace
 
 namespace ppo::examples::bluedefense {
+/**
+ * @brief Réalise l'opération BeforeStep de BlueDefenseWorldRules; voir les préconditions et effets dans son corps C++.
+ */
 void BlueDefenseWorldRules::BeforeStep(ppo::model::WorldEntities& entities)
 {
     ActivateScheduledThreats(entities);
@@ -89,6 +98,10 @@ void BlueDefenseWorldRules::BeforeStep(ppo::model::WorldEntities& entities)
         }
 }
 
+/**
+ * @brief Traite les entrées et applique les effets associés à Resolve.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void BlueDefenseWorldRules::Resolve(ppo::model::WorldEntities& entities)
 {
     // Resolve physical impacts before the legacy SNA rules record destruction
@@ -116,6 +129,10 @@ void BlueDefenseWorldRules::Resolve(ppo::model::WorldEntities& entities)
     }
 }
 
+/**
+ * @brief Traite les entrées et applique les effets associés à ResolveRestrictedZonePenetrations.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void BlueDefenseWorldRules::ResolveRestrictedZonePenetrations(
     ppo::model::WorldEntities& entities)
 {
@@ -173,6 +190,10 @@ void BlueDefenseWorldRules::ResolveRestrictedZonePenetrations(
     }
 }
 
+/**
+ * @brief Réalise l'opération ActivateScheduledThreats de BlueDefenseWorldRules; voir les préconditions et effets dans son corps C++.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void BlueDefenseWorldRules::ActivateScheduledThreats(
     ppo::model::WorldEntities& entities)
 {
@@ -213,6 +234,10 @@ void BlueDefenseWorldRules::ActivateScheduledThreats(
     }
 }
 
+/**
+ * @brief Traite les entrées et applique les effets associés à ResolveFriendlyMobileCollisions.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void BlueDefenseWorldRules::ResolveFriendlyMobileCollisions(
     ppo::model::WorldEntities& entities)
 {
@@ -267,6 +292,10 @@ void BlueDefenseWorldRules::ResolveFriendlyMobileCollisions(
     }
 }
 
+/**
+ * @brief Réalise l'opération AfterStep de BlueDefenseWorldRules; voir les préconditions et effets dans son corps C++.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void BlueDefenseWorldRules::AfterStep()
 {
     original_.AfterStep();

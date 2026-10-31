@@ -10,6 +10,10 @@
 namespace ppo::serialization {
 
 namespace {
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Peut signaler un état invalide par exception.
+ */
 void CheckRewardContract(std::vector<std::string> const& names)
 {
     if (names.empty())
@@ -64,6 +68,10 @@ TrainingSettings ReadTrainingSettings(
     return settings;
 }
 
+/**
+ * @brief Sérialise ou écrit les données associées à WriteTrainingSettings selon les garanties implémentées.
+ * @details Peut signaler un état invalide par exception.
+ */
 void WriteTrainingSettings(
     json& document, TrainingSettings const& settings,
     std::vector<std::string> const& rewardNames)

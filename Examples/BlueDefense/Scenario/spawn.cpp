@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Scenario/spawn.cpp
+ * @brief Placement physique des Bleus, Rouges et zones selon le scénario.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "spawn.hpp"
 
 #include <algorithm>
@@ -15,6 +21,9 @@ constexpr float kHeadingJitter = 0.12F;
 constexpr float kNominalRedSpeed = 220.F;
 constexpr float kRedSpeedJitter = 40.F;
 
+/**
+ * @brief Réalise l'opération FiniteRange; voir les préconditions et effets dans son corps C++.
+ */
 bool FiniteRange(SpawnRange const& range) noexcept
 {
     return std::isfinite(range.minimum) && std::isfinite(range.maximum)
@@ -27,12 +36,18 @@ bool ValidWorld(WorldBounds const& world) noexcept
         && world.halfNorth > 0.F && world.halfEast > 0.F;
 }
 
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par Sample.
+ */
 float Sample(SpawnRange const& range, std::mt19937& rng)
 {
     return std::uniform_real_distribution<float>{
         range.minimum, range.maximum}(rng);
 }
 
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par SampleStep.
+ */
 std::size_t SampleStep(std::array<std::size_t, 2> const& range,
                        std::mt19937& rng)
 {
@@ -40,6 +55,10 @@ std::size_t SampleStep(std::array<std::size_t, 2> const& range,
         range[0], range[1]}(rng);
 }
 
+/**
+ * @brief Réalise l'opération Probability; voir les préconditions et effets dans son corps C++.
+ * @details Applique des bornes numériques.
+ */
 bool Probability(float value) noexcept
 {
     return std::isfinite(value) && value >= 0.F && value <= 1.F;
@@ -51,6 +70,10 @@ bool ValidDelayRange(std::array<std::size_t, 2> const& range) noexcept
         && range[1] < EpisodeSpawnLayout::NeverActivate / 2U;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Applique des bornes numériques.
+ */
 bool ValidRestrictedZone(RestrictedZoneSpawnSettings const& zone) noexcept
 {
     if (zone.id.empty() || zone.platform.empty()
@@ -63,12 +86,17 @@ bool ValidRestrictedZone(RestrictedZoneSpawnSettings const& zone) noexcept
         && FiniteRange(zone.randomNorth) && FiniteRange(zone.randomEast);
 }
 
+/** @brief Déclare le type Position, utilisé par Placement physique des Bleus, Rouges et zones selon le scénario. */
 struct Position final
 {
     float north{};
     float east{};
 };
 
+/**
+ * @brief Réalise l'opération PositionOnExpandedBoundary; voir les préconditions et effets dans son corps C++.
+ * @details Applique des bornes numériques.
+ */
 Position PositionOnExpandedBoundary(float bearing, float scale, float side,
                                     WorldBounds const& world) noexcept
 {
@@ -82,6 +110,9 @@ Position PositionOnExpandedBoundary(float bearing, float scale, float side,
     };
 }
 
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par SampleRedPosition.
+ */
 Position SampleRedPosition(RedSpawnSettings const& settings, float side,
                            WorldBounds const& world, std::mt19937& rng)
 {
@@ -96,6 +127,9 @@ float Separation(Position const& first, Position const& second) noexcept
                       first.east - second.east);
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool IsSeparatedFromAll(Position const& candidate,
                         std::vector<Position> const& accepted,
                         float minimumSeparation) noexcept
@@ -107,6 +141,9 @@ bool IsSeparatedFromAll(Position const& candidate,
         });
 }
 
+/**
+ * @brief Réalise l'opération RedIndex; voir les préconditions et effets dans son corps C++.
+ */
 std::optional<std::size_t> RedIndex(std::string_view name) noexcept
 {
     constexpr std::string_view prefix{"red_"};
@@ -126,6 +163,9 @@ std::optional<std::size_t> RedIndex(std::string_view name) noexcept
     return oneBasedIndex - 1U;
 }
 
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par MakeRedSpawn.
+ */
 Spawn MakeRedSpawn(Position const& position, float objectiveEast,
                    std::mt19937& rng, bool destroyed)
 {
@@ -142,6 +182,9 @@ Spawn MakeRedSpawn(Position const& position, float objectiveEast,
 
 } // namespace
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool Valid(SpawnSettings const& settings) noexcept
 {
     auto const fractionRange = [](SpawnRange const& range) {
@@ -186,6 +229,9 @@ bool Valid(SpawnSettings const& settings) noexcept
     return true;
 }
 
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par GenerateEpisodeSpawnLayout.
+ */
 std::optional<EpisodeSpawnLayout> GenerateEpisodeSpawnLayout(
     int side, SpawnSettings const& settings, WorldBounds const& world,
     std::mt19937& rng, std::string* diagnostic)
@@ -281,6 +327,9 @@ std::optional<EpisodeSpawnLayout> GenerateEpisodeSpawnLayout(
     return result;
 }
 
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par MakeSpawn.
+ */
 std::optional<Spawn> MakeSpawn(std::string_view name,
                                EpisodeSpawnLayout const& layout,
                                WorldBounds const& world,

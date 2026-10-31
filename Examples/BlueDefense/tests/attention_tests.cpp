@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/tests/attention_tests.cpp
+ * @brief Tests et assertions déterministes pour attention tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "patrol_rltools.hpp"
 #include <cmath>
 #include <iostream>
@@ -5,6 +11,9 @@
 namespace blue=ppo::examples::bluedefense::defenders;
 namespace rlt=rl_tools;
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     blue::Device device{};

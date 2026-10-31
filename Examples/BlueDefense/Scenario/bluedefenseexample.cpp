@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Scenario/bluedefenseexample.cpp
+ * @brief Chargement BlueDefense et BluePatrol et composition des entités et agents.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "bluedefenseexample.hpp"
 #include "initializer.hpp"
 #include "spawn_config.hpp"
@@ -91,6 +97,9 @@ bool SameGeneralizedBlueTemplate(
         && first.m_agents == second.m_agents;
 }
 
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ */
 bool LoadScenario(std::filesystem::path const& path,
                   ppo::model::Environment& environment)
 {
@@ -399,6 +408,10 @@ bool LoadScenario(std::filesystem::path const& path,
 
 } // namespace
 
+/**
+ * @brief Réalise l'opération Definition; voir les préconditions et effets dans son corps C++.
+ * @details Utilise des fichiers ou chemins.
+ */
 ppo::app::ExampleDefinition Definition()
 {
     return {
@@ -411,6 +424,10 @@ ppo::app::ExampleDefinition Definition()
     };
 }
 
+/**
+ * @brief Réalise l'opération BluePatrolDefinition; voir les préconditions et effets dans son corps C++.
+ * @details Utilise des fichiers ou chemins.
+ */
 ppo::app::ExampleDefinition BluePatrolDefinition()
 {
     return {

@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Core/blue_team_roles.hpp
+ * @brief Désignation du leader et affectations stables des équipiers en wedge.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "team_capacity.hpp"
@@ -164,6 +170,9 @@ public:
      * @return Valid sampled assignment, or `std::nullopt` for an invalid count.
      */
     template<typename RandomEngine>
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par Sample.
+ */
     static std::optional<BlueTeamRoles> Sample(
         std::size_t const activeBlueCount,
         RandomEngine& randomEngine)

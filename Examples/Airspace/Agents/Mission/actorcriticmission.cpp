@@ -214,6 +214,9 @@ ActorCriticTrackAttention::parse_input(
 * @brief Applies masked dot-product attention over valid tracks only.
 */
 torch::Tensor
+/**
+ * @brief Réalise l'opération masked_attention_context de ActorCriticTrackAttention; voir les préconditions et effets dans son corps C++.
+ */
 ActorCriticTrackAttention::masked_attention_context(
     const torch::Tensor& feat,
     const torch::Tensor& query,
@@ -388,6 +391,10 @@ ActorCriticTrackAttention::evaluate(
 * @brief Returns only the actor output for production inference.
 */
 torch::Tensor
+/**
+ * @brief Réalise l'opération forward_mu de ActorCriticTrackAttention; voir les préconditions et effets dans son corps C++.
+ * @details Utilise des fichiers ou chemins.
+ */
 ActorCriticTrackAttention::forward_mu(torch::Tensor flat_input)
 {
     // Actor

@@ -339,6 +339,9 @@ PPO::Save(std::filesystem::path const& modelpath)
 * @return Reference to the output structure.
 */
 PPOOutputs const&
+/**
+ * @brief Retourne une vue ou une valeur calculée depuis l'état courant de PPO.
+ */
 PPO::GetOutputs(void) const noexcept
 {
     if (p_impl == nullptr)

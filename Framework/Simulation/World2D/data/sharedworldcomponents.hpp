@@ -158,6 +158,7 @@ struct sFlightModelState
 
 // Rendering metadata derived from the current world bounds (sEnvironmentState).
 // Snapshot-only: no independent geometry or collision behavior is imposed.
+/** @brief Déclare le type sDefendedArea, utilisé par Interface ou implémentation du composant sharedworldcomponents. */
 struct sDefendedArea
 {
     float m_north{0.F};

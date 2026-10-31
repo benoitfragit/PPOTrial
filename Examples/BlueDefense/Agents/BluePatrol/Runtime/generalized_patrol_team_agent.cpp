@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Runtime/generalized_patrol_team_agent.cpp
+ * @brief Contrôleur ECS MAPPO partagé des Bleus : états, observations, actions, récompenses, évaluations et checkpoints.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "generalized_patrol_team_agent.hpp"
 
 #include "generalized_cooperative_reward.hpp"
@@ -20,6 +26,10 @@
 namespace ppo::examples::bluedefense::defenders {
 namespace {
 
+/**
+ * @brief Réalise l'opération GeneralizedMobileFromEcs; voir les préconditions et effets dans son corps C++.
+ * @details Consulte ou modifie des composants ECS.
+ */
 Mobile GeneralizedMobileFromEcs(ppo::model::BaseEntity& entity)
 {
     auto const [state] = entity.get<ppo::model::sEntityState>();
@@ -68,6 +78,10 @@ float GeneralizedRestrictedZoneRisk(
 }
 
 template<std::size_t Capacity>
+/**
+ * @brief Réalise l'opération AliveCount; voir les préconditions et effets dans son corps C++.
+ * @details Consulte ou modifie des composants ECS.
+ */
 std::size_t AliveCount(std::array<Mobile, Capacity> const& mobiles,
                        std::size_t const activeCount) noexcept
 {
@@ -76,6 +90,10 @@ std::size_t AliveCount(std::array<Mobile, Capacity> const& mobiles,
         [](Mobile const& mobile) { return mobile.available; }));
 }
 
+/**
+ * @brief Réalise l'opération CombatMask; voir les préconditions et effets dans son corps C++.
+ * @details Consulte ou modifie des composants ECS.
+ */
 GeneralizedCombatStateMask CombatMask(
     GeneralizedRuntimeState const& state) noexcept
 {
@@ -294,6 +312,10 @@ GeneralizedPatrolMappoAgent::GeneralizedPatrolMappoAgent(
     LoadPromotedScore();
 }
 
+/**
+ * @brief Libère les ressources détenues par l'objet de GeneralizedPatrolMappoAgent.
+ * @details Consulte ou modifie des composants ECS.
+ */
 GeneralizedPatrolMappoAgent::~GeneralizedPatrolMappoAgent()
 {
     SaveAtUpdateBoundary();
@@ -308,6 +330,10 @@ void GeneralizedPatrolMappoAgent::Init()
     episodeDone_ = false;
 }
 
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées de GeneralizedPatrolMappoAgent.
+ * @details Consulte ou modifie des composants ECS.
+ */
 Parameters GeneralizedPatrolMappoAgent::ReadParameters() const
 {
     Parameters result = parameters_;
@@ -336,6 +362,10 @@ Parameters GeneralizedPatrolMappoAgent::ReadParameters() const
     return result;
 }
 
+/**
+ * @brief Projette les composants ECS en tableaux compacts de Bleus, Rouges, rayons LiDAR, objectif et disponibilité; vérifie la validité cinématique.
+ * @details Consulte ou modifie des composants ECS. Peut signaler un état invalide par exception.
+ */
 GeneralizedRuntimeState GeneralizedPatrolMappoAgent::ReadState(
     Parameters const& parameters) const
 {
@@ -404,6 +434,10 @@ GeneralizedRuntimeState GeneralizedPatrolMappoAgent::ReadState(
     return result;
 }
 
+/**
+ * @brief Réalise l'opération Roles de GeneralizedPatrolMappoAgent; voir les préconditions et effets dans son corps C++.
+ * @details Consulte ou modifie des composants ECS. Peut signaler un état invalide par exception.
+ */
 BlueTeamRoles const& GeneralizedPatrolMappoAgent::Roles() const
 {
     if (!registry_->ctx().contains<InitializerContext>())
@@ -417,6 +451,10 @@ BlueTeamRoles const& GeneralizedPatrolMappoAgent::Roles() const
     return *context.blueTeamRoles;
 }
 
+/**
+ * @brief Calcule les observations de chacun des P Bleus et refuse les masques, rôles et valeurs invalides.
+ * @details Peut signaler un état invalide par exception.
+ */
 void GeneralizedPatrolMappoAgent::BuildObservations(
     Parameters const& parameters, GeneralizedRuntimeState const& state,
     std::array<GeneralizedObservation,
@@ -465,6 +503,10 @@ void GeneralizedPatrolMappoAgent::BuildObservations(
     throw std::runtime_error("Invalid generalized blue observation");
 }
 
+/**
+ * @brief Construit les métriques d'un épisode de campagne à partir de l'objectif, de la survie et de la qualité du suivi de patrouille et de formation.
+ * @details Applique des bornes numériques.
+ */
 GeneralizedEvaluationSample
 GeneralizedPatrolMappoAgent::BuildEvaluationSample(
     Parameters const& parameters, GeneralizedRuntimeState const& state,
@@ -506,6 +548,10 @@ GeneralizedPatrolMappoAgent::BuildEvaluationSample(
     return result;
 }
 
+/**
+ * @brief Capture l'état ECS, construit les observations v8 et calcule les commandes synchronisées; utilise l'acteur déterministe lors d'une campagne d'évaluation.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void GeneralizedPatrolMappoAgent::ChooseAction()
 {
     if (episodeDone_ || (finished_ && !evaluation_.InProgress())
@@ -558,6 +604,10 @@ void GeneralizedPatrolMappoAgent::ChooseAction()
     }
 }
 
+/**
+ * @brief Traite le résultat du pas ECS, détecte la terminaison ou la troncature, produit quinze canaux de reward, fournit P retours au learner et déclenche les frontières d'évaluation ou checkpoint.
+ * @details Consulte ou modifie des composants ECS.
+ */
 bool GeneralizedPatrolMappoAgent::SetNewState()
 {
     if (!hasBeforeStep_)
@@ -842,6 +892,10 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
     }
 }
 
+/**
+ * @brief Enregistre l'acteur et l'état complet uniquement à une frontière PPO stable et selon la cadence configurée.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void GeneralizedPatrolMappoAgent::SaveAtUpdateBoundary(
     bool const force) noexcept
 {
@@ -872,6 +926,10 @@ void GeneralizedPatrolMappoAgent::SaveAtUpdateBoundary(
     }
 }
 
+/**
+ * @brief Sauvegarde le RNG de l'entraînement et lance les épisodes de campagne déterministes sans collecter de rollout.
+ * @details Consulte ou modifie des composants ECS. Peut signaler un état invalide par exception.
+ */
 void GeneralizedPatrolMappoAgent::StartEvaluation()
 {
     if (registry_ == nullptr
@@ -900,6 +958,10 @@ void GeneralizedPatrolMappoAgent::StartEvaluation()
               << " (" << evaluation_.TestCount() << " cases)\n";
 }
 
+/**
+ * @brief Configure la graine, la direction et la phase de l'hippodrome pour le prochain cas d'évaluation.
+ * @details Consulte ou modifie des composants ECS. Peut signaler un état invalide par exception.
+ */
 void GeneralizedPatrolMappoAgent::PrepareEvaluationCase()
 {
     if (registry_ == nullptr
@@ -917,6 +979,10 @@ void GeneralizedPatrolMappoAgent::PrepareEvaluationCase()
     context.next = 0U;
 }
 
+/**
+ * @brief Désactive les overrides de campagne et restaure le RNG de formation.
+ * @details Consulte ou modifie des composants ECS.
+ */
 void GeneralizedPatrolMappoAgent::RestoreTrainingInitializer() noexcept
 {
     if (registry_ == nullptr
@@ -935,6 +1001,10 @@ void GeneralizedPatrolMappoAgent::RestoreTrainingInitializer() noexcept
     }
 }
 
+/**
+ * @brief Sauvegarde le meilleur acteur évalué et sa note après une campagne réussie.
+ * @details Utilise des fichiers ou chemins.
+ */
 void GeneralizedPatrolMappoAgent::PromoteEvaluatedActor() noexcept
 {
     try
@@ -951,6 +1021,10 @@ void GeneralizedPatrolMappoAgent::PromoteEvaluatedActor() noexcept
     }
 }
 
+/**
+ * @brief Lit la note du meilleur acteur précédemment promu.
+ * @details Utilise des fichiers ou chemins.
+ */
 void GeneralizedPatrolMappoAgent::LoadPromotedScore() noexcept
 {
     try
@@ -978,6 +1052,10 @@ void GeneralizedPatrolMappoAgent::LoadPromotedScore() noexcept
     }
 }
 
+/**
+ * @brief Sauvegarde la note de promotion avec remplacement transactionnel du fichier.
+ * @details Utilise des fichiers ou chemins. Peut signaler un état invalide par exception.
+ */
 void GeneralizedPatrolMappoAgent::SavePromotedScore()
 {
     auto scorePath = productionCheckpoint_;
@@ -1019,6 +1097,9 @@ void GeneralizedPatrolMappoAgent::SavePromotedScore()
         std::filesystem::remove(backup, ignored);
 }
 
+/**
+ * @brief Applique les commandes utilisateur et les réglages de récompense après vérification des valeurs.
+ */
 void GeneralizedPatrolMappoAgent::ProcessCommand(
     ppo::model::sAgentRealTimeCommand const& command) noexcept
 {
@@ -1044,6 +1125,10 @@ void GeneralizedPatrolMappoAgent::ProcessCommand(
 }
 
 ppo::model::sAgentStateSnaphot
+/**
+ * @brief Publie le snapshot du contrôleur, de la collecte PPO, des rewards et de l'évaluation pour la télémétrie et l'IHM.
+ * @details Applique des bornes numériques.
+ */
 GeneralizedPatrolMappoAgent::GetSnapshot() const noexcept
 {
     ppo::model::sAgentStateSnaphot snapshot{};

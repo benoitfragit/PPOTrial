@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/tests/generalized_reward_shaping_tests.cpp
+ * @brief Tests et assertions déterministes pour generalized reward shaping tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "generalized_reward_shaping.hpp"
 #include "generalized_cooperative_reward.hpp"
 
@@ -7,6 +13,9 @@
 namespace patrol = ppo::examples::bluedefense::defenders;
 
 namespace {
+/**
+ * @brief Réalise l'opération Close; voir les préconditions et effets dans son corps C++.
+ */
 bool Close(float const a, float const b, float const tolerance = 1.e-4F)
 {
     return std::abs(a - b) <= tolerance;
@@ -26,6 +35,9 @@ patrol::GeneralizedRuntimeState MakeState(
     return state;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestControlEffortPenalty()
 {
     patrol::Parameters parameters{};
@@ -44,6 +56,9 @@ bool TestControlEffortPenalty()
         parameters, patrol::Action{1.F, 1.F}), 0.F, 1.e-7F);
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestTracking()
 {
     patrol::Parameters parameters{};
@@ -74,6 +89,9 @@ bool TestTracking()
             parameters, before, wrongHeading, *roles);
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestWedgeReference()
 {
     patrol::Parameters parameters{};
@@ -106,6 +124,9 @@ bool TestWedgeReference()
         && Close(observations[1].values[offsetInObservation + 7U], 0.F);
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestPursuit()
 {
     patrol::Parameters parameters{};
@@ -134,6 +155,9 @@ bool TestPursuit()
             MakeState(1U, 0U)), 0.F);
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestCooperation()
 {
     patrol::Parameters parameters{};
@@ -156,6 +180,9 @@ bool TestCooperation()
         && patrol::GeneralizedEngagementWeight(parameters, closeRed) > 0.F
         && patrol::GeneralizedEngagementWeight(parameters, objectiveThreat) > 0.F;
 }
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestFormationAndLowSpeed()
 {
     patrol::Parameters parameters{};
@@ -216,6 +243,9 @@ bool TestFormationAndLowSpeed()
         && Close(patrol::GeneralizedLowSpeedRisk(parameters, mobile), 0.F);
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool TestSafetyRisks()
 {
     patrol::Parameters parameters{};
@@ -309,6 +339,9 @@ bool TestSafetyRisks()
 
 } // namespace
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     if (!TestTracking()) return 1;

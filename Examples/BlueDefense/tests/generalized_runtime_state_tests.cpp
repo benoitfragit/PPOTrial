@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/tests/generalized_runtime_state_tests.cpp
+ * @brief Tests et assertions déterministes pour generalized runtime state tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "generalized_runtime_state.hpp"
 
 #include <algorithm>
@@ -11,6 +17,9 @@ namespace blue = ppo::examples::bluedefense::defenders;
 
 namespace {
 
+/**
+ * @brief Réalise l'opération StateFor; voir les préconditions et effets dans son corps C++.
+ */
 blue::GeneralizedRuntimeState StateFor(std::size_t const blueCount,
                                        std::size_t const redCount) noexcept
 {
@@ -36,6 +45,9 @@ blue::GeneralizedRuntimeState StateFor(std::size_t const blueCount,
     return state;
 }
 
+/**
+ * @brief Réalise l'opération MaskCount; voir les préconditions et effets dans son corps C++.
+ */
 std::size_t MaskCount(blue::GeneralizedRawObservation const& observation,
                       std::size_t const offset, std::size_t const tracks,
                       std::size_t const features) noexcept
@@ -49,6 +61,9 @@ std::size_t MaskCount(blue::GeneralizedRawObservation const& observation,
     return result;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool CheckCase(std::size_t const blueCount,
                std::size_t const redCount,
                std::size_t const leader) noexcept
@@ -102,6 +117,9 @@ bool CheckCase(std::size_t const blueCount,
 
 } // namespace
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     if (!CheckCase(1U, 0U, 0U))

@@ -1,3 +1,9 @@
+/**
+ * @file Framework/RL/Core/tests/core_tests.cpp
+ * @brief Tests et assertions déterministes pour core tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "ppo/core/runner.hpp"
 #include "ppo/core/agent_contract.hpp"
 #include "ppo/core/buffers.hpp"
@@ -12,10 +18,15 @@
 #include <vector>
 
 namespace {
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Peut signaler un état invalide par exception.
+ */
 void Check(bool condition) {
     if (!condition) throw std::runtime_error("core regression test failed");
 }
 
+/** @brief Déclare le type FakeEnvironment, utilisé par Tests et assertions déterministes pour core tests. */
 class FakeEnvironment final : public ppo::core::IEnvironment {
 public:
     std::size_t ObservationSize() const noexcept override { return 1U; }
@@ -35,13 +46,20 @@ private:
     float position_ = 0.F;
 };
 
+/** @brief Déclare le type FakeLearner, utilisé par Tests et assertions déterministes pour core tests. */
 class FakeLearner final : public ppo::core::ILearner {
 public:
+/**
+ * @brief Réalise l'opération ChooseAction; voir les préconditions et effets dans son corps C++.
+ */
     ppo::core::Action ChooseAction(ppo::core::Observation const& obs) override {
         Check(obs.size() == 1U);
         return invalid_action ? ppo::core::Action{} : ppo::core::Action{1.F};
     }
     bool invalid_action = false;
+/**
+ * @brief Réalise l'opération Observe; voir les préconditions et effets dans son corps C++.
+ */
     void Observe(ppo::core::Transition const& t) override {
         ++observed;
         last = t;
@@ -53,6 +71,7 @@ public:
 
 
 void TestMultiAgentPhases() {
+/** @brief Déclare le type Agent, utilisé par Tests et assertions déterministes pour core tests. */
     struct Agent { int id; };
     auto a = std::make_shared<Agent>(Agent{1});
     auto b = std::make_shared<Agent>(Agent{2});
@@ -87,6 +106,9 @@ void TestMultiAgentPhases() {
     Check(events == std::vector<int>({20, 30}));
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 void TestEvaluationMonitoring()
 {
     using ppo::core::EvaluationProgress;
@@ -117,6 +139,9 @@ void TestEvaluationMonitoring()
     Check(outcome.completed && finished == 2 && stepLimitExhausted == 1);
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 void TestEvaluationScheduling() {
     std::vector<int> events{};
     // Early termination at step 1 of test 0, normal exhaustion for test 1.
@@ -179,6 +204,7 @@ void TestEvaluationScheduling() {
 
 // The helper must also work in the dependency-free build, for a domain
 // that is entirely unrelated to either current neural policy.
+/** @brief Déclare le type ExampleAgentModel, utilisé par Tests et assertions déterministes pour core tests. */
 struct ExampleAgentModel
 {
     using STATES = std::array<float, 4>;
@@ -193,6 +219,9 @@ static_assert(ppo::core::SameContract(
                   ExampleAgentModel::kAgentContract),
               "Model and generic agent contract must agree");
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 void TestAgentContracts()
 {
     using ppo::core::AgentContract;
@@ -250,6 +279,9 @@ void TestAgentContracts()
     Check(!SameContract(example, reordered));
 }
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main() {
     // The legacy agent ABI/telemetry contract is standalone C++17:
     // no LibTorch or ECS header is required by the headless build.
@@ -320,8 +352,12 @@ int main() {
     Check(runner.Reset().at(0) == 0.F);
 
     // A policy-only runner is inference: no learner feedback is generated.
+/** @brief Déclare le type ConstantPolicy, utilisé par Tests et assertions déterministes pour core tests. */
     class ConstantPolicy final : public ppo::core::IPolicy {
     public:
+/**
+ * @brief Réalise l'opération ChooseAction; voir les préconditions et effets dans son corps C++.
+ */
         ppo::core::Action ChooseAction(ppo::core::Observation const&) override {
             return {1.F};
         }

@@ -22,6 +22,9 @@
 #include <system_error>
 #include <thread>
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main(int argc, char** argv)
 {
     // Main only selects a compiled example; each example owns its startup.

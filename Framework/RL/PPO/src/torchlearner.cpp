@@ -1,3 +1,9 @@
+/**
+ * @file Framework/RL/PPO/src/torchlearner.cpp
+ * @brief Interface ou implémentation du composant torchlearner.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "torchlearner.hpp"
 
 #include <algorithm>
@@ -8,6 +14,10 @@
 namespace ppo::model {
 
 namespace {
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Peut signaler un état invalide par exception.
+ */
 long long CheckedDimension(std::size_t value)
 {
     if (value == 0 || value > static_cast<std::size_t>(std::numeric_limits<long long>::max()))
@@ -22,6 +32,10 @@ std::shared_ptr<ITrainingNet> CheckedPolicy(std::shared_ptr<ITrainingNet> policy
     return policy;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Peut signaler un état invalide par exception.
+ */
 long long CheckedRollout(std::int64_t value)
 {
     if (value <= 0)
@@ -54,6 +68,10 @@ TorchLearner::TorchLearner(
 }
 
 ppo::core::Action
+/**
+ * @brief Réalise l'opération ChooseAction de TorchLearner; voir les préconditions et effets dans son corps C++.
+ * @details Peut signaler un état invalide par exception.
+ */
 TorchLearner::ChooseAction(ppo::core::Observation const& observation)
 {
     if (observation.size() != observation_.size())
@@ -85,10 +103,29 @@ TorchLearner::Observe(ppo::core::Transition const& transition)
     pending_action_ = false;
 }
 
+/**
+ * @brief Initialise ou rétablit l'état de TorchLearner selon le contexte courant.
+ * @details Utilise des fichiers ou chemins.
+ */
 void TorchLearner::ResetRollout() { agent_.Init(); pending_action_ = false; }
+/**
+ * @brief Réalise l'opération RolloutComplete de TorchLearner; voir les préconditions et effets dans son corps C++.
+ * @details Utilise des fichiers ou chemins.
+ */
 bool TorchLearner::RolloutComplete() const noexcept { return !agent_.IsTraining(); }
+/**
+ * @brief Réalise l'opération RolloutStep de TorchLearner; voir les préconditions et effets dans son corps C++.
+ * @details Utilise des fichiers ou chemins.
+ */
 long long TorchLearner::RolloutStep() const noexcept { return agent_.GetCurrentStep(); }
+/**
+ * @brief Réalise l'opération Outputs de TorchLearner; voir les préconditions et effets dans son corps C++.
+ * @details Utilise des fichiers ou chemins.
+ */
 PPOOutputs const& TorchLearner::Outputs() const noexcept { return agent_.GetOutputs(); }
+/**
+ * @brief Sérialise ou écrit les données associées à Save selon les garanties implémentées.
+ */
 void TorchLearner::Save(std::filesystem::path const& path) { agent_.Save(path); }
 
 } // namespace ppo::model

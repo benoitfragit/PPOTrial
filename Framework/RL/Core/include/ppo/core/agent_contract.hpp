@@ -1,3 +1,9 @@
+/**
+ * @file Framework/RL/Core/include/ppo/core/agent_contract.hpp
+ * @brief Interface ou implémentation du composant agent contract.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include <cstddef>
@@ -11,6 +17,7 @@ namespace ppo::core {
 // independent of neural backends, simulation entities and serialization.
 // Identifiers must have static lifetime (normally string literals):
 // the descriptor does not own string_view storage.
+/** @brief Déclare le type AgentContract, utilisé par Interface ou implémentation du composant agent contract. */
 struct AgentContract
 {
     std::string_view profile;
@@ -20,6 +27,9 @@ struct AgentContract
     std::size_t actionSize;
 };
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 constexpr bool IsValid(AgentContract const& contract) noexcept
 {
     return !contract.profile.empty()
@@ -45,6 +55,9 @@ constexpr bool SameContract(AgentContract const& lhs,
 // The widths come from the domain model's existing fixed-size vectors.
 // The generic core does not know any specific agent names or dimensions.
 template<typename ObservationVector, typename ActionVector>
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par MakeAgentContract.
+ */
 constexpr AgentContract MakeAgentContract(
     std::string_view profile,
     std::string_view observationLayout,
@@ -62,6 +75,9 @@ constexpr AgentContract MakeAgentContract(
 // Shared validation for both training and inference bindings. Future domain
 // adapters describe themselves without adding cases to the core.
 template<typename Model>
+/**
+ * @brief Réalise l'opération AgentContractOf; voir les préconditions et effets dans son corps C++.
+ */
 constexpr AgentContract AgentContractOf() noexcept
 {
     constexpr AgentContract contract = Model::kAgentContract;

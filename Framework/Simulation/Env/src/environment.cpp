@@ -46,6 +46,7 @@ enum class eEnvironmentState : unsigned char {
 * @brief Internal command exchanged with the environment thread.
 */
 struct sRealTimeCommand {
+/** @brief Déclare le type eTypeCommand, utilisé par Thread ECS, ordonnanceur d'agents, règles de monde et snapshots synchronisés. */
     enum class eTypeCommand {
         None,
         ChangeState,
@@ -92,6 +93,9 @@ struct Environment::Impl
     eEnvironmentState               m_prevState         { m_state };
 };
 
+/**
+ * @brief Réalise l'opération Impl de Environment::Impl; voir les préconditions et effets dans son corps C++.
+ */
 Environment::Impl::Impl(void)
 {
     // Create the shared environment-state context before any entity is added.
@@ -313,6 +317,10 @@ Environment::Environment(void):
 */
 Environment::~Environment(void) = default;
 
+/**
+ * @brief Met à jour ou enregistre les données sous la responsabilité de Environment.
+ * @details Consulte ou modifie des composants ECS.
+ */
 bool Environment::SetWorldRules(std::unique_ptr<IWorldRules> rules)
 {
     if (p_impl == nullptr || p_impl->m_running.load(std::memory_order_acquire) || rules == nullptr)
@@ -335,6 +343,9 @@ Environment::GetRegistry(void) noexcept
 }
 
 Entity::InitializerSystem
+/**
+ * @brief Retourne une vue ou une valeur calculée depuis l'état courant de Environment.
+ */
 Environment::GetEntityInitializer(void) const noexcept
 {
     return p_impl != nullptr ? p_impl->m_entityInitializer : nullptr;

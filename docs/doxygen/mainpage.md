@@ -1,53 +1,30 @@
-\mainpage PPOTrial Documentation
+\mainpage PPOTrial — documentation complète du code
 
 [TOC]
 
-## Overview
+## Objectif
 
-This site gathers the Doxygen comments already present in the C++ codebase and
-adds a project-level reference for the JSON configuration files used by the
-runtime, the renderer, the scenarios, and the RL agents.
+Cette documentation décrit le **code tel qu'il existe**, sans changer la simulation, les agents, les récompenses ou les poids. Le référentiel de lecture est le commit `e003f0c5235057470db824b5d9bf12b23d6e64c8` (31 octobre 2026). Les pages d'architecture sont complémentaires des **commentaires Doxygen présents dans les sources `.cpp` et `.hpp`**, et de la référence HTML générée depuis leurs implémentations.
 
-The generated documentation is meant to stay outside the CMake build chain.
-You can regenerate it on demand with a standalone script whenever the code or
-the JSON formats evolve.
+L'ancienne configuration Doxygen analysait des dossiers qui n'existent plus et masquait les symboles sans commentaires. La nouvelle configuration analyse le dépôt depuis sa racine, inclut **165 fichiers C++**, leurs corps de fonctions, les symboles privés et statiques, les méthodes locales, les références et les graphes d'appels si Graphviz est présent.
 
-## What Is Included
+## Parcours de lecture
 
-- API reference generated from the documented headers and source files.
-- Source browsing and cross-references between types, functions, files, and
-  namespaces.
-- A JSON reference page that explains the actual file formats consumed by the
-  code.
-- Optional Graphviz diagrams when `dot.exe` is installed alongside Doxygen.
+- \ref architecture_reference "Architecture et dépendances des modules"
+- \ref blue_mappo_reference "BlueDefense : fonctionnement complet du MAPPO"
+- \ref legacy_rl_reference "PPO classique et agents Airspace historiques"
+- \ref config_ci_reference "Configuration, exécution, CI et tests"
+- \ref json_formats "Contrats JSON actifs"
+- \ref source_inventory "Inventaire de chaque fichier C++ et des scripts"
+- **Files / File List** : fonctions et fichiers `.cpp` jusqu'à leurs implémentations.
+- **Classes / Namespaces / Search** : signatures, champs, appels et usages.
 
-## Generate The Docs
+## Construction autonome (sans compiler l'application)
 
-1. Double click `generatedoc.bat` from the repository root.
-2. The script looks for `doxygen.exe` on the `PATH` and in common Windows
-   installation folders.
-3. If `dot.exe` from Graphviz is available, call graphs and dependency graphs
-   are enabled automatically.
-4. The HTML site is generated in `docs/generated/html`.
-5. The script opens `docs/generated/html/index.html` automatically on success.
+Sur Windows, installer Doxygen et facultativement Graphviz, puis exécuter `generatedoc.bat` à la racine du dépôt (ou `tools/generatedoc.ps1 -NoOpen`). Le script exécute Doxygen indépendamment de CMake, LibTorch et RLTools.
 
-## Recommended Output Format
+Résultat : `docs/generated/html/index.html`. Les avertissements (dont API sans commentaires) sont dans `docs/generated/doxygen-warnings.log`. Ils sont intentionnellement **non bloquants** : la référence doit rester consultable même avec des lacunes documentaires.
 
-The default and recommended output for this repository is **HTML**.
+## Comprendre ce que « complet » signifie
 
-- It is the easiest format to browse locally.
-- It supports search, diagrams, source navigation, and cross-links well.
-- It benefits the most from the custom stylesheet shipped in this repository.
-
-If you want more later, Doxygen can also generate other outputs:
-
-- **HTML + Graphviz**: best day-to-day format and the prettiest choice here.
-- **LaTeX/PDF**: useful for frozen deliverables or printable snapshots.
-- **XML / QHP**: useful only if you later want IDE or external tooling
-  integration.
-
-## JSON Reference
-
-The JSON configuration formats are documented here:
-
-- \subpage json_formats "JSON File Formats"
+Doxygen extrait toutes les déclarations et définitions qu'il reconnaît et fournit les sources navigables. Pour les fonctions sans commentaires historiques, le corps du code est affiché; une documentation contractuelle rédigée de chaque ligne ne peut pas être inférée de façon fiable par l'outil. Les pages suivantes explicitent les cheminements importants et signalent cette limite. Des commentaires Doxygen ont été ajoutés dans les fichiers `.cpp`, `.hpp` et les sources des tests lorsqu'ils en manquaient, sans modifier aucune instruction C++, signature, constante ni contrôle de flux. Les 37 sources déjà suffisamment commentées sont conservées telles quelles. Au total, 128 sources reçoivent des annotations, dont 443 fonctions et 58 types supplémentaires. Aucun CMake applicatif, JSON opérationnel, modèle ou checkpoint n'est modifié.

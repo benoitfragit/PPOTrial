@@ -151,6 +151,10 @@ ActorCriticNet::forward(torch::Tensor state)
 * @return Mean action tensor.
 */
 torch::Tensor
+/**
+ * @brief Réalise l'opération forward_mu de ActorCriticNet; voir les préconditions et effets dans son corps C++.
+ * @details Utilise des fichiers ou chemins.
+ */
 ActorCriticNet::forward_mu(torch::Tensor state)
 {
     torch::Tensor x = torch::relu(fc1->forward(state));
@@ -194,6 +198,9 @@ ActorCriticNetProd::load(std::filesystem::path const& modelpath)
 * @return Mean action tensor.
 */
 torch::Tensor
+/**
+ * @brief Réalise l'opération forward de ActorCriticNetProd; voir les préconditions et effets dans son corps C++.
+ */
 ActorCriticNetProd::forward(torch::Tensor state)
 {
     if (p_policy == nullptr)

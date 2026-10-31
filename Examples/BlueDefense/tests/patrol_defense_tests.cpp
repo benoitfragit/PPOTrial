@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/tests/patrol_defense_tests.cpp
+ * @brief Tests et assertions déterministes pour patrol defense tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "patrol_defense.hpp"
 #include "patrol_core.hpp"
 #include "patrol_rltools.hpp"
@@ -46,6 +52,7 @@ bool RestrictedZoneDestructionTerminatesMappo()
     if (rewards[0] != -100.F || rewards[1] != -100.F)
         return false;
 
+/** @brief Déclare le type TestContext, utilisé par Tests et assertions déterministes pour patrol defense tests. */
     struct TestContext final {};
     TestContext device{};
     TestContext rng{};
@@ -57,6 +64,9 @@ bool RestrictedZoneDestructionTerminatesMappo()
 
 } // namespace
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     blue::DefenseSettings const settings{};

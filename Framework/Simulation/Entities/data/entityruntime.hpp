@@ -1,3 +1,9 @@
+/**
+ * @file Framework/Simulation/Entities/data/entityruntime.hpp
+ * @brief Interface ou implémentation du composant entityruntime.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "components.hpp"
@@ -7,6 +13,9 @@
 namespace ppo::model {
 
 template<typename Entities, typename GetEntity>
+/**
+ * @brief Exécute une étape d'évolution ou de calcul du composant.
+ */
 void AdvanceLivingEntities(Entities& entities, GetEntity&& getEntity)
 {
     for (auto& entry : entities)

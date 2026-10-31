@@ -25,6 +25,7 @@ namespace ppo::model {
 * @tparam Model Domain model exposing state and action buffers.
 */
 template<typename Policy, typename Model>
+/** @brief Déclare le type ProdAgent, utilisé par Interface ou implémentation du composant prodagent. */
 class ProdAgent :
     public IAgent
 {
@@ -39,6 +40,10 @@ public:
     using ActionVector = typename Model::ACTIONS;
 
     // Optional descriptor; no change to the PPO execution path or agent ABI.
+/**
+ * @brief Réalise l'opération Contract; voir les préconditions et effets dans son corps C++.
+ * @details Utilise des fichiers ou chemins.
+ */
     static constexpr ppo::core::AgentContract Contract() noexcept
     {
         return ppo::core::AgentContractOf<Model>();

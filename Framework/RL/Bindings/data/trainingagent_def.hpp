@@ -24,6 +24,10 @@ namespace ppo::model {
 * @brief Builds the training agent and registers its JSON persistence hooks.
 */
 template<typename Policy, typename Model>
+/**
+ * @brief Exécute une étape d'évolution ou de calcul du composant.
+ * @details Utilise des fichiers ou chemins.
+ */
 TrainingAgent<Policy, Model>::TrainingAgent(Model* model, 
                                             std::string const& name, 
                                             std::string const& modelpath, 
@@ -69,6 +73,9 @@ TrainingAgent<Policy, Model>::TrainingAgent(Model* model,
 */
 template<typename Policy, typename Model>
 void
+/**
+ * @brief Initialise ou rétablit l'état selon le contexte courant.
+ */
 TrainingAgent<Policy, Model>::Init(void)
 {
     if (p_model == nullptr)
@@ -146,6 +153,9 @@ TrainingAgent<Policy, Model>::ProcessCommand(sAgentRealTimeCommand const& comman
 */
 template<typename Policy, typename Model>
 void
+/**
+ * @brief Réalise l'opération ChooseAction; voir les préconditions et effets dans son corps C++.
+ */
 TrainingAgent<Policy, Model>::ChooseAction(void)
 {
     // Reset the step reward before the reward function accumulates new terms.
@@ -170,6 +180,9 @@ TrainingAgent<Policy, Model>::ChooseAction(void)
 */
 template<typename Policy, typename Model>
 void
+/**
+ * @brief Met à jour ou enregistre les données sous la responsabilité.
+ */
 TrainingAgent<Policy, Model>::SetDone(bool done)         noexcept
 {
     m_internal.m_done |= done;
@@ -195,6 +208,10 @@ TrainingAgent<Policy, Model>::AddReward(unsigned char type, float reward)      n
 */
 template<typename Policy, typename Model>
 bool
+/**
+ * @brief Met à jour ou enregistre les données sous la responsabilité.
+ * @details Applique des bornes numériques.
+ */
 TrainingAgent<Policy, Model>::SetNewState(void)
 {
     bool ret{ false };
@@ -275,6 +292,10 @@ TrainingAgent<Policy, Model>::SetNewState(void)
 */
 template<typename Policy, typename Model>
 bool      
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Peut signaler un état invalide par exception.
+ */
 TrainingAgent<Policy, Model>::IsTraining(void)                  const noexcept
 {
     if (p_rlagent == nullptr)
@@ -298,6 +319,10 @@ TrainingAgent<Policy, Model>::IsTrained(void)                  const noexcept
 */
 template<typename Policy, typename Model>
 void
+/**
+ * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ * @details Peut signaler un état invalide par exception.
+ */
 TrainingAgent<Policy, Model>::LoadFromFile(ppo::serialization::json& ar)
 {
     std::vector<std::string> rewardNames{};
@@ -332,6 +357,9 @@ TrainingAgent<Policy, Model>::LoadFromFile(ppo::serialization::json& ar)
 */
 template<typename Policy, typename Model>
 void 
+/**
+ * @brief Sérialise ou écrit les données associées à SaveToFile selon les garanties implémentées.
+ */
 TrainingAgent<Policy, Model>::SaveToFile(ppo::serialization::json& ar)
 {
     ppo::serialization::TrainingSettings settings{};
@@ -363,6 +391,9 @@ TrainingAgent<Policy, Model>::SaveToFile(ppo::serialization::json& ar)
 */
 template<typename Policy, typename Model>
 bool
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 TrainingAgent<Policy, Model>::IsLastStep(void)                  const noexcept
 {
     if (p_rlagent == nullptr)

@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/tests/generalized_learner_tests.cpp
+ * @brief Tests et assertions déterministes pour generalized learner tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "generalized_patrol_learner.hpp"
 
 #include <algorithm>
@@ -14,6 +20,9 @@ namespace rlt = rl_tools;
 
 namespace {
 
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par MakeObservations.
+ */
 blue::GeneralizedPatrolLearner::Observations MakeObservations(
     blue::ActiveTeamCounts const counts)
 {
@@ -36,6 +45,9 @@ blue::GeneralizedPatrolLearner::Observations MakeObservations(
     return observations;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool SamePooledContext(blue::GeneralizedPatrolLearner::CentralCriticObservation const& lhs,
           blue::GeneralizedPatrolLearner::CentralCriticObservation const& rhs)
 {
@@ -61,6 +73,10 @@ bool ThrowsRuntimeError(Callable&& callable)
     return false;
 }
 
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par MakeV4TrainingFixture.
+ * @details Utilise des fichiers ou chemins. Peut signaler un état invalide par exception.
+ */
 std::string MakeV4TrainingFixture()
 {
     blue::Device device{};
@@ -89,6 +105,10 @@ std::string MakeV4TrainingFixture()
     return fixture;
 }
 
+/**
+ * @brief Sérialise ou écrit les données associées à WriteText selon les garanties implémentées.
+ * @details Utilise des fichiers ou chemins. Peut signaler un état invalide par exception.
+ */
 void WriteText(std::filesystem::path const& path, std::string const& text)
 {
     std::ofstream stream{path, std::ios::binary | std::ios::trunc};
@@ -97,6 +117,10 @@ void WriteText(std::filesystem::path const& path, std::string const& text)
         throw std::runtime_error("Cannot write generalized learner fixture");
 }
 
+/**
+ * @brief Réalise l'opération VerifyOptimizationFailureGuard; voir les préconditions et effets dans son corps C++.
+ * @details Peut signaler un état invalide par exception.
+ */
 bool VerifyOptimizationFailureGuard()
 {
     blue::GeneralizedOptimizationGuard guard{};
@@ -156,6 +180,9 @@ bool VerifyOptimizationFailureGuard()
     }
 }
 
+/**
+ * @brief Réalise l'opération VerifyAbortPendingStep; voir les préconditions et effets dans son corps C++.
+ */
 bool VerifyAbortPendingStep()
 {
     blue::ActiveTeamCounts const counts{1U, 0U};
@@ -179,6 +206,9 @@ bool VerifyAbortPendingStep()
         && learner.StepCount() == 1U && !learner.OptimizationFailed();
 }
 
+/**
+ * @brief Réalise l'opération VerifyDeadActorMask; voir les préconditions et effets dans son corps C++.
+ */
 bool VerifyDeadActorMask()
 {
     blue::ActiveTeamCounts const counts{1U, 0U};
@@ -205,6 +235,9 @@ bool VerifyDeadActorMask()
         && means == learner.EvaluateActions(observations, alive);
 }
 
+/**
+ * @brief Réalise l'opération VerifyPostLossMissionCredit; voir les préconditions et effets dans son corps C++.
+ */
 bool VerifyPostLossMissionCredit()
 {
     blue::ActiveTeamCounts const counts{2U, 0U};
@@ -247,6 +280,9 @@ bool VerifyPostLossMissionCredit()
     return absoluteAdvantages[1] > absoluteAdvantages[0] + 0.1F;
 }
 
+/**
+ * @brief Réalise l'opération VerifyTeamSize; voir les préconditions et effets dans son corps C++.
+ */
 bool VerifyTeamSize(blue::ActiveTeamCounts const counts)
 {
     blue::GeneralizedPatrolLearner learner{counts, 731U, 2U};
@@ -321,6 +357,9 @@ bool VerifyTeamSize(blue::ActiveTeamCounts const counts)
 
 } // namespace
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     if (!VerifyOptimizationFailureGuard())

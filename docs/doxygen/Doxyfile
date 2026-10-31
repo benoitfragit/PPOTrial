@@ -1,76 +1,84 @@
-DOXYFILE_ENCODING      = UTF-8
-PROJECT_NAME           = "PPOTrial"
-PROJECT_BRIEF          = "Doxygen reference for the PPOTrial codebase"
-OUTPUT_DIRECTORY       = docs/generated
-ALLOW_UNICODE_NAMES    = YES
-OUTPUT_LANGUAGE        = English
+DOXYFILE_ENCODING       = UTF-8
+PROJECT_NAME            = "PPOTrial"
+PROJECT_BRIEF           = "Référence exhaustive C++17 : API, sources .cpp, entraînement et simulation"
+OUTPUT_DIRECTORY        = docs/generated
+ALLOW_UNICODE_NAMES     = YES
+OUTPUT_LANGUAGE         = French
 
-MARKDOWN_SUPPORT       = YES
-AUTOLINK_SUPPORT       = YES
-JAVADOC_AUTOBRIEF      = YES
-BUILTIN_STL_SUPPORT    = YES
+MARKDOWN_SUPPORT        = YES
+AUTOLINK_SUPPORT        = YES
+JAVADOC_AUTOBRIEF       = YES
+BUILTIN_STL_SUPPORT     = YES
+FULL_PATH_NAMES         = YES
+STRIP_FROM_PATH         = .
+CASE_SENSE_NAMES        = YES
 
-FULL_PATH_NAMES        = YES
-STRIP_FROM_PATH        = .
-CASE_SENSE_NAMES       = YES
+# Point capital : scanner l'arborescence ACTUELLE et non les anciens dossiers.
+# Script tools/generatedoc.ps1 exécute Doxygen depuis la racine du dépôt.
+INPUT                   = .
+FILE_PATTERNS           = *.hpp *.cpp *.h *.c *.cc *.cxx *.hxx *.inl *.md *.dox
+RECURSIVE               = YES
+EXCLUDE                 = .git .vs build out docs/generated
+EXCLUDE_PATTERNS        = */.git/* */.vs/* */build/* */out/* */docs/generated/* */__pycache__/*
+USE_MDFILE_AS_MAINPAGE  = docs/doxygen/mainpage.md
 
-INPUT                  = Agents Entities Env Evaluation Initializer Main Meta PPO Renderer Serialization docs/doxygen
-FILE_PATTERNS          = *.hpp *.cpp *.md
-RECURSIVE              = YES
-EXCLUDE                = out docs/generated
+# Afficher toute l'API, y compris .cpp, symboles privés, anonymes et locaux.
+EXTRACT_ALL             = YES
+EXTRACT_PRIVATE         = YES
+EXTRACT_PRIV_VIRTUAL    = YES
+EXTRACT_STATIC          = YES
+EXTRACT_LOCAL_CLASSES   = YES
+EXTRACT_LOCAL_METHODS   = YES
+EXTRACT_ANON_NSPACES    = YES
+INTERNAL_DOCS           = YES
+HIDE_UNDOC_MEMBERS      = NO
+HIDE_UNDOC_CLASSES      = NO
+HIDE_IN_BODY_DOCS       = NO
+SHOW_INCLUDE_FILES      = YES
+SHOW_USED_FILES         = YES
+SHOW_FILES              = YES
+SHOW_NAMESPACES         = YES
 
-USE_MDFILE_AS_MAINPAGE = docs/doxygen/mainpage.md
+# Permet de lire les corps de fonctions même si le code ne porte aucun commentaire.
+SOURCE_BROWSER          = YES
+INLINE_SOURCES          = YES
+STRIP_CODE_COMMENTS     = NO
+VERBATIM_HEADERS        = YES
+REFERENCED_BY_RELATION  = YES
+REFERENCES_RELATION     = YES
+ENABLE_PREPROCESSING    = YES
+MACRO_EXPANSION         = NO
 
-EXTRACT_ALL            = NO
-EXTRACT_PRIVATE        = YES
-EXTRACT_STATIC         = YES
-EXTRACT_LOCAL_CLASSES  = YES
-EXTRACT_LOCAL_METHODS  = YES
-EXTRACT_ANON_NSPACES   = YES
-HIDE_UNDOC_MEMBERS     = YES
-HIDE_UNDOC_CLASSES     = YES
-HIDE_IN_BODY_DOCS      = YES
+# Journaliser les lacunes de documentation sans rendre la génération bloquante.
+WARNINGS                = YES
+WARN_IF_UNDOCUMENTED    = YES
+WARN_IF_DOC_ERROR       = YES
+WARN_AS_ERROR           = NO
+WARN_LOGFILE            = docs/generated/doxygen-warnings.log
 
-SHOW_INCLUDE_FILES     = YES
-SHOW_USED_FILES        = YES
-SHOW_FILES             = YES
-SHOW_NAMESPACES        = YES
+GENERATE_HTML           = YES
+HTML_OUTPUT             = html
+HTML_EXTRA_STYLESHEET   = docs/doxygen/theme/ppo-theme.css
+HTML_COLORSTYLE         = LIGHT
+HTML_DYNAMIC_MENUS      = YES
+HTML_DYNAMIC_SECTIONS   = YES
+GENERATE_TREEVIEW       = YES
+TREEVIEW_WIDTH          = 360
+SEARCHENGINE            = YES
 
-SOURCE_BROWSER         = YES
-INLINE_SOURCES         = NO
-VERBATIM_HEADERS       = YES
-REFERENCED_BY_RELATION = YES
-REFERENCES_RELATION    = YES
+GENERATE_LATEX          = NO
+GENERATE_XML            = NO
+GENERATE_RTF            = NO
+GENERATE_MAN            = NO
 
-WARNINGS               = YES
-WARN_IF_UNDOCUMENTED   = NO
-WARN_IF_DOC_ERROR      = YES
-WARN_AS_ERROR          = NO
-WARN_LOGFILE           = docs/generated/doxygen-warnings.log
-
-GENERATE_HTML          = YES
-HTML_OUTPUT            = html
-HTML_EXTRA_STYLESHEET  = docs/doxygen/theme/ppo-theme.css
-HTML_COLORSTYLE        = LIGHT
-HTML_DYNAMIC_MENUS     = YES
-HTML_DYNAMIC_SECTIONS  = YES
-GENERATE_TREEVIEW      = YES
-TREEVIEW_WIDTH         = 320
-SEARCHENGINE           = YES
-
-GENERATE_LATEX         = NO
-GENERATE_XML           = NO
-GENERATE_RTF           = NO
-GENERATE_MAN           = NO
-
-CLASS_DIAGRAMS         = YES
-HAVE_DOT               = YES
-DOT_IMAGE_FORMAT       = svg
-INTERACTIVE_SVG        = YES
-CALL_GRAPH             = YES
-CALLER_GRAPH           = YES
-DIRECTORY_GRAPH        = YES
-UML_LOOK               = YES
-DOT_GRAPH_MAX_NODES    = 80
-MAX_DOT_GRAPH_DEPTH    = 2
-DOT_CLEANUP            = YES
+CLASS_DIAGRAMS          = YES
+HAVE_DOT                = YES
+DOT_IMAGE_FORMAT        = svg
+INTERACTIVE_SVG         = YES
+CALL_GRAPH              = YES
+CALLER_GRAPH            = YES
+DIRECTORY_GRAPH         = YES
+UML_LOOK                = YES
+DOT_GRAPH_MAX_NODES     = 100
+MAX_DOT_GRAPH_DEPTH     = 3
+DOT_CLEANUP             = YES

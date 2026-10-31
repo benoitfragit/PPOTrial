@@ -1,3 +1,9 @@
+/**
+ * @file Tests/model_checkpoint_tests.cpp
+ * @brief Tests et assertions déterministes pour model checkpoint tests.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 // Smoke test of the two *existing* production checkpoints. This test must
 // never train or serialize a model; it only restores and evaluates its policy.
 #include "actorcriticnet.hpp"
@@ -24,6 +30,10 @@ namespace {
 // Distinct values detect wrong feature order. For the mission model the last
 // feature of each track is a validity mask, so keep the mask binary and ensure
 // there are both occupied and empty track slots.
+/**
+ * @brief Construit, transforme ou échantillonne les données produites par MakeObservation.
+ * @details Utilise des fichiers ou chemins. Peut signaler un état invalide par exception.
+ */
 std::vector<float> MakeObservation(std::size_t dimension)
 {
     std::vector<float> observation(dimension);
@@ -40,6 +50,10 @@ std::vector<float> MakeObservation(std::size_t dimension)
     return observation;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Utilise des fichiers ou chemins. Peut signaler un état invalide par exception.
+ */
 void CheckActions(torch::Tensor const& actions, int64_t expectedDim)
 {
     if (!actions.defined() || actions.dim() != 2 ||
@@ -93,6 +107,10 @@ void CheckCheckpoint(std::filesystem::path const& path,
 // inference. This is read-only: a partial rollout never calls UpdatePolicy,
 // Save or any evaluator, so existing archives and weights remain unchanged.
 template<typename TrainingNet>
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Utilise des fichiers ou chemins. Peut signaler un état invalide par exception.
+ */
 void CheckTrainingTransitionParity(std::filesystem::path const& modelRoot,
                                    int64_t inputDim,
                                    int64_t actionDim)
@@ -156,6 +174,10 @@ void CheckTrainingTransitionParity(std::filesystem::path const& modelRoot,
 
 } // namespace
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Utilise des fichiers ou chemins.
+ */
 void CheckExistingAgentContracts()
 {
     constexpr auto snaTraining = rl::SNATrainingAgent::Contract();

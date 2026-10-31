@@ -17,6 +17,10 @@ using ppo::serialization::json;
 
 namespace {
 
+/**
+ * @brief Sérialise ou écrit les données associées à Write selon les garanties implémentées.
+ * @details Utilise des fichiers ou chemins.
+ */
 void Write(fs::path const& path, std::string const& text)
 {
     std::ofstream out(path, std::ios::binary);
@@ -31,6 +35,9 @@ std::string Read(fs::path const& path)
 
 } // namespace
 
+/**
+ * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ */
 int main()
 {
     fs::path const root = fs::temp_directory_path()

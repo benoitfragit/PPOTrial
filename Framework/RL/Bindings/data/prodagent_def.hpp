@@ -25,6 +25,10 @@ namespace ppo::model {
 * @brief Builds the production agent and loads its serialized policy when present.
 */
 template<typename Policy, typename Model>
+/**
+ * @brief Réalise l'opération ProdAgent; voir les préconditions et effets dans son corps C++.
+ * @details Utilise des fichiers ou chemins.
+ */
 ProdAgent<Policy, Model>::ProdAgent(Model* model, std::string const& name, std::filesystem::path const& modelpath):
     p_model{model},
     m_name{name},
@@ -47,6 +51,9 @@ ProdAgent<Policy, Model>::ProdAgent(Model* model, std::string const& name, std::
 */
 template<typename Policy,  typename Model>
 void
+/**
+ * @brief Initialise ou rétablit l'état selon le contexte courant.
+ */
 ProdAgent<Policy, Model>::Init(void)
 {
     if (p_model == nullptr)
@@ -77,6 +84,9 @@ ProdAgent<Policy, Model>::ChooseAction(void)
 */
 template<typename Policy, typename Model>
 bool
+/**
+ * @brief Met à jour ou enregistre les données sous la responsabilité.
+ */
 ProdAgent<Policy, Model>::SetNewState(void)
 {
     if (p_model == nullptr)
@@ -103,6 +113,9 @@ ProdAgent<Policy, Model>::IsTrained(void)                  const noexcept
 */
 template<typename Policy, typename Model>
 sAgentStateSnaphot
+/**
+ * @brief Retourne une vue ou une valeur calculée depuis l'état courant.
+ */
 ProdAgent<Policy, Model>::GetSnapshot(void) const noexcept
 {
     static const sAgentStateSnaphot snapshot{};

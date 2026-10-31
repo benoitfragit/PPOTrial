@@ -1,3 +1,9 @@
+/**
+ * @file Examples/Airspace/Scenario/airspaceworldrules.hpp
+ * @brief Construction, données et arbitrage du scénario airspaceworldrules.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "worldrules.hpp"
@@ -10,6 +16,7 @@ namespace ppo::examples::airspace {
 
 // All historical world-specific outcome rules and visual events live here.
 // The environment invokes these hooks but never interprets the task.
+/** @brief Déclare le type AirspaceWorldRules, utilisé par Construction, données et arbitrage du scénario airspaceworldrules. */
 class AirspaceWorldRules final : public ppo::model::IWorldRules
 {
 public:
@@ -21,6 +28,10 @@ public:
      */
     explicit AirspaceWorldRules(
         bool resolveHostileRestrictedZoneWeapons = true) noexcept
+/**
+ * @brief Réalise l'opération m_resolveHostileRestrictedZoneWeapons; voir les préconditions et effets dans son corps C++.
+ * @details Consulte ou modifie des composants ECS.
+ */
         : m_resolveHostileRestrictedZoneWeapons(
             resolveHostileRestrictedZoneWeapons)
     {

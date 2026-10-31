@@ -1,234 +1,71 @@
-\page json_formats JSON Configuration v2
+\page json_formats Contrats JSON du dépôt au 31 octobre 2026
 
 [TOC]
 
-## Single configuration format
+## Principe de lecture
 
-All active JSON resources under resources/settings use **formatVersion = 2**.
-No alternate runtime loaders or old-file path fallbacks exist.
+Les ressources actives sont sous `resources/settings` et utilisent `formatVersion: 2`. Les véritables contrats sont imposés par les validateurs C++/Python, non par des exemples historiques restés dans des guides. Les chemins et noms ci-dessous correspondent aux fichiers effectivement présents dans l'arbre Git **e003f0c5235057470db824b5d9bf12b23d6e64c8**.
 
-| Purpose | Relative path under resources/settings |
+## Scénarios
+
+| Fichier | Contenu |
 | --- | --- |
-| Logical agent profiles | AgentProfiles.json |
-| Main scenario | Scenarios/Playground.json |
-| Blue MAPPO scenarios | Scenarios/BluePatrol.json, Scenarios/TwoVsTwo.json |
-| Evaluation scenarios | Scenarios/Evaluation/RLMission.json, Scenarios/Evaluation/RLSNA.json |
-| PPO/MAPPO settings | Training/RLMission.json, Training/RLSNA.json, Training/BluePatrol.json |
-| Platform parameters | Platforms/Mobile/*.json, Platforms/RestrictedZone/*.json |
-| Evaluation cases | Evaluation/Cases/RLMission.json, Evaluation/Cases/RLSNA.json |
-| Named initial-state presets | Evaluation/InitialStates.json |
-| Simulation state | Environment.json |
-| Display state | Renderer.json |
+| `Scenarios/BlueDefense.json` | Défense opérationnelle : objectif, templates bleu/rouge, zones, P=4/N=4 par défaut, paramètres de placement et retards. |
+| `Scenarios/BluePatrol.json` | Patrouille d'apprentissage : objectif, template bleu, zones, P=2/N=0 par défaut, `patrolOnly=true`. |
+| `Scenarios/Playground.json` | Scénario d'exemple Airspace. |
+| `Scenarios/Evaluation/RLMission.json`, `RLSNA.json` | Cas/campagnes historiques Airspace. |
 
-The `twoVsTwo` object in `Scenarios/TwoVsTwo.json` owns the episode spawn
-contract. `redSpawn` defines the front/lateral bearing interval, the scale
-beyond the rectangular world boundary and the guaranteed attacker separation.
-The shipped `redTeam` instantiates four production RLMission attackers, with
-seeded optional activation delays. The legacy `threatCurriculum` remains
-available only when `redTeam` is absent.
-`restrictedZoneSpawn` defines a side-relative position box and an activation
-probability. World limits remain sensor and reward references; they do not stop
-the production RLMission attackers.
+Une entité déclarative contient notamment `type`, `platform`, `side`, `target` si nécessaire, et `agents`. Les types courants sont `Mobile`, `RestrictedZone`, `Objective`. `AgentProfiles.json` relie les modes `training`/`production` de `RLSNA` et `RLMission` aux types C++ enregistrés.
 
-`blueTeam` and `redTeam` are optional additive contracts. `blueTeam` selects
-the generalized blue runtime and `redTeam` sizes its opponents. If both are
-absent, the archived 2v2 entities, RNG order, curriculum and v7/v4 checkpoint
-path are unchanged. `Scenarios/TwoVsTwo.json` enables `blueTeam` and `redTeam`
-directly so the existing GUI entry owns the generalized MAPPO runtime:
+Le bloc `blueDefense` paramètre `blueController`, `blueTeam.activeCount`, `redTeam.activeCount`, `redSpawn`, `restrictedZoneSpawn` et `restrictedZones`. Le code valide les effectifs P∈[1,9], N∈[0,10] et les contraintes de placement; les rouges sont des RLMission de production (pas de nouveaux agents RL rouges). Les activations différées doivent être prises en compte dans le critère « tous les rouges neutralisés ».
 
-~~~json
-"blueTeam": {"activeCount": 5},
-"redTeam": {
-  "activeCount": 7,
-  "maximumPlacementAttempts": 512,
-  "delayedActivationProbability": 0.25,
-  "minimumActivationDelaySteps": 256,
-  "maximumActivationDelaySteps": 768
-}
-~~~
+## Apprentissage BluePatrol
 
-`blueTeam.activeCount` is bounded to `[1,9]`; `redTeam.activeCount` is bounded
-to `[0,10]`. Generalized red placement attempts are bounded to `[1,4096]` per
-mobile and fail with a diagnostic when `redSpawn.minimumSeparation` cannot be
-satisfied. Activation delays are positive, finite, ordered ECS team-step
-indices. An enabled legacy `threatCurriculum` and generalized `redTeam` are
-mutually exclusive.
+`Training/BluePatrol.json` contient :
 
-The generalized loader clones one agent-free friendly Mobile template into
-`blue_1..blue_P`, and one production-RLMission hostile Mobile template into
-`red_1..red_N`. Exactly one blue leader is sampled per reset. Every teammate
-owns a stable unique V-formation slot and its normalized `[-1,1]` encoding.
-One synchronized team step produces P actions before physics and exactly P
-same-step transitions after ECS resolution.
+| Clé | Interprétation |
+| --- | --- |
+| `patrol.racetrack.lengthMeters/widthMeters/headingDegrees/anchorNorthMeters/anchorEastMeters` | Intervalles de tirage d'hippodrome par épisode. |
+| `patrol.racetrack.clockwise/boundaryMarginMeters/maximumSamplingAttempts` | Sens et contraintes d'échantillonnage. |
+| `patrol.formation.separationDistanceMeters/separationAngleDegrees` | Intervalle des positions du wedge. |
+| `patrol.defense.*` | Activation/désactivation du suivi de menaces, horizon d'intrusion et protection de l'objectif. |
+| `training.rolloutSteps` | Pas synchronisés d'équipe par mise à jour PPO (actuellement 2048). |
+| `training.maxUpdates` | Plafond de mises à jour (1000 dans le JSON de base). |
+| `training.checkpointEvery` | Fréquence des campagnes d'évaluation. |
+| `training.seed` | Graine de l'entraînement. |
+| `evaluation.episodes/maxSteps/seed/minimumTrackingFraction` | Campagne embarquée déterministe. |
+| `rewards.clamp` | Borne scalaire absolue de la récompense. |
+| `rewards.weights` | **Sept noms hérités** mis en correspondance avec les canaux généralisés par le C++. |
+| `rewards.generalized.ownLossWeight/lowSpeedRiskWeight` | Poids supplémentaires des pertes individuelles et de basse vitesse. |
+| `rewards.shaping` | Coefficients du suivi, de formation et de l'effort de contrôle. |
 
-See docs/configuration-guide.md for explanations and examples.
+La référence exacte des **15 canaux généralisés** et de leur affectation par rôle est \ref blue_mappo_reference. Modifier un poids n'est pas équivalent à changer une condition de destruction. Le fichier `training.saveEveryUpdates` peut être fixé par le workflow/runner, avec des valeurs par défaut prises en charge par la lecture de settings.
 
-## Scenario and agent profiles
+## Curriculum
 
-A scenario contains **formatVersion**, **agentProfiles** (path to AgentProfiles.json),
-and **entities** keyed by logical identifier. Each entity contains **type**, **platform**,
-**side**, **target** and a list of agent descriptors.
+`Training/BluePatrolCurriculum.json` : V1, séquence historique. `Training/BluePatrolCurriculumV2.json` : V2, **1000 updates**, `rehearsal.primaryUpdates=24`, `rehearsal.priorUpdates=6`, neuf étapes :
 
-~~~json
-{
-  "formatVersion": 2,
-  "agentProfiles": "../AgentProfiles.json",
-  "entities": {
-    "blue": {
-      "type": "Aircraft",
-      "platform": "trainingaircraft",
-      "side": "Friend",
-      "target": "obj2",
-      "agents": [{"profile": "RLMission", "mode": "training"}]
-    }
-  }
-}
-~~~
+| Étape | P | N | Zones hostiles | Budget updates |
+| --- | ---: | ---: | --- | ---: |
+| 01-hippodrome | 1 | 0 | non | 32 |
+| 02-hippodrome-wedge | 2 | 0 | non | 48 |
+| 03-one-vs-one | 1 | 1 | non | 72 |
+| 04-one-vs-two | 1 | 2 | non | 72 |
+| 05-one-vs-zones | 1 | 0 | oui | 64 |
+| 06-two-vs-one-zones | 2 | 1 | oui | 88 |
+| 07-two-vs-two-zones | 2 | 2 | oui | 100 |
+| 08-three-vs-three-zones | 3 | 3 | oui | 124 |
+| 09-four-vs-four | 4 | 4 | oui | 400 |
 
-AgentProfiles.json maps each logical profile plus mode onto the application's
-existing registered C++ agent name. The PPO core does not depend on agent names.
+Le curriculum V2 est piloté par `tools/ci/mappo_curriculum.py`, pas par un tirage dynamique de scénarios à l'intérieur de `GeneralizedPatrolLearner`. Les contraintes de reprise sont documentées dans \ref config_ci_reference.
 
-## Training
+## Physique, rendu, évaluation historique
 
-Training/PROFIL.json has root **formatVersion**, plus **training**, **rewards** and
-**ppo** objects. Rewards use a map keyed by the model's reward-channel names.
-The codec resolves these names in the model's declared order and rejects
-missing or unknown channels.
+- `Environment.json` : `environment.maxEast`, `maxNorth`, `timeStep` (positions en mètres, temps en secondes).
+- `Platforms/Mobile/*.json` : paramètres de vol et SNA, dont `FlightModel.CruiseSpeed`, limites d'accélération, vitesse minimale, carburant.
+- `Platforms/RestrictedZone/restrictedzone.json`, `sam.json` : zones et géométrie.
+- `Renderer.json` : `renderer.camera`, `showGrid`, `showPatrolTrack`, `showHardBoundary`, `showPseudoLidar` et préférences de visualisation.
+- `Training/RLMission.json`, `Training/RLSNA.json` : paramètres PPO LibTorch historiques.
+- `Evaluation/Cases/RLMission.json`, `RLSNA.json` : ensembles de tests historiques; `Evaluation/InitialStates.json` : états initiaux nommés.
 
-- training.rolloutSteps: transitions in one PPO rollout.
-- training.checkpointEvery: PPO updates between evaluation requests.
-- training.modelVersion: saved/current policy version.
-- rewards.clamp: total reward clamp.
-- rewards.weights: per-channel coefficients by name.
-- ppo.gamma, gaeLambda, clipEpsilon, valueCoefficient, entropyCoefficient,
-  learningRate, epochs, batchSize, targetKL: PPO hyperparameters.
-
-The settings files are updated by the application on exit.
-
-Training/BluePatrol.json configures the separate native RLTools MAPPO backend.
-Its patrol object contains the bounded racetrack, wedge, and credible-threat
-defence settings. All geometry ranges are sampled once per episode from the
-configured seed; no waypoint list is generated. It also contains
-training.rolloutSteps, training.maxUpdates,
-training.checkpointEvery, training.seed, rewards.clamp and seven named reward
-weights. Its rolloutSteps value counts ECS team steps: two defenders generate
-two actor transitions per team step. The application presets are 512, 1024,
-2048 and 4096; 128 is the PPO mini-batch size, not the application rollout.
-Its evaluation object contains episodes, maxSteps, seed and
-minimumTrackingFraction. checkpointEvery starts this deterministic live-ECS
-campaign; the current Actor is promoted to production only after improving the
-recorded score.
-
-Blue MAPPO writes an inference Actor and a separate complete training state in
-`model/BluePatrol/latest`. The training state contains Actor, centralized
-Critic, both Adam states, update count and RLTools RNG. Rollout samples are not
-serialized; resume starts a fresh rollout. `model/BluePatrol/prod` remains an
-inference-only promoted Actor plus its evaluation score.
-
-The archived two-blue checkpoint contract is Actor v7 and training-state v4.
-The P/N path writes `blue_patrol_generalized_v8.txt` and
-`blue_patrol_generalized_training_v5.txt`. Its raw v8 observation has 295
-values: own state, exactly 61 ECS pseudo-LiDAR rays, explicit role/slot, ten
-masked red tracks, eight masked other-blue tracks, a separate masked objective,
-patrol/global fields and normalized P/N. Masked order-invariant attention and
-mean/max pooling build the compact 156-value MLP trunk.
-
-The same `evaluation` settings drive a generalized update-boundary campaign.
-It uses deterministic v8 Actor means in the live ECS without adding rollout
-rows or consuming the learner RNG. Episode survival and neutralization are
-normalized by P and N before campaign averaging. A strictly better candidate
-is promoted only to `model/BluePatrol/prod/blue_patrol_generalized_v8.txt`;
-its P/N-tagged score metadata and all v8 files remain separate from v7/v4.
-
-A strict v7 Actor can initialize the compatible v8 encoders, queries, trunk,
-output and standard deviation. The explicit v4 training migration copies only
-the compatible Actor and its matching Adam moments. The fixed-2v2 Critic,
-optimizer scalar states, RNG, update count and rollout are reset. This is not a
-bit-identical training resume. Never delete the v7/v4 files: the legacy 2v2
-runtime still owns them and the generalized runtime may use them as migration
-sources. V8/v5 writes are atomic and reject wrong versions or truncation. Red
-RLMission checkpoints are unaffected.
-
-Restricted zones never consume any of RLMission's ten ranked tracks. Only
-living opposing `Mobile` and `Objective` entities are track candidates; zones
-remain visible through the dedicated SAM/pseudo-LiDAR path. The RLMission
-152-value layout is unchanged.
-
-Each hostile zone may set `oppositeObjective=true`. Its configured east value
-is then treated as a magnitude and mirrored onto the side opposite the current
-objective. The shipped scenario uses only two boundary zones whose centres
-remain outside the world, so no hostile zone is centred in the defended area
-and the objective cannot be covered.
-
-The blue `Platforms/Mobile/defender_car.json` profile mirrors the
-`trainingaircraft` speed, turn-rate and SNA engagement-angle limits and exposes
-`FlightModel.CruiseSpeed`. The TwoVsTwo loader uses it consistently for the
-initial state and patrol reference. The remaining `FlightModel` and `SNA`
-fields define the blue physical and engagement limits without changing the
-red `attacker_car` profile.
-
-## Evaluation
-
-An evaluation scenario has the same **entities** and **agentProfiles**
-structure, plus an **evaluation** block with:
-
-- **evaluatedEntity**: entity identifier.
-- **casesFile**: relative path to the input cases JSON.
-- **nbTests**: requested cases, bounded by available data.
-- **nbSteps**: maximum steps per case.
-- **timeStep**: simulated seconds per step.
-- **maxNorth**, **maxEast**: world boundaries in metres.
-
-Evaluation/Cases/PROFIL.json contains:
-
-~~~json
-{
-  "formatVersion": 2,
-  "tests": [
-    {"name": "example", "entities": {
-      "blue": {"north": 0, "east": 0, "heading": 0, "speed": 300}
-    }}
-  ]
-}
-~~~
-
-The actual case files each contain 100 full tests. Case files are **not**
-neural-network checkpoints (model.pt).
-
-Evaluation/InitialStates.json is a separate source of named presets consumed
-by CheckpointInitializerSystem. Its **presets** object holds per-entity
-lists of objects with north, east, heading, speed, turnAcceleration and
-acceleration. It does not replace the evaluator's test suites.
-
-## Platforms and state settings
-
-Each platform JSON contains **formatVersion** and a **parameters** object.
-Platform paths use Platforms/Aircraft/ or Platforms/Ground/ and file stems
-matching the platform names from scenarios.
-
-Environment.json uses a lowerCamelCase **environment** object (maxNorth,
-maxEast, timeStep). Renderer.json uses a lowerCamelCase **renderer** object
-(scaleLevel, autoAttachCamera, showGrid, camera and the other visual preferences).
-All settings are written in the same format that is read, with formatVersion = 2. The Serializer refuses invalid input and does not
-overwrite it with default values at shutdown.
-
-Units: North/East positions and limits are metres; speeds are metres/second;
-orientation is radians; simulation time is seconds; camera FOV is degrees.
-
-## Extension and validation
-
-Register C++ application agent factories, add a logical profile/mode to
-AgentProfiles.json, and reference it from a scenario. Update tests for the
-agent's reward contract and evaluation cases. No changes are needed in
-GenericRLCore.
-
-Configuration tests assert numeric settings, resolved agent names, initial
-case counts and handling of malformed JSON. Run the Windows VS2022 Debug and
-Release CTest suites before release.
-
-For fast development iterations, build and run only `TwoVsTwoSpawnTests`,
-`TwoVsTwoTeamDomainTests`, `TwoVsTwoTeamDynamicsTests`, the
-`TwoVsTwoGeneralized*` tests, and `MissionTrackSelectionTests`. The runtime and
-embedded-learner smoke tests plus `PPO.exe --example two-vs-two --check-example`
-are the heavier final pre-merge validation, not a requirement after each core
-edit.
+La liste de **tous les JSON** et de leurs chemins, y compris les fichiers legacy, figure dans \ref source_inventory.

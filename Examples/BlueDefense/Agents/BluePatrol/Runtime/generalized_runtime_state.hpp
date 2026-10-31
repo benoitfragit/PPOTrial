@@ -1,3 +1,9 @@
+/**
+ * @file Examples/BlueDefense/Agents/BluePatrol/Runtime/generalized_runtime_state.hpp
+ * @brief État physique compact et construction des observations v8 depuis le registre ECS.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #pragma once
 
 #include "generalized_observation.hpp"
@@ -209,6 +215,9 @@ inline float ObjectiveThreatLevel(GeneralizedRuntimeState const& state,
 
 namespace generalized_runtime_detail {
 
+/**
+ * @brief Sérialise ou écrit les données associées à WriteRelativeTrack selon les garanties implémentées.
+ */
 inline void WriteRelativeTrack(
     GeneralizedRawObservation& observation, std::size_t& offset,
     Mobile const& own, Mobile const& target, Parameters const& parameters,
@@ -237,6 +246,10 @@ inline void WriteRelativeTrack(
     observation[offset++] = 1.F;
 }
 
+/**
+ * @brief Réalise l'opération ThreatPressure; voir les préconditions et effets dans son corps C++.
+ * @details Applique des bornes numériques.
+ */
 inline float ThreatPressure(GeneralizedRuntimeState const& state,
                             Parameters const& parameters) noexcept
 {

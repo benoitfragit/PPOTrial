@@ -1,3 +1,9 @@
+/**
+ * @file Framework/Simulation/World2D/src/restrictedzonegeometry.cpp
+ * @brief Interface ou implémentation du composant restrictedzonegeometry.
+ * @details Référence de l'unité, de ses types et de ses fonctions C++.
+ * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ */
 #include "restrictedzonegeometry.hpp"
 
 #include <algorithm>
@@ -6,6 +12,9 @@
 namespace ppo::model {
 namespace {
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ */
 bool Valid(PlanarPosition position) noexcept
 {
     return std::isfinite(position.north) && std::isfinite(position.east);
@@ -19,6 +28,10 @@ float RestrictedZoneWarningRadius(float lethalRadius) noexcept
         ? kRestrictedZoneWarningRadiusScale * lethalRadius : 0.F;
 }
 
+/**
+ * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
+ * @details Applique des bornes numériques.
+ */
 bool IsInsideRestrictedZone(PlanarPosition point,
                             PlanarPosition centre,
                             float lethalRadius) noexcept
