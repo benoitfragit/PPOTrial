@@ -25,6 +25,7 @@ struct SnapshotResult final
     bool disabledZonePresent{false};
     bool componentsValid{true};
     unsigned hostileRestrictedZones{0U};
+    bool hardBoundaryMatchesWorld{false};
 };
 
 /**
@@ -61,6 +62,19 @@ SnapshotResult Capture(ppo::model::Environment const& environment)
 {
     SnapshotResult result{};
     environment.ReadSnapshot([&](entt::registry const& snapshot) {
+        if (snapshot.ctx().contains<ppo::model::sHardBoundaryOverlay>()
+            && snapshot.ctx().contains<ppo::model::sEnvironmentState>())
+        {
+            auto const& outer = snapshot.ctx().get<
+                ppo::model::sHardBoundaryOverlay>();
+            auto const& world = snapshot.ctx().get<
+                ppo::model::sEnvironmentState>();
+            result.hardBoundaryMatchesWorld =
+                std::isfinite(outer.m_halfNorth)
+                && std::isfinite(outer.m_halfEast)
+                && std::fabs(outer.m_halfNorth - world.m_maxNorth) < 1.e-3F
+                && std::fabs(outer.m_halfEast - world.m_maxEast) < 1.e-3F;
+        }
         snapshot.view<ppo::model::sEntityState,
                       ppo::model::sEntityMetadata>().each(
             [&](entt::entity entity,
@@ -126,5 +140,6 @@ int main()
     return result.hostileRestrictedZones == 2U
         && result.activeZonePresent
         && result.disabledZonePresent
-        && result.componentsValid ? 0 : 3;
+        && result.componentsValid && result.hardBoundaryMatchesWorld
+            ? 0 : 3;
 }
