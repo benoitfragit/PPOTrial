@@ -9,7 +9,7 @@
 namespace ppo::examples::bluedefense::defenders {
 
 /** @brief Conservative dense boundary weight versus sparse neutralizations. */
-inline constexpr float kGeneralizedBoundaryClearanceWeight = 0.10F;
+inline constexpr float kGeneralizedBoundaryClearanceWeight = 0.01F;
 
 /**
  * @brief Weighted control effort for one active blue trajectory.
@@ -126,12 +126,11 @@ inline float GeneralizedBoundaryRisk(
         return Clamp((std::abs(position) - limit)
             / std::max((scale - 1.F) * limit, 1.F), 0.F, 1.F);
     };
-    float const outside = std::max({
+    // The departure cost uses the actual position; anticipation stays in
+    // the approaching term, so saturation cannot precede the hard limit.
+    float const outside = std::max(
         exitFraction(mobile.north, parameters.halfNorth),
-        exitFraction(mobile.east, parameters.halfEast),
-        exitFraction(projectedNorth, parameters.halfNorth),
-        exitFraction(projectedEast, parameters.halfEast)
-    });
+        exitFraction(mobile.east, parameters.halfEast));
     return Clamp(0.35F * approaching + 0.65F * outside, 0.F, 1.F);
 }
 
