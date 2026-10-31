@@ -202,5 +202,148 @@ class CurriculumTests(unittest.TestCase):
                          self.original_scenario)
 
 
+    def v2_config(self) -> dict:
+        return {
+            "formatVersion": 2,
+            "totalUpdates": 15,
+            "rehearsal": {"primaryUpdates": 2, "priorUpdates": 1},
+            "stages": test_stages(first_updates=3)["stages"][:-1] + [
+                {"id": "reference-4v4", "blue": 4, "red": 4,
+                 "hostileZones": True, "updates": 12},
+            ],
+        }
+
+    def test_v2_repository_policy_is_1000_updates_and_opt_in(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        v2_file = (repository / "resources/settings/Training/"
+                   "BluePatrolCurriculumV2.json")
+        v1_file = (repository / "resources/settings/Training/"
+                   "BluePatrolCurriculum.json")
+        v2 = json.loads(v2_file.read_text(encoding="utf-8"))
+        stages, primary, prior = curriculum.validate_curriculum_v2(v2)
+        self.assertEqual(v2["totalUpdates"], 1000)
+        self.assertEqual(len(stages), 9)
+        self.assertEqual(sum(item["updates"] for item in stages), 1000)
+        self.assertEqual(stages[-1]["updates"], 400)
+        self.assertEqual((primary, prior), (24, 6))
+        self.assertEqual(json.loads(v1_file.read_text())["formatVersion"], 1)
+
+    def test_v2_rehearsal_only_uses_prior_stages(self) -> None:
+        cfg = self.v2_config()
+        stages, primary, prior = curriculum.validate_curriculum_v2(cfg)
+        first, first_end = curriculum.choose_rehearsal_block(
+            stages, 0, 0, 3, 0, primary, prior)
+        self.assertEqual((first["id"], first_end), ("hippodrome", 3))
+        sequence = []
+        updates = 3
+        while updates < 15:
+            selected, next_update = curriculum.choose_rehearsal_block(
+                stages, 1, 3, 15, updates, primary, prior)
+            sequence.append((selected["id"], updates, next_update))
+            self.assertGreater(next_update, updates)
+            self.assertLessEqual(next_update, 15)
+            updates = next_update
+        self.assertEqual(
+            [x[0] for x in sequence],
+            ["reference-4v4", "hippodrome", "reference-4v4",
+             "hippodrome", "reference-4v4", "hippodrome",
+             "reference-4v4", "reference-4v4"])
+        # Other earlier phases rotate round-robin, never referencing future.
+        multi = [
+            {"id": str(i), "blue": 1, "red": 0,
+             "hostileZones": False, "updates": 20}
+            for i in range(5)
+        ]
+        seen = [
+            curriculum.choose_rehearsal_block(
+                multi, 4, 100, 220, 102 + cycle * 3,
+                2, 1)[0]["id"]
+            for cycle in range(4)
+        ]
+        self.assertEqual(seen, ["0", "1", "2", "3"])
+
+    def test_v2_invalid_config_and_v1_progress_are_rejected(self) -> None:
+        cfg = self.v2_config()
+        cfg["totalUpdates"] = 14
+        with self.assertRaisesRegex(ValueError, "sum"):
+            curriculum.validate_curriculum_v2(cfg)
+        cfg["totalUpdates"] = 15
+        cfg["rehearsal"]["priorUpdates"] = 0
+        with self.assertRaisesRegex(ValueError, "positive"):
+            curriculum.validate_curriculum_v2(cfg)
+        cfg = self.v2_config()
+        curriculum.write_json(self.curriculum_path, cfg)
+        legacy = {
+            "formatVersion": 1, "curriculumHash": "old-v1",
+            "baselineUpdates": 0, "nextStage": 1,
+        }
+        curriculum.write_json(curriculum.PROGRESS, legacy)
+        self.fake_checkpoint(4)
+        with self.assertRaisesRegex(ValueError, "Incompatible V1"):
+            curriculum.run(self.args())
+        self.assertEqual(curriculum.TRAINING_FILE.read_bytes(),
+                         self.original_training)
+
+    def test_v2_fresh_100_percent_succeeds_and_preserves_production(self) -> None:
+        curriculum.write_json(self.curriculum_path, self.v2_config())
+        selected_scenarios = []
+
+        def simulate(binary: Path, stage: dict, seconds: int,
+                     log_path: Path) -> str:
+            self.assertGreaterEqual(seconds, 20)
+            current = json.loads(curriculum.TRAINING_FILE.read_text())
+            selected_scenarios.append(stage["id"])
+            self.fake_checkpoint(current["training"]["maxUpdates"])
+            curriculum.PROD.write_text("candidate " + stage["id"])
+            curriculum.PROD_SCORE.write_text("candidate score")
+            return "Evaluation #1 P=4 N=4 score=75"
+
+        with patch.object(curriculum, "run_stage", side_effect=simulate):
+            self.assertEqual(curriculum.run(self.args()), 0)
+        self.assertEqual(curriculum.read_updates(), 15)
+        self.assertEqual(
+            json.loads(curriculum.PROGRESS.read_text())["formatVersion"], 2)
+        self.assertEqual(
+            json.loads(curriculum.PROGRESS.read_text())["nextStage"], 2)
+        self.assertEqual(selected_scenarios.count("hippodrome"), 4)
+        self.assertEqual(selected_scenarios.count("reference-4v4"), 5)
+        self.assertEqual(curriculum.PROD.read_text(), "candidate reference-4v4")
+        self.assertEqual(curriculum.TRAINING_FILE.read_bytes(),
+                         self.original_training)
+        self.assertEqual(curriculum.SCENARIO_FILE.read_bytes(),
+                         self.original_scenario)
+
+    def test_v2_resume_same_block_after_partial_training(self) -> None:
+        curriculum.write_json(self.curriculum_path, self.v2_config())
+        seen = []
+
+        def partial(binary: Path, stage: dict, seconds: int,
+                    log_path: Path) -> None:
+            seen.append(stage["id"])
+            self.fake_checkpoint(curriculum.read_updates() + 1)
+            return None
+
+        with patch.object(curriculum, "run_stage", side_effect=partial):
+            self.assertEqual(curriculum.run(self.args()), 0)
+        self.assertEqual(curriculum.read_updates(), 1)
+        self.assertEqual(
+            json.loads(curriculum.PROGRESS.read_text())["nextStage"], 0)
+
+        def complete(binary: Path, stage: dict, seconds: int,
+                     log_path: Path) -> None:
+            seen.append(stage["id"])
+            target = json.loads(
+                curriculum.TRAINING_FILE.read_text())["training"]["maxUpdates"]
+            self.fake_checkpoint(target)
+            return None
+
+        with patch.object(curriculum, "run_stage", side_effect=complete):
+            self.assertEqual(curriculum.run(self.args()), 0)
+        self.assertEqual(seen[0:2], ["hippodrome", "hippodrome"])
+        self.assertEqual(curriculum.read_updates(), 15)
+        self.assertEqual(
+            json.loads(curriculum.PROGRESS.read_text())["nextStage"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()
