@@ -8,6 +8,9 @@
 
 namespace ppo::examples::bluedefense::defenders {
 
+/** @brief Conservative dense boundary weight versus sparse neutralizations. */
+inline constexpr float kGeneralizedBoundaryClearanceWeight = 0.10F;
+
 /**
  * @brief Weighted control effort for one active blue trajectory.
  *
