@@ -35,7 +35,7 @@ and returns an error when no resumable training-state checkpoint exists.
 
 - `training.rolloutSteps`: number of environment steps per PPO update
   (currently 2048).
-- `training.maxUpdates`: maximum PPO updates (currently 300).
+- `training.maxUpdates`: maximum PPO updates (currently 1000 for standard non-curriculum training).
 - `training.checkpointEvery`: deterministic evaluation interval (currently 10).
 - `training.saveEveryUpdates`: independent checkpoint interval (1 for CI).
   When absent, it defaults to `checkpointEvery` for compatibility.
@@ -74,6 +74,39 @@ GitHub-hosted runners have limited job duration, so the default time budget is
 **manual**, not automatic; it must be started by the user. A new workflow with
 `workflow_dispatch` normally becomes available in the Actions UI after it
 exists on the default branch.
+
+## Versioned curricula (V1 / V2)
+
+The manual training workflow has a `curriculum_enabled` switch and a
+`curriculum_version` choice. Select **V2** to run the new independent
+curriculum; leaving `resume_run_id` empty starts a **fresh** V2 training
+session. V1 remains selectable to resume historical sequential sessions.
+
+- **V1:** `BluePatrolCurriculum.json`, 236 update quotas, nine sequential
+  phases. Its configuration and progress fingerprint are unchanged.
+- **V2:** `BluePatrolCurriculumV2.json`, **1000 update quotas**, the same
+  nine scenario families, with rehearsal of earlier phases starting at the
+  second phase. The budget allocation is 32, 48, 72, 72, 64, 88, 100, 124,
+  and **400 updates in 4v4**.
+- **Mixing:** the V2 orchestrator uses 24 PPO updates on the current stage,
+  then 6 on a *previously completed* stage, cycling through all earlier
+  stages. The first phase has nothing to replay. The final 4v4 remains
+  dominant while revisiting all eight older stage families.
+- **Resume:** a V2 checkpoint can only resume with its matching V2
+  `curriculum-progress.json` fingerprint and full V6 training state.
+  A V1 run artifact (including run 11) must **not** be passed directly
+  as a V2 resume checkpoint; start V2 fresh instead. V1 progress is
+  still accepted in V1 mode.
+- **No recompilation between stages:** the orchestration switches JSON
+  scenario parameters across headless process launches. The existing
+  GitHub workflow still builds `PPO.exe` **once per GitHub job**.
+- **Time:** `max_seconds=14400` is a 4-hour budget, **not a promise**
+  that all 1000 updates finish in one CI run. Download the V2 checkpoint
+  and resume explicitly across jobs if necessary.
+
+Rehearsal occurs **between blocks of PPO updates**, not by sampling a
+different scenario on every environment episode. Per-episode mixing would
+require modifying the simulator's reset/curriculum integration.
 
 ## Limitations and acceptance checks
 
