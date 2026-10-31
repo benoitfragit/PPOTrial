@@ -262,6 +262,43 @@ class CurriculumTests(unittest.TestCase):
         ]
         self.assertEqual(seen, ["0", "1", "2", "3"])
 
+    def test_v2_all_phases_rehearse_and_final_is_mostly_four_v_four(self) -> None:
+        repository = Path(__file__).resolve().parents[2]
+        file = (repository / "resources/settings/Training/"
+                "BluePatrolCurriculumV2.json")
+        stages, primary, prior = curriculum.validate_curriculum_v2(
+            json.loads(file.read_text(encoding="utf-8")))
+        first_update = 0
+        for index, stage in enumerate(stages):
+            end = first_update + stage["updates"]
+            updates = first_update
+            primary_count = 0
+            earlier_ids = set()
+            while updates < end:
+                active, next_update = curriculum.choose_rehearsal_block(
+                    stages, index, first_update, end,
+                    updates, primary, prior)
+                self.assertGreater(next_update, updates)
+                self.assertLessEqual(next_update, end)
+                if active["id"] == stage["id"]:
+                    primary_count += next_update - updates
+                else:
+                    self.assertIn(active, stages[:index])
+                    earlier_ids.add(active["id"])
+                updates = next_update
+            self.assertEqual(updates, end)
+            if index == 0:
+                self.assertEqual(primary_count, stage["updates"])
+            else:
+                self.assertGreaterEqual(
+                    primary_count / stage["updates"], 0.75)
+                self.assertGreater(len(earlier_ids), 0)
+            if index == len(stages) - 1:
+                self.assertEqual(len(earlier_ids), 8)
+                self.assertGreaterEqual(primary_count, 320)
+            first_update = end
+        self.assertEqual(first_update, 1000)
+
     def test_v2_invalid_config_and_v1_progress_are_rejected(self) -> None:
         cfg = self.v2_config()
         cfg["totalUpdates"] = 14
