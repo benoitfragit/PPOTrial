@@ -12,10 +12,18 @@ on:
           - blue-defense
           - blue-patrol
       curriculum_enabled:
-        description: "Enable staged curriculum 1v0 through 4v4 (same Release binary)"
+        description: "Enable MAPPO staged curriculum with optional rehearsal (V2)"
         required: true
         type: boolean
         default: false
+      curriculum_version:
+        description: "V2 progressive rehearsal (1000 updates), or legacy sequential V1"
+        required: true
+        type: choice
+        default: v2
+        options:
+          - v2
+          - v1
       max_seconds:
         description: "Training time budget in seconds (leave headroom for build/artifacts)"
         required: true
@@ -145,6 +153,7 @@ jobs:
         env:
           MAX_SECONDS: ${{ inputs.max_seconds }}
           RESUME_RUN_ID: ${{ inputs.resume_run_id }}
+          CURRICULUM_VERSION: ${{ inputs.curriculum_version }}
         run: |
           $seconds = 0
           if (-not [int]::TryParse($env:MAX_SECONDS, [ref]$seconds) -or $seconds -lt 1 -or $seconds -gt 18000) {
@@ -154,7 +163,13 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) {
             $fresh = @("--fresh-start")
           }
-          python -u tools/ci/mappo_curriculum.py --max-seconds $seconds @fresh
+          $curriculumConfig = if ($env:CURRICULUM_VERSION -eq "v2") {
+            "resources/settings/Training/BluePatrolCurriculumV2.json"
+          } else {
+            "resources/settings/Training/BluePatrolCurriculum.json"
+          }
+          Write-Host "Curriculum version=$env:CURRICULUM_VERSION config=$curriculumConfig"
+          python -u tools/ci/mappo_curriculum.py --curriculum $curriculumConfig --max-seconds $seconds @fresh
           if ($LASTEXITCODE -ne 0) { throw "MAPPO curriculum failed with code $LASTEXITCODE" }
 
       - name: Validate fresh resumable checkpoint
