@@ -250,10 +250,29 @@ bool TestSafetyRisks()
     float const approach = patrol::GeneralizedBoundaryRisk(
         parameters, alone.blues[0]);
     alone.blues[0].north = parameters.halfNorth + 100.F;
-    float const outside = patrol::GeneralizedBoundaryRisk(
+    float const justOutside = patrol::GeneralizedBoundaryRisk(
+        parameters, alone.blues[0]);
+    alone.blues[0].north = parameters.halfNorth
+        * (1.F + 0.5F * (parameters.hardBoundaryScale - 1.F));
+    float const midwayOutside = patrol::GeneralizedBoundaryRisk(
+        parameters, alone.blues[0]);
+    alone.blues[0].north = parameters.halfNorth
+        * parameters.hardBoundaryScale;
+    float const terminal = patrol::GeneralizedBoundaryRisk(
+        parameters, alone.blues[0]);
+    alone.blues[0].north = parameters.halfNorth
+        * (parameters.hardBoundaryScale + 0.5F);
+    float const beyond = patrol::GeneralizedBoundaryRisk(
+        parameters, alone.blues[0]);
+    alone.blues[0].available = false;
+    float const dead = patrol::GeneralizedBoundaryRisk(
         parameters, alone.blues[0]);
     if (!Close(inside, 0.F) || !(approach > inside)
-        || !Close(outside, 1.F))
+        || !(justOutside > approach && justOutside < midwayOutside)
+        || !(midwayOutside < terminal) || !Close(terminal, 1.F)
+        || !Close(beyond, 1.F) || !Close(dead, 0.F)
+        || !(patrol::GeneralizedSafetyPenalty(
+                justOutside, midwayOutside) < 0.5F))
         return false;
 
     // Red-zone band: 1.75 NEZ caution / 1.10 NEZ physical danger.
