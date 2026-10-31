@@ -49,7 +49,7 @@
   },
   "training": {
     "rolloutSteps": 2048,
-    "maxUpdates": 300,
+    "maxUpdates": 1000,
     "checkpointEvery": 10,
     "seed": 42
   },
