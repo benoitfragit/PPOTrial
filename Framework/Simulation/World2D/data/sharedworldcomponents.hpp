@@ -166,6 +166,13 @@ struct sDefendedArea
     float m_halfEast{0.F};
 };
 
+/** @brief Snapshot-only MAPPO outer failure rectangle (render-only data). */
+struct sHardBoundaryOverlay final
+{
+    float m_halfNorth{0.F};
+    float m_halfEast{0.F};
+};
+
 /**
  * @brief Snapshot-only samples used to draw the leader's analytical patrol.
  *
