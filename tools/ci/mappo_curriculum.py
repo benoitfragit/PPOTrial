@@ -194,6 +194,38 @@ def require_clean_fresh_start() -> None:
             path.unlink()
 
 
+REPLAY_PRIMARY_UPDATES = 12
+REPLAY_PRIOR_UPDATES = 3
+
+
+def choose_rehearsal_block(stages: list[dict], phase_index: int,
+                           phase_start: int, phase_end: int,
+                           updates: int) -> tuple[dict, int]:
+    """Deterministic 80/20 rehearsal without new checkpoint metadata.
+
+    New phases sample only *earlier* stages. Once all phases are complete,
+    continue predominantly in 4v4, replaying any of the eight earlier stages.
+    The checkpoint's PPO update count uniquely identifies the next block,
+    including when a GitHub run stops partway through one.
+    """
+    if not phase_start <= updates < phase_end:
+        raise ValueError("Rehearsal update outside its phase")
+    primary = stages[min(phase_index, len(stages) - 1)]
+    prior_count = min(phase_index, len(stages) - 1)
+    if prior_count == 0:
+        return primary, phase_end
+    cycle_length = REPLAY_PRIMARY_UPDATES + REPLAY_PRIOR_UPDATES
+    offset = updates - phase_start
+    cycle, within_cycle = divmod(offset, cycle_length)
+    if within_cycle < REPLAY_PRIMARY_UPDATES:
+        return primary, min(phase_end, updates + REPLAY_PRIMARY_UPDATES - within_cycle)
+    # Finish each phase with its own scenario, even if it has a short tail.
+    if phase_end - updates <= REPLAY_PRIOR_UPDATES:
+        return primary, phase_end
+    previous = stages[cycle % prior_count]
+    return previous, min(phase_end, updates + cycle_length - within_cycle)
+
+
 def run(args: argparse.Namespace) -> int:
     config = json.loads(Path(args.curriculum).read_text(encoding="utf-8"))
     stages = validate_curriculum(config)
@@ -219,84 +251,111 @@ def run(args: argparse.Namespace) -> int:
             "Checkpoint is behind completed curriculum stages: "
             f"updates={updates}, required={completed_target}"
         )
-    if progress["nextStage"] == len(stages):
-        print("[CURRICULUM] All stages already completed.")
+    # Preserve the legacy curriculum hash and phase quotas so V6 checkpoints
+    # from completed or partial curricula (including run 11) still resume.
+    # The independent target is the configured global PPO update ceiling.
+    total_stage_updates = sum(stage["updates"] for stage in stages)
+    final_stage_target = progress["baselineUpdates"] + total_stage_updates
+    requested_target = original_training["training"]["maxUpdates"]
+    if type(requested_target) is not int or requested_target <= 0:
+        raise ValueError("Invalid training.maxUpdates")
+    continuation_target = max(final_stage_target, requested_target)
+    phase_count = len(stages) + int(continuation_target > final_stage_target)
+    if progress["nextStage"] == len(stages) and updates >= continuation_target:
+        print("[CURRICULUM] All phases and consolidation already completed.")
         return 0
 
     OUTPUT.mkdir(parents=True, exist_ok=True)
     stage_root = OUTPUT / "curriculum"
     stage_root.mkdir(parents=True, exist_ok=True)
-    baseline = {path: path.read_bytes() if path.is_file() else None
-                for path in (PROD, PROD_SCORE)}
     deadline = time.monotonic() + args.max_seconds
     summary: list[str] = [
-        "# Blue MAPPO curriculum CI",
+        "# Blue MAPPO curriculum CI — progressive rehearsal",
         "",
-        f"Start PPO update: {updates}; target stages: {len(stages)}.",
+        f"Start PPO update: {updates}; target update: {continuation_target}.",
+        "Within each new phase, 12 primary updates precede three earlier-stage"
+        " rehearsal updates; the current phase closes on its primary scenario.",
         "",
-        "| Stage | P/N | Hostile zones | Target update | Current update | Last evaluation |",
-        "| --- | --- | --- | ---: | ---: | --- |",
+        "| Phase | Active scenario | P/N | Zones | Block target | Last evaluation |",
+        "| --- | --- | --- | --- | ---: | --- |",
     ]
     try:
-        for index in range(progress["nextStage"], len(stages)):
-            stage = stages[index]
-            target = progress["baselineUpdates"] + sum(
-                item["updates"] for item in stages[:index + 1]
-            )
+        for index in range(progress["nextStage"], phase_count):
+            phase_start = (progress["baselineUpdates"] +
+                sum(item["updates"] for item in stages[:index]))
+            phase_target = (progress["baselineUpdates"] +
+                sum(item["updates"] for item in stages[:index + 1])
+                if index < len(stages) else continuation_target)
+            if index == len(stages):
+                phase_start = final_stage_target
+            current = stages[min(index, len(stages) - 1)]
+            phase_name = (current["id"] if index < len(stages)
+                          else "consolidation-4v4")
+            phase_dir = stage_root / f"{index + 1:02d}-{phase_name}"
             updates = read_updates()
-            if updates >= target:
-                print(f"[CURRICULUM] Skip completed {stage['id']} at update {updates}.")
-                progress["nextStage"] = index + 1
-                write_json(PROGRESS, progress)
-                continue
-            remaining = deadline - time.monotonic()
-            if remaining < 20:
-                print("[CURRICULUM] Time budget reached; checkpoint can resume.")
-                break
-            # Equal fair-share time; an incomplete stage never gets skipped.
-            seconds = max(1, min(int(remaining), max(
-                30, int(remaining / (len(stages) - index))
-            )))
-            stage_dir = stage_root / f"{index + 1:02d}-{stage['id']}"
-            stage_dir.mkdir(parents=True, exist_ok=True)
-            print(f"[CURRICULUM] Stage={stage['id']} P={stage['blue']} "
-                  f"N={stage['red']} zones={stage['hostileZones']} "
-                  f"updates={updates}->{target} budget_s={seconds}",
-                  flush=True)
-            apply_stage(stage, target, original_training, original_scenario)
-            if (stage["blue"], stage["red"]) != (4, 4):
-                # Remove the 4v4 production score for isolated level evaluation.
-                PROD.unlink(missing_ok=True)
-                PROD_SCORE.unlink(missing_ok=True)
-            try:
-                last_eval = run_stage(
-                    binary, stage, seconds, stage_dir / "training.log"
-                )
-                fresh_updates = read_updates()
-                if fresh_updates <= updates:
-                    raise RuntimeError(
-                        f"Stage {stage['id']} made no optimizer progress: {updates}"
-                    )
-                if TELEMETRY.is_file():
-                    shutil.copy2(TELEMETRY, stage_dir / "telemetry.csv")
-                if fresh_updates >= target:
+            if updates >= phase_target:
+                if index < len(stages):
                     progress["nextStage"] = index + 1
                     write_json(PROGRESS, progress)
-                row = (f"| {stage['id']} | {stage['blue']}/{stage['red']} | "
-                       f"{stage['hostileZones']} | {target} | "
-                       f"{fresh_updates} | {last_eval or 'n/a'} |")
-                summary.append(row)
-                (OUTPUT / "curriculum-summary.md").write_text(
-                    "\n".join(summary) + "\n", encoding="utf-8"
-                )
-                if fresh_updates < target:
-                    print(f"[CURRICULUM] Stage {stage['id']} incomplete at "
-                          f"{fresh_updates}/{target}; resume via run ID.")
+                continue
+            while updates < phase_target:
+                remaining = deadline - time.monotonic()
+                if remaining < 20:
+                    print("[CURRICULUM] Time budget reached; checkpoint can resume.")
                     break
-            finally:
-                save_candidate_and_restore(baseline, stage, stage_dir)
+                selected, block_target = choose_rehearsal_block(
+                    stages, index, phase_start, phase_target, updates)
+                # Reserve time for later unfinished phases, but permit
+                # continuation alone to use the full remaining time budget.
+                later_phases = phase_count - index
+                seconds = max(1, min(int(remaining),
+                    max(30, int(remaining / later_phases))))
+                block_dir = phase_dir / f"update-{updates:06d}-{selected['id']}"
+                block_dir.mkdir(parents=True, exist_ok=True)
+                baseline = {path: path.read_bytes() if path.is_file() else None
+                            for path in (PROD, PROD_SCORE)}
+                print(f"[CURRICULUM] Phase={phase_name} active={selected['id']} "
+                      f"P={selected['blue']} N={selected['red']} "
+                      f"zones={selected['hostileZones']} "
+                      f"updates={updates}->{block_target} budget_s={seconds}",
+                      flush=True)
+                apply_stage(selected, block_target,
+                            original_training, original_scenario)
+                if (selected["blue"], selected["red"]) != (4, 4):
+                    # A rehearsal policy is not comparable to 4v4 production.
+                    PROD.unlink(missing_ok=True)
+                    PROD_SCORE.unlink(missing_ok=True)
+                try:
+                    last_eval = run_stage(
+                        binary, selected, seconds, block_dir / "training.log")
+                    fresh_updates = read_updates()
+                    if fresh_updates <= updates or fresh_updates > block_target:
+                        raise RuntimeError(
+                            f"Invalid optimizer progress in {selected['id']}: "
+                            f"{updates}->{fresh_updates} (target {block_target})")
+                    if TELEMETRY.is_file():
+                        shutil.copy2(TELEMETRY, block_dir / "telemetry.csv")
+                    summary.append(
+                        f"| {phase_name} | {selected['id']} | "
+                        f"{selected['blue']}/{selected['red']} | "
+                        f"{selected['hostileZones']} | {fresh_updates} | "
+                        f"{last_eval or 'n/a'} |")
+                    (OUTPUT / "curriculum-summary.md").write_text(
+                        "\n".join(summary) + "\n", encoding="utf-8")
+                finally:
+                    save_candidate_and_restore(baseline, selected, block_dir)
+                updates = fresh_updates
+                if updates < block_target:
+                    print(f"[CURRICULUM] Partial block {selected['id']} at "
+                          f"{updates}/{block_target}; resume via run ID.")
+                    break
+            if updates < phase_target:
+                break
+            if index < len(stages):
+                progress["nextStage"] = index + 1
+                write_json(PROGRESS, progress)
     finally:
-        # Restore pristine checkout resources even on failures.
+        # Never leak rehearsal geometry or weights back into this checkout.
         TRAINING_FILE.write_bytes(original_training_bytes)
         SCENARIO_FILE.write_bytes(original_scenario_bytes)
 
