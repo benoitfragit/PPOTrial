@@ -256,6 +256,12 @@ bool TestSafetyRisks()
         * (1.F + 0.5F * (parameters.hardBoundaryScale - 1.F));
     float const midwayOutside = patrol::GeneralizedBoundaryRisk(
         parameters, alone.blues[0]);
+    // Approaching the hard boundary must never saturate a full step early
+    // because projected position is already beyond the terminal limit.
+    alone.blues[0].north = parameters.halfNorth
+        * parameters.hardBoundaryScale - 1000.F;
+    float const beforeTerminal = patrol::GeneralizedBoundaryRisk(
+        parameters, alone.blues[0]);
     alone.blues[0].north = parameters.halfNorth
         * parameters.hardBoundaryScale;
     float const terminal = patrol::GeneralizedBoundaryRisk(
@@ -269,12 +275,15 @@ bool TestSafetyRisks()
         parameters, alone.blues[0]);
     if (!Close(inside, 0.F) || !(approach > inside)
         || !(justOutside > approach && justOutside < midwayOutside)
-        || !(midwayOutside < terminal) || !Close(terminal, 1.F)
+        || !(midwayOutside < beforeTerminal)
+        || !(beforeTerminal < terminal) || !Close(terminal, 1.F)
         || !Close(beyond, 1.F) || !Close(dead, 0.F)
         || !(patrol::GeneralizedSafetyPenalty(
                 justOutside, midwayOutside) < 0.5F)
-        || !(patrol::kGeneralizedBoundaryClearanceWeight
-                * patrol::GeneralizedSafetyPenalty(0.F, 1.F)
+        // A sustained worst-case risk must remain below one red
+        // neutralization event even over 200 steps of dense shaping.
+        || !(200.F * patrol::kGeneralizedBoundaryClearanceWeight
+                * patrol::GeneralizedSafetyPenalty(1.F, 1.F)
              < 0.25F * 2.F))
         return false;
 
