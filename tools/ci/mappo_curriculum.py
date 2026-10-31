@@ -333,13 +333,12 @@ def run_v2(args: argparse.Namespace, config: dict) -> int:
                 selected, block_end = choose_rehearsal_block(
                     stages, index, phase_start, phase_end, updates,
                     primary_updates, prior_updates)
-                # Share remaining time proportional to remaining PPO updates.
-                remaining_updates = (baseline_updates + config["totalUpdates"]
-                                     - updates)
-                block_updates = block_end - updates
-                seconds = max(20, min(int(remaining_time),
-                    max(20, int(remaining_time * block_updates /
-                                max(remaining_updates, 1)))))
+                # maxUpdates stops the binary at block_end; the wall-clock
+                # limit is only a safeguard. Give each block the entire
+                # remaining budget rather than prorating it by update count.
+                # A prorated limit can expire mid-block and prematurely end
+                # the curriculum while hours remain.
+                seconds = int(remaining_time)
                 block_dir = (stage_root / f"{index + 1:02d}-{phase['id']}"
                              / f"update-{updates:06d}-{selected['id']}")
                 block_dir.mkdir(parents=True, exist_ok=True)
@@ -379,8 +378,11 @@ def run_v2(args: argparse.Namespace, config: dict) -> int:
                 if updates < block_end:
                     print(
                         f"[CURRICULUM_V2] Partial block: {updates}/{block_end}; "
-                        "resume via run ID.")
-                    break
+                        "continuing in this run while time remains.",
+                        flush=True)
+                    # A partial but progressing block must not terminate the
+                    # curriculum. Retry with the same cumulative maxUpdates;
+                    # the PPO checkpoint holds the optimizer state.
             if updates < phase_end:
                 break
             progress["nextStage"] = index + 1
