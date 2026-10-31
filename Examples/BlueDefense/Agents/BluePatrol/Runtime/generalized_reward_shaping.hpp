@@ -89,7 +89,12 @@ inline float GeneralizedRestrictedZoneProximityRisk(
     return proximity * (0.5F + 0.5F * Clamp(forwardAlignment, 0.F, 1.F));
 }
 
-/** @brief Early map-boundary risk, plus a persistent out-of-area cost. */
+/**
+ * @brief Bounded graduated exit risk: caution inside, increasing cost outside.
+ *
+ * The gradient only saturates at the hard failure rectangle, so the dense
+ * BoundaryClearance channel stays secondary to sparse combat outcomes.
+ */
 inline float GeneralizedBoundaryRisk(
     Parameters const& parameters, Mobile const& mobile) noexcept
 {
@@ -107,12 +112,24 @@ inline float GeneralizedBoundaryRisk(
         return Clamp((std::abs(position) - limit + caution)
             / caution, 0.F, 1.F);
     };
-    return std::max({
+    float const approaching = std::max({
         axisRisk(mobile.north, parameters.halfNorth),
         axisRisk(mobile.east, parameters.halfEast),
         axisRisk(projectedNorth, parameters.halfNorth),
         axisRisk(projectedEast, parameters.halfEast)
     });
+    auto const exitFraction = [scale = parameters.hardBoundaryScale](
+                                  float const position, float const limit) noexcept {
+        return Clamp((std::abs(position) - limit)
+            / std::max((scale - 1.F) * limit, 1.F), 0.F, 1.F);
+    };
+    float const outside = std::max({
+        exitFraction(mobile.north, parameters.halfNorth),
+        exitFraction(mobile.east, parameters.halfEast),
+        exitFraction(projectedNorth, parameters.halfNorth),
+        exitFraction(projectedEast, parameters.halfEast)
+    });
+    return Clamp(0.35F * approaching + 0.65F * outside, 0.F, 1.F);
 }
 
 /**
