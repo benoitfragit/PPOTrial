@@ -384,8 +384,9 @@ class CurriculumTests(unittest.TestCase):
             self.fake_checkpoint(next_update)
             return None
 
-        with patch.object(curriculum, "run_stage", side_effect=partial):
-            self.assertEqual(curriculum.run(self.args()), 0)
+        with patch.object(curriculum.time, "monotonic", return_value=0.0):
+            with patch.object(curriculum, "run_stage", side_effect=partial):
+                self.assertEqual(curriculum.run(self.args()), 0)
         self.assertEqual(seen, [
             ("hippodrome", 494, 499),
             ("hippodrome", 499, 500),
