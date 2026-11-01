@@ -66,7 +66,9 @@ Le curriculum V2 est piloté par `tools/ci/mappo_curriculum.py`, pas par un tira
 - `Environment.json` : `environment.maxEast`, `maxNorth`, `timeStep` (positions en mètres, temps en secondes).
 - `Platforms/Mobile/*.json` : paramètres de vol et SNA, dont `FlightModel.CruiseSpeed`, limites d'accélération, vitesse minimale, carburant.
 - `Platforms/RestrictedZone/restrictedzone.json`, `sam.json` : zones et géométrie.
-- `Renderer.json` : `renderer.camera`, `showGrid`, `showPatrolTrack`, `showHardBoundary`, `showPseudoLidar` et préférences de visualisation.
+- `Renderer.json` : `renderer.camera`, suivi indépendant du FPS, `showGrid`,
+  `showPatrolTrack`, `showHardBoundary`, `showPseudoLidar` et préférences de
+  visualisation. L'ancienne clé `showMetaCatalog` est ignorée.
 - `Training/RLMission.json`, `Training/RLSNA.json` : paramètres PPO LibTorch historiques.
 - `Evaluation/Cases/RLMission.json`, `RLSNA.json` : ensembles de tests historiques; `Evaluation/InitialStates.json` : états initiaux nommés.
 

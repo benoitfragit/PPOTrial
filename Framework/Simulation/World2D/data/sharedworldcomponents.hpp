@@ -194,4 +194,29 @@ struct sPatrolTrackOverlay final
     std::size_t m_sampleCount{};
 };
 
+/**
+ * @brief Snapshot-only blue role information consumed by tactical rendering.
+ *
+ * This view model mirrors an already sampled episode assignment. It cannot
+ * alter agent observations, actions, rewards, physics, or role selection.
+ */
+struct sBlueTeamRoleOverlay final
+{
+    /** @brief Maximum supported blue-team cardinality. */
+    static constexpr std::size_t MaximumBlueMobiles = 9U;
+
+    /** @brief Number of blue mobiles participating in the episode. */
+    std::size_t m_activeBlueCount{};
+    /** @brief Zero-based physical index carrying the leader role. */
+    std::size_t m_leaderPhysicalIndex{};
+
+    /** @brief Returns true when the fixed-capacity role view is consistent. */
+    constexpr bool Valid() const noexcept
+    {
+        return m_activeBlueCount != 0U
+            && m_activeBlueCount <= MaximumBlueMobiles
+            && m_leaderPhysicalIndex < m_activeBlueCount;
+    }
+};
+
 } /* ppo::model */

@@ -379,6 +379,8 @@ void TestPatrolOverlaySnapshot()
     environment.m_maxEast = 80000.F;
     auto& context = world.ctx().emplace<InitializerContext>();
     context.patrolGeometryReady = true;
+    context.blueTeamRoles =
+        ppo::examples::bluedefense::defenders::BlueTeamRoles::Create(4U, 2U);
     context.patrolGeometry.anchorNorth = 120.F;
     context.patrolGeometry.anchorEast = -340.F;
     auto& sourceOverlay = context.patrolTrackOverlay;
@@ -410,6 +412,12 @@ void TestPatrolOverlaySnapshot()
                 overlay.m_north[0] - overlay.m_north[last],
                 overlay.m_east[0] - overlay.m_east[last]) < 0.1F,
             "leader patrol overlay is not closed");
+    Require(snapshot.ctx().contains<sBlueTeamRoleOverlay>(),
+            "BlueDefense snapshot has no blue role visualization overlay");
+    auto const& roles = snapshot.ctx().get<sBlueTeamRoleOverlay>();
+    Require(roles.Valid() && roles.m_activeBlueCount == 4U
+                && roles.m_leaderPhysicalIndex == 2U,
+            "blue role visualization overlay changed the sampled assignment");
 }
 
 /**

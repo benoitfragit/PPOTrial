@@ -1,6 +1,7 @@
-# Historical desktop rendering stays with the Airspace example.
-# Keep the UI, model assets and simulation controls unchanged.
+# Desktop rendering stays shared by the Airspace and BlueDefense examples.
 add_library(AirspaceRenderer STATIC
+    camera_follow.hpp
+    tactical_role.hpp
     tactical_view_layout.hpp
     environmentrenderer.hpp
     environmentrenderer.cpp)
@@ -19,7 +20,6 @@ target_link_libraries(AirspaceRenderer
         GenericEntities
         GenericEnv
         GenericPPO
-        MetaReflection
     PRIVATE
         AirspaceEntities)
 

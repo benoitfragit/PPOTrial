@@ -33,7 +33,6 @@
         "showGrid": false,
         "showHardBoundary": false,
         "showInspection": false,
-        "showMetaCatalog": false,
         "showMinimap": false,
         "showPatrolTrack": true,
         "showPseudoLidar": false,

@@ -383,9 +383,11 @@ private:
     * @param snapshot Read-only environment snapshot.
     * @param blue Blue mobile followed by this camera.
     * @param camera Camera state to update.
+    * @param forceSnap True after assigning a different mobile to the view.
     */
     void UpdateBlueCamera(entt::registry const& snapshot,
-                          entt::entity blue, Camera3D& camera) const;
+                          entt::entity blue, Camera3D& camera,
+                          bool forceSnap) const;
     /**
     * @brief Collects friendly mobile entities in deterministic display order.
     * @param snapshot Read-only environment snapshot.
@@ -469,11 +471,6 @@ private:
     */
     void DrawAgentsWindow(entt::registry const& snapshot);
     /**
-    * @brief Draws the metadata catalog window.
-    */
-    void DrawMetaCatalogWindow(void);
-
-    /**
     * @brief Renders the full tactical 3D scene into the render texture.
     * @param snapshot Read-only environment snapshot.
     * @param target Render target receiving the scene.
@@ -526,6 +523,8 @@ private:
     * @brief Active 3D camera.
     */
     Camera3D m_camera{};
+    /** @brief Entity used to detect single-camera target changes. */
+    entt::entity m_cameraTrackedEntity{entt::null};
 
     /**
     * @brief Window title.
@@ -601,13 +600,13 @@ private:
     * @brief True when destroyed entities remain visible.
     */
     bool m_showDestroyed{ true };
-    /**
-    * @brief True when the metadata catalog window is visible.
-    */
-    bool m_showMetaCatalog{ false };
+    /** @brief True when the compact simulation control panel is visible. */
     bool m_showSimulation{ true };
+    /** @brief True when the top-down tactical minimap is visible. */
     bool m_showMinimap{ false };
+    /** @brief True when the searchable entity table is visible. */
     bool m_showEntities{ false };
+    /** @brief True when the concise selected-entity details are visible. */
     bool m_showInspection{ false };
     /**
     * @brief True when the pseudo-lidar overlay is visible.

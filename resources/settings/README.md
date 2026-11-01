@@ -10,7 +10,7 @@ Toutes les configurations utilisent **formatVersion: 2**, avec un unique lecteur
 | Composer l'équipe P/N commune à l'entraînement et à l'inférence | Scenarios/BlueDefense.json |
 | Modifier les caractéristiques physiques | Platforms/Mobile/*.json ou Platforms/RestrictedZone/*.json |
 | Régler les limites du monde et son pas | Environment.json |
-| Régler l'IHM et la caméra | Renderer.json |
+| Régler l'IHM, la caméra et les vues tactiques | Renderer.json |
 | Changer la composition ou les limites d'une campagne | Scenarios/Evaluation/RLMission.json ou RLSNA.json |
 | Changer les 100 cas d'évaluation | Evaluation/Cases/RLMission.json ou RLSNA.json |
 | Utiliser des collections nommées d'états initiaux | Evaluation/InitialStates.json |

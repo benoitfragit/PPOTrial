@@ -405,7 +405,7 @@ pas être copié tel quel : `schemaVersion: 1` devient `formatVersion: 2`,
 | Ancienne clé V1 (dans `Renderer`) | Clé V2 (dans `renderer`) |
 | --- | --- |
 | `ScaleLevel`, `AutoAttachCamera` | `scaleLevel`, `autoAttachCamera` |
-| `ShowGrid`, `ShowDomains`, `ShowDestroyed`, `ShowMetaCatalog` | `showGrid`, `showDomains`, `showDestroyed`, `showMetaCatalog` |
+| `ShowGrid`, `ShowDomains`, `ShowDestroyed` | `showGrid`, `showDomains`, `showDestroyed` |
 | `ShowPseudoLidar`, `FocusSelectionInMinimap` | `showPseudoLidar`, `focusSelectionInMinimap` |
 | `CameraDistance`, `CameraHeight`, `TrailDuration` | `cameraDistance`, `cameraHeight`, `trailDuration` |
 | `DomainHeight`, `MinimapZoom` | `domainHeight`, `minimapZoom` |
@@ -418,6 +418,11 @@ défaut du code sont `false`, `false`, `false` et `true`, respectivement.
 Le fichier V2 distribué les renseigne explicitement. Conserver les valeurs
 numériques (notamment celles de la caméra) lors de la conversion ; ne pas
 réinitialiser `renderer` aux valeurs d'exemple.
+
+`ShowMetaCatalog`/`showMetaCatalog` est une ancienne préférence désormais
+ignorée : le navigateur de méta-réflexion et le dump réflexif ont été retirés
+de l'IHM. Le panneau `showInspection` reste disponible sous le nom
+**Entity details** et présente directement les informations opérationnelles.
 
 **Fichiers versionnés :** `resources/settings/Renderer.json` est déjà au format V2
 dans le dépôt. Les valeurs du fichier historique (dont les coordonnées de caméra

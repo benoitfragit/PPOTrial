@@ -91,6 +91,14 @@ P vues, une par Bleu, dans une grille 1×1 à 3×3. La distance, la hauteur et l
 champ de vision sont partagés par toutes les caméras. La case
 `Multiple blue cameras` permet de retrouver la vue tactique unique.
 
+Les voitures utilisent un modèle procédural plus lisible avec éclairage,
+vitrages, roues et accent de rôle. Un badge doré **L** identifie le leader de
+l'épisode et un badge cyan **E** chaque équipier, dans la vue 3D, les vignettes
+multi-caméras et la mini-carte. Le suivi privilégie un Bleu vivant, se recale
+immédiatement lors d'un changement de cible ou d'un reset et reste indépendant
+du nombre d'images par seconde. L'inspection affiche uniquement les données
+opérationnelles utiles ; le navigateur de méta-réflexion a été retiré de l'IHM.
+
 ## Validation
 
 Pour exécuter les tests de base sans interface :

@@ -63,6 +63,13 @@ Bleu dans une grille bornée à neuf cellules. Les paramètres distance, hauteur
 et champ de vision sont communs à toutes les vues. `Multiple blue cameras`
 permet de revenir à la caméra unique historique.
 
+Le rendu publie les rôles déjà échantillonnés par l'épisode sans intervenir
+dans leur attribution : **L** (doré) désigne le leader et **E** (cyan) un
+équipier. Les badges apparaissent au-dessus des voitures, dans les titres des
+vues et sur la mini-carte. Le changement de cible, la destruction du mobile
+suivi et les téléportations de reset provoquent un recalage déterministe de la
+caméra ; le déplacement continu utilise un lissage indépendant du FPS.
+
 ## Compatibilité de checkpoints
 
 Le moteur MAPPO conserve le chargement des modèles v8 ainsi que des lecteurs

@@ -8,12 +8,15 @@
 */
 #include "environmentrenderer.hpp"
 #include "airspacecomponents.hpp"
+#include "camera_follow.hpp"
+#include "tactical_role.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -27,11 +30,7 @@
 #include <rlImGui.h>
 #include <rlgl.h>
 
-#include "entt/meta/meta.hpp"
-#include "entt/meta/resolve.hpp"
-
 #include "interface.hpp"
-#include "metaregistry.hpp"
 #include "serializer.hpp"
 
 namespace ppo::renderer {
@@ -43,11 +42,11 @@ constexpr float DEG_PER_RAD = 57.2957795131F;
 constexpr float CAMERA_MOUSE_ORBIT_SPEED = 0.0075F;
 constexpr float CAMERA_MOUSE_PAN_SPEED = 0.0100F;
 constexpr float CAMERA_WHEEL_ZOOM_SPEED = 1.25F;
-constexpr float CAMERA_ATTACH_SMOOTHING = 0.12F;
+constexpr float CAMERA_FOLLOW_RESPONSE_PER_SECOND = 8.F;
 constexpr float AIRCRAFT_MODEL_EXTENT = 2.45F;
 constexpr float OBJECTIVE_MODEL_EXTENT = 5.80F;
 constexpr float AIRCRAFT_MODEL_YAW_OFFSET_DEG = 180.F;
-constexpr std::size_t MULTI_CAMERA_RENDERS_PER_FRAME = 2U;
+constexpr std::size_t MULTI_CAMERA_RENDERS_PER_FRAME = 3U;
 constexpr int MULTI_CAMERA_MAX_TEXTURE_WIDTH = 960;
 constexpr int MULTI_CAMERA_MAX_TEXTURE_HEIGHT = 540;
 
@@ -163,6 +162,17 @@ VectorCross(Vector3 const& a, Vector3 const& b)
         a.z * b.x - a.x * b.z,
         a.x * b.y - a.y * b.x
     };
+}
+
+/**
+ * @brief Computes the dot product of two vectors.
+ * @param a Left operand.
+ * @param b Right operand.
+ * @return Scalar dot product.
+ */
+float VectorDot(Vector3 const& a, Vector3 const& b) noexcept
+{
+    return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
 /**
@@ -717,28 +727,159 @@ bool IsCarVisual(entt::registry const& snapshot, entt::entity id)
 }
 
 /**
-* @brief Draws a heading-aligned low-poly car without external model assets.
+ * @brief Resolves the render-only episode role of one blue mobile.
+ * @param snapshot Snapshot containing metadata and role overlay.
+ * @param entity Candidate blue entity.
+ * @return Leader, teammate, or none when no role is published.
 */
-void DrawCarGlyph3D(ppo::model::sEntityState const& state, float scale, Color body)
+TacticalRole TacticalRoleForEntity(entt::registry const& snapshot,
+                                   entt::entity const entity) noexcept
+{
+    if (!snapshot.ctx().contains<ppo::model::sBlueTeamRoleOverlay>()
+        || !snapshot.any_of<ppo::model::sEntityMetadata>(entity))
+    {
+        return TacticalRole::None;
+    }
+
+    auto const& overlay =
+        snapshot.ctx().get<ppo::model::sBlueTeamRoleOverlay>();
+    if (!overlay.Valid())
+        return TacticalRole::None;
+    auto const& metadata =
+        snapshot.get<ppo::model::sEntityMetadata>(entity);
+    return ResolveTacticalRole(metadata.m_name, overlay.m_activeBlueCount,
+                               overlay.m_leaderPhysicalIndex);
+}
+
+/**
+ * @brief Returns the high-contrast accent associated with a tactical role.
+ * @param role Render-only role marker.
+ * @return Gold for leader, cyan for teammate, neutral gray otherwise.
+ */
+Color TacticalRoleColor(TacticalRole const role) noexcept
+{
+    if (role == TacticalRole::Leader)
+        return Color{255, 196, 62, 255};
+    if (role == TacticalRole::Teammate)
+        return Color{65, 205, 255, 255};
+    return Color{190, 205, 218, 255};
+}
+
+/**
+ * @brief Draws a heading-aligned low-poly car without external assets.
+ * @param state Current mobile state.
+ * @param scale World-to-render scale.
+ * @param body Team body color.
+ * @param role Optional blue-team role used for roof accents.
+ */
+void DrawCarGlyph3D(ppo::model::sEntityState const& state, float scale,
+                    Color body, TacticalRole const role)
 {
     auto const center = ToWorld3D(state.m_x, state.m_y, 0.F, scale);
+    Color const accent = TacticalRoleColor(role);
     rlPushMatrix();
     rlTranslatef(center.x, center.y, center.z);
     rlRotatef(-state.m_rotation * DEG_PER_RAD, 0.F, 1.F, 0.F);
 
-    DrawCube(Vector3{0.F, 0.26F, 0.F}, 1.15F, 0.30F, 2.35F, body);
-    DrawCubeWires(Vector3{0.F, 0.26F, 0.F}, 1.15F, 0.30F, 2.35F, Fade(WHITE, 0.5F));
-    DrawCube(Vector3{0.F, 0.53F, 0.13F}, 0.92F, 0.28F, 1.14F,
-             Color{45, 67, 82, 255});
-    DrawCube(Vector3{0.F, 0.49F, -0.43F}, 0.88F, 0.12F, 0.07F,
-             Color{156, 198, 218, 255});
+    DrawCube(Vector3{0.08F, 0.025F, 0.08F}, 1.38F, 0.035F, 2.62F,
+             Fade(BLACK, 0.38F));
+    DrawCube(Vector3{0.F, 0.20F, 0.F}, 1.22F, 0.28F, 2.42F,
+             ColorBrightness(body, -0.18F));
+    DrawCube(Vector3{0.F, 0.34F, -0.47F}, 1.15F, 0.24F, 1.42F, body);
+    DrawCube(Vector3{0.F, 0.35F, 0.77F}, 1.12F, 0.22F, 0.52F,
+             ColorBrightness(body, -0.08F));
+    DrawCubeWires(Vector3{0.F, 0.27F, 0.F}, 1.23F, 0.42F, 2.42F,
+                  Fade(WHITE, 0.48F));
+
+    DrawCube(Vector3{0.F, 0.57F, 0.18F}, 0.94F, 0.34F, 1.08F,
+             Color{38, 58, 72, 255});
+    DrawCube(Vector3{0.F, 0.755F, 0.18F}, 0.80F, 0.045F, 0.82F,
+             accent);
+    DrawCube(Vector3{0.F, 0.58F, -0.39F}, 0.84F, 0.22F, 0.055F,
+             Color{144, 198, 224, 255});
+    DrawCube(Vector3{0.F, 0.58F, 0.74F}, 0.84F, 0.20F, 0.055F,
+             Color{79, 109, 126, 255});
+
     for (float side : {-0.63F, 0.63F})
         for (float axle : {-0.72F, 0.72F})
+        {
             DrawCube(Vector3{side, 0.16F, axle}, 0.22F, 0.32F, 0.46F,
                      Color{17, 22, 29, 255});
-    for (float side : {-0.36F, 0.36F})
-        DrawCube(Vector3{side, 0.27F, -1.19F}, 0.20F, 0.12F, 0.05F, YELLOW);
+            DrawCube(Vector3{side * 1.01F, 0.16F, axle}, 0.235F, 0.17F,
+                     0.22F, Color{115, 127, 138, 255});
+        }
+
+    DrawCube(Vector3{0.F, 0.20F, -1.235F}, 0.52F, 0.11F, 0.045F,
+             Color{20, 28, 34, 255});
+    for (float side : {-0.39F, 0.39F})
+    {
+        DrawCube(Vector3{side, 0.35F, -1.235F}, 0.24F, 0.13F, 0.055F,
+                 Color{225, 244, 255, 255});
+        DrawCube(Vector3{side, 0.32F, 1.235F}, 0.23F, 0.12F, 0.055F,
+                 Color{255, 62, 48, 255});
+    }
+    DrawCube(Vector3{0.F, 0.15F, 1.245F}, 0.76F, 0.08F, 0.04F,
+             Color{30, 36, 42, 255});
     rlPopMatrix();
+}
+
+/**
+ * @brief Draws screen-facing L/E badges above blue cars in one render target.
+ * @param snapshot Snapshot containing entities and role overlay.
+ * @param camera Camera used to project world positions.
+ * @param width Render-target width in pixels.
+ * @param height Render-target height in pixels.
+ * @param worldScale World-to-render scale.
+ */
+void DrawTacticalRoleBadges(entt::registry const& snapshot,
+                            Camera3D const& camera, int const width,
+                            int const height, float const worldScale)
+{
+    if (!snapshot.ctx().contains<ppo::model::sBlueTeamRoleOverlay>()
+        || width <= 0 || height <= 0)
+    {
+        return;
+    }
+
+    Vector3 const cameraForward =
+        VectorNormalizeSafe(VectorSub(camera.target, camera.position));
+    float const fontSize = std::clamp(
+        0.052F * static_cast<float>(std::min(width, height)), 15.F, 24.F);
+    float const radius = fontSize * 0.72F;
+    Font const font = GetFontDefault();
+    auto const entities = snapshot.view<ppo::model::sEntityState>();
+    for (entt::entity const entity : entities)
+    {
+        auto const role = TacticalRoleForEntity(snapshot, entity);
+        if (role == TacticalRole::None || !IsCarVisual(snapshot, entity))
+            continue;
+
+        auto const& state = entities.get<ppo::model::sEntityState>(entity);
+        Vector3 world = ToWorld3D(state.m_x, state.m_y, 0.F, worldScale);
+        world.y += 1.35F;
+        if (VectorDot(cameraForward, VectorSub(world, camera.position)) <= 0.F)
+            continue;
+
+        Vector2 const screen = GetWorldToScreenEx(world, camera, width, height);
+        if (screen.x < -radius || screen.x > static_cast<float>(width) + radius
+            || screen.y < -radius || screen.y > static_cast<float>(height) + radius)
+        {
+            continue;
+        }
+
+        Color const accent = TacticalRoleColor(role);
+        DrawCircleV(Vector2{screen.x + 2.F, screen.y + 2.F}, radius,
+                    Fade(BLACK, 0.62F));
+        DrawCircleV(screen, radius, Fade(accent, 0.94F));
+        DrawCircleLines(static_cast<int>(screen.x), static_cast<int>(screen.y),
+                        radius, Fade(WHITE, 0.92F));
+        char const* const marker = TacticalRoleMarker(role);
+        Vector2 const textSize = MeasureTextEx(font, marker, fontSize, 1.F);
+        DrawTextEx(font, marker,
+                   Vector2{screen.x - 0.5F * textSize.x,
+                           screen.y - 0.54F * textSize.y},
+                   fontSize, 1.F, Color{12, 20, 28, 255});
+    }
 }
 
 /**
@@ -1384,183 +1525,33 @@ EntityDisplayName(entt::registry const& snapshot, entt::entity entity, ppo::mode
     return EntityDisplayName(state, entity);
 }
 
-std::string
-FieldDisplayName(char const* rawName)
+/**
+ * @brief Applies the shared frame-rate-independent follow contract to raylib.
+ * @param camera Camera updated in place.
+ * @param desiredPosition Desired world-space camera position.
+ * @param desiredTarget Desired world-space look-at target.
+ * @param forceSnap True after a target identity change.
+ * @param snapDistance Maximum continuous target displacement.
+ */
+void UpdateCameraFollowPose(Camera3D& camera,
+                            Vector3 const& desiredPosition,
+                            Vector3 const& desiredTarget,
+                            bool const forceSnap,
+                            float const snapDistance) noexcept
 {
-    if (rawName == nullptr)
-        return "<unnamed>";
-
-    std::string name{ rawName };
-    if (name.rfind("m_", 0) == 0)
-        name.erase(0, 2);
-
-    return name;
-}
-
-char const*
-MetaDisplayName(entt::meta_type const& type)
-{
-    if (auto const* info = static_cast<ppo::reflection::sMetaDescriptor*>(type.custom()); info != nullptr)
-        return info->scenario_name;
-
-    return type.name() != nullptr ? type.name() : "<unnamed>";
-}
-
-bool
-TryGetArithmeticString(entt::meta_any const& any, std::string& out)
-{
-    if (auto const* value = any.try_cast<bool>())
-    {
-        out = *value ? "true" : "false";
-        return true;
-    }
-
-    if (auto const* value = any.try_cast<unsigned long long>())
-    {
-        out = std::to_string(*value);
-        return true;
-    }
-
-    if (auto const* value = any.try_cast<unsigned int>())
-    {
-        out = std::to_string(*value);
-        return true;
-    }
-
-    if (auto const* value = any.try_cast<int>())
-    {
-        out = std::to_string(*value);
-        return true;
-    }
-
-    if (auto const* value = any.try_cast<float>())
-    {
-        out = TextFormat("%.3f", *value);
-        return true;
-    }
-
-    if (auto const* value = any.try_cast<double>())
-    {
-        out = TextFormat("%.3f", *value);
-        return true;
-    }
-
-    return false;
-}
-
-std::string
-TryResolveEntityName(entt::registry const* snapshot, entt::entity entity)
-{
-    if (snapshot == nullptr || entity == entt::null || !snapshot->valid(entity))
-        return {};
-
-    if (snapshot->any_of<ppo::model::sEntityState>(entity))
-    {
-        auto const& state = snapshot->get<ppo::model::sEntityState>(entity);
-        return EntityDisplayName(*snapshot, entity, state);
-    }
-
-    return "Entity #" + std::to_string(static_cast<entt::id_type>(entity));
-}
-
-void
-DrawMetaAnyRecursive(char const* label, entt::meta_any value, entt::registry const* snapshot = nullptr)
-{
-    if (!value)
-    {
-        ImGui::Text("%s: <null>", label);
-        return;
-    }
-
-    auto const type = value.type();
-    std::string stringValue{};
-
-    if (TryGetArithmeticString(value, stringValue))
-    {
-        ImGui::Text("%s: %s", label, stringValue.c_str());
-        return;
-    }
-
-    if (auto const* text = value.try_cast<std::string>())
-    {
-        ImGui::Text("%s: %s", label, text->c_str());
-        return;
-    }
-
-    if (auto const* entityId = value.try_cast<ppo::model::EntityId>())
-    {
-        std::string const resolved = TryResolveEntityName(snapshot, *entityId);
-        if (!resolved.empty())
-            ImGui::Text("%s: %s", label, resolved.c_str());
-        else
-            ImGui::Text("%s: <entity:%u>", label, static_cast<unsigned int>(*entityId));
-        return;
-    }
-
-    auto seq = value.as_sequence_container();
-    if (seq)
-    {
-        if (ImGui::TreeNode(label, "%s [%zu]", label, seq.size()))
-        {
-            std::size_t index = 0;
-            for (auto it = seq.begin(); it != seq.end(); ++it, ++index)
-            {
-                auto item = *it;
-                std::string const itemLabel = "item[" + std::to_string(index) + "]";
-                DrawMetaAnyRecursive(itemLabel.c_str(), item, snapshot);
-            }
-            ImGui::TreePop();
-        }
-        return;
-    }
-
-    auto map = value.as_associative_container();
-    if (map)
-    {
-        if (ImGui::TreeNode(label, "%s {%zu}", label, map.size()))
-        {
-            std::size_t index = 0;
-            for (auto it = map.begin(); it != map.end(); ++it, ++index)
-            {
-                auto pair = *it;
-                std::string const keyLabel = "key[" + std::to_string(index) + "]";
-                std::string const valueLabel = "value[" + std::to_string(index) + "]";
-                DrawMetaAnyRecursive(keyLabel.c_str(), pair.first, snapshot);
-                DrawMetaAnyRecursive(valueLabel.c_str(), pair.second, snapshot);
-            }
-            ImGui::TreePop();
-        }
-        return;
-    }
-
-    if (ImGui::TreeNode(label, "%s (%s)", label, MetaDisplayName(type)))
-    {
-        bool hasData = false;
-        for (auto const& [_, data] : type.data())
-        {
-            hasData = true;
-            auto field = data.get(value);
-            std::string const fieldName = FieldDisplayName(data.name());
-            DrawMetaAnyRecursive(fieldName.c_str(), field, snapshot);
-        }
-
-        if (!hasData)
-            ImGui::TextUnformatted("<no reflected fields>");
-
-        ImGui::TreePop();
-    }
-}
-
-template<typename Component>
-void
-DrawComponentIfPresent(entt::registry const& snapshot, entt::entity entity)
-{
-    if (!snapshot.any_of<Component>(entity))
-        return;
-
-    auto const& component = snapshot.get<Component>(entity);
-    auto type = entt::resolve<Component>();
-    DrawMetaAnyRecursive(MetaDisplayName(type), entt::forward_as_meta(component), &snapshot);
+    CameraFollowPose const current{
+        {camera.position.x, camera.position.y, camera.position.z},
+        {camera.target.x, camera.target.y, camera.target.z}};
+    CameraFollowPose const desired{
+        {desiredPosition.x, desiredPosition.y, desiredPosition.z},
+        {desiredTarget.x, desiredTarget.y, desiredTarget.z}};
+    CameraFollowPose const updated = AdvanceCameraFollow(
+        current, desired, GetFrameTime(), CAMERA_FOLLOW_RESPONSE_PER_SECOND,
+        forceSnap, snapDistance);
+    camera.position = Vector3{updated.position.x, updated.position.y,
+                              updated.position.z};
+    camera.target = Vector3{updated.target.x, updated.target.y,
+                            updated.target.z};
 }
 
 } // namespace
@@ -1626,7 +1617,6 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
             m_showGrid = section.value("showGrid", m_showGrid);
             m_showDomains = section.value("showDomains", m_showDomains);
             m_showDestroyed = section.value("showDestroyed", m_showDestroyed);
-            m_showMetaCatalog = section.value("showMetaCatalog", m_showMetaCatalog);
             m_showMinimap = section.value("showMinimap", m_showMinimap);
             m_showEntities = section.value("showEntities", m_showEntities);
             m_showInspection = section.value("showInspection", m_showInspection);
@@ -1684,7 +1674,6 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
             section["showGrid"] = m_showGrid;
             section["showDomains"] = m_showDomains;
             section["showDestroyed"] = m_showDestroyed;
-            section["showMetaCatalog"] = m_showMetaCatalog;
             section["showMinimap"] = m_showMinimap;
             section["showEntities"] = m_showEntities;
             section["showInspection"] = m_showInspection;
@@ -1958,8 +1947,7 @@ EnvironmentRenderer::BuildDockspace(void)
             ImGui::MenuItem("Simulation", nullptr, &m_showSimulation);
             ImGui::MenuItem("Minimap", nullptr, &m_showMinimap);
             ImGui::MenuItem("Entities", nullptr, &m_showEntities);
-            ImGui::MenuItem("Inspector", nullptr, &m_showInspection);
-            ImGui::MenuItem("Meta catalog", nullptr, &m_showMetaCatalog);
+            ImGui::MenuItem("Entity details", nullptr, &m_showInspection);
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
@@ -1990,8 +1978,10 @@ EnvironmentRenderer::BuildDefaultLayout(ImGuiID dockspaceId)
     ImGui::DockBuilderSetNodeSize(dockspaceId, size);
 
     ImGuiID dockMain = dockspaceId;
-    ImGuiID dockSidebar = ImGui::DockBuilderSplitNode(dockMain, ImGuiDir_Right, 0.37F, nullptr, &dockMain);
-    ImGuiID dockControls = ImGui::DockBuilderSplitNode(dockSidebar, ImGuiDir_Down, 0.25F, nullptr, &dockSidebar);
+    ImGuiID dockSidebar = ImGui::DockBuilderSplitNode(
+        dockMain, ImGuiDir_Right, 0.31F, nullptr, &dockMain);
+    ImGuiID dockControls = ImGui::DockBuilderSplitNode(
+        dockSidebar, ImGuiDir_Down, 0.22F, nullptr, &dockSidebar);
 
     ImGui::DockBuilderDockWindow("3D Tactical View", dockMain);
     ImGui::DockBuilderDockWindow("Learning", dockSidebar);
@@ -1999,8 +1989,7 @@ EnvironmentRenderer::BuildDefaultLayout(ImGuiID dockspaceId)
     // Optional windows share a tabbed dock, never crowd the default view.
     ImGui::DockBuilderDockWindow("Minimap", dockControls);
     ImGui::DockBuilderDockWindow("Entities", dockControls);
-    ImGui::DockBuilderDockWindow("Inspection", dockControls);
-    ImGui::DockBuilderDockWindow("Meta Catalog", dockControls);
+    ImGui::DockBuilderDockWindow("Entity details", dockControls);
 
     ImGui::DockBuilderFinish(dockspaceId);
 }
@@ -2168,23 +2157,17 @@ EnvironmentRenderer::UpdateExplosionEffects(entt::registry const& snapshot)
 void
 EnvironmentRenderer::UpdateTrackedEntity(entt::registry const& snapshot)
 {
-    if (m_trackedEntity != entt::null && snapshot.valid(m_trackedEntity) && snapshot.any_of<ppo::model::sEntityState>(m_trackedEntity))
-        return;
-
-    m_trackedEntity = entt::null;
-
-    bool hasTrainingAgent = false;
-    auto agentView = snapshot.view<ppo::model::sAgentStateSnaphot>();
-    for (auto entity : agentView)
+    if (m_trackedEntity != entt::null && snapshot.valid(m_trackedEntity)
+        && snapshot.any_of<ppo::model::sEntityState>(m_trackedEntity))
     {
-        auto const& [state] = agentView.get(entity);
-        if (state.m_name.find("Training") != std::string::npos)
-        {
-            hasTrainingAgent = true;
-            break;
-        }
+        auto const& tracked =
+            snapshot.get<ppo::model::sEntityState>(m_trackedEntity);
+        if (!tracked.m_destroyed)
+            return;
     }
 
+    m_trackedEntity = entt::null;
+    entt::entity fallbackMobile = entt::null;
     auto entityView = snapshot.view<ppo::model::sEntityState>();
     for (auto entity : entityView)
     {
@@ -2192,12 +2175,16 @@ EnvironmentRenderer::UpdateTrackedEntity(entt::registry const& snapshot)
         if (state.m_type != ppo::model::eEntityType::Mobile || state.m_destroyed)
             continue;
 
-        if (!hasTrainingAgent || state.m_side == ppo::model::eEntitySide::Friend)
+        if (fallbackMobile == entt::null)
+            fallbackMobile = entity;
+        if (state.m_side == ppo::model::eEntitySide::Friend)
         {
             m_trackedEntity = entity;
             break;
         }
     }
+    if (m_trackedEntity == entt::null)
+        m_trackedEntity = fallbackMobile;
 
     if (m_selectedEntity == entt::null)
         m_selectedEntity = m_trackedEntity;
@@ -2216,7 +2203,10 @@ EnvironmentRenderer::UpdateAttachedCamera(entt::registry const& snapshot)
     UpdateTrackedEntity(snapshot);
 
     if (m_trackedEntity == entt::null || !snapshot.any_of<ppo::model::sEntityState>(m_trackedEntity))
+    {
+        m_cameraTrackedEntity = entt::null;
         return;
+    }
 
     auto const& state = snapshot.get<ppo::model::sEntityState>(m_trackedEntity);
     Vector3 const focus = ToWorld3D(state.m_x, state.m_y, 0.F, m_worldScale);
@@ -2234,8 +2224,11 @@ EnvironmentRenderer::UpdateAttachedCamera(entt::registry const& snapshot)
         focus.z - forward.z * m_cameraDistance
     };
 
-    m_camera.target = VectorLerpLocal(m_camera.target, desiredTarget, CAMERA_ATTACH_SMOOTHING);
-    m_camera.position = VectorLerpLocal(m_camera.position, desiredPosition, CAMERA_ATTACH_SMOOTHING);
+    bool const forceSnap = m_cameraTrackedEntity != m_trackedEntity;
+    m_cameraTrackedEntity = m_trackedEntity;
+    UpdateCameraFollowPose(
+        m_camera, desiredPosition, desiredTarget, forceSnap,
+        std::max(10.F, 0.8F * m_cameraDistance));
 }
 
 /**
@@ -2246,7 +2239,7 @@ EnvironmentRenderer::UpdateAttachedCamera(entt::registry const& snapshot)
 */
 void EnvironmentRenderer::UpdateBlueCamera(
     entt::registry const& snapshot, entt::entity const blue,
-    Camera3D& camera) const
+    Camera3D& camera, bool const forceSnap) const
 {
     if (blue == entt::null || !snapshot.valid(blue)
         || !snapshot.any_of<ppo::model::sEntityState>(blue))
@@ -2267,10 +2260,9 @@ void EnvironmentRenderer::UpdateBlueCamera(
         focus.y + m_cameraHeight,
         focus.z - forward.z * m_cameraDistance
     };
-    camera.target = VectorLerpLocal(
-        camera.target, desiredTarget, CAMERA_ATTACH_SMOOTHING);
-    camera.position = VectorLerpLocal(
-        camera.position, desiredPosition, CAMERA_ATTACH_SMOOTHING);
+    UpdateCameraFollowPose(
+        camera, desiredPosition, desiredTarget, forceSnap,
+        std::max(10.F, 0.8F * m_cameraDistance));
     camera.up = m_camera.up;
     camera.fovy = m_camera.fovy;
     camera.projection = m_camera.projection;
@@ -2529,7 +2521,11 @@ EnvironmentRenderer::DrawSimulationControls(entt::registry const& snapshot)
 
     ImGui::SeparatorText("Visuals");
     ImGui::Checkbox("Multiple blue cameras", &m_multipleCameras);
-    ImGui::Checkbox("Auto-attach camera", &m_autoAttachCamera);
+    if (ImGui::Checkbox("Follow tracked mobile", &m_autoAttachCamera)
+        && m_autoAttachCamera)
+    {
+        m_cameraTrackedEntity = entt::null;
+    }
     ImGui::Checkbox("Show grid", &m_showGrid);
     ImGui::Checkbox("Show domains", &m_showDomains);
     ImGui::Checkbox("Show pseudo lidar", &m_showPseudoLidar);
@@ -2538,7 +2534,6 @@ EnvironmentRenderer::DrawSimulationControls(entt::registry const& snapshot)
     if (snapshot.ctx().contains<ppo::model::sHardBoundaryOverlay>())
         ImGui::Checkbox("Show outer failure boundary", &m_showHardBoundary);
     ImGui::Checkbox("Show destroyed markers", &m_showDestroyed);
-    ImGui::Checkbox("Show meta catalog", &m_showMetaCatalog);
     ImGui::Checkbox("Center minimap on selection", &m_focusSelectionInMinimap);
 
     ImGui::SliderFloat("Camera distance", &m_cameraDistance, 5.F, 60.F);
@@ -3021,13 +3016,11 @@ EnvironmentRenderer::RenderTacticalScene(
                 || state.m_type == ppo::model::eEntityType::Objective);
         Color const renderColor = useDestroyedLook ? DestroyedTint(baseColor) : baseColor;
         Vector3 const center = ToWorld3D(state.m_x, state.m_y, 0.F, m_worldScale);
-        bool const isSelected = (entity == m_selectedEntity);
-        bool const isTracked = (entity == m_trackedEntity);
-
         if (state.m_type == ppo::model::eEntityType::Mobile)
         {
             if (IsCarVisual(snapshot, entity))
-                DrawCarGlyph3D(state, m_worldScale, renderColor);
+                DrawCarGlyph3D(state, m_worldScale, renderColor,
+                               TacticalRoleForEntity(snapshot, entity));
             else if (auto const* aircraftModel = ResolveAircraftModelAsset(
                     m_blueAircraftModel,
                     m_redAircraftModel,
@@ -3104,9 +3097,6 @@ EnvironmentRenderer::RenderTacticalScene(
             }
         }
 
-        (void)isTracked;
-        (void)isSelected;
-
         if (state.m_destroyed && m_showDestroyed)
         {
             if (state.m_type == ppo::model::eEntityType::Mobile
@@ -3132,6 +3122,8 @@ EnvironmentRenderer::RenderTacticalScene(
           DrawExplosion3D(effect, m_worldScale);
 
       EndMode3D();
+      DrawTacticalRoleBadges(snapshot, camera, target.texture.width,
+                             target.texture.height, m_worldScale);
       EndTextureMode();
   }
 
@@ -3178,6 +3170,16 @@ void EnvironmentRenderer::DrawMultipleTacticalViews(
                 | ImGuiWindowFlags_NoScrollWithMouse);
 
         entt::entity const blue = targets.m_entities[index];
+        TacticalRole const role = TacticalRoleForEntity(snapshot, blue);
+        if (role != TacticalRole::None)
+        {
+            Color const roleColor = TacticalRoleColor(role);
+            ImGui::TextColored(
+                ImVec4{roleColor.r / 255.F, roleColor.g / 255.F,
+                       roleColor.b / 255.F, 1.F},
+                "[%s]", TacticalRoleMarker(role));
+            ImGui::SameLine();
+        }
         auto const* metadata =
             snapshot.try_get<ppo::model::sEntityMetadata>(blue);
         if (metadata != nullptr && !metadata->m_name.empty())
@@ -3186,8 +3188,9 @@ void EnvironmentRenderer::DrawMultipleTacticalViews(
             ImGui::Text("Blue %u", static_cast<unsigned>(index + 1U));
 
         TacticalCameraView& view = m_tacticalCameraViews[index];
+        bool const targetChanged = view.m_blue != blue;
         view.m_blue = blue;
-        UpdateBlueCamera(snapshot, blue, view.m_camera);
+        UpdateBlueCamera(snapshot, blue, view.m_camera, targetChanged);
         ImVec2 const imageSize = ImGui::GetContentRegionAvail();
         int const imageWidth = std::max(32, static_cast<int>(imageSize.x));
         int const imageHeight = std::max(32, static_cast<int>(imageSize.y));
@@ -3256,6 +3259,17 @@ EnvironmentRenderer::DrawTacticalWindow(entt::registry const& snapshot)
         ImGui::Text("%s", EntityDisplayName(state, m_selectedEntity).c_str());
         ImGui::SameLine();
         ImGui::TextColored(ColorForSideUi(state.m_side), "%s", SideLabel(state.m_side));
+        TacticalRole const role = TacticalRoleForEntity(snapshot, m_selectedEntity);
+        if (role != TacticalRole::None)
+        {
+            Color const roleColor = TacticalRoleColor(role);
+            ImGui::SameLine();
+            ImGui::TextColored(
+                ImVec4{roleColor.r / 255.F, roleColor.g / 255.F,
+                       roleColor.b / 255.F, 1.F},
+                "[%s] %s", TacticalRoleMarker(role),
+                role == TacticalRole::Leader ? "Leader" : "Teammate");
+        }
         ImGui::SameLine();
         ImGui::Text("Heading %.1f deg", state.m_rotation * DEG_PER_RAD);
     }
@@ -3272,8 +3286,12 @@ EnvironmentRenderer::DrawTacticalWindow(entt::registry const& snapshot)
     {
         m_cameraDistance = 12.F;
         m_cameraHeight = 4.5F;
+        m_cameraTrackedEntity = entt::null;
         for (auto& view : m_tacticalCameraViews)
+        {
             view.m_camera = m_camera;
+            view.m_blue = entt::null;
+        }
     }
 
     ImGui::SameLine();
@@ -3293,6 +3311,17 @@ EnvironmentRenderer::DrawTacticalWindow(entt::registry const& snapshot)
     ImGui::Text("Episodes %u", m_missionTelemetry.m_totalEpisodes);
     ImGui::SameLine();
     ImGui::Text("%s", m_missionTelemetry.m_lastEpisodeSuccess ? "Last: Success" : "Last: Pending/Fail");
+    Color const leaderColor = TacticalRoleColor(TacticalRole::Leader);
+    Color const teammateColor = TacticalRoleColor(TacticalRole::Teammate);
+    ImGui::TextColored(
+        ImVec4{leaderColor.r / 255.F, leaderColor.g / 255.F,
+               leaderColor.b / 255.F, 1.F},
+        "L  Leader");
+    ImGui::SameLine();
+    ImGui::TextColored(
+        ImVec4{teammateColor.r / 255.F, teammateColor.g / 255.F,
+               teammateColor.b / 255.F, 1.F},
+        "E  Teammate");
     BlueCameraTargets const cameraTargets =
         CollectBlueCameraTargets(snapshot);
     if (m_multipleCameras && cameraTargets.m_count != 0U)
@@ -3554,6 +3583,25 @@ EnvironmentRenderer::DrawMinimapWindow(entt::registry const& snapshot)
             draw->AddCircleFilled(center, 5.F, color);
         }
 
+        TacticalRole const role = TacticalRoleForEntity(snapshot, entity);
+        if (role != TacticalRole::None)
+        {
+            Color const badgeColor = TacticalRoleColor(role);
+            ImVec2 const badgeCenter{center.x, center.y - 17.F};
+            draw->AddCircleFilled(
+                ImVec2{badgeCenter.x + 1.5F, badgeCenter.y + 1.5F}, 8.F,
+                IM_COL32(0, 0, 0, 150));
+            draw->AddCircleFilled(
+                badgeCenter, 8.F,
+                IM_COL32(badgeColor.r, badgeColor.g, badgeColor.b, 245));
+            char const* const marker = TacticalRoleMarker(role);
+            ImVec2 const textSize = ImGui::CalcTextSize(marker);
+            draw->AddText(
+                ImVec2{badgeCenter.x - 0.5F * textSize.x,
+                       badgeCenter.y - 0.5F * textSize.y},
+                IM_COL32(12, 20, 28, 255), marker);
+        }
+
         if (m_showDomains && snapshot.any_of<ppo::model::sSNAState>(entity))
         {
             auto const& snaState = snapshot.get<ppo::model::sSNAState>(entity);
@@ -3566,18 +3614,18 @@ EnvironmentRenderer::DrawMinimapWindow(entt::registry const& snapshot)
             else
             {
                 int const segments = 28;
-                std::vector<ImVec2> arc{};
-                arc.reserve(static_cast<std::size_t>(segments) + 1U);
+                std::array<ImVec2, 29> arc{};
                 for (int i = 0; i <= segments; ++i)
                 {
                     float const t = static_cast<float>(i) / static_cast<float>(segments);
                     float const a = state.m_rotation - snaState.m_maxShootAngle + t * (2.F * snaState.m_maxShootAngle);
-                    arc.push_back(ImVec2{ center.x + std::sin(a) * radiusPx, center.y - std::cos(a) * radiusPx });
+                    arc[static_cast<std::size_t>(i)] = ImVec2{
+                        center.x + std::sin(a) * radiusPx,
+                        center.y - std::cos(a) * radiusPx};
                 }
-                std::vector<ImVec2> cone{};
-                cone.reserve(static_cast<std::size_t>(segments) + 2U);
-                cone.push_back(center);
-                cone.insert(cone.end(), arc.begin(), arc.end());
+                std::array<ImVec2, 30> cone{};
+                cone.front() = center;
+                std::copy(arc.begin(), arc.end(), cone.begin() + 1);
                 draw->AddConvexPolyFilled(cone.data(), static_cast<int>(cone.size()), IM_COL32(255, 72, 72, 34));
                 draw->AddPolyline(arc.data(), static_cast<int>(arc.size()), IM_COL32(255, 196, 170, 170), 0, 1.5F);
                 draw->AddLine(center, arc.front(), IM_COL32(255, 196, 170, 135), 1.1F);
@@ -3735,108 +3783,111 @@ EnvironmentRenderer::DrawEntitiesWindow(entt::registry const& snapshot)
 }
 
 /**
-* @brief Draws the reflected-component inspector for the tracked entity.
+* @brief Draws concise operational details for the selected entity.
 * @param snapshot Snapshot registry used for rendering.
 */
 void
 EnvironmentRenderer::DrawInspectorWindow(entt::registry const& snapshot)
 {
-    ImGui::Begin("Inspection");
+    ImGui::Begin("Entity details", &m_showInspection);
 
-    if (m_selectedEntity == entt::null || !snapshot.valid(m_selectedEntity))
+    if (m_selectedEntity == entt::null || !snapshot.valid(m_selectedEntity)
+        || !snapshot.any_of<ppo::model::sEntityState>(m_selectedEntity))
     {
-        ImGui::TextUnformatted("Select an entity to inspect it.");
+        ImGui::TextDisabled("Select an entity from the tactical view or list.");
         ImGui::End();
         return;
     }
 
     auto const& entityState = snapshot.get<ppo::model::sEntityState>(m_selectedEntity);
-    ImGui::Text("%s", EntityDisplayName(snapshot, m_selectedEntity, entityState).c_str());
+    ImGui::TextUnformatted(
+        EntityDisplayName(snapshot, m_selectedEntity, entityState).c_str());
     ImGui::SameLine();
     ImGui::TextColored(ColorForSideUi(entityState.m_side), "%s", SideLabel(entityState.m_side));
+    TacticalRole const role = TacticalRoleForEntity(snapshot, m_selectedEntity);
+    if (role != TacticalRole::None)
+    {
+        Color const roleColor = TacticalRoleColor(role);
+        ImGui::SameLine();
+        ImGui::TextColored(
+            ImVec4{roleColor.r / 255.F, roleColor.g / 255.F,
+                   roleColor.b / 255.F, 1.F},
+            "[%s] %s", TacticalRoleMarker(role),
+            role == TacticalRole::Leader ? "Leader" : "Teammate");
+    }
     ImGui::SameLine();
-    if (ImGui::Button("Track"))
+    if (ImGui::Button("Follow"))
         m_trackedEntity = m_selectedEntity;
 
-    if (ImGui::BeginChild("##entitysummary", ImVec2(0.F, 110.F), true))
+    ImGui::SeparatorText("Overview");
+    if (ImGui::BeginTable("##entity-overview", 2,
+                          ImGuiTableFlags_RowBg
+                              | ImGuiTableFlags_BordersInnerV))
     {
-        ImGui::Columns(3, "##summarycols", false);
-        ImGui::Text("Position");
-        ImGui::Text("N %.0f", entityState.m_x);
-        ImGui::Text("E %.0f", entityState.m_y);
-        ImGui::NextColumn();
-        ImGui::Text("Kinematics");
-        ImGui::Text("V %.1f", entityState.m_speed);
-        ImGui::Text("Hdg %.1f deg", entityState.m_rotation * DEG_PER_RAD);
-        ImGui::NextColumn();
-        ImGui::Text("Lifecycle");
-        ImGui::Text("%s", entityState.m_destroyed ? "Destroyed" : "Alive");
-        ImGui::Text("Id %u", static_cast<unsigned int>(m_selectedEntity));
+        auto const row = [](char const* const label, char const* const value) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled("%s", label);
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(value);
+        };
+        char value[128]{};
+        std::snprintf(value, sizeof(value), "N %.0f m   E %.0f m",
+                      entityState.m_x, entityState.m_y);
+        row("Position", value);
+        std::snprintf(value, sizeof(value), "%.1f m/s", entityState.m_speed);
+        row("Speed", value);
+        std::snprintf(value, sizeof(value), "%.1f deg",
+                      entityState.m_rotation * DEG_PER_RAD);
+        row("Heading", value);
+        row("State", entityState.m_destroyed ? "Destroyed" : "Active");
+
         if (snapshot.any_of<ppo::model::sEntityMetadata>(m_selectedEntity))
         {
             auto const& metadata = snapshot.get<ppo::model::sEntityMetadata>(m_selectedEntity);
-            ImGui::Text("Name %s", metadata.m_name.c_str());
+            row("Scenario name", metadata.m_name.c_str());
+            row("Platform", metadata.m_archetype.c_str());
         }
-        ImGui::Columns(1);
-    }
-    ImGui::EndChild();
-
-    if (ImGui::BeginTable("##componenttable", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV))
-    {
-        ImGui::TableSetupColumn("Component", ImGuiTableColumnFlags_WidthFixed, 180.F);
-        ImGui::TableSetupColumn("Reflected Data");
-        ImGui::TableHeadersRow();
-
-        auto drawRow = [&](char const* componentName, auto drawFn)
-        {
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(componentName);
-            ImGui::TableNextColumn();
-            drawFn();
-        };
-
-        if (snapshot.any_of<ppo::model::sEntityMetadata>(m_selectedEntity))
-        {
-            drawRow("EntityMetadata", [&]()
-            {
-                DrawComponentIfPresent<ppo::model::sEntityMetadata>(snapshot, m_selectedEntity);
-            });
-        }
-
-        if (snapshot.any_of<ppo::model::sEntityState>(m_selectedEntity))
-        {
-            drawRow("EntityState", [&]()
-            {
-                DrawComponentIfPresent<ppo::model::sEntityState>(snapshot, m_selectedEntity);
-            });
-        }
-
-        if (snapshot.any_of<ppo::model::sSNAState>(m_selectedEntity))
-        {
-            drawRow("SNAState", [&]()
-            {
-                DrawComponentIfPresent<ppo::model::sSNAState>(snapshot, m_selectedEntity);
-            });
-        }
-
-        if (snapshot.any_of<ppo::model::sFlightModelState>(m_selectedEntity))
-        {
-            drawRow("FlightModelState", [&]()
-            {
-                DrawComponentIfPresent<ppo::model::sFlightModelState>(snapshot, m_selectedEntity);
-            });
-        }
-
-        if (snapshot.any_of<ppo::model::sSNAControlState>(m_selectedEntity))
-        {
-            drawRow("SNAControlState", [&]()
-            {
-                DrawComponentIfPresent<ppo::model::sSNAControlState>(snapshot, m_selectedEntity);
-            });
-        }
-
         ImGui::EndTable();
+    }
+
+    if (snapshot.any_of<ppo::model::sSNAState>(m_selectedEntity))
+    {
+        auto const& awareness =
+            snapshot.get<ppo::model::sSNAState>(m_selectedEntity);
+        ImGui::SeparatorText("Engagement");
+        if (awareness.m_target != entt::null
+            && snapshot.valid(awareness.m_target)
+            && snapshot.any_of<ppo::model::sEntityState>(awareness.m_target))
+        {
+            auto const& target = snapshot.get<ppo::model::sEntityState>(awareness.m_target);
+            ImGui::Text("Target: %s",
+                        EntityDisplayName(snapshot, awareness.m_target, target).c_str());
+        }
+        else
+            ImGui::TextDisabled("No active target");
+        ImGui::Text("Closing speed %.1f m/s  |  PK %.2f",
+                    awareness.m_closingspeed, awareness.m_pk);
+        ImGui::Text("No-escape range %.0f m  |  Missiles %hu/%hu",
+                    awareness.m_noescapezone, awareness.m_nbmissiles,
+                    awareness.m_maxnbmissiles);
+    }
+
+    if (snapshot.any_of<ppo::model::sFlightModelState>(m_selectedEntity))
+    {
+        auto const& flight =
+            snapshot.get<ppo::model::sFlightModelState>(m_selectedEntity);
+        ImGui::SeparatorText("Motion");
+        ImGui::Text("Acceleration %.2f  |  Turn acceleration %.2f",
+                    flight.m_acc, flight.m_accpsi);
+        ImGui::Text("Fuel %.1f / %.1f", flight.m_fuel, flight.m_maxfuel);
+    }
+    if (snapshot.any_of<ppo::model::sSNAControlState>(m_selectedEntity))
+    {
+        auto const& control =
+            snapshot.get<ppo::model::sSNAControlState>(m_selectedEntity);
+        ImGui::TextDisabled("Commands  acceleration %.2f  |  turn %.2f",
+                            control.m_accCmd, control.m_rotSpeedCmd);
     }
 
     ImGui::End();
@@ -3901,67 +3952,12 @@ EnvironmentRenderer::DrawAgentsWindow(entt::registry const& snapshot)
                     ImGui::TextDisabled(
                         "Losses sampled from the last PPO mini-batch.");
                     DrawAgentPlot(agent, state);
-                    if (ImGui::CollapsingHeader("Agent snapshot"))
-                        DrawMetaAnyRecursive(state.m_name.c_str(), entt::forward_as_meta(state));
                     ImGui::EndTabItem();
                 }
                 ImGui::EndTabBar();
             }
         }
         ImGui::PopID();
-    }
-
-    ImGui::End();
-}
-
-/**
-* @brief Draws the meta-catalog browser listing reflected project types.
-*/
-void
-EnvironmentRenderer::DrawMetaCatalogWindow(void)
-{
-    if (!m_showMetaCatalog)
-        return;
-
-    ImGui::Begin("Meta Catalog");
-
-    std::array<std::vector<std::string>, 5> buckets{};
-    for (auto&& entry : entt::resolve())
-    {
-        auto const& type = entry.second;
-        auto descriptor = type.custom();
-
-        std::string prefix = "[Type]";
-        std::size_t bucketIndex = 0;
-        if (auto const* info = static_cast<ppo::reflection::sMetaDescriptor*>(descriptor); info != nullptr)
-        {
-            switch (info->category)
-            {
-            case ppo::reflection::eMetaCategory::Entity:    prefix = "[Entity]"; bucketIndex = 1; break;
-            case ppo::reflection::eMetaCategory::Component: prefix = "[Component]"; bucketIndex = 2; break;
-            case ppo::reflection::eMetaCategory::Agent:     prefix = "[Agent]"; bucketIndex = 3; break;
-            case ppo::reflection::eMetaCategory::Enum:      prefix = "[Enum]"; bucketIndex = 4; break;
-            default: break;
-            }
-        }
-
-        std::string label = prefix + " ";
-        label += (type.name() != nullptr) ? type.name() : "<unnamed>";
-        buckets[bucketIndex].push_back(label);
-    }
-
-    char const* sectionNames[]{ "Other", "Entities", "Components", "Agents", "Enums" };
-    for (std::size_t index = 0; index < buckets.size(); ++index)
-    {
-        if (buckets[index].empty())
-            continue;
-
-        std::sort(buckets[index].begin(), buckets[index].end());
-        if (ImGui::CollapsingHeader(sectionNames[index], ImGuiTreeNodeFlags_DefaultOpen))
-        {
-            for (auto const& label : buckets[index])
-                ImGui::BulletText("%s", label.c_str());
-        }
     }
 
     ImGui::End();
@@ -4020,7 +4016,6 @@ EnvironmentRenderer::Run(void)
         if (m_showInspection)
             DrawInspectorWindow(snapshot);
         DrawAgentsWindow(snapshot);
-        DrawMetaCatalogWindow();
     });
 
     rlImGuiEnd();

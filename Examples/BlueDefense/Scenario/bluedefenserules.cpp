@@ -325,6 +325,13 @@ void BlueDefenseWorldRules::CopySnapshot(entt::registry& source, entt::registry&
             && context.patrolTrackOverlay.m_sampleCount >= 2U)
             target.ctx().emplace<ppo::model::sPatrolTrackOverlay>(
                 context.patrolTrackOverlay);
+        if (context.blueTeamRoles && context.blueTeamRoles->IsValid())
+        {
+            target.ctx().emplace<ppo::model::sBlueTeamRoleOverlay>(
+                ppo::model::sBlueTeamRoleOverlay{
+                    context.blueTeamRoles->ActiveBlueCount(),
+                    context.blueTeamRoles->LeaderPhysicalIndex()});
+        }
     }
 }
 }
