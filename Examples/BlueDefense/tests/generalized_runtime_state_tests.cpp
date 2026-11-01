@@ -150,6 +150,8 @@ int main()
     }
 
     blue::Parameters equivalentParameters{};
+    equivalentParameters.cruiseSpeed = 300.F;
+    equivalentParameters.maxSpeed = 750.F;
     equivalentParameters.geometry.direction = -1;
     auto equivalent = StateFor(2U, 2U);
     blue::Reference const leader = blue::PatrolReference(
@@ -162,10 +164,10 @@ int main()
     if (!equivalentRoles || !blue::BuildGeneralizedObservations(
             equivalentParameters, equivalent, *equivalentRoles, observations)
         || std::abs(observations[1U].values[
-               blue::GeneralizedObservationLayout::PatrolOffset + 6U])
+               blue::GeneralizedObservationLayout::PatrolOffset + 7U] - 1.F)
                > 1.0e-5F
         || std::abs(observations[1U].values[
-               blue::GeneralizedObservationLayout::PatrolOffset + 7U])
+               blue::GeneralizedObservationLayout::PatrolOffset + 8U] - 1.F)
                > 1.0e-5F)
     {
         return 5;

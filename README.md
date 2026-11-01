@@ -71,12 +71,12 @@ Les paramètres, le rollout et les poids de récompense sont définis dans
 ## Sauvegardes et compatibilité
 
 Les modèles généralisés se trouvent sous `resources/model/BluePatrol` :
-`latest/blue_patrol_generalized_v8.txt` pour l'acteur et
-`latest/blue_patrol_generalized_training_v5.txt` pour l'état complet
+`latest/blue_patrol_generalized_v9.txt` pour l'acteur et
+`latest/blue_patrol_generalized_training_v6.txt` pour l'état complet
 d'apprentissage. La promotion après évaluation utilise `prod/`.
 
 Les lecteurs des formats anciens V4/V7 sont conservés **pour migration
-uniquement**. Ils ne réactivent pas d'ancien agent ou entraînement 2v2.
+explicite uniquement**, hors du runtime v9. Aucun ancien acteur n’est repris automatiquement. Ils ne réactivent pas d'ancien agent ou entraînement 2v2.
 Les règles RLMission et les modèles des Rouges restent inchangés.
 
 ## IHM
@@ -117,3 +117,5 @@ une campagne de validation distincte.
 - [Configuration JSON et paramètres](docs/configuration-guide.md)
 - [Instructions pour les contributions](AGENTS.md)
 - [Entraînement distant MAPPO Windows Release / GitHub Actions](docs/remote-mappo-training.md)
+
+Le curriculum **V3 depuis zéro** et le contrat d’observation v9 sont décrits dans [docs/blue-mappo-v3.md](docs/blue-mappo-v3.md).

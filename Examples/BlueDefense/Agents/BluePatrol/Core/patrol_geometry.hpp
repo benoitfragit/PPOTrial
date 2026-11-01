@@ -39,13 +39,13 @@ struct PatrolRange final
  */
 struct PatrolGeometrySettings final
 {
-    PatrolRange lengthMeters{50000.F, 60000.F};
-    PatrolRange widthMeters{16000.F, 20000.F};
+    PatrolRange lengthMeters{40000.F, 45000.F};
+    PatrolRange widthMeters{16000.F, 19000.F};
     PatrolRange headingRadians{1.3962634F, 1.7453293F};
     PatrolRange anchorNorthMeters{-1500.F, 1500.F};
     PatrolRange anchorEastMeters{-2000.F, 2000.F};
-    PatrolRange separationDistanceMeters{6000.F, 9000.F};
-    PatrolRange separationAngleRadians{0.17453293F, 0.43633232F};
+    PatrolRange separationDistanceMeters{2700.F, 3200.F};
+    PatrolRange separationAngleRadians{0.52359878F, 0.61086524F};
     float boundaryMarginMeters{2000.F};
     std::size_t maximumSamplingAttempts{128U};
     bool clockwise{false};
@@ -76,6 +76,10 @@ struct PatrolSamplingConstraints final
     float cruiseSpeed{};
     float maximumRotationRate{};
     float collisionDistance{};
+    /** @brief Mission separation, in addition to physical exclusion spheres. */
+    float minimumSeparationMeters{2500.F};
+    /** @brief Maximum attainable follower speed; legacy callers may omit it. */
+    float maximumSpeed{std::numeric_limits<float>::max()};
 };
 
 /**
@@ -404,6 +408,35 @@ inline PatrolCurvePose EvaluateFormationPose(
     return result;
 }
 
+/** @brief Exact offset-curve tangent and speed on a straight or circular arc. */
+struct PatrolFormationReference final
+{
+    PatrolCurvePose pose{};
+    float speed{};
+};
+
+/**
+ * @brief Differentiates the rigid wedge in the leader's tangent frame.
+ * At a curvature discontinuity the one-sided reference changes; the physical
+ * aircraft still accelerates through its own dynamics, never via this helper.
+ */
+inline PatrolFormationReference EvaluateFormationReference(
+    PatrolGeometry const& geometry, PatrolCurvePose const& leader,
+    std::size_t const slot, float const leaderSpeed) noexcept
+{
+    FormationOffset const offset = EvaluateFormationOffset(
+        slot, geometry.separationDistance, geometry.separationAngle);
+    float const inward = static_cast<float>(geometry.direction)
+        * offset.inwardMeters;
+    float const tangent = 1.F - leader.curvature * inward;
+    float const normal = leader.curvature * offset.longitudinalMeters;
+    PatrolCurvePose pose = EvaluateFormationPose(geometry, leader, slot);
+    float const ratio = std::hypot(tangent, normal);
+    pose.heading = leader.heading + std::atan2(normal, tangent);
+    pose.curvature = ratio > 1.e-6F ? leader.curvature / ratio : 0.F;
+    return {pose, leaderSpeed * ratio};
+}
+
 /**
  * @brief Checks every active generalized blue spawn against world bounds.
  * @param geometry Episode patrol and formation geometry.
@@ -433,6 +466,10 @@ inline bool GeneralizedFormationFitsBounds(
         return false;
     }
 
+    if (!std::isfinite(constraints.minimumSeparationMeters)
+        || constraints.minimumSeparationMeters <= 0.F)
+        return false;
+
     auto const insideBounds = [&](PatrolCurvePose const& pose) noexcept {
         return std::isfinite(pose.north) && std::isfinite(pose.east)
             && std::abs(pose.north) + settings.boundaryMarginMeters
@@ -443,15 +480,37 @@ inline bool GeneralizedFormationFitsBounds(
 
     PatrolCurvePose const leader = EvaluatePatrolCurve(
         geometry, arclength);
-    if (!insideBounds(leader))
+    if (!insideBounds(leader)
+        || !std::isfinite(constraints.collisionDistance)
+        || constraints.collisionDistance <= 0.F)
         return false;
+
+    // Validate the full wedge, not only independent world-boundary checks.
+    // Two physical exclusion spheres must never overlap at a nominal slot:
+    // the 2.25x physical collision radius also leaves a small clearance
+    // around the 2x caution radius in the default BlueDefense scenario.
+    std::array<PatrolCurvePose, TeamCapacity::MaximumBlueMobiles> poses{};
+    poses[0] = leader;
     for (std::size_t formationSlot = 0U;
          formationSlot + 1U < activeBlueCount; ++formationSlot)
     {
-        if (!insideBounds(EvaluateFormationPose(
-                geometry, leader, formationSlot)))
-        {
+        poses[formationSlot + 1U] = EvaluateFormationPose(
+            geometry, leader, formationSlot);
+        if (!insideBounds(poses[formationSlot + 1U]))
             return false;
+    }
+    float const minimumSpacing = std::max(
+        2.25F * constraints.collisionDistance,
+        constraints.minimumSeparationMeters);
+    for (std::size_t first = 0U; first < activeBlueCount; ++first)
+    {
+        for (std::size_t second = first + 1U;
+             second < activeBlueCount; ++second)
+        {
+            if (std::hypot(poses[first].north - poses[second].north,
+                           poses[first].east - poses[second].east)
+                < minimumSpacing)
+                return false;
         }
     }
     return true;
@@ -702,6 +761,116 @@ inline std::optional<PatrolGeometry> SamplePatrolGeometry(
         candidate.direction = settings.clockwise ? -1 : 1;
         if (Valid(candidate, settings, constraints))
             return candidate;
+    }
+    return std::nullopt;
+}
+
+
+/**
+ * @brief A single patrol episode start, with every active Blue slot already
+ *        verified against world limits and the physical exclusion spheres.
+ */
+struct GeneralizedPatrolStart final
+{
+    PatrolGeometry geometry{};
+    float arclength{};
+};
+
+/**
+ * @brief Conservative full-circuit envelope and offset-curve feasibility.
+ * Each stadium consists of two straight sections and two semicircles. The
+ * axis-aligned envelope below bounds both semicircles analytically; checking
+ * a spawn phase alone cannot establish that the complete lap is flyable.
+ */
+inline bool GeneralizedFormationCircuitFeasible(
+    PatrolGeometry const& geometry, PatrolGeometrySettings const& settings,
+    PatrolSamplingConstraints const& constraints,
+    std::size_t const blueCount) noexcept
+{
+    if (!Valid(geometry, settings, constraints)
+        || blueCount < 1U || blueCount > TeamCapacity::MaximumBlueMobiles
+        || !std::isfinite(constraints.minimumSeparationMeters)
+        || constraints.minimumSeparationMeters <= 0.F
+        || !std::isfinite(constraints.maximumSpeed)
+        || constraints.maximumSpeed < constraints.cruiseSpeed)
+        return false;
+    float const radius = 0.5F * geometry.width;
+    float const halfStraight = 0.5F * (geometry.length - geometry.width);
+    float const cosine = std::abs(std::cos(geometry.heading));
+    float const sine = std::abs(std::sin(geometry.heading));
+    for (std::size_t index = 0U; index < blueCount; ++index)
+    {
+        FormationOffset const offset = index == 0U ? FormationOffset{}
+            : EvaluateFormationOffset(index - 1U,
+                geometry.separationDistance, geometry.separationAngle);
+        // EvaluatePatrolCurve uses signed curvature and the same inward sign.
+        float const turnRadius = std::hypot(
+            radius - offset.inwardMeters, offset.longitudinalMeters);
+        float const major = std::max(halfStraight + turnRadius,
+            halfStraight + std::abs(offset.longitudinalMeters));
+        float const minor = std::max(turnRadius,
+            std::abs(radius - offset.inwardMeters));
+        if (std::abs(geometry.anchorNorth) + cosine * major + sine * minor
+                + settings.boundaryMarginMeters > constraints.halfNorth
+            || std::abs(geometry.anchorEast) + sine * major + cosine * minor
+                + settings.boundaryMarginMeters > constraints.halfEast
+            || constraints.cruiseSpeed * turnRadius / radius
+                > constraints.maximumSpeed
+            || constraints.cruiseSpeed / radius > constraints.maximumRotationRate)
+            return false;
+    }
+    // Rigid transforms preserve all pairwise slot distances throughout a lap.
+    return GeneralizedFormationFitsBounds(
+        geometry, settings, constraints, blueCount, 0.F);
+}
+
+/**
+ * @brief Samples geometry and team placement as one bounded transaction.
+ *
+ * A valid racetrack may still have an impossible wedge (e.g. two teammates
+ * closer than the collision clearance at every phase). Retry a new geometry
+ * rather than poisoning the episode with an unplaceable formation.
+ * maximumSamplingAttempts bounds geometry candidates; each candidate uses
+ * the existing bounded phase search. No global RNG or persistent policy state
+ * is changed.
+ */
+inline std::optional<GeneralizedPatrolStart> SampleGeneralizedPatrolStart(
+    PatrolGeometrySettings const& settings,
+    PatrolSamplingConstraints const& constraints,
+    std::size_t const activeBlueCount,
+    std::mt19937& rng,
+    std::optional<float> const evaluationPhaseFraction = std::nullopt)
+{
+    if (!Valid(settings)
+        || activeBlueCount < TeamCapacity::MinimumBlueMobiles
+        || activeBlueCount > TeamCapacity::MaximumBlueMobiles
+        || (evaluationPhaseFraction
+            && (!std::isfinite(*evaluationPhaseFraction)
+                || *evaluationPhaseFraction < 0.F
+                || *evaluationPhaseFraction >= 1.F)))
+    {
+        return std::nullopt;
+    }
+
+    PatrolGeometrySettings oneGeometryAttempt = settings;
+    oneGeometryAttempt.maximumSamplingAttempts = 1U;
+    for (std::size_t attempt = 0U;
+         attempt < settings.maximumSamplingAttempts; ++attempt)
+    {
+        auto const geometry = SamplePatrolGeometry(
+            oneGeometryAttempt, constraints, rng);
+        if (!geometry || !GeneralizedFormationCircuitFeasible(
+                *geometry, settings, constraints, activeBlueCount))
+            continue;
+
+        std::optional<float> const arclength = evaluationPhaseFraction
+            ? FindGeneralizedEvaluationArclength(
+                *geometry, settings, constraints, activeBlueCount,
+                *evaluationPhaseFraction)
+            : SampleGeneralizedFormationArclength(
+                *geometry, settings, constraints, activeBlueCount, rng);
+        if (arclength)
+            return GeneralizedPatrolStart{*geometry, *arclength};
     }
     return std::nullopt;
 }

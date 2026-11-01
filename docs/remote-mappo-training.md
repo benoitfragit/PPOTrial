@@ -36,18 +36,18 @@ checkpoint exists.
 
 - `training.rolloutSteps`: number of environment steps per PPO update
   (currently 2048).
-- `training.maxUpdates`: maximum PPO updates (currently 1000 for standard non-curriculum training).
+- `training.maxUpdates`: maximum PPO updates (currently 2000 for standard non-curriculum training).
 - `training.checkpointEvery`: deterministic evaluation interval (currently 10).
 - `training.saveEveryUpdates`: independent checkpoint interval (1 for CI).
   When absent, it defaults to `checkpointEvery` for compatibility.
 
 The learner writes these files at completed PPO-update boundaries:
 
-- `resources/model/BluePatrol/latest/blue_patrol_generalized_v8.txt`:
+- `resources/model/BluePatrol/latest/blue_patrol_generalized_v9.txt`:
   inference actor.
-- `resources/model/BluePatrol/latest/blue_patrol_generalized_training_v5.txt`:
+- `resources/model/BluePatrol/latest/blue_patrol_generalized_training_v6.txt`:
   **full training state**, using internal format `BLUE_TEAM_TRAINING_V6`.
-- `resources/model/BluePatrol/prod/blue_patrol_generalized_v8.txt`:
+- `resources/model/BluePatrol/prod/blue_patrol_generalized_v9.txt`:
   promoted actor only after successful evaluation, when present.
 
 Training-state serialization includes actor, critic, Adam moments,
@@ -76,38 +76,30 @@ GitHub-hosted runners have limited job duration, so the default time budget is
 `workflow_dispatch` normally becomes available in the Actions UI after it
 exists on the default branch.
 
-## Versioned curricula (V1 / V2)
+## Complete V3 curriculum from scratch
 
-The manual training workflow has a `curriculum_enabled` switch and a
-`curriculum_version` choice. Select **V2** to run the new independent
-curriculum; leaving `resume_run_id` empty starts a **fresh** V2 training
-session. V1 remains selectable to resume historical sequential sessions.
+Select curriculum_enabled=true, curriculum_version=v3, resume_run_id empty,
+max_seconds=14400 and save_every_updates=1. V3 starts random actor/critic/Adam
+state at update zero, with observation v9 and 2048-step rollouts. It does not
+migrate run 16 or any older actor. Twelve phases total 1200 PPO updates, from
+1vs0 / 2vs0 / 3vs0 / 4vs0 to progressive combat and a final 4vs4. Rehearsal
+uses 24 primary updates followed by 6 updates from earlier phases, round-robin.
+The first phase has no earlier task; every phase ends with its primary task.
 
-- **V1:** `BluePatrolCurriculum.json`, 236 update quotas, nine sequential
-  phases. Its configuration and progress fingerprint are unchanged.
-- **V2:** `BluePatrolCurriculumV2.json`, **1000 update quotas**, the same
-  nine scenario families, with rehearsal of earlier phases starting at the
-  second phase. The budget allocation is 32, 48, 72, 72, 64, 88, 100, 124,
-  and **400 updates in 4v4**.
-- **Mixing:** the V2 orchestrator uses 24 PPO updates on the current stage,
-  then 6 on a *previously completed* stage, cycling through all earlier
-  stages. The first phase has nothing to replay. The final 4v4 remains
-  dominant while revisiting all eight older stage families.
-- **Resume:** a V2 checkpoint can only resume with its matching V2
-  `curriculum-progress.json` fingerprint and full V6 training state.
-  A V1 run artifact (including run 11) must **not** be passed directly
-  as a V2 resume checkpoint; start V2 fresh instead. V1 progress is
-  still accepted in V1 mode.
-- **No recompilation between stages:** the orchestration switches JSON
-  scenario parameters across headless process launches. The existing
-  GitHub workflow still builds `PPO.exe` **once per GitHub job**.
-- **Time:** `max_seconds=14400` is a 4-hour budget, **not a promise**
-  that all 1000 updates finish in one CI run. Download the V2 checkpoint
-  and resume explicitly across jobs if necessary.
+To continue this new run across jobs, select its own run ID with the same V3
+JSON fingerprint and observation v9. Old V2/V3 progress is rejected. The runner
+only resets current Blue files in its temporary checkout on fresh start;
+archived candidate files and RLMission are untouched. The old training filename
+ending in v5 is no longer loaded by the runtime. Format V6 remains the full
+optimizer envelope, with an independently checked observation version of 9.
 
-Rehearsal occurs **between blocks of PPO updates**, not by sampling a
-different scenario on every environment episode. Per-episode mixing would
-require modifying the simulator's reset/curriculum integration.
+The 4-hour budget is a wall-clock limit, not a guarantee that all 1200 updates
+finish in one job. Incomplete progressing blocks continue while time remains;
+a complete checkpoint can resume later. Scenario changes occur between PPO
+blocks/processes; earlier tasks are replayed throughout later phases.
+
+See [blue-mappo-v3.md](blue-mappo-v3.md) for targets, rewards, physical lap
+criteria, feasibility checks and diagnostics. No name V4 is used for this work.
 
 ## Limitations and acceptance checks
 

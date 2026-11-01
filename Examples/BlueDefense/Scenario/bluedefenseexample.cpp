@@ -337,15 +337,11 @@ bool LoadScenario(
     context.patrolCruiseSpeed = patrolParameters.cruiseSpeed;
     context.patrolMaximumRotationRate = patrolParameters.maxRotationRate;
     context.patrolCollisionDistance = patrolParameters.collisionDistance;
+    context.patrolMinimumSeparationMeters = patrolTraining.noThreatPatrol.minimumSeparationMeters;
+    context.patrolMaximumSpeed = patrolParameters.maxSpeed;
     context.patrolGeometrySettings = patrolGeometrySettings;
     auto const modelRoot = std::filesystem::path{RESOURCE_PATH}.parent_path()
         / "model" / "BluePatrol";
-    auto const latestCheckpoint = modelRoot / "latest"
-        / "blue_patrol_mappo_v7.txt";
-    auto const trainingCheckpoint = modelRoot / "latest"
-        / "blue_patrol_training_v4.txt";
-    auto const productionCheckpoint = modelRoot / "prod"
-        / "blue_patrol_mappo_v7.txt";
     auto& world = registry->ctx().get<ppo::model::sEnvironmentState>();
     world.m_maxNorth = worldNorth;
     world.m_maxEast = worldEast;
@@ -379,19 +375,17 @@ bool LoadScenario(
                     "red_" + std::to_string(index + 1U)).get();
 
             auto const generalizedLatest = modelRoot / "latest"
-                / "blue_patrol_generalized_v8.txt";
+                / "blue_patrol_generalized_v9.txt";
             auto const generalizedTraining = modelRoot / "latest"
-                / "blue_patrol_generalized_training_v5.txt";
+                / "blue_patrol_generalized_training_v6.txt";
             auto const generalizedProduction = modelRoot / "prod"
-                / "blue_patrol_generalized_v8.txt";
+                / "blue_patrol_generalized_v9.txt";
             auto controller = environment.CreateAgent<
                 defenders::GeneralizedPatrolMappoAgent>(
                     guards, configuredBlueCount, attackers, redCount,
                     *entities.at("blue_objective"), patrolParameters,
                     patrolTraining, executionMode, generalizedLatest,
-                    generalizedTraining, generalizedProduction,
-                    trainingCheckpoint, latestCheckpoint,
-                    productionCheckpoint);
+                    generalizedTraining, generalizedProduction);
             if (!controller)
                 return false;
             agents.push_back(std::move(controller));

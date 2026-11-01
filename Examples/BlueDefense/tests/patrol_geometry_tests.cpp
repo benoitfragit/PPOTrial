@@ -239,5 +239,115 @@ int main()
     {
     }
 
+    // Two physical exclusion spheres must not overlap nominal wedge slots.
+    patrol::PatrolGeometry closeWedge{};
+    closeWedge.separationDistance = 6000.F;
+    closeWedge.separationAngle = 0.17453293F; // 10 degrees: 2084 m apart.
+    patrol::PatrolGeometrySettings wideSettings{};
+    wideSettings.boundaryMarginMeters = 0.F;
+    patrol::PatrolSamplingConstraints wideConstraints{
+        200000.F, 200000.F, 300.F, 0.8F, 1000.F};
+    if (patrol::GeneralizedFormationFitsBounds(
+            closeWedge, wideSettings, wideConstraints, 3U, 0.F))
+        return 15;
+    closeWedge.separationAngle = 0.35F;
+    if (!patrol::GeneralizedFormationFitsBounds(
+            closeWedge, wideSettings, wideConstraints, 3U, 0.F))
+        return 16;
+
+
+    // A valid racetrack can have an impossible P=3 wedge at every phase.
+    // The combined sampler must reject it, while P=1 and P=2 stay feasible.
+    auto impossibleFormation = fixed;
+    impossibleFormation.separationDistanceMeters = {6000.F, 6000.F};
+    impossibleFormation.separationAngleRadians = {
+        0.17453293F, 0.17453293F};
+    impossibleFormation.maximumSamplingAttempts = 3U;
+    std::mt19937 invalidFormationRng{73U};
+    if (patrol::SampleGeneralizedPatrolStart(
+            impossibleFormation, constraints, 3U, invalidFormationRng))
+        return 17;
+    std::mt19937 loneBlueRng{73U};
+    auto const loneBlue = patrol::SampleGeneralizedPatrolStart(
+        impossibleFormation, constraints, 1U, loneBlueRng);
+    if (!loneBlue || !patrol::GeneralizedFormationFitsBounds(
+            loneBlue->geometry, impossibleFormation, constraints, 1U,
+            loneBlue->arclength))
+        return 18;
+    std::mt19937 twoBlueRng{73U};
+    auto const twoBlue = patrol::SampleGeneralizedPatrolStart(
+        impossibleFormation, constraints, 2U, twoBlueRng);
+    if (!twoBlue || !patrol::GeneralizedFormationFitsBounds(
+            twoBlue->geometry, impossibleFormation, constraints, 2U,
+            twoBlue->arclength))
+        return 19;
+
+    // Regress run 17: if the first wedge is too narrow, a subsequent
+    // geometry must be sampled rather than permanently failing the episode.
+    auto recoverableFormation = impossibleFormation;
+    recoverableFormation.separationAngleRadians = {0.17453293F, 0.35F};
+    recoverableFormation.maximumSamplingAttempts = 32U;
+    bool recoveredNarrowWedge = false;
+    for (unsigned int seed = 0U; seed < 128U; ++seed)
+    {
+        std::mt19937 initialRng{seed};
+        auto const initiallySampled = patrol::SamplePatrolGeometry(
+            recoverableFormation, constraints, initialRng);
+        if (!initiallySampled
+            || 2.F * initiallySampled->separationDistance
+                * std::sin(initiallySampled->separationAngle)
+                >= 2.25F * constraints.collisionDistance)
+            continue;
+
+        std::mt19937 retryRng{seed};
+        std::mt19937 repeatRng{seed};
+        auto const recovered = patrol::SampleGeneralizedPatrolStart(
+            recoverableFormation, constraints, 3U, retryRng);
+        auto const repeated = patrol::SampleGeneralizedPatrolStart(
+            recoverableFormation, constraints, 3U, repeatRng);
+        if (recovered && repeated
+            && Same(recovered->geometry, repeated->geometry)
+            && recovered->arclength == repeated->arclength
+            && patrol::GeneralizedFormationFitsBounds(
+                recovered->geometry, recoverableFormation, constraints,
+                3U, recovered->arclength))
+        {
+            recoveredNarrowWedge = true;
+            break;
+        }
+    }
+    if (!recoveredNarrowWedge)
+        return 20;
+
+    // Evaluation phase selection and maximum-size blue teams use the same
+    // formation-aware geometry transaction with deterministic seeds.
+    std::mt19937 evaluationRng{31U};
+    std::mt19937 evaluationRepeatRng{31U};
+    // The former large fixed wedge fitted selected spawn phases only. Reject
+    // it for P=9 rather than promising an impossible complete circuit.
+    if (patrol::SampleGeneralizedPatrolStart(fixed, constraints, 9U, evaluationRng))
+        return 23;
+    patrol::PatrolGeometrySettings feasibleSettings{};
+    patrol::PatrolSamplingConstraints const feasibleConstraints{
+        22329.375F, 35727.F, 300.F, 0.8F, 1000.F, 2500.F, 750.F};
+    evaluationRng.seed(31U);
+    auto const evaluationStart = patrol::SampleGeneralizedPatrolStart(
+        feasibleSettings, feasibleConstraints, 9U, evaluationRng, 0.F);
+    auto const evaluationRepeated = patrol::SampleGeneralizedPatrolStart(
+        feasibleSettings, feasibleConstraints, 9U, evaluationRepeatRng, 0.F);
+    if (!evaluationStart || !evaluationRepeated
+        || !Same(evaluationStart->geometry, evaluationRepeated->geometry)
+        || evaluationStart->arclength != evaluationRepeated->arclength
+        || !patrol::GeneralizedFormationFitsBounds(
+            evaluationStart->geometry, feasibleSettings, feasibleConstraints, 9U,
+            evaluationStart->arclength))
+        return 21;
+    std::mt19937 invalidPhaseRng{31U};
+    if (patrol::SampleGeneralizedPatrolStart(
+            fixed, constraints, 9U, invalidPhaseRng, 1.F)
+        || patrol::SampleGeneralizedPatrolStart(
+            fixed, constraints, 0U, invalidPhaseRng))
+        return 22;
+
     return 0;
 }

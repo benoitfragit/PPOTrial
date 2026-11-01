@@ -30,11 +30,13 @@ struct InitializerContext {
     std::optional<EpisodeSpawnLayout> episodeLayout{};
     bool patrolOnly{false};
     /** @brief Configured initial/reference speed of P blue mobiles. */
-    float patrolCruiseSpeed{700.F};
+    float patrolCruiseSpeed{300.F};
     /** @brief Maximum blue yaw rate used to reject infeasible turns. */
-    float patrolMaximumRotationRate{0.70000059604645F};
+    float patrolMaximumRotationRate{0.8F};
     /** @brief Blue collision radius used to validate the sampled wedge. */
     float patrolCollisionDistance{1000.F};
+    float patrolMinimumSeparationMeters{2500.F};
+    float patrolMaximumSpeed{750.F};
     /** @brief Configured family sampled exactly once per episode. */
     defenders::PatrolGeometrySettings patrolGeometrySettings{};
     /** @brief Immutable continuous racetrack used by the current episode. */

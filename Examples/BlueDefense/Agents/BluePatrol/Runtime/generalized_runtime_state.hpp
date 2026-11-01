@@ -1,6 +1,6 @@
 /**
  * @file Examples/BlueDefense/Agents/BluePatrol/Runtime/generalized_runtime_state.hpp
- * @brief État physique compact et construction des observations v8 depuis le registre ECS.
+ * @brief État physique compact et construction des observations v9 depuis le registre ECS.
  * @details Référence de l'unité, de ses types et de ses fonctions C++.
  * Les implémentations sont accessibles via le navigateur de sources Doxygen.
  */
@@ -12,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <string>
 #include <type_traits>
 
@@ -269,6 +270,125 @@ inline float ThreatPressure(GeneralizedRuntimeState const& state,
 
 } // namespace generalized_runtime_detail
 
+/** @brief Continuous combat priority, independent from target validity. */
+inline float GeneralizedEngagementWeight(
+    Parameters const& parameters, GeneralizedRuntimeState const& state) noexcept
+{
+    float nearest = std::numeric_limits<float>::max();
+    for (std::size_t red = 0U; red < state.counts.redMobiles; ++red)
+    {
+        if (!state.reds[red].available)
+            continue;
+        for (std::size_t blue = 0U; blue < state.counts.blueMobiles; ++blue)
+            if (state.blues[blue].available)
+                nearest = std::min(nearest, std::hypot(
+                    state.blues[blue].north - state.reds[red].north,
+                    state.blues[blue].east - state.reds[red].east));
+    }
+    float const range = parameters.defense.teammateThreatDistanceMeters;
+    return std::max(Clamp((2.F * range - nearest) / range, 0.F, 1.F),
+        generalized_runtime_detail::ThreatPressure(state, parameters));
+}
+
+/** @brief One instantaneous measurement target and its anticipatory guidance. */
+struct GeneralizedPatrolTarget final
+{
+    PatrolCurvePose pose{};
+    float speed{};
+    PatrolCurvePose guidancePose{};
+    float guidanceSpeed{};
+    bool valid{};
+};
+using GeneralizedPatrolTargets = std::array<GeneralizedPatrolTarget,
+    TeamCapacity::MaximumBlueMobiles>;
+
+/** @brief Pvs0 requires the complete team; combat may continue with survivors. */
+inline bool GeneralizedNoThreatTeamLost(GeneralizedRuntimeState const& state) noexcept
+{
+    if (state.counts.redMobiles > 0U)
+        return false;
+    for (std::size_t index = 0U; index < state.counts.blueMobiles; ++index)
+        if (!state.blues[index].available)
+            return true;
+    return false;
+}
+
+/** @brief Reject non-finite geometry before advertising a virtual target. */
+inline bool FinitePatrolPose(PatrolCurvePose const& pose) noexcept
+{
+    return std::isfinite(pose.north) && std::isfinite(pose.east)
+        && std::isfinite(pose.heading) && std::isfinite(pose.arclength)
+        && std::isfinite(pose.phase) && std::isfinite(pose.curvature);
+}
+
+/** @brief Only actually active hostiles contribute; delayed tracks stay masked. */
+inline bool GeneralizedHasActiveRed(GeneralizedRuntimeState const& state) noexcept
+{
+    for (std::size_t index = 0U; index < state.counts.redMobiles; ++index)
+        if (state.reds[index].available)
+            return true;
+    return false;
+}
+
+/**
+ * @brief Computes all P targets from one leader projection for this snapshot.
+ * Invalid/padded/dead participants have a zero target and a false mask. A lost
+ * leader invalidates patrol references; surviving combat agents retain their
+ * real tracks and can continue interception without following a destroyed one.
+ */
+inline GeneralizedPatrolTargets ComputePatrolTargets(
+    Parameters const& parameters, GeneralizedRuntimeState const& state,
+    BlueTeamRoles const& roles, float const lookaheadSeconds = 3.F) noexcept
+{
+    GeneralizedPatrolTargets targets{};
+    if (!Valid(parameters) || !Valid(state) || !roles.IsValid()
+        || roles.ActiveBlueCount() != state.counts.blueMobiles
+        || !std::isfinite(lookaheadSeconds) || lookaheadSeconds < 0.F)
+        return targets;
+    Mobile const& leader = state.blues[roles.LeaderPhysicalIndex()];
+    if (!leader.available)
+        return targets;
+    PatrolCurvePose const projection = ProjectOnPatrolCurve(
+        parameters.geometry, leader.north, leader.east).pose;
+    PatrolCurvePose const preview = EvaluatePatrolCurve(parameters.geometry,
+        projection.arclength + parameters.cruiseSpeed * lookaheadSeconds);
+    for (std::size_t index = 0U; index < state.counts.blueMobiles; ++index)
+    {
+        if (!state.blues[index].available)
+            continue;
+        BlueRoleAssignment const assignment = *roles.Assignment(index);
+        PatrolFormationReference const geometry = assignment.role == BlueRole::Leader
+            ? PatrolFormationReference{projection, parameters.cruiseSpeed}
+            : EvaluateFormationReference(parameters.geometry, projection,
+                assignment.formationSlot, parameters.cruiseSpeed);
+        PatrolFormationReference const guidance = assignment.role == BlueRole::Leader
+            ? PatrolFormationReference{preview, parameters.cruiseSpeed}
+            : EvaluateFormationReference(parameters.geometry, preview,
+                assignment.formationSlot, parameters.cruiseSpeed);
+        if (!FinitePatrolPose(geometry.pose) || !FinitePatrolPose(guidance.pose)
+            || !std::isfinite(geometry.speed) || geometry.speed <= 0.F
+            || geometry.speed > parameters.maxSpeed
+            || !std::isfinite(guidance.speed) || guidance.speed <= 0.F
+            || guidance.speed > parameters.maxSpeed
+            || std::abs(geometry.speed * geometry.pose.curvature) > parameters.maxRotationRate
+            || std::abs(guidance.speed * guidance.pose.curvature) > parameters.maxRotationRate)
+            continue;
+        targets[index] = {geometry.pose, geometry.speed,
+            guidance.pose, guidance.speed, true};
+    }
+    return targets;
+}
+
+/** @brief Compatibility convenience for tests; production reuses snapshot targets. */
+inline GeneralizedPatrolTarget GeneralizedNoThreatTarget(
+    Parameters const& parameters, GeneralizedRuntimeState const& state,
+    BlueTeamRoles const& roles, std::size_t const index) noexcept
+{
+    return index < state.counts.blueMobiles
+        ? ComputePatrolTargets(parameters, state, roles)[index]
+        : GeneralizedPatrolTarget{};
+}
+
 /**
  * @brief Builds exactly P decentralized generalized observations.
  *
@@ -286,7 +406,8 @@ inline bool BuildGeneralizedObservations(
     Parameters const& parameters, GeneralizedRuntimeState const& state,
     BlueTeamRoles const& roles,
     std::array<GeneralizedObservation,
-               TeamCapacity::MaximumBlueMobiles>& observations) noexcept
+               TeamCapacity::MaximumBlueMobiles>& observations,
+    GeneralizedPatrolTargets const* const snapshotTargets = nullptr) noexcept
 {
     observations = {};
     if (!Valid(parameters) || !Valid(state) || !roles.IsValid()
@@ -297,12 +418,12 @@ inline bool BuildGeneralizedObservations(
 
     float const diagonal = std::hypot(parameters.halfNorth,
                                       parameters.halfEast);
-    std::size_t const leaderIndex = roles.LeaderPhysicalIndex();
-    Mobile const& leader = state.blues[leaderIndex];
-    PatrolProjection const projection = ProjectOnPatrolCurve(
-        parameters.geometry, leader.north, leader.east);
-    float const pressure = generalized_runtime_detail::ThreatPressure(
-        state, parameters);
+    GeneralizedPatrolTargets const computed = snapshotTargets == nullptr
+        ? ComputePatrolTargets(parameters, state, roles)
+        : GeneralizedPatrolTargets{};
+    GeneralizedPatrolTargets const& targets = snapshotTargets != nullptr
+        ? *snapshotTargets : computed;
+    float const pressure = GeneralizedEngagementWeight(parameters, state);
 
     for (std::size_t physicalIndex = 0U;
          physicalIndex < state.counts.blueMobiles; ++physicalIndex)
@@ -393,56 +514,26 @@ inline bool BuildGeneralizedObservations(
             parameters, 1.F);
 
         offset = GeneralizedObservationLayout::PatrolOffset;
-        if (assignment.role == BlueRole::Leader)
+        GeneralizedPatrolTarget const& target = targets[physicalIndex];
+        if (target.valid && own.available)
         {
-            float const relativeTangent = projection.pose.heading - own.heading;
-            float const phaseAngle = kTwoPi * projection.pose.phase;
-            float const lookahead = std::max(
-                3.F * own.speed, 0.25F * parameters.geometry.width);
-            PatrolCurvePose const preview = EvaluatePatrolCurve(
-                parameters.geometry, projection.pose.arclength + lookahead);
-            float const minimumTurnRadius = parameters.cruiseSpeed
-                / parameters.maxRotationRate;
-            observation[offset++] = std::cos(relativeTangent);
-            observation[offset++] = std::sin(relativeTangent);
-            observation[offset++] = Clamp(
-                projection.signedCrossTrackError
-                    / std::max(0.5F * parameters.geometry.width, 1.F),
-                -2.F, 2.F);
-            observation[offset++] = std::sin(phaseAngle);
-            observation[offset++] = std::cos(phaseAngle);
-            observation[offset++] = Clamp(
-                preview.curvature * minimumTurnRadius, -1.F, 1.F);
-            offset += 2U;
+            float const north = target.guidancePose.north - own.north;
+            float const east = target.guidancePose.east - own.east;
+            float const bearing = std::atan2(east, north) - own.heading;
+            observation[offset++] = Clamp(north / (2.F * parameters.halfNorth), -2.F, 2.F);
+            observation[offset++] = Clamp(east / (2.F * parameters.halfEast), -2.F, 2.F);
+            observation[offset++] = Clamp((target.guidanceSpeed * std::cos(target.guidancePose.heading)
+                - own.speed * std::cos(own.heading)) / parameters.maxSpeed, -2.F, 2.F);
+            observation[offset++] = Clamp((target.guidanceSpeed * std::sin(target.guidancePose.heading)
+                - own.speed * std::sin(own.heading)) / parameters.maxSpeed, -2.F, 2.F);
+            observation[offset++] = Clamp(std::hypot(north, east) / (2.F * diagonal), 0.F, 2.F);
+            observation[offset++] = std::cos(bearing);
+            observation[offset++] = std::sin(bearing);
+            observation[offset++] = 1.F;
         }
         else
         {
-            FormationOffset const slot = EvaluateFormationOffset(
-                assignment.formationSlot,
-                parameters.geometry.separationDistance,
-                parameters.geometry.separationAngle);
-            float const cosHeading = std::cos(leader.heading);
-            float const sinHeading = std::sin(leader.heading);
-            float const inward = static_cast<float>(
-                parameters.geometry.direction) * slot.inwardMeters;
-            float const expectedNorth = leader.north
-                + slot.longitudinalMeters * cosHeading
-                - inward * sinHeading;
-            float const expectedEast = leader.east
-                + slot.longitudinalMeters * sinHeading
-                + inward * cosHeading;
-            float const errorNorth = own.north - expectedNorth;
-            float const errorEast = own.east - expectedEast;
-            offset += 6U;
-            observation[offset++] = Clamp(
-                (errorNorth * cosHeading + errorEast * sinHeading)
-                    / parameters.geometry.separationDistance,
-                -2.F, 2.F);
-            observation[offset++] = Clamp(
-                static_cast<float>(parameters.geometry.direction)
-                    * (-errorNorth * sinHeading + errorEast * cosHeading)
-                    / parameters.geometry.separationDistance,
-                -2.F, 2.F);
+            offset += 8U;
         }
         observation[offset++] = assignment.role == BlueRole::Leader
             ? -1.F : 1.F;
@@ -458,5 +549,7 @@ inline bool BuildGeneralizedObservations(
 
 static_assert(std::is_trivially_copyable_v<GeneralizedRuntimeState>,
     "Generalized runtime snapshots must remain allocation-free values");
+static_assert(std::is_trivially_copyable_v<GeneralizedPatrolTargets>,
+    "Generalized patrol targets must remain allocation-free values");
 
 } // namespace ppo::examples::bluedefense::defenders

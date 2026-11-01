@@ -38,7 +38,7 @@ public:
     /**
      * @brief Loads a promoted generalized actor for deterministic inference.
      * @param counts Active P/N composition of the current scenario.
-     * @param checkpoint Strict generalized V8 production checkpoint.
+     * @param checkpoint Strict generalized V9 production checkpoint.
      * @throws std::invalid_argument If @p counts or @p checkpoint is invalid.
      * @throws std::runtime_error If the checkpoint cannot be read.
      */

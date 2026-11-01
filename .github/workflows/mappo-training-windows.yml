@@ -12,18 +12,24 @@ on:
           - blue-defense
           - blue-patrol
       curriculum_enabled:
-        description: "Enable MAPPO staged curriculum with optional rehearsal (V2)"
+        description: "Enable staged curriculum (fresh or resumed)"
+        required: true
+        type: boolean
+        default: true
+      curriculum_version:
+        description: "V3 complete training (observation v9), V2 or V1 legacy"
+        required: true
+        type: choice
+        default: v3
+        options:
+          - v3
+          - v2
+          - v1
+      curriculum_warm_start:
+        description: "One-time V3 import of a V9 checkpoint from resume_run_id (NOT for subsequent V3 resumes)"
         required: true
         type: boolean
         default: false
-      curriculum_version:
-        description: "V2 progressive rehearsal (1000 updates), or legacy sequential V1"
-        required: true
-        type: choice
-        default: v2
-        options:
-          - v2
-          - v1
       max_seconds:
         description: "Training time budget in seconds (leave headroom for build/artifacts)"
         required: true
@@ -154,29 +160,42 @@ jobs:
           MAX_SECONDS: ${{ inputs.max_seconds }}
           RESUME_RUN_ID: ${{ inputs.resume_run_id }}
           CURRICULUM_VERSION: ${{ inputs.curriculum_version }}
+          WARM_START: ${{ inputs.curriculum_warm_start }}
         run: |
           $seconds = 0
           if (-not [int]::TryParse($env:MAX_SECONDS, [ref]$seconds) -or $seconds -lt 1 -or $seconds -gt 18000) {
             throw "max_seconds must be an integer in [1, 18000]"
           }
           $fresh = @()
+          $warm = @()
+          if ($env:WARM_START -eq "true") {
+            if ($env:CURRICULUM_VERSION -ne "v3" -or
+                [string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) {
+              throw "V3 warm start requires curriculum_version=v3 and resume_run_id"
+            }
+            $warm = @("--warm-start")
+          }
           if ([string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) {
+            # Fresh start only resets progress in this runner checkout.
+            Remove-Item "resources/model/BluePatrol/curriculum-progress.json" -Force -ErrorAction SilentlyContinue
             $fresh = @("--fresh-start")
           }
-          $curriculumConfig = if ($env:CURRICULUM_VERSION -eq "v2") {
+          $curriculumConfig = if ($env:CURRICULUM_VERSION -eq "v3") {
+            "resources/settings/Training/BluePatrolCurriculumV3.json"
+          } elseif ($env:CURRICULUM_VERSION -eq "v2") {
             "resources/settings/Training/BluePatrolCurriculumV2.json"
           } else {
             "resources/settings/Training/BluePatrolCurriculum.json"
           }
           Write-Host "Curriculum version=$env:CURRICULUM_VERSION config=$curriculumConfig"
-          python -u tools/ci/mappo_curriculum.py --curriculum $curriculumConfig --max-seconds $seconds @fresh
+          python -u tools/ci/mappo_curriculum.py --curriculum $curriculumConfig --max-seconds $seconds @fresh @warm
           if ($LASTEXITCODE -ne 0) { throw "MAPPO curriculum failed with code $LASTEXITCODE" }
 
       - name: Validate fresh resumable checkpoint
         run: |
           $root = "resources/model/BluePatrol/latest"
-          $training = Join-Path $root "blue_patrol_generalized_training_v5.txt"
-          $actor = Join-Path $root "blue_patrol_generalized_v8.txt"
+          $training = Join-Path $root "blue_patrol_generalized_training_v6.txt"
+          $actor = Join-Path $root "blue_patrol_generalized_v9.txt"
           $start = (Get-Item ".mappo-training-start").LastWriteTimeUtc
           foreach ($path in @($training, $actor)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Checkpoint missing: $path" }
@@ -187,7 +206,7 @@ jobs:
             Write-Host "$path : $($file.Length) bytes"
           }
           $header = Get-Content -LiteralPath $training -TotalCount 1
-          if (-not $header.StartsWith("BLUE_TEAM_TRAINING_V6 ")) {
+          if (-not $header.StartsWith("BLUE_TEAM_TRAINING_V6 6 9 ")) {
             throw "Unexpected full-training checkpoint format"
           }
 
@@ -197,10 +216,10 @@ jobs:
         with:
           name: blue-mappo-checkpoints
           path: |
-            resources/model/BluePatrol/latest/blue_patrol_generalized_v8.txt
-            resources/model/BluePatrol/latest/blue_patrol_generalized_training_v5.txt
-            resources/model/BluePatrol/prod/blue_patrol_generalized_v8.txt
-            resources/model/BluePatrol/prod/blue_patrol_generalized_v8.txt.score
+            resources/model/BluePatrol/latest/blue_patrol_generalized_v9.txt
+            resources/model/BluePatrol/latest/blue_patrol_generalized_training_v6.txt
+            resources/model/BluePatrol/prod/blue_patrol_generalized_v9.txt
+            resources/model/BluePatrol/prod/blue_patrol_generalized_v9.txt.score
             resources/model/BluePatrol/curriculum-progress.json
           if-no-files-found: warn
           retention-days: 30
