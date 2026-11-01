@@ -235,7 +235,7 @@ int main()
     static_assert(RawLayout::BlueTracks == 8U);
     static_assert(RawLayout::ObjectiveTracks == 1U);
     static_assert(RawLayout::Version != LegacyLayout::Version);
-    static_assert(blue::kGeneralizedPolicyCheckpointVersion == 8U);
+    static_assert(blue::kGeneralizedPolicyCheckpointVersion == 9U);
     static_assert(blue::kGeneralizedTrainingCheckpointVersion == 6U);
 
     blue::Observation legacyObservation{};
@@ -487,11 +487,22 @@ int main()
     }
 
     std::string wrongVersion = serializedPolicy;
-    auto const headerVersion = wrongVersion.find("BLUE_TEAM_MAPPO_V8 8");
+    auto const headerVersion = wrongVersion.find("BLUE_TEAM_MAPPO_V9 9");
     if (headerVersion == std::string::npos)
         return 13;
-    wrongVersion[headerVersion + std::string{"BLUE_TEAM_MAPPO_V8 "}.size()]
-        = '9';
+    std::string oldObservation = serializedPolicy;
+    auto const observationHeader = oldObservation.find("BLUE_TEAM_MAPPO_V9 9 9 ");
+    if (observationHeader == std::string::npos)
+        return 16;
+    oldObservation.replace(observationHeader,
+        std::string{"BLUE_TEAM_MAPPO_V9 9 9 "}.size(), "BLUE_TEAM_MAPPO_V9 9 8 ");
+    if (!ThrowsRuntimeError([&] {
+            std::stringstream input{oldObservation};
+            blue::ReadGeneralizedPolicy(input, loadedActor);
+        }))
+        return 17;
+    wrongVersion[headerVersion + std::string{"BLUE_TEAM_MAPPO_V9 "}.size()]
+        = '8';
     if (!ThrowsRuntimeError([&] {
             std::stringstream input{wrongVersion};
             blue::ReadGeneralizedPolicy(input, loadedActor);

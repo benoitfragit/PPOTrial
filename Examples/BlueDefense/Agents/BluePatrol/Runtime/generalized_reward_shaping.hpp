@@ -7,6 +7,7 @@
 #pragma once
 
 #include "generalized_runtime_state.hpp"
+#include "patrol_training_settings.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -328,46 +329,247 @@ inline float GeneralizedPursuitProgress(
         ? Clamp(weightedProgress / totalWeight, -1.F, 1.F) : 0.F;
 }
 
-/**
- * @brief Engagement pressure from nearby reds or danger to the objective.
- * No target is selected; distant harmless tracks do not reward pursuit.
- */
-inline float GeneralizedEngagementWeight(
-    Parameters const& parameters,
-    GeneralizedRuntimeState const& state) noexcept
+/** @brief Individually normalized position, speed and heading errors. */
+struct GeneralizedPatrolError final
 {
-    float nearest = std::numeric_limits<float>::infinity();
-    bool threatPresent = false;
-    for (std::size_t redIndex = 0U; redIndex < state.counts.redMobiles;
-         ++redIndex)
+    float position{};
+    float speed{};
+    float heading{};
+
+    bool InTolerance() const noexcept
     {
-        Mobile const& red = state.reds[redIndex];
-        if (!red.available)
-            continue;
-        threatPresent = true;
-        for (std::size_t blueIndex = 0U; blueIndex < state.counts.blueMobiles;
-             ++blueIndex)
+        return position <= 1.F && speed <= 1.F && heading <= 1.F;
+    }
+
+    float BoundedCost() const noexcept
+    {
+        // A flat clip at one tolerance would remove all guidance for a
+        // distant leader or follower. Rational saturation stays bounded
+        // while preserving a gradient until recovery.
+        auto const saturate = [](float const error) noexcept {
+            return 1.F - 1.F / (1.F + std::max(error, 0.F));
+        };
+        return 0.5F * saturate(position)
+            + 0.3F * saturate(speed)
+            + 0.2F * saturate(heading);
+    }
+};
+
+/** @brief Errors refer only to the appropriate role's projected target. */
+inline GeneralizedPatrolError GeneralizedNoThreatError(
+    GeneralizedRuntimeState const& state,
+    GeneralizedPatrolTarget const& target, std::size_t const physicalIndex,
+    PatrolNoThreatSettings const& settings) noexcept
+{
+    if (!target.valid || physicalIndex >= state.counts.blueMobiles
+        || !state.blues[physicalIndex].available)
+        return {2.F, 2.F, 2.F};
+    Mobile const& blue = state.blues[physicalIndex];
+    return {
+        std::hypot(blue.north - target.pose.north,
+                   blue.east - target.pose.east)
+            / settings.positionToleranceMeters,
+        std::abs(blue.speed - target.speed)
+            / std::max(settings.speedToleranceFraction * target.speed, 1.F),
+        std::abs(std::remainder(
+            blue.heading - target.pose.heading, kPatrolTwoPi))
+            / settings.headingToleranceRadians
+    };
+}
+
+/** @brief Convenience overload; the runtime passes its already-computed target. */
+inline GeneralizedPatrolError GeneralizedNoThreatError(
+    Parameters const& parameters, GeneralizedRuntimeState const& state,
+    BlueTeamRoles const& roles, std::size_t const physicalIndex,
+    PatrolNoThreatSettings const& settings) noexcept
+{
+    return GeneralizedNoThreatError(state,
+        GeneralizedNoThreatTarget(parameters, state, roles, physicalIndex),
+        physicalIndex, settings);
+}
+
+/** @brief Bounded physical advance; projection jumps or station keeping earn zero. */
+inline float GeneralizedPatrolAdvance(
+    Parameters const& parameters, GeneralizedPatrolTarget const& before,
+    GeneralizedPatrolTarget const& after) noexcept
+{
+    if (!before.valid || !after.valid)
+        return 0.F;
+    float const forward = std::remainder(
+        after.pose.arclength - before.pose.arclength,
+        CircuitLength(parameters.geometry));
+    if (forward <= 0.F || forward > 1.5F * parameters.maxSpeed * parameters.dt)
+        return 0.F;
+    return Clamp(forward / std::max(parameters.cruiseSpeed * parameters.dt, 1.F),
+        0.F, 1.F);
+}
+
+/**
+ * @brief Bounded tracking improvement plus correctly flown forward motion.
+ * Targets belong to their respective before/after snapshots. The quality term
+ * is multiplied by physical progress, so parking on the curve earns no bonus.
+ * The runtime compensates the formation-channel weight to keep effective
+ * patrol and formation magnitudes comparable to stepRewardScale.
+ */
+inline float GeneralizedPatrolTransitionShaping(
+    Parameters const& parameters, GeneralizedRuntimeState const& before,
+    GeneralizedRuntimeState const& after,
+    GeneralizedPatrolTargets const& beforeTargets,
+    GeneralizedPatrolTargets const& afterTargets, BlueTeamRoles const& roles,
+    std::size_t const index, PatrolNoThreatSettings const& settings) noexcept
+{
+    if (!settings.enabled || !roles.IsValid()
+        || !Valid(before.counts) || !Valid(after.counts)
+        || roles.ActiveBlueCount() != before.counts.blueMobiles
+        || roles.ActiveBlueCount() != after.counts.blueMobiles
+        || index >= before.counts.blueMobiles
+        || index >= after.counts.blueMobiles
+        || !beforeTargets[index].valid || !afterTargets[index].valid)
+        return 0.F;
+    auto const previous = GeneralizedNoThreatError(
+        before, beforeTargets[index], index, settings);
+    auto const current = GeneralizedNoThreatError(
+        after, afterTargets[index], index, settings);
+    float const cost = current.BoundedCost();
+    float const improvement = Clamp(
+        (previous.BoundedCost() - cost) * settings.positionToleranceMeters
+            / std::max(parameters.cruiseSpeed * parameters.dt, 1.F), -1.F, 1.F);
+    float const tracking = Clamp(1.F - std::max(
+        current.position, std::max(current.speed, current.heading)), 0.F, 1.F);
+    std::size_t const leader = roles.LeaderPhysicalIndex();
+    float const forward = GeneralizedPatrolAdvance(
+        parameters, beforeTargets[leader], afterTargets[leader]);
+    return settings.stepRewardScale * Clamp(
+        0.5F * improvement + forward * (0.25F * (1.F - cost) + 0.75F * tracking)
+            - 0.25F * cost, -1.F, 1.F);
+}
+
+/** @brief All living participants must remain outside each other's sphere. */
+inline bool GeneralizedPatrolSpacingSafe(
+    GeneralizedRuntimeState const& state,
+    float const minimumSeparationMeters) noexcept
+{
+    for (std::size_t i = 0U; i < state.counts.blueMobiles; ++i)
+    {
+        if (!state.blues[i].available)
+            return false;
+        for (std::size_t j = i + 1U; j < state.counts.blueMobiles; ++j)
         {
-            Mobile const& blue = state.blues[blueIndex];
-            if (!blue.available)
-                continue;
-            nearest = std::min(nearest,
-                std::hypot(blue.north - red.north,
-                           blue.east - red.east));
+            Mobile const& first = state.blues[i];
+            Mobile const& second = state.blues[j];
+            if (!second.available ||
+                std::hypot(first.north - second.north,
+                           first.east - second.east) < minimumSeparationMeters)
+                return false;
         }
     }
-    if (!threatPresent)
-        return 0.F;
-    if (!std::isfinite(nearest))
-        return 0.F;
-    float const engagementRange =
-        parameters.defense.teammateThreatDistanceMeters;
-    float const close = Clamp(
-        (2.F * engagementRange - nearest) / engagementRange, 0.F, 1.F);
-    float const pressure = generalized_runtime_detail::ThreatPressure(
-        state, parameters);
-    return std::max(close, pressure);
+    return true;
 }
+
+/**
+ * @brief Accumulates one full physically attainable correctly flown lap.
+ *
+ * Tracking errors consume the configured unqualified-distance budget. Unsafe
+ * separation, reversing or an implausible arc jump reset all progress. No fixed-timestep
+ * stationary hold or nearest-point wrap-around can yield mission success.
+ */
+class GeneralizedPatrolLapProgress final
+{
+public:
+    /** @brief Clears episode diagnostics and accumulated physical distance. */
+    void Reset() noexcept { *this = {}; }
+    bool Completed() const noexcept { return completed_; }
+    float DistanceMeters() const noexcept { return distanceMeters_; }
+    float QualifiedDistanceMeters() const noexcept { return qualifiedMeters_; }
+    std::size_t ResetCount() const noexcept { return resets_; }
+    std::size_t TrackingViolationSteps() const noexcept { return trackingViolations_; }
+    char const* LastResetCause() const noexcept { return resetCause_; }
+
+    /** @brief Reuses the exact snapshot references used by the policy and reward. */
+    bool Observe(
+        Parameters const& parameters, GeneralizedRuntimeState const& before,
+        GeneralizedRuntimeState const& after, BlueTeamRoles const& roles,
+        PatrolNoThreatSettings const& settings,
+        GeneralizedPatrolTargets const& beforeTargets,
+        GeneralizedPatrolTargets const& afterTargets) noexcept
+    {
+        if (!Valid(before.counts) || !Valid(after.counts) || !roles.IsValid()
+            || roles.ActiveBlueCount() != after.counts.blueMobiles
+            || before.counts.blueMobiles != after.counts.blueMobiles)
+            return Invalidate("invalid_contract");
+        if (!settings.enabled)
+            return Invalidate("disabled");
+        if (!GeneralizedPatrolSpacingSafe(after,
+                std::max(settings.minimumSeparationMeters, parameters.collisionDistance)))
+            return Invalidate("loss_or_separation");
+        bool qualified = true;
+        for (std::size_t index = 0U; index < after.counts.blueMobiles; ++index)
+        {
+            if (!afterTargets[index].valid || !GeneralizedNoThreatError(
+                    after, afterTargets[index], index, settings).InTolerance())
+                qualified = false;
+        }
+        if (!qualified)
+        {
+            ++trackingViolations_;
+            if (settings.minimumQualifiedFraction >= 1.F)
+                return Invalidate("tracking");
+        }
+        std::size_t const leader = roles.LeaderPhysicalIndex();
+        if (!beforeTargets[leader].valid || !afterTargets[leader].valid)
+            return Invalidate("invalid_reference");
+        float const circuit = CircuitLength(parameters.geometry);
+        float const forward = std::remainder(
+            afterTargets[leader].pose.arclength - beforeTargets[leader].pose.arclength,
+            circuit);
+        // The displacement check also rejects physically impossible test/runtime jumps.
+        float const displacement = std::hypot(
+            after.blues[leader].north - before.blues[leader].north,
+            after.blues[leader].east - before.blues[leader].east);
+        float const maximum = 1.5F * parameters.maxSpeed * parameters.dt;
+        if (forward <= 0.F || forward > maximum || displacement > maximum)
+            return Invalidate("reverse_stationary_or_jump");
+        distanceMeters_ += forward;
+        if (qualified)
+            qualifiedMeters_ += forward;
+        if (distanceMeters_ >= circuit - 0.25F)
+        {
+            completed_ = qualifiedMeters_ + 0.25F
+                >= settings.minimumQualifiedFraction * distanceMeters_;
+            if (!completed_)
+                return Invalidate("insufficient_qualified_distance");
+        }
+        return completed_;
+    }
+
+    /** @brief Convenience overload for domain tests without a snapshot cache. */
+    bool Observe(
+        Parameters const& parameters, GeneralizedRuntimeState const& before,
+        GeneralizedRuntimeState const& after, BlueTeamRoles const& roles,
+        PatrolNoThreatSettings const& settings) noexcept
+    {
+        return Observe(parameters, before, after, roles, settings,
+            ComputePatrolTargets(parameters, before, roles, settings.lookaheadSeconds),
+            ComputePatrolTargets(parameters, after, roles, settings.lookaheadSeconds));
+    }
+
+private:
+    bool Invalidate(char const* const cause) noexcept
+    {
+        distanceMeters_ = 0.F;
+        qualifiedMeters_ = 0.F;
+        completed_ = false;
+        ++resets_;
+        resetCause_ = cause;
+        return false;
+    }
+    float distanceMeters_{};
+    float qualifiedMeters_{};
+    std::size_t resets_{};
+    std::size_t trackingViolations_{};
+    char const* resetCause_{"none"};
+    bool completed_{};
+};
 
 /** @brief Retain patrol outside engagement and relax it under pressure. */
 inline float GeneralizedCooperationWeight(

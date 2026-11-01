@@ -98,7 +98,7 @@ void CheckAdditionalAssets(fs::path const& root)
         && renderer.at("autoAttachCamera").get<bool>()
         && renderer.at("multipleCameras").get<bool>()
         && !renderer.at("showGrid").get<bool>()
-        && renderer.at("showPseudoLidar").get<bool>()
+        && !renderer.at("showPseudoLidar").get<bool>()
         && renderer.at("camera").at("fovy").get<float>() == 45.F,
         "renderer settings changed during migration");
 
@@ -112,15 +112,17 @@ void CheckAdditionalAssets(fs::path const& root)
         && camera.at("target").at(0).get<double>() == 7.42773962020874
         && camera.at("target").at(1).get<double>() == 0.34999987483024597
         && camera.at("target").at(2).get<double>() == -12.805513381958008
-        && renderer.at("cameraDistance").get<double>() == 45.35300064086914
-        && renderer.at("cameraHeight").get<double>() == 24.687000274658203
+        && renderer.at("cameraDistance").get<double>() == 39.375
+        && renderer.at("cameraHeight").get<double>() == 17.0
         && renderer.at("domainHeight").get<double>() == 2.318000078201294
         && renderer.at("trailDuration").get<double>() == 3.0999999046325684,
         "renderer V2 lost original camera precision");
     Require(!renderer.at("showMinimap").get<bool>()
         && !renderer.at("showEntities").get<bool>()
         && !renderer.at("showInspection").get<bool>()
-        && renderer.at("showSimulation").get<bool>(),
+        && renderer.at("showSimulation").get<bool>()
+        && renderer.at("showPatrolTrack").get<bool>()
+        && !renderer.at("showHardBoundary").get<bool>(),
         "renderer V2 workspace panel defaults changed");
 
     auto const profiles = ppo::serialization::Serializer::Parse(root / "AgentProfiles.json");

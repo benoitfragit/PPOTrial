@@ -9,6 +9,7 @@
 #include "generalized_evaluation_campaign.hpp"
 #include "generalized_runtime_state.hpp"
 #include "generalized_cooperative_reward.hpp"
+#include "generalized_reward_shaping.hpp"
 #include "patrol_training_settings.hpp"
 #include "baseentity.hpp"
 #include "iagent.hpp"
@@ -56,12 +57,9 @@ public:
      * @param parameters Patrol, vehicle, and world parameters.
      * @param training Embedded learner settings.
      * @param executionMode Training or promoted-production inference.
-     * @param actorCheckpoint New generalized v8 actor path.
-     * @param trainingCheckpoint New generalized v5 full-state path.
-     * @param productionCheckpoint Separate promoted generalized v8 actor path.
-     * @param legacyTrainingV4 Read-only historical v4 migration source.
-     * @param legacyLatestV7 Read-only historical v7 migration source.
-     * @param legacyProductionV7 Read-only fallback v7 migration source.
+     * @param actorCheckpoint New generalized v9 actor path.
+     * @param trainingCheckpoint Full V6 state with observation v9.
+     * @param productionCheckpoint Separate promoted generalized v9 actor path.
      */
     GeneralizedPatrolMappoAgent(
         std::array<ppo::model::BaseEntity*,
@@ -76,10 +74,7 @@ public:
         GeneralizedPatrolExecutionMode executionMode,
         std::filesystem::path actorCheckpoint,
         std::filesystem::path trainingCheckpoint,
-        std::filesystem::path productionCheckpoint,
-        std::filesystem::path legacyTrainingV4,
-        std::filesystem::path legacyLatestV7,
-        std::filesystem::path legacyProductionV7);
+        std::filesystem::path productionCheckpoint);
     ~GeneralizedPatrolMappoAgent() override;
 
     GeneralizedPatrolMappoAgent(GeneralizedPatrolMappoAgent const&) = delete;
@@ -136,14 +131,20 @@ private:
     void BuildObservations(
         Parameters const& parameters, GeneralizedRuntimeState const& state,
         std::array<GeneralizedObservation,
-                   TeamCapacity::MaximumBlueMobiles>& observations) const;
+                   TeamCapacity::MaximumBlueMobiles>& observations,
+        GeneralizedPatrolTargets const& targets) const;
 /**
  * @brief Construit, transforme ou échantillonne les données produites par BuildEvaluationSample.
  * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
  */
     GeneralizedEvaluationSample BuildEvaluationSample(
         Parameters const& parameters, GeneralizedRuntimeState const& state,
-        bool missionFailed, bool timeout) const;
+        bool missionFailed, bool timeout, bool patrolCompleted,
+        GeneralizedPatrolTargets const& targets) const;
+    /** @brief Bounded per-episode geometry and weighted reward diagnostics. */
+    void WritePatrolDiagnostics(Parameters const& parameters,
+        GeneralizedRuntimeState const& state,
+        GeneralizedPatrolTargets const& targets, char const* phase) const;
 /**
  * @brief Sérialise ou écrit les données associées à SaveAtUpdateBoundary selon les garanties implémentées.
  * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
@@ -203,12 +204,16 @@ private:
     std::mt19937 trainingRng_{};
 
     GeneralizedRuntimeState beforeStep_{};
+    GeneralizedPatrolTargets beforeTargets_{};
     std::array<Action, TeamCapacity::MaximumBlueMobiles> lastActions_{};
     std::array<bool, TeamCapacity::MaximumBlueMobiles> beforeAvailability_{};
     std::size_t episodeStep_{};
     std::uint64_t lastSavedUpdate_{};
     unsigned long long id_{ppo::model::GetNewUniqId()};
     float currentReward_{};
+    GeneralizedPatrolLapProgress noThreatLap_{};
+    std::array<GeneralizedRewardValues, 2U> roleRewardSums_{};
+    std::array<std::size_t, 2U> roleRewardSteps_{};
     bool hasBeforeStep_{};
     bool episodeDone_{};
     bool finished_{};

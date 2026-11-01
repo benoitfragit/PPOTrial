@@ -63,6 +63,8 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     endif()
     add_test(NAME BlueDefenseInferenceRuntimeSmoke
         COMMAND BlueDefensePatrolRuntimeSmokeTest blue-defense-inference)
+    set_tests_properties(BlueDefenseInferenceRuntimeSmoke PROPERTIES
+        FIXTURES_REQUIRED BlueInferenceActor)
     add_test(NAME BlueDefenseCombatRuntimeSmoke
         COMMAND BlueDefensePatrolRuntimeSmokeTest blue-defense)
 

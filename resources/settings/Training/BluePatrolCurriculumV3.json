@@ -1,0 +1,97 @@
+{
+  "formatVersion": 3,
+  "description": "Complete V3 curriculum from random initialization, observation v9; no run-16 migration. Each later phase rehearses earlier tasks.",
+  "observationVersion": 9,
+  "initialization": "scratch",
+  "totalUpdates": 1200,
+  "rehearsal": {
+    "primaryUpdates": 24,
+    "priorUpdates": 6
+  },
+  "stages": [
+    {
+      "id": "01-hippodrome",
+      "blue": 1,
+      "red": 0,
+      "hostileZones": false,
+      "updates": 160
+    },
+    {
+      "id": "02-wedge",
+      "blue": 2,
+      "red": 0,
+      "hostileZones": false,
+      "updates": 160
+    },
+    {
+      "id": "03-three-slots",
+      "blue": 3,
+      "red": 0,
+      "hostileZones": false,
+      "updates": 80
+    },
+    {
+      "id": "04-four-slots",
+      "blue": 4,
+      "red": 0,
+      "hostileZones": false,
+      "updates": 80
+    },
+    {
+      "id": "05-one-vs-one",
+      "blue": 1,
+      "red": 1,
+      "hostileZones": false,
+      "updates": 100
+    },
+    {
+      "id": "06-one-vs-two",
+      "blue": 1,
+      "red": 2,
+      "hostileZones": false,
+      "updates": 60
+    },
+    {
+      "id": "07-two-vs-one",
+      "blue": 2,
+      "red": 1,
+      "hostileZones": false,
+      "updates": 60
+    },
+    {
+      "id": "08-two-vs-two",
+      "blue": 2,
+      "red": 2,
+      "hostileZones": false,
+      "updates": 100
+    },
+    {
+      "id": "09-three-vs-two",
+      "blue": 3,
+      "red": 2,
+      "hostileZones": true,
+      "updates": 80
+    },
+    {
+      "id": "10-three-vs-three",
+      "blue": 3,
+      "red": 3,
+      "hostileZones": true,
+      "updates": 80
+    },
+    {
+      "id": "11-patrol-hostile-zones",
+      "blue": 4,
+      "red": 0,
+      "hostileZones": true,
+      "updates": 80
+    },
+    {
+      "id": "12-reference-four-vs-four",
+      "blue": 4,
+      "red": 4,
+      "hostileZones": true,
+      "updates": 160
+    }
+  ]
+}

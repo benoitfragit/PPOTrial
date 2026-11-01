@@ -30,15 +30,15 @@ Les poids des récompenses sont identifiés par leur **nom**, puis remis dans l'
 **checkpointEvery: 5** signifie une demande d'évaluation toutes les cinq mises à jour PPO. Les paramètres des campagnes d'évaluation (nbTests, nbSteps) sont dans Scenarios/Evaluation/.
 
 Pour le contrôleur bleu généralisé, **Training/BluePatrol.json** règle le nombre
-de pas d'équipe par rollout (2048 par défaut), la limite de mises à jour, la
+de pas d'équipe par rollout (2048 dans la configuration V3), la limite de mises à jour, la
 graine, la campagne d'évaluation intégrée et les quinze récompenses MAPPO. P
 Bleus produisent P transitions
 par pas d'équipe. Le mini-batch interne de 128 n'est pas la longueur du
 rollout. `checkpointEvery` déclenche la campagne déterministe configurée ; le
 checkpoint de production n'est remplacé qu'après un meilleur score.
 
-Après une mise à jour PPO, `model/BluePatrol/latest/` contient l'acteur v8 et
-`blue_patrol_generalized_training_v5.txt` (état interne V6). Ce dernier permet
+Après une mise à jour PPO, `model/BluePatrol/latest/` contient l'acteur v9 et
+`blue_patrol_generalized_training_v6.txt` (état interne V6). Ce dernier permet
 une vraie reprise de l'acteur,
 du critique, d'Adam, du compteur et du RNG ; le buffer de rollout repart vide.
 `model/BluePatrol/prod/` ne contient que le meilleur acteur évalué.
@@ -48,8 +48,8 @@ Les capacités propres aux défenseurs bleus sont dans
 vitesse initiale et leur référence de patrouille ; les autres champs
 `FlightModel` règlent leurs limites physiques et `SNA` leur domaine
 d'engagement. `MaxRotAcceleration` est exprimé en rad/s. Les valeurs bleues
-reprennent celles de `trainingaircraft` : 0,700000596 rad/s,
-`CruiseSpeed` et `MaxSpeed` à 700 m/s, et `MaxShootAngle` à
+sont propres au scénario Bleu : rotation maximale 0,8 rad/s,
+`CruiseSpeed` à 300 m/s, `MaxSpeed` à 750 m/s, et `MaxShootAngle` à
 3,147198 rad. Ces paramètres ne modifient pas
 `attacker_car` ni RLMission.
 
