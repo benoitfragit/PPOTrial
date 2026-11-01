@@ -23,3 +23,7 @@ jobs:
         run: python -m unittest discover -s tools/ci -p "test_mappo_metrics.py" -v
       - name: MAPPO curriculum Python tests
         run: python -m unittest discover -s tools/ci -p "test_mappo_curriculum.py" -v
+      - name: Blue training diagnostic Python tests
+        env:
+          PYTHONPATH: tools/blue_training_diagnostics
+        run: python -m unittest discover -s tools/blue_training_diagnostics/tests -p "test_*.py" -v

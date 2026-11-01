@@ -119,6 +119,13 @@ jobs:
           python -m unittest discover -s tools/ci -p "test_mappo_curriculum.py" -v
           if ($LASTEXITCODE -ne 0) { throw "MAPPO curriculum tests failed" }
 
+      - name: Validate Blue training diagnostic tool
+        env:
+          PYTHONPATH: tools/blue_training_diagnostics
+        run: |
+          python -m unittest discover -s tools/blue_training_diagnostics/tests -p "test_*.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "Blue diagnostic tests failed" }
+
       - name: Configure independent frequent checkpoints
         env:
           SAVE_EVERY_UPDATES: ${{ inputs.save_every_updates }}
@@ -150,7 +157,7 @@ jobs:
           }
           New-Item -ItemType Directory -Path "build/mappo-telemetry" -Force | Out-Null
           $trainingLog = "build/mappo-telemetry/mappo-training.log"
-          & build/release/Main/Release/PPO.exe --no-gui --example $env:SCENARIO --max-seconds $seconds |
+          & build/release/Main/Release/PPO.exe --no-gui --example $env:SCENARIO --max-seconds $seconds 2>&1 |
             Tee-Object -FilePath $trainingLog
           if ($LASTEXITCODE -ne 0) { throw "Headless training exited with code $LASTEXITCODE" }
 
@@ -252,6 +259,51 @@ jobs:
             Write-Warning "MAPPO telemetry script unavailable (checkout failed?)"
           }
 
+      - name: Record reproducible diagnostic manifest
+        if: always()
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+          CURRICULUM_ENABLED: ${{ inputs.curriculum_enabled }}
+          CURRICULUM_VERSION: ${{ inputs.curriculum_version }}
+          CURRICULUM_WARM_START: ${{ inputs.curriculum_warm_start }}
+          MAX_SECONDS: ${{ inputs.max_seconds }}
+          SAVE_EVERY_UPDATES: ${{ inputs.save_every_updates }}
+          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
+        run: |
+          New-Item -ItemType Directory -Path "build/mappo-telemetry" -Force | Out-Null
+          $hashes = [ordered]@{}
+          foreach ($path in @(
+            "resources/settings/Training/BluePatrol.json",
+            "resources/settings/Training/BluePatrolCurriculumV3.json",
+            "resources/settings/Scenarios/BlueDefense.json"
+          )) {
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+              $hashes[$path] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+          }
+          $manifest = [ordered]@{
+            schema_version = 1
+            repository = "${{ github.repository }}"
+            run_id = [long]"${{ github.run_id }}"
+            run_number = [long]"${{ github.run_number }}"
+            run_attempt = [long]"${{ github.run_attempt }}"
+            head_sha = "${{ github.sha }}"
+            ref = "${{ github.ref }}"
+            generated_utc = [DateTime]::UtcNow.ToString("o")
+            inputs = [ordered]@{
+              scenario = $env:SCENARIO
+              curriculum_enabled = ($env:CURRICULUM_ENABLED -eq "true")
+              curriculum_version = $env:CURRICULUM_VERSION
+              curriculum_warm_start = ($env:CURRICULUM_WARM_START -eq "true")
+              max_seconds = [long]$env:MAX_SECONDS
+              save_every_updates = [long]$env:SAVE_EVERY_UPDATES
+              resume_run_id = $env:RESUME_RUN_ID
+            }
+            configuration_sha256 = $hashes
+          }
+          $manifest | ConvertTo-Json -Depth 8 | Set-Content `
+            -LiteralPath "build/mappo-telemetry/run-manifest.json" -Encoding utf8
+
       - name: Publish MAPPO telemetry CSV and SVG curves
         if: always()
         uses: actions/upload-artifact@v4
@@ -262,7 +314,9 @@ jobs:
             build/mappo-telemetry/mappo-summary.md
             build/mappo-telemetry/mappo-progress.svg
             build/mappo-telemetry/mappo-losses.csv
+            build/mappo-telemetry/mappo-optimizer.csv
             build/mappo-telemetry/mappo-training.log
+            build/mappo-telemetry/run-manifest.json
             build/mappo-telemetry/curriculum-summary.md
             build/mappo-telemetry/curriculum/**
           if-no-files-found: warn

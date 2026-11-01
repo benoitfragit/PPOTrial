@@ -20,10 +20,12 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -46,6 +48,20 @@ struct GeneralizedTrainingDiagnostics final
     float criticDerivativeL1{};
     /** @brief Sum of absolute log-standard-deviation gradients. */
     float logStdGradientL1{};
+    /** @brief Mean negative clipped PPO surrogate over all actor samples. */
+    float policyLoss{};
+    /** @brief Mean squared centralized-value error over all critic samples. */
+    float valueLoss{};
+    /** @brief Mean diagonal-Gaussian policy entropy. */
+    float entropy{};
+    /** @brief Mean non-negative approximate KL estimator. */
+    float approximateKl{};
+    /** @brief Fraction of actor samples outside the PPO clipping interval. */
+    float clipFraction{};
+    /** @brief Fraction of return variance explained by pre-update values. */
+    float explainedVariance{};
+    /** @brief Mean action standard deviation after the completed update. */
+    float actionStdMean{};
 };
 
 /**
@@ -907,6 +923,7 @@ private:
         std::size_t learnable = EstimateGeneralizedAdvantages();
         diagnostics_.learnableTransitions = learnable;
         diagnostics_.criticTransitions = transitions_.size();
+        diagnostics_.explainedVariance = ExplainedVariance();
         if (learnable != 0U)
             NormalizeAdvantages(learnable);
         auto const advantagesDone = Clock::now();
@@ -934,6 +951,7 @@ private:
                       << std::chrono::duration_cast<std::chrono::milliseconds>(
                              Clock::now() - started).count() << std::endl;
         }
+        FinalizeDiagnostics(learnable);
         auto const ended = Clock::now();
         auto const millis = [](Clock::duration duration) {
             return std::chrono::duration_cast<
@@ -947,6 +965,96 @@ private:
                   << " advantages_ms=" << millis(advantagesDone - baselinesDone)
                   << " ppo_ms=" << millis(ended - advantagesDone)
                   << " total_ms=" << millis(ended - started) << std::endl;
+        std::ostringstream metrics;
+        metrics << std::setprecision(9)
+                << "[MAPPO_UPDATE] update=" << completedUpdates_ + 1U
+                << " policy_loss=" << diagnostics_.policyLoss
+                << " value_loss=" << diagnostics_.valueLoss
+                << " entropy=" << diagnostics_.entropy
+                << " approx_kl=" << diagnostics_.approximateKl
+                << " clip_fraction=" << diagnostics_.clipFraction
+                << " explained_variance=" << diagnostics_.explainedVariance
+                << " advantage_abs_mean="
+                << diagnostics_.generalizedAdvantageAbsMean
+                << " actor_derivative_l1=" << diagnostics_.actorDerivativeL1
+                << " critic_derivative_l1=" << diagnostics_.criticDerivativeL1
+                << " log_std_gradient_l1=" << diagnostics_.logStdGradientL1
+                << " action_std_mean=" << diagnostics_.actionStdMean
+                << " learnable=" << diagnostics_.learnableTransitions
+                << " critic_rows=" << diagnostics_.criticTransitions
+                << " total_ms=" << millis(ended - started);
+        std::clog << metrics.str() << std::endl;
+    }
+
+    /**
+     * @brief Computes the critic's pre-update explained variance.
+     * @return Finite value ``1 - Var(return-value)/Var(return)`` or zero when
+     * the return variance is degenerate.
+     */
+    float ExplainedVariance() const noexcept
+    {
+        if (transitions_.empty())
+            return 0.F;
+        float meanReturn = 0.F;
+        float meanResidual = 0.F;
+        for (auto const& transition : transitions_)
+        {
+            meanReturn += transition.returnValue;
+            meanResidual += transition.returnValue - transition.value;
+        }
+        float const inverse = 1.F / static_cast<float>(transitions_.size());
+        meanReturn *= inverse;
+        meanResidual *= inverse;
+        float returnVariance = 0.F;
+        float residualVariance = 0.F;
+        for (auto const& transition : transitions_)
+        {
+            float const centeredReturn = transition.returnValue - meanReturn;
+            float const centeredResidual = transition.returnValue
+                - transition.value - meanResidual;
+            returnVariance += centeredReturn * centeredReturn;
+            residualVariance += centeredResidual * centeredResidual;
+        }
+        returnVariance *= inverse;
+        residualVariance *= inverse;
+        if (returnVariance <= PPOParameters::ADVANTAGE_EPSILON)
+            return 0.F;
+        float const result = 1.F - residualVariance / returnVariance;
+        return std::isfinite(result) ? result : 0.F;
+    }
+
+    /**
+     * @brief Converts accumulated per-sample diagnostics into finite means.
+     * @param learnable Number of unique actor rows in the rollout.
+     */
+    void FinalizeDiagnostics(std::size_t const learnable) noexcept
+    {
+        std::size_t const actorSamples = learnable
+            * static_cast<std::size_t>(PPOParameters::N_EPOCHS);
+        if (actorSamples != 0U)
+        {
+            float const inverse = 1.F / static_cast<float>(actorSamples);
+            diagnostics_.policyLoss *= inverse;
+            diagnostics_.entropy *= inverse;
+            diagnostics_.approximateKl *= inverse;
+            diagnostics_.clipFraction *= inverse;
+        }
+        std::size_t const criticSamples = transitions_.size()
+            * static_cast<std::size_t>(PPOParameters::N_EPOCHS);
+        if (criticSamples != 0U)
+            diagnostics_.valueLoss /= static_cast<float>(criticSamples);
+
+        float standardDeviation = 0.F;
+        for (Index action = 0;
+             action < static_cast<Index>(
+                          GeneralizedObservationLayout::ActionSize);
+             ++action)
+        {
+            standardDeviation += std::exp(
+                rlt::get(actor_.log_std.parameters, 0, action));
+        }
+        diagnostics_.actionStdMean = standardDeviation
+            / static_cast<float>(GeneralizedObservationLayout::ActionSize);
     }
 
 /**
@@ -1140,11 +1248,19 @@ private:
             float const ratio = std::exp(std::clamp(
                 currentLogProbability - transition->oldLogProbability,
                 -20.F, 20.F));
+            float const logRatio = std::clamp(
+                currentLogProbability - transition->oldLogProbability,
+                -20.F, 20.F);
             float const clipped = std::clamp(
                 ratio, 1.F - PPOParameters::EPSILON_CLIP,
                 1.F + PPOParameters::EPSILON_CLIP);
             float const surrogate = ratio * transition->advantage;
             float const clippedSurrogate = clipped * transition->advantage;
+            diagnostics_.policyLoss -= std::min(surrogate, clippedSurrogate);
+            diagnostics_.approximateKl += std::max(
+                0.F, ratio - 1.F - logRatio);
+            if (std::abs(ratio - 1.F) > PPOParameters::EPSILON_CLIP)
+                diagnostics_.clipFraction += 1.F;
             float const logProbabilityDerivative =
                 surrogate <= clippedSurrogate
                     ? -transition->advantage * ratio
@@ -1159,6 +1275,8 @@ private:
                     trainingActorOutput_, row, action);
                 float const logStd = rlt::get(
                     actor_.log_std.parameters, 0, action);
+                diagnostics_.entropy += logStd
+                    + 0.5F * (1.F + std::log(kTwoPi));
                 float const variance = std::exp(2.F * logStd);
                 float const difference = transition->action[action] - mean;
                 float const derivative =
@@ -1200,8 +1318,10 @@ private:
             if (transition == nullptr)
                 continue;
             float const value = rlt::get(trainingCriticOutput_, row, 0);
+            float const difference = value - transition->returnValue;
+            diagnostics_.valueLoss += difference * difference;
             float const derivative =
-                2.F * (value - transition->returnValue)
+                2.F * difference
                 / static_cast<float>(criticRows);
             rlt::set(trainingCriticDerivative_, row, 0, derivative);
             diagnostics_.criticDerivativeL1 += std::abs(derivative);

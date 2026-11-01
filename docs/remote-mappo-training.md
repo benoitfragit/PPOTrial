@@ -70,6 +70,38 @@ launches training and publishes downloadable artifacts. A fresh output
 checkpoint is required for a successful training job. Artifact retention is
 30 days; download useful states before expiry.
 
+Each new telemetry artifact also contains `run-manifest.json`, with the run,
+commit, workflow inputs and configuration SHA-256 hashes needed to audit
+comparisons. `mappo-optimizer.csv` records per-update policy/value loss,
+entropy, approximate KL, clipping fraction, explained variance, action standard
+deviation, derivative activity and optimizer duration. Older artifacts without
+these files remain supported by the local diagnostic tool.
+
+## Local download and diagnostic UI
+
+On Windows, double-click:
+
+```text
+tools\blue_training_diagnostics\Lancer_Diagnostic_Blue.bat
+```
+
+The standard-library-only Tkinter application lists this workflow's runs,
+downloads the two Blue artifacts into the user's known Downloads folder,
+generates a standalone HTML/SVG diagnostic, and compares two selected runs.
+No Python package installation is required. Artifact downloads reuse the
+existing Git/Git Extensions authentication through Git Credential Manager.
+The credential is held in memory only and is never displayed, logged or stored
+by the application.
+
+The report consumes the detailed evaluation, patrol, per-role reward, Blue
+loss, status and optimizer timing markers. Comparison pairs only identical
+`P/N + seed + case` observations when showing case-level deltas.
+
+See [Blue Training Diagnostics](../tools/blue_training_diagnostics/README.md)
+for the metrics, security controls, tests and comparison rules. In particular,
+scores or rewards from different curriculum levels and P/N contexts are never
+presented as directly comparable quality evidence.
+
 GitHub-hosted runners have limited job duration, so the default time budget is
 4 hours, allowing headroom for building and packaging. Workflow execution is
 **manual**, not automatic; it must be started by the user. A new workflow with

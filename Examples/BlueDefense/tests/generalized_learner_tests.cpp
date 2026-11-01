@@ -232,6 +232,14 @@ bool VerifyDeadActorMask()
         && diagnostics.criticTransitions == 2U
         && diagnostics.actorDerivativeL1 == 0.F
         && diagnostics.logStdGradientL1 == 0.F
+        && diagnostics.policyLoss == 0.F
+        && diagnostics.entropy == 0.F
+        && diagnostics.approximateKl == 0.F
+        && diagnostics.clipFraction == 0.F
+        && diagnostics.valueLoss > 0.F
+        && std::isfinite(diagnostics.explainedVariance)
+        && std::isfinite(diagnostics.actionStdMean)
+        && diagnostics.actionStdMean > 0.F
         && diagnostics.criticDerivativeL1 > 0.F
         && means == learner.EvaluateActions(observations, alive);
 }
@@ -353,6 +361,18 @@ bool VerifyTeamSize(blue::ActiveTeamCounts const counts)
         && diagnostics.actorDerivativeL1 > 0.F
         && diagnostics.criticDerivativeL1 > 0.F
         && diagnostics.logStdGradientL1 > 0.F
+        && std::isfinite(diagnostics.policyLoss)
+        && std::isfinite(diagnostics.valueLoss)
+        && diagnostics.valueLoss >= 0.F
+        && std::isfinite(diagnostics.entropy)
+        && std::isfinite(diagnostics.approximateKl)
+        && diagnostics.approximateKl >= 0.F
+        && std::isfinite(diagnostics.clipFraction)
+        && diagnostics.clipFraction >= 0.F
+        && diagnostics.clipFraction <= 1.F
+        && std::isfinite(diagnostics.explainedVariance)
+        && std::isfinite(diagnostics.actionStdMean)
+        && diagnostics.actionStdMean > 0.F
         && std::isfinite(updatedLogStd) && updatedLogStd != initialLogStd;
 }
 

@@ -10,7 +10,7 @@ import math
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 FIELDS = (
     "elapsed_seconds", "updates", "rollout_steps", "rollout_target",
@@ -134,6 +134,48 @@ LOSS_FIELDS = (
     "fuel_remaining", "fuel_capacity",
 )
 
+UPDATE_FIELDS = (
+    "update", "policy_loss", "value_loss", "entropy", "approx_kl",
+    "clip_fraction", "explained_variance", "advantage_abs_mean",
+    "actor_derivative_l1", "critic_derivative_l1", "log_std_gradient_l1",
+    "action_std_mean", "learnable", "critic_rows", "total_ms",
+)
+
+
+def read_optimizer_updates(path: Path) -> List[Dict[str, float]]:
+    """Read finite, per-update PPO diagnostics from the training log."""
+    if not path.is_file():
+        return []
+    updates: Dict[int, Dict[str, float]] = {}
+    with path.open("r", encoding="utf-8-sig", errors="replace") as stream:
+        for line in stream:
+            if "[MAPPO_UPDATE]" not in line:
+                continue
+            payload = line.split("[MAPPO_UPDATE]", 1)[1]
+            fields = dict(token.split("=", 1)
+                          for token in payload.split() if "=" in token)
+            if not all(name in fields for name in UPDATE_FIELDS):
+                continue
+            try:
+                record = {name: float(fields[name]) for name in UPDATE_FIELDS}
+            except ValueError:
+                continue
+            if not all(math.isfinite(value) for value in record.values()):
+                continue
+            update = int(record["update"])
+            if update >= 0:
+                updates[update] = record
+    return [updates[key] for key in sorted(updates)]
+
+
+def write_optimizer_csv(updates: List[Dict[str, float]], out: Path) -> None:
+    """Write normalized optimizer diagnostics for offline analysis."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=UPDATE_FIELDS)
+        writer.writeheader()
+        writer.writerows(updates)
+
 
 def read_eval_losses(path: Path) -> List[Dict[str, str]]:
     """Read one diagnostic record for each newly destroyed evaluation Blue."""
@@ -237,8 +279,9 @@ def evaluation_summary(episodes: List[Dict[str, str]]) -> List[str]:
 
 
 def summary(rows: List[Dict[str, float]], run_url: str,
-            eval_episodes: List[Dict[str, str]] | None = None,
-            eval_losses: List[Dict[str, str]] | None = None) -> str:
+            eval_episodes: Optional[List[Dict[str, str]]] = None,
+            eval_losses: Optional[List[Dict[str, str]]] = None,
+            optimizer_updates: Optional[List[Dict[str, float]]] = None) -> str:
     last = rows[-1] if rows else None
     updates = int(max((r["updates"] for r in rows), default=0))
     longest_stagnation = 0.0
@@ -289,6 +332,25 @@ def summary(rows: List[Dict[str, float]], run_url: str,
         lines.extend(["", "### Blue flight-model loss diagnostics", ""])
         lines.extend(evaluation_loss_summary(
             eval_losses, eval_episodes or []))
+    if optimizer_updates is not None:
+        lines.extend(["", "### PPO optimizer diagnostics", ""])
+        if optimizer_updates:
+            latest = optimizer_updates[-1]
+            lines.extend([
+                f"Updates instrumented: **{len(optimizer_updates)}**; latest "
+                f"policy loss: **{latest['policy_loss']:.5f}**, value loss: "
+                f"**{latest['value_loss']:.5f}**, entropy: "
+                f"**{latest['entropy']:.5f}**.",
+                f"Latest approximate KL: **{latest['approx_kl']:.5f}**; "
+                f"clip fraction: **{latest['clip_fraction']:.2%}**; explained "
+                f"variance: **{latest['explained_variance']:.5f}**.",
+                "Full per-update evidence: mappo-optimizer.csv.",
+            ])
+        else:
+            lines.append(
+                "No per-update optimizer diagnostics "
+                "(legacy run or no completed update)."
+            )
     if run_url:
         lines.extend([
             "",
@@ -316,10 +378,13 @@ def main() -> None:
     write_chart(rows, args.out / "mappo-progress.svg")
     evaluation = read_eval_episodes(args.log) if args.log else None
     losses = read_eval_losses(args.log) if args.log else None
+    optimizer = read_optimizer_updates(args.log) if args.log else None
     if losses is not None:
         write_loss_csv(losses, args.out / "mappo-losses.csv")
+    if optimizer is not None:
+        write_optimizer_csv(optimizer, args.out / "mappo-optimizer.csv")
     result = summary(rows, os.environ.get("MAPPO_RUN_URL", ""),
-                     evaluation, losses)
+                     evaluation, losses, optimizer)
     (args.out / "mappo-summary.md").write_text(result, encoding="utf-8")
     # GitHub's Windows runner can expose a CP1252 stdout even though the
     # summary includes Unicode sparkline blocks.

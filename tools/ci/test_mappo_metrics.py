@@ -9,7 +9,8 @@ from pathlib import Path
 
 from mappo_metrics import (
     FIELDS, evaluation_loss_summary, evaluation_summary, read_eval_episodes,
-    read_eval_losses, read_rows, sparkline, summary, write_chart, write_loss_csv,
+    read_eval_losses, read_optimizer_updates, read_rows, sparkline, summary,
+    write_chart, write_loss_csv, write_optimizer_csv,
 )
 
 
@@ -142,6 +143,35 @@ class MappoMetricsTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertIn("▁", completed.stdout)
 
+    def test_optimizer_diagnostics_are_finite_and_exported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            log = root / "training.log"
+            valid = (
+                "[MAPPO_UPDATE] update=7 policy_loss=-0.12 value_loss=0.8 "
+                "entropy=2.1 approx_kl=0.014 clip_fraction=0.2 "
+                "explained_variance=0.45 advantage_abs_mean=1.2 "
+                "actor_derivative_l1=3 critic_derivative_l1=4 "
+                "log_std_gradient_l1=5 action_std_mean=0.61 learnable=20 "
+                "critic_rows=24 total_ms=1450\n"
+            )
+            log.write_text(
+                valid
+                + valid.replace("update=7", "update=8").replace("0.014", "nan"),
+                encoding="utf-8",
+            )
+            updates = read_optimizer_updates(log)
+            self.assertEqual(len(updates), 1)
+            self.assertEqual(updates[0]["update"], 7.0)
+            self.assertEqual(updates[0]["clip_fraction"], 0.2)
+            output = root / "optimizer.csv"
+            write_optimizer_csv(updates, output)
+            with output.open(encoding="utf-8", newline="") as stream:
+                exported = list(csv.DictReader(stream))
+            self.assertEqual(exported[0]["total_ms"], "1450.0")
+            report = summary([], "", optimizer_updates=updates)
+            self.assertIn("PPO optimizer diagnostics", report)
+            self.assertIn("mappo-optimizer.csv", report)
 
 
 if __name__ == "__main__":
