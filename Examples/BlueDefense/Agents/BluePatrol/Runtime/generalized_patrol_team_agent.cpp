@@ -866,7 +866,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                 training_.noThreatPatrol, beforeTargets_, frozenAfterTargets);
         }
         auto const outcome = generalized_episode_detail::EvaluateOutcome(
-            after, pendingThreats, waypointSequencer_, lapCompleted,
+            after, pendingThreats, waypointSequencer_, leaderIndex, lapCompleted,
             training_.noThreatPatrol, parameters.dt, episodeStep_,
             evaluation_.InProgress()
                 ? training_.evaluation.maxSteps : parameters.episodeSteps);

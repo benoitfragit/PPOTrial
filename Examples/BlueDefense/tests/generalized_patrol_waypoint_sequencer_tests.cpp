@@ -160,7 +160,8 @@ bool RallyAndGeneration()
         && Near(sequencer.Waypoints()[0].pose.arclength, 1700.F + spacing);
 }
 
-bool CompleteSequence(int const direction, std::size_t const blueCount)
+bool CompleteSequence(int const direction, std::size_t const blueCount,
+                      bool const wingmanOffFormation = false)
 {
     blue::Parameters parameters = TestParameters(direction);
     auto const roles = *blue::BlueTeamRoles::Create(
@@ -181,8 +182,14 @@ bool CompleteSequence(int const direction, std::size_t const blueCount)
     {
         auto const before = StateAt(
             parameters, roles, circuit * static_cast<float>(step) / steps);
-        auto const after = StateAt(parameters, roles,
+        auto after = StateAt(parameters, roles,
             circuit * static_cast<float>(step + 1U) / steps);
+        if (wingmanOffFormation && blueCount > 1U)
+        {
+            // Wingman violations must not block physically crossed leader gates.
+            after.blues[0].heading += 1.F;
+            after.blues[0].speed += 100.F;
+        }
         sequencer.Observe(parameters, before, after, roles, settings);
         std::size_t const count = sequencer.ValidatedWaypointCount();
         if (count < previousCount || count > previousCount + 1U)
@@ -219,8 +226,13 @@ bool NoPrematureAdvanceOrShortcut()
     shortcut.Observe(parameters, start, halfway, roles, settings);
     // A physically impossible branch-cut shortcut invalidates the lap and
     // cannot advance WPT1.
-    return shortcut.ValidatedWaypointCount() == 0U
-        && !shortcut.CircuitValid();
+    if (shortcut.ValidatedWaypointCount() != 0U
+        || shortcut.CircuitValid() || shortcut.Following()
+        || shortcut.ActiveWaypoint() != nullptr)
+        return false;
+    // Recovery starts a new lap and never inherits the shortcut's progress.
+    return EnterFollow(shortcut, parameters, halfway, roles, settings)
+        && shortcut.CircuitValid() && shortcut.ValidatedWaypointCount() == 0U;
 }
 
 bool OrbitCannotAdvanceSequence()
@@ -266,8 +278,8 @@ bool OrbitCannotAdvanceSequence()
         sequencer.Observe(parameters, previous, current, roles, settings);
         previous = current;
     }
-    return sequencer.ValidatedWaypointCount() == 1U
-        && !sequencer.Completed();
+    // Recovery may restart at WPT1; local orbiting must never complete a lap.
+    return !sequencer.Completed();
 }
 
 bool WedgeAndCombatCompatibility()
@@ -349,6 +361,14 @@ int main()
                 std::cerr << "sequence direction=" << direction
                           << " P=" << count << '\n';
                 return 2;
+            }
+    for (int direction : {-1, 1})
+        for (std::size_t count : {2U, 3U, 4U, 9U})
+            if (!CompleteSequence(direction, count, true))
+            {
+                std::cerr << "wingman-independent waypoint direction="
+                          << direction << " P=" << count << '\n';
+                return 7;
             }
     if (!NoPrematureAdvanceOrShortcut()) { std::cerr << "shortcut\n"; return 3; }
     if (!OrbitCannotAdvanceSequence()) { std::cerr << "orbit\n"; return 4; }

@@ -302,15 +302,14 @@ struct GeneralizedPatrolTarget final
 using GeneralizedPatrolTargets = std::array<GeneralizedPatrolTarget,
     TeamCapacity::MaximumBlueMobiles>;
 
-/** @brief Pvs0 requires the complete team; combat may continue with survivors. */
-inline bool GeneralizedNoThreatTeamLost(GeneralizedRuntimeState const& state) noexcept
+/** @brief Pvs0 fails on leader loss; wingman loss keeps its own penalty. */
+inline bool GeneralizedNoThreatTeamLost(
+    GeneralizedRuntimeState const& state,
+    std::size_t const leaderPhysicalIndex) noexcept
 {
-    if (state.counts.redMobiles > 0U)
-        return false;
-    for (std::size_t index = 0U; index < state.counts.blueMobiles; ++index)
-        if (!state.blues[index].available)
-            return true;
-    return false;
+    return state.counts.redMobiles == 0U
+        && (leaderPhysicalIndex >= state.counts.blueMobiles
+            || !state.blues[leaderPhysicalIndex].available);
 }
 
 /** @brief Reject non-finite geometry before advertising a virtual target. */

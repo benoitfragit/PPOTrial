@@ -563,34 +563,13 @@ inline float GeneralizedPatrolConvergenceShaping(
         -1.F, 1.F);
 }
 
-/** @brief All living participants must remain outside each other's sphere. */
-inline bool GeneralizedPatrolSpacingSafe(
-    GeneralizedRuntimeState const& state,
-    float const minimumSeparationMeters) noexcept
-{
-    for (std::size_t i = 0U; i < state.counts.blueMobiles; ++i)
-    {
-        if (!state.blues[i].available)
-            return false;
-        for (std::size_t j = i + 1U; j < state.counts.blueMobiles; ++j)
-        {
-            Mobile const& first = state.blues[i];
-            Mobile const& second = state.blues[j];
-            if (!second.available ||
-                std::hypot(first.north - second.north,
-                           first.east - second.east) < minimumSeparationMeters)
-                return false;
-        }
-    }
-    return true;
-}
-
 /**
  * @brief Accumulates one full physically attainable correctly flown lap.
  *
- * Tracking errors consume the configured unqualified-distance budget. Unsafe
- * separation, reversing or an implausible arc jump reset all progress. No fixed-timestep
- * stationary hold or nearest-point wrap-around can yield mission success.
+ * Only the leader qualifies the circuit; wingmen retain their own formation
+ * and collision rewards. Leader tracking errors consume the unqualified-distance
+ * budget. Reversing or implausible projection jumps reset progress. Station
+ * keeping or a projection wrap-around cannot yield mission success.
  */
 class GeneralizedPatrolLapProgress final
 {
@@ -618,23 +597,19 @@ public:
             return Invalidate("invalid_contract");
         if (!settings.enabled)
             return Invalidate("disabled");
-        if (!GeneralizedPatrolSpacingSafe(after,
-                std::max(settings.minimumSeparationMeters, parameters.collisionDistance)))
-            return Invalidate("loss_or_separation");
-        bool qualified = true;
-        for (std::size_t index = 0U; index < after.counts.blueMobiles; ++index)
-        {
-            if (!afterTargets[index].valid || !GeneralizedNoThreatError(
-                    after, afterTargets[index], index, settings).InTolerance())
-                qualified = false;
-        }
+        std::size_t const leader = roles.LeaderPhysicalIndex();
+        if (leader >= before.counts.blueMobiles
+            || !before.blues[leader].available || !after.blues[leader].available)
+            return Invalidate("leader_lost");
+        bool const qualified = afterTargets[leader].valid
+            && GeneralizedNoThreatError(
+                after, afterTargets[leader], leader, settings).InTolerance();
         if (!qualified)
         {
             ++trackingViolations_;
             if (settings.minimumQualifiedFraction >= 1.F)
                 return Invalidate("tracking");
         }
-        std::size_t const leader = roles.LeaderPhysicalIndex();
         if (!beforeTargets[leader].valid || !afterTargets[leader].valid)
             return Invalidate("invalid_reference");
         float const circuit = CircuitLength(parameters.geometry);
