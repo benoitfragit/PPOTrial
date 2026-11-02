@@ -94,14 +94,20 @@ bool TerminalRewards(blue::BlueTeamRoles const& roles,
         || rewards.team.values[timeout] != expectedTimeout)
         return false;
     for (std::size_t index = 0U; index < roles.ActiveBlueCount(); ++index)
-        if (rewards.perBlue[index].values[mission] != expectedOutcome
+    {
+        float const individualOutcome = outcome.patrolCompleted
+            && index != roles.LeaderPhysicalIndex() ? 0.F : expectedOutcome;
+        if (rewards.perBlue[index].values[mission] != individualOutcome
             || rewards.perBlue[index].values[timeout] != expectedTimeout)
             return false;
+    }
     return true;
 }
 
 /** @brief Exercises the same frozen references and terminal resolver as the agent. */
-bool CompleteLap(int const direction, std::size_t const blueCount)
+bool CompleteLap(int const direction, std::size_t const blueCount,
+                 bool const wingmanOffFormation = false,
+                 bool const wingmanLost = false)
 {
     auto const parameters = TestParameters(direction);
     auto const roles = *blue::BlueTeamRoles::Create(blueCount, blueCount - 1U);
@@ -117,8 +123,15 @@ bool CompleteLap(int const direction, std::size_t const blueCount)
     auto const steps = static_cast<std::size_t>(std::ceil(circuit / 60.F));
     for (std::size_t step = 1U; step <= steps; ++step)
     {
-        auto const after = StateAt(parameters, roles,
+        auto after = StateAt(parameters, roles,
             circuit * static_cast<float>(step) / static_cast<float>(steps));
+        if (blueCount > 1U && wingmanOffFormation)
+        {
+            after.blues[0].heading += 1.F;
+            after.blues[0].speed += 100.F;
+        }
+        if (blueCount > 1U && wingmanLost)
+            after.blues[0].available = false;
         auto const targets = sequencer.Targets(parameters, before, roles, settings);
         auto const frozen = blue::ComputePatrolWaypointTargets(parameters, after,
             roles, targets[roles.LeaderPhysicalIndex()].guidancePose);
@@ -126,6 +139,7 @@ bool CompleteLap(int const direction, std::size_t const blueCount)
         bool const lapCompleted = lap.Observe(
             parameters, before, after, roles, settings, targets, frozen);
         auto const outcome = episode::EvaluateOutcome(after, false, sequencer,
+            roles.LeaderPhysicalIndex(),
             lapCompleted, settings, parameters.dt, step + 2U, 4096U);
         bool const final = step == steps;
         if (outcome.patrolCompleted != final || outcome.terminated != final
@@ -135,16 +149,20 @@ bool CompleteLap(int const direction, std::size_t const blueCount)
         before = after;
     }
     auto const success = episode::EvaluateOutcome(before, false, sequencer,
+            roles.LeaderPhysicalIndex(),
         lap.Completed(), settings, parameters.dt, 2400U, 4096U);
     if (!success.terminated || success.truncated
         || std::strcmp(success.DiagnosticCause(), "success") != 0
-        || episode::EvaluateOutcome(before, false, sequencer, false,
+        || episode::EvaluateOutcome(before, false, sequencer,
+            roles.LeaderPhysicalIndex(), false,
             settings, parameters.dt, steps, 4096U).patrolCompleted
-        || episode::EvaluateOutcome(before, true, sequencer, true,
+        || episode::EvaluateOutcome(before, true, sequencer,
+            roles.LeaderPhysicalIndex(), true,
             settings, parameters.dt, steps, 4096U).patrolCompleted)
         return false;
     blue::GeneralizedPatrolWaypointSequencer incomplete{};
-    return !episode::EvaluateOutcome(before, false, incomplete, true,
+    return !episode::EvaluateOutcome(before, false, incomplete,
+            roles.LeaderPhysicalIndex(), true,
             settings, parameters.dt, steps, 4096U).patrolCompleted
         && blue::GeneralizedMissionAdvantage(2.F, 3.F, 4.F, 100.F,
             0.9F, 0.8F, success.terminated, success.truncated) == -1.F;
@@ -170,6 +188,7 @@ bool TimeoutAndFailure()
             completed = lap.Observe(parameters, state, state, roles, settings,
                 targets, targets);
         auto const outcome = episode::EvaluateOutcome(state, false, sequencer,
+            roles.LeaderPhysicalIndex(),
             completed, settings, parameters.dt, step, 4096U);
         if (outcome.terminated || outcome.missionFailed || outcome.patrolCompleted
             || outcome.truncated != (step == 2400U)
@@ -185,6 +204,7 @@ bool TimeoutAndFailure()
     auto const before = state;
     state.blues[0].available = false;
     auto const failure = episode::EvaluateOutcome(state, false, sequencer,
+            roles.LeaderPhysicalIndex(),
         false, settings, parameters.dt, 2400U, 4096U);
     return failure.missionFailed && failure.terminated && !failure.truncated
         && std::strcmp(failure.DiagnosticCause(), "failure") == 0
@@ -205,17 +225,20 @@ bool CombatAndPendingThreats()
         for (std::size_t red = 0U; red < redCount; ++red)
             state.reds[red].available = false;
         auto const pending = episode::EvaluateOutcome(state, true, sequencer,
+            roles.LeaderPhysicalIndex(),
             false, settings, parameters.dt, 2400U, 4096U);
         if (pending.terminated || pending.truncated || pending.noThreatRemains
             || !TerminalRewards(roles, state, state, pending, 0.F, 0.F, true))
             return false;
         auto const pendingTimeout = episode::EvaluateOutcome(state, true, sequencer,
+            roles.LeaderPhysicalIndex(),
             false, settings, parameters.dt, 4096U, 4096U);
         if (pendingTimeout.terminated || !pendingTimeout.truncated
             || !TerminalRewards(roles, state, state, pendingTimeout, 0.F, -1.F, true))
             return false;
         state.reds[0].available = true;
         auto const combat = episode::EvaluateOutcome(state, false, sequencer,
+            roles.LeaderPhysicalIndex(),
             false, settings, parameters.dt, 2400U, 4096U);
         if (combat.terminated || combat.truncated)
             return false;
@@ -223,6 +246,7 @@ bool CombatAndPendingThreats()
         state.reds[0].available = false;
         state.failed = true; // Existing victory precedence at a boundary exit.
         auto const victory = episode::EvaluateOutcome(state, false, sequencer,
+            roles.LeaderPhysicalIndex(),
             false, settings, parameters.dt, 4096U, 4096U);
         if (!victory.noThreatRemains || !victory.terminated || victory.truncated
             || victory.missionFailed || victory.patrolCompleted
@@ -230,7 +254,8 @@ bool CombatAndPendingThreats()
             || !TerminalRewards(roles, before, state, victory, 1.F, 0.F))
             return false;
         state.objectiveAvailable = false;
-        if (!episode::EvaluateOutcome(state, false, sequencer, false,
+        if (!episode::EvaluateOutcome(state, false, sequencer,
+            roles.LeaderPhysicalIndex(), false,
                 settings, parameters.dt, 4096U, 4096U).missionFailed)
             return false;
         state.failed = false;
@@ -249,6 +274,17 @@ int main()
                 std::cerr << "lap/reward direction=" << direction << " P=" << count << '\n';
                 return 1;
             }
+    for (int direction : {-1, 1})
+        for (std::size_t count : {3U, 9U})
+        {
+            if (!CompleteLap(direction, count, true, false)
+                || !CompleteLap(direction, count, false, true))
+            {
+                std::cerr << "leader independent lap direction=" << direction
+                          << " P=" << count << '\n';
+                return 4;
+            }
+        }
     if (!TimeoutAndFailure()) { std::cerr << "timeout/failure\n"; return 2; }
     if (!CombatAndPendingThreats()) { std::cerr << "combat/pending\n"; return 3; }
     return 0;

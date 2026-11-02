@@ -19,9 +19,10 @@ Trois conséquences sont explicites :
 2. La taille de l'observation ne change pas, mais la sémantique temporelle de
    ses colonnes de patrouille change. Les poids V9 du run 22 sont incompatibles
    avec V10 ; aucun chargement ou warm start silencieux n'est autorisé.
-3. RALLY → FOLLOW est irréversible pour le tour. L'hystérésis à deux seuils
-   stabilise l'acquisition du couloir avant cette transition ; elle ne crée pas
-   d'oscillation de mode après la génération.
+3. La transition RALLY → FOLLOW est stable tant que la progression physique
+   reste valide. Un saut impossible ou une inversion significative annule le
+   tour courant et revient en RALLY pour préparer une nouvelle séquence. Aucun
+   waypoint de l'ancien tour n'est crédité à la nouvelle tentative.
 
 RLMission, la physique, les comportements Rouges, les capacités P=1..9 et
 N=0..10 et les fonctions de reward ne sont pas modifiés.
@@ -60,15 +61,17 @@ Une validation exige simultanément :
 - le franchissement dirigé du plan tangent et la proximité du segment de pas ;
 - la distance cumulée requise, ce qui interdit de couper entre les deux
   branches proches de l'hippodrome ;
-- les tolérances existantes de piste, cap, vitesse, wedge et séparation pour
-  tous les Bleus.
+- une qualification de distance, cap et vitesse du **leader seul** sur
+  au moins 95 % du tour, indépendamment du passage des waypoints.
+  Les équipiers conservent leurs propres rewards de wedge et de séparation.
 
 Le rayon de passage est borné par un quart de l'espacement entre waypoints et
 s'adapte à la tolérance de position ainsi qu'à la distance parcourue en deux
-pas. Un saut impossible ou un retour significatif invalide le tour sans
-rembobiner l'index. WPT10 exige presque une longueur de circuit complète et ne
-produit `patrolCompleted` que lorsque le validateur physique historique
-confirme le même tour. Tourner autour d'un ancien waypoint ne peut donc ni
+pas. Un saut impossible, un retour significatif ou un passage manqué invalide le
+tour et déclenche une nouvelle acquisition RALLY. WPT10 exige presque une
+longueur de circuit complète et ne produit `patrolCompleted` que lorsque
+le validateur physique du **leader** confirme le même tour. Tourner autour
+d'un ancien waypoint ne peut donc ni
 accumuler dix validations ni produire le succès terminal.
 
 ## Reward, timeout et terminaison
@@ -76,7 +79,11 @@ accumuler dix validations ni produire le succès terminal.
 La projection instantanée reste dans `PatrolTarget::pose`; le waypoint figé est
 dans `guidancePose`. `GeneralizedPatrolConvergenceShaping()` et les autres
 fonctions de reward ne sont pas modifiés. Le succès WPT10 réutilise le canal
-terminal `Mission outcome` existant.
+terminal `Mission outcome` existant,
+attribué au leader pour un scénario N=0. Les équipiers conservent
+`Formation keeping`, `Blue separation` et `Own loss` inchangés.
+La disparition d'un équipier ne supprime pas le succès du leader survivant ;
+la disparition du leader reste un échec sans Rouge.
 
 Pour N=0, `rewards.noThreatPatrol.maxEpisodeSeconds` vaut 480 par défaut. La
 limite est convertie avec `ceil(seconds / dt)` puis bornée par la limite

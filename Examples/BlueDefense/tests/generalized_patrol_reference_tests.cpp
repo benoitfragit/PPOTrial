@@ -217,7 +217,7 @@ bool ShapingAndLaps()
                 before = OnTargets(parameters, roles, circuit * step / segments);
                 after = OnTargets(parameters, roles, circuit * (step + 1U) / segments);
                 if (transient && step < 20U)
-                    after.blues[0].speed = 0.F;
+                    after.blues[roles.LeaderPhysicalIndex()].speed = 0.F;
                 completed = lap.Observe(parameters, before, after, roles, settings);
                 if (completed && step + 1U != segments)
                     return false;
@@ -231,7 +231,7 @@ bool ShapingAndLaps()
     {
         before = OnTargets(parameters, roles, circuit * step / segments);
         after = OnTargets(parameters, roles, circuit * (step + 1U) / segments);
-        after.blues[0].speed = 0.F;
+        after.blues[roles.LeaderPhysicalIndex()].speed = 0.F;
         if (lap.Observe(parameters, before, after, roles, settings))
             return false;
     }
@@ -245,11 +245,11 @@ bool ShapingAndLaps()
         || lap.DistanceMeters() != 0.F)
         return false;
     after.blues[1].available = false;
-    if (!blue::GeneralizedNoThreatTeamLost(after)
+    if (!blue::GeneralizedNoThreatTeamLost(after, roles.LeaderPhysicalIndex())
         || lap.Observe(parameters, before, after, roles, settings))
         return false;
     after.counts.redMobiles = 1U;
-    return !blue::GeneralizedNoThreatTeamLost(after);
+    return !blue::GeneralizedNoThreatTeamLost(after, roles.LeaderPhysicalIndex());
 }
 
 /** @brief Convergence uses flight-step scales, not global-world distances. */

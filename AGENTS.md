@@ -31,6 +31,30 @@ repository. Adapted from the MFDStudio AGENTS.md engineering conventions.
   evaluation of learned policies.
 - Re-read all changed files and keep diffs free of unrelated formatting edits.
 
+## Mandatory self-review and reward discipline
+- After **every** code or test change, re-read the complete modified functions,
+  callers, affected tests and final diff. Check role-to-physical-index mapping,
+  before/after-step snapshots, control-flow and success/failure/timeout semantics.
+  Do not rely on a successful build alone as a substitute for code review.
+- Before updating an existing PR, inspect the full diff against its base,
+  verify that no unrelated change entered it, and correct every identified
+  defect. Check the actual CI job logs, not only the workflow headline; rerun
+  relevant checks after fixes. Never declare a change validated while required
+  checks are failing, pending or not executed.
+- Do not invent or add Blue MAPPO reward channels, bonuses, weights, shaping
+  formulas or normalizations unless the user **explicitly requests** them.
+  Reuse the existing leader patrol, wingman formation, separation, individual
+  loss and mission-outcome channels. Any requested redistribution of an existing
+  channel must retain its established magnitude and have role-specific tests.
+- For no-Red patrol (N=0), the living leader must be able to earn its existing
+  completed-lap reward by following a physically validated complete racetrack,
+  **independently of wingmen formation errors or losses**. Wingmen learn from
+  their existing formation and safety signals; collision physics and individual
+  loss penalties remain authoritative. Do not award completion for shortcuts,
+  stationary orbits, invalidated laps or a destroyed leader.
+- Keep unfinished training evaluations independent of development branches;
+  never merge their behavioral changes into master without explicit approval.
+
 ## Fixed x64 build directories
 - The only x64 Debug build directory is `build/debug`.
 - The only x64 Release build directory is `build/release`.

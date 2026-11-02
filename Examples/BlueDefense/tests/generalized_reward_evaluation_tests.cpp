@@ -175,7 +175,11 @@ bool TestNoRedNeedsCompletedLap()
     if (AggregateGeneralizedCooperativeRewards(*roles, transition, {}, rewards)
             != GeneralizedRewardStatus::Applied
         || !Near(Channel(rewards.team,
-                GeneralizedRewardChannel::MissionOutcome), 1.F))
+                GeneralizedRewardChannel::MissionOutcome), 1.F)
+        || !Near(Channel(rewards.perBlue[roles->LeaderPhysicalIndex()],
+                GeneralizedRewardChannel::MissionOutcome), 1.F)
+        || !Near(Channel(rewards.perBlue[0],
+                GeneralizedRewardChannel::MissionOutcome), 0.F))
         return false;
     sample.patrolCompleted = true;
     evaluation.Reset();

@@ -339,10 +339,10 @@ inline bool ValidSettings(GeneralizedRewardSettings const& settings) noexcept
  * divided by P. OwnLoss is a separate undiluted individual event. Collective
  * rewards remain present after death so earlier actions retain mission credit;
  * result.active masks only physical actions and local responsibility signals.
- * All cooperative event channels are shared. Only the living leader
- * receives patrol tracking; each teammate receives only its unique formation
- * penalty. The team decomposition averages role/control contributions
- * over P, making its scale independent of team size.
+ * Combat outcome is shared; a no-threat completed-lap bonus goes only to the
+ * leader. Only the living leader receives patrol tracking, while teammates
+ * receive their own formation signal. The team decomposition averages
+ * role/control contributions over P, making its scale independent of team size.
  *
  * @param roles Stable leader and formation-slot assignment for the episode.
  * @param transition Pre/post masks and pure shaping signals.
@@ -443,6 +443,14 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
         GeneralizedRewardBreakdown& breakdown = result.perBlue[physicalIndex];
         shared(breakdown);
         BlueRoleAssignment const assignment = *roles.Assignment(physicalIndex);
+        // The existing Mission outcome bonus rewards the pilot of the lap,
+        // not a wingman whose formation quality is learned separately.
+        if (redCount == 0U && transition.patrolCompleted
+            && assignment.role != BlueRole::Leader)
+        {
+            breakdown.values[static_cast<std::size_t>(
+                GeneralizedRewardChannel::MissionOutcome)] = 0.F;
+        }
         if (transition.responsibilities.leaderOnlyPursuit
             && assignment.role != BlueRole::Leader)
         {

@@ -16,7 +16,7 @@
 
 namespace ppo::examples::bluedefense::defenders {
 
-/** @brief Irreversible no-threat patrol guidance phase. */
+/** @brief No-threat patrol guidance phase, with recovery after invalidation. */
 enum class GeneralizedPatrolMode : std::uint8_t
 {
     Rally,
@@ -214,12 +214,15 @@ public:
         float const requiredProgress = finalWaypoint
             ? CircuitLength(parameters.geometry) - 0.25F
             : active.requiredDistanceMeters - acceptanceRadius;
-        if (distanceMeters_ < requiredProgress
-            || !PassesWaypointZone(
-                previousLeader, currentLeader, active.pose, acceptanceRadius)
-            || !TeamQualified(parameters, after, roles, settings, active.pose))
-        {
+        if (distanceMeters_ < requiredProgress)
             return GeneralizedWaypointUpdate::None;
+        if (!PassesWaypointZone(
+                previousLeader, currentLeader, active.pose, acceptanceRadius))
+        {
+            // A missed passage cannot hold guidance on a stale waypoint.
+            // Reacquire a fresh lap rather than crediting a skipped gate.
+            return distanceMeters_ > active.requiredDistanceMeters + acceptanceRadius
+                ? Invalidate() : GeneralizedWaypointUpdate::None;
         }
 
         ++validatedWaypointCount_;
@@ -331,55 +334,16 @@ private:
             && SegmentDistance(before, after, waypoint) <= acceptanceRadius;
     }
 
-    /** @brief Validates track, heading, speed and separation for every Blue. */
-    static bool TeamQualified(
-        Parameters const& parameters, GeneralizedRuntimeState const& state,
-        BlueTeamRoles const& roles,
-        PatrolNoThreatSettings const& settings,
-        PatrolCurvePose const& leaderWaypoint) noexcept
-    {
-        GeneralizedPatrolTargets const targets = ComputePatrolWaypointTargets(
-            parameters, state, roles, leaderWaypoint);
-        for (std::size_t first = 0U;
-             first < state.counts.blueMobiles; ++first)
-        {
-            Mobile const& blue = state.blues[first];
-            if (!blue.available || !targets[first].valid
-                || std::hypot(
-                    blue.north - targets[first].pose.north,
-                    blue.east - targets[first].pose.east)
-                    > settings.positionToleranceMeters
-                || std::abs(blue.speed - targets[first].speed)
-                    > settings.speedToleranceFraction
-                        * targets[first].speed
-                || std::abs(std::remainder(
-                    blue.heading - targets[first].pose.heading,
-                    kPatrolTwoPi)) > settings.headingToleranceRadians)
-            {
-                return false;
-            }
-            for (std::size_t second = first + 1U;
-                 second < state.counts.blueMobiles; ++second)
-            {
-                Mobile const& teammate = state.blues[second];
-                if (!teammate.available
-                    || std::hypot(blue.north - teammate.north,
-                            blue.east - teammate.east)
-                        < std::max(settings.minimumSeparationMeters,
-                            parameters.collisionDistance))
-                {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    /** @brief Marks the lap invalid without rewinding the active waypoint. */
+    /** @brief Invalidates the current lap and restores rally guidance. */
     GeneralizedWaypointUpdate Invalidate() noexcept
     {
         if (Following())
+        {
             circuitValid_ = false;
+            completed_ = false;
+            mode_ = GeneralizedPatrolMode::Rally;
+            rallyCorridorLatched_ = false;
+        }
         return GeneralizedWaypointUpdate::Invalidated;
     }
 

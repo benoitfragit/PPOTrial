@@ -33,6 +33,7 @@ struct EpisodeOutcome final
  * @param state Valid resolved snapshot with immutable episode membership.
  * @param pendingThreats Whether a delayed Red still awaits activation.
  * @param sequencer Leader-owned waypoint progress for this episode.
+ * @param leaderPhysicalIndex Physical leader chosen for this episode.
  * @param lapCompleted Result of the independent physical lap validator.
  * @param settings No-threat horizon; ignored when any Red is configured.
  * @param dt Positive simulated duration of one step, in seconds.
@@ -43,7 +44,8 @@ struct EpisodeOutcome final
 inline EpisodeOutcome EvaluateOutcome(
     GeneralizedRuntimeState const& state, bool const pendingThreats,
     GeneralizedPatrolWaypointSequencer const& sequencer,
-    bool const lapCompleted, PatrolNoThreatSettings const& settings,
+    std::size_t const leaderPhysicalIndex, bool const lapCompleted,
+    PatrolNoThreatSettings const& settings,
     float const dt, std::size_t const episodeStep,
     std::size_t const maximumSteps) noexcept
 {
@@ -62,7 +64,8 @@ inline EpisodeOutcome EvaluateOutcome(
         && sequencer.Completed() && sequencer.CircuitValid() && lapCompleted;
     // Preserve combat victory precedence over a simultaneous boundary exit.
     result.missionFailed = (state.failed && !result.noThreatRemains)
-        || !state.objectiveAvailable || GeneralizedNoThreatTeamLost(state);
+        || !state.objectiveAvailable
+        || GeneralizedNoThreatTeamLost(state, leaderPhysicalIndex);
     result.terminated = result.missionFailed || result.noThreatRemains
         || result.patrolCompleted;
     std::size_t const limit = state.counts.redMobiles == 0U
