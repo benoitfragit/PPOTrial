@@ -862,29 +862,52 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         float const engagement = std::max(
             GeneralizedEngagementWeight(parameters, beforeStep_),
             GeneralizedEngagementWeight(parameters, after));
+        std::size_t const redBefore = GeneralizedLiveRedCount(beforeStep_);
+        std::size_t const redAfter = GeneralizedLiveRedCount(after);
+        bool const noVisibleRed = redBefore == 0U && redAfter == 0U;
+        bool const singleVisibleRed = redBefore == 1U && redAfter == 1U;
         float const patrolWeight = rewardWeights_[static_cast<std::size_t>(
             GeneralizedRewardChannel::PatrolTracking)];
         float const formationWeight = rewardWeights_[static_cast<std::size_t>(
             GeneralizedRewardChannel::FormationKeeping)];
-        transition.responsibilities.leaderPatrol =
-            (1.F - 0.9F * engagement) * GeneralizedPatrolTransitionShaping(
+        // Multi-Red combat keeps its previous shaping; no-Red gains recovery.
+        float const leaderTracking = noVisibleRed
+            ? GeneralizedPatrolConvergenceShaping(
                 parameters, beforeStep_, after, beforeTargets_, afterTargets,
                 roles, roles.LeaderPhysicalIndex(), training_.noThreatPatrol)
-            / std::max(patrolWeight, 1.F);
-        transition.responsibilities.pursuitProgress = engagement
-            * GeneralizedPursuitProgress(parameters, beforeStep_, after);
+            : GeneralizedPatrolTransitionShaping(
+                parameters, beforeStep_, after, beforeTargets_, afterTargets,
+                roles, roles.LeaderPhysicalIndex(), training_.noThreatPatrol);
+        transition.responsibilities.leaderPatrol = singleVisibleRed ? 0.F
+            : (1.F - 0.9F * engagement) * leaderTracking
+                / std::max(patrolWeight, 1.F);
+        // One Red: leader chases; wingmen retain their physical leader wedge.
+        transition.responsibilities.leaderOnlyPursuit = singleVisibleRed;
+        transition.responsibilities.pursuitProgress = singleVisibleRed
+            ? GeneralizedSingleRedLeaderProgress(
+                parameters, beforeStep_, after, roles)
+            : engagement * GeneralizedPursuitProgress(
+                parameters, beforeStep_, after);
         for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
         {
             BlueRoleAssignment const assignment = *roles.Assignment(index);
             if (assignment.role == BlueRole::Teammate)
             {
-                transition.responsibilities.formationSlots[assignment.formationSlot] =
-                    (1.F - engagement) * GeneralizedPatrolTransitionShaping(
+                float const formationTracking = noVisibleRed
+                    ? GeneralizedPatrolConvergenceShaping(
                         parameters, beforeStep_, after, beforeTargets_, afterTargets,
                         roles, index, training_.noThreatPatrol)
-                        / std::max(formationWeight, 1.F)
-                    + engagement * cooperation * GeneralizedFormationProgressReward(
-                        parameters, beforeStep_, after, roles, index);
+                    : GeneralizedPatrolTransitionShaping(
+                        parameters, beforeStep_, after, beforeTargets_, afterTargets,
+                        roles, index, training_.noThreatPatrol);
+                transition.responsibilities.formationSlots[assignment.formationSlot] =
+                    singleVisibleRed
+                        ? GeneralizedFormationProgressReward(
+                            parameters, beforeStep_, after, roles, index)
+                        : (1.F - engagement) * formationTracking
+                            / std::max(formationWeight, 1.F)
+                          + engagement * cooperation * GeneralizedFormationProgressReward(
+                              parameters, beforeStep_, after, roles, index);
             }
             transition.responsibilities.controlEffort[index] =
                 GeneralizedControlEffortPenalty(

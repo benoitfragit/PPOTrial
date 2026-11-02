@@ -102,6 +102,45 @@ class BlueDiagnosticsTests(unittest.TestCase):
             self.assertEqual(paired["terminal_changes"], 0)
             self.assertAlmostEqual(paired["blue_alive_delta_mean"], 0.0)
 
+
+    def test_ci_generator_uses_existing_run_evidence_and_summary(self):
+        from blue_diagnostics.ci_report import generate_ci_report
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run_root = root / "runner"
+            self._write_run(run_root, 123, "v3", "1", "0")
+            csv_source = next(run_root.rglob("mappo-training.csv"))
+            summary = root / "step-summary.md"
+            output = run_root / "diagnostic.html"
+            checkpoint = next(run_root.rglob("blue_patrol_generalized_training_v6.txt"))
+            report = generate_ci_report(
+                run_root, csv_source, output, summary,
+                {"run_number": 123, "id": 20260123}, (checkpoint,),
+            )
+            self.assertEqual(report, output)
+            text = report.read_text(encoding="utf-8")
+            self.assertIn("Diagnostic du run 123", text)
+            self.assertIn("Patrouille et formation", text)
+            self.assertIn("<svg", text)
+            summary_text = summary.read_text(encoding="utf-8")
+            self.assertIn("blue-mappo-diagnostic", summary_text)
+            self.assertIn("Dernier update PPO", summary_text)
+            self.assertIn("Violations de suivi", summary_text)
+
+    def test_ci_generator_gracefully_renders_failed_run_without_csv(self):
+        from blue_diagnostics.ci_report import generate_ci_report
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            report = generate_ci_report(
+                root, root / "missing.csv", root / "diagnostic.html",
+                root / "summary.md", {"run_number": 99},
+            )
+            self.assertTrue(report.is_file())
+            self.assertIn("Télémétrie CSV absente",
+                          report.read_text(encoding="utf-8"))
+
     def test_safe_zip_rejects_parent_traversal(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

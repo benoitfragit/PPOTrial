@@ -329,6 +329,64 @@ inline float GeneralizedPursuitProgress(
         ? Clamp(weightedProgress / totalWeight, -1.F, 1.F) : 0.F;
 }
 
+
+/** @brief Number of physically visible Reds (delayed spawns are masked). */
+inline std::size_t GeneralizedLiveRedCount(
+    GeneralizedRuntimeState const& state) noexcept
+{
+    std::size_t count = 0U;
+    for (std::size_t index = 0U; index < state.counts.redMobiles; ++index)
+        if (state.reds[index].available)
+            ++count;
+    return count;
+}
+
+/**
+ * @brief Relative progress towards a fixed beginning-of-step waypoint.
+ * Uses the exact same normalization in single-Red pursuit and patrol.
+ */
+inline float GeneralizedFrozenWaypointProgress(
+    Parameters const& parameters, Mobile const& before, Mobile const& after,
+    float const targetNorth, float const targetEast) noexcept
+{
+    float const oldDistance = std::hypot(
+        before.north - targetNorth, before.east - targetEast);
+    float const newDistance = std::hypot(
+        after.north - targetNorth, after.east - targetEast);
+    return Clamp((oldDistance - newDistance)
+        / std::max(parameters.maxSpeed * parameters.dt, 1.F), -1.F, 1.F);
+}
+
+/**
+ * @brief Progress of the physical leader towards the sole visible Red.
+ * The Red is held at its before-step location, as in team pursuit shaping.
+ * Combat scale remains maxSpeed*dt, matching the existing group pursuit.
+ */
+inline float GeneralizedSingleRedLeaderProgress(
+    Parameters const& parameters, GeneralizedRuntimeState const& before,
+    GeneralizedRuntimeState const& after, BlueTeamRoles const& roles) noexcept
+{
+    if (!roles.IsValid() || before.counts.blueMobiles != after.counts.blueMobiles
+        || before.counts.redMobiles != after.counts.redMobiles
+        || roles.ActiveBlueCount() != before.counts.blueMobiles
+        || GeneralizedLiveRedCount(before) != 1U
+        || GeneralizedLiveRedCount(after) != 1U)
+        return 0.F;
+    std::size_t const leader = roles.LeaderPhysicalIndex();
+    if (!before.blues[leader].available || !after.blues[leader].available)
+        return 0.F;
+    for (std::size_t red = 0U; red < before.counts.redMobiles; ++red)
+    {
+        if (!before.reds[red].available || !after.reds[red].available)
+            continue;
+        Mobile const& hostile = before.reds[red];
+        return GeneralizedFrozenWaypointProgress(parameters,
+            before.blues[leader], after.blues[leader],
+            hostile.north, hostile.east);
+    }
+    return 0.F;
+}
+
 /** @brief Individually normalized position, speed and heading errors. */
 struct GeneralizedPatrolError final
 {
@@ -442,6 +500,67 @@ inline float GeneralizedPatrolTransitionShaping(
     return settings.stepRewardScale * Clamp(
         0.5F * improvement + forward * (0.25F * (1.F - cost) + 0.75F * tracking)
             - 0.25F * cost, -1.F, 1.F);
+}
+
+
+/**
+ * @brief Pvs0 convergence at the same reward scale as single-Red pursuit.
+ *
+ * The current waypoint is frozen for the whole physics step. Far off-track,
+ * use the closest projected reference instead of paying for parallel flight
+ * towards a perpetual lookahead. The reward strongly prefers cruise speed
+ * over a saturated 750 m/s chase, without making recovery gradients vanish.
+ */
+inline float GeneralizedPatrolConvergenceShaping(
+    Parameters const& parameters, GeneralizedRuntimeState const& before,
+    GeneralizedRuntimeState const& after,
+    GeneralizedPatrolTargets const& beforeTargets,
+    GeneralizedPatrolTargets const& afterTargets, BlueTeamRoles const& roles,
+    std::size_t const index, PatrolNoThreatSettings const& settings) noexcept
+{
+    if (!settings.enabled || !roles.IsValid()
+        || !Valid(before.counts) || !Valid(after.counts)
+        || roles.ActiveBlueCount() != before.counts.blueMobiles
+        || roles.ActiveBlueCount() != after.counts.blueMobiles
+        || index >= before.counts.blueMobiles
+        || index >= after.counts.blueMobiles
+        || !before.blues[index].available || !after.blues[index].available
+        || !beforeTargets[index].valid || !afterTargets[index].valid)
+        return 0.F;
+
+    Mobile const& previous = before.blues[index];
+    Mobile const& current = after.blues[index];
+    PatrolCurvePose const& track = beforeTargets[index].pose;
+    PatrolCurvePose const& waypoint = beforeTargets[index].guidancePose;
+    GeneralizedPatrolError const error = GeneralizedNoThreatError(
+        after, afterTargets[index], index, settings);
+    float const trackGate = Clamp(1.F - error.position, 0.F, 1.F);
+    float const waypointClosing = GeneralizedFrozenWaypointProgress(
+        parameters, previous, current, waypoint.north, waypoint.east);
+    float const trackClosing = GeneralizedFrozenWaypointProgress(
+        parameters, previous, current, track.north, track.east);
+    float const closing = trackGate * waypointClosing
+        + (1.F - trackGate) * trackClosing;
+    // At 300 m/s, 60 m of correct flight earns approximately +0.8, the
+    // same as a 60-m step towards one Red (weight 2, maxSpeed*dt = 150 m).
+    // Beyond cruise speed, this bounded penalty defeats the incentive to
+    // accelerate solely to maximize lookahead-distance reduction.
+    float const speedPenalty = 0.4F * error.speed / (1.F + error.speed);
+    float const alignment = Clamp(
+        1.F - std::max(error.speed, error.heading), 0.F, 1.F);
+    std::size_t const leader = roles.LeaderPhysicalIndex();
+    float const forward = GeneralizedPatrolAdvance(
+        parameters, beforeTargets[leader], afterTargets[leader]);
+    // Saturate the progress bonus BEFORE applying the speed penalty:
+    // otherwise 2*closing can exceed one and the final clamp conceals
+    // the overspeed penalty (750 m/s would still earn the maximum).
+    float const progressReward = Clamp(2.F * closing, -1.F, 1.F);
+    return Clamp(
+        progressReward - speedPenalty
+            + settings.stepRewardScale * (
+                forward * trackGate * alignment
+                - 0.15F * error.BoundedCost()),
+        -1.F, 1.F);
 }
 
 /** @brief All living participants must remain outside each other's sphere. */

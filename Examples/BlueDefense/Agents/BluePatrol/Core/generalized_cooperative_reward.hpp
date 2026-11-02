@@ -144,6 +144,8 @@ struct GeneralizedResponsibilitySignals final
     float threatContainment{};
     /** @brief Blue-motion-only progress towards the living red set. */
     float pursuitProgress{};
+    /** @brief Restrict a sole Red's approach reward to the physical leader. */
+    bool leaderOnlyPursuit{};
     /** @brief Teammate contributions indexed by unique formation slot. */
     std::array<float, kMaximumFormationSlots> formationSlots{};
     /** @brief Non-negative normalized control effort by physical blue index. */
@@ -429,6 +431,7 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
 
     float patrolSum = 0.F;
     float formationSum = 0.F;
+    float pursuitSum = 0.F;
     float effortSum = 0.F;
     float separationSum = 0.F;
     float zoneSum = 0.F;
@@ -439,13 +442,21 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
     {
         GeneralizedRewardBreakdown& breakdown = result.perBlue[physicalIndex];
         shared(breakdown);
+        BlueRoleAssignment const assignment = *roles.Assignment(physicalIndex);
+        if (transition.responsibilities.leaderOnlyPursuit
+            && assignment.role != BlueRole::Leader)
+        {
+            breakdown.values[static_cast<std::size_t>(
+                GeneralizedRewardChannel::PursuitProgress)] = 0.F;
+        }
+        pursuitSum += breakdown.values[static_cast<std::size_t>(
+            GeneralizedRewardChannel::PursuitProgress)];
         if (!transition.before.blueAlive[physicalIndex])
             continue;
         result.active[physicalIndex] = true;
         if (!transition.after.blueAlive[physicalIndex])
             breakdown.values[static_cast<std::size_t>(
                 GeneralizedRewardChannel::OwnLoss)] = -1.F;
-        BlueRoleAssignment const assignment = *roles.Assignment(physicalIndex);
         if (assignment.role == BlueRole::Leader)
         {
             float const patrol = std::clamp(
@@ -489,6 +500,9 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
         boundarySum += boundary;
         lowSpeedSum += lowSpeed;
     }
+    result.team.values[static_cast<std::size_t>(
+        GeneralizedRewardChannel::PursuitProgress)] =
+            pursuitSum / static_cast<float>(blueCount);
     result.team.values[static_cast<std::size_t>(
         GeneralizedRewardChannel::OwnLoss)] = blueSurvival;
     result.team.values[static_cast<std::size_t>(

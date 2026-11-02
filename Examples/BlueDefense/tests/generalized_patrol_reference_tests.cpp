@@ -251,6 +251,94 @@ bool ShapingAndLaps()
     after.counts.redMobiles = 1U;
     return !blue::GeneralizedNoThreatTeamLost(after);
 }
+
+/** @brief Convergence uses flight-step scales, not global-world distances. */
+bool TestConvergenceAndSingleRed()
+{
+    auto parameters = Parameters();
+    blue::PatrolNoThreatSettings settings{};
+    settings.stepRewardScale = 0.004F;
+    for (int direction : {-1, 1})
+    {
+        parameters.geometry.direction = direction;
+        for (std::size_t count : {1U, 3U})
+        {
+            auto const roles = *blue::BlueTeamRoles::Create(count, count - 1U);
+            auto const before = OnTargets(parameters, roles, 2000.F);
+            auto const after = OnTargets(parameters, roles, 2060.F);
+            auto const beforeTargets = blue::ComputePatrolTargets(parameters, before, roles);
+            auto const afterTargets = blue::ComputePatrolTargets(parameters, after, roles);
+            std::size_t const leader = roles.LeaderPhysicalIndex();
+            float const perfect = blue::GeneralizedPatrolConvergenceShaping(
+                parameters, before, after, beforeTargets, afterTargets, roles, leader, settings);
+            // 60 m at cruise speed must have the same effective scale as
+            // 2 * the single-Red progress channel (60 / 150 = 0.4).
+            if (perfect < 0.75F || perfect > 0.85F)
+                return false;
+            auto overspeed = OnTargets(parameters, roles, 2150.F);
+            overspeed.blues[leader].speed = 750.F;
+            float const fastReward = blue::GeneralizedPatrolConvergenceShaping(
+                parameters, before, overspeed, beforeTargets,
+                blue::ComputePatrolTargets(parameters, overspeed, roles),
+                roles, leader, settings);
+            if (!(fastReward < perfect && fastReward < 0.75F))
+                return false;
+            auto offset = before;
+            float const heading = offset.blues[leader].heading;
+            float const nNorth = -std::sin(heading);
+            float const nEast = std::cos(heading);
+            offset.blues[leader].north += 2500.F * nNorth;
+            offset.blues[leader].east += 2500.F * nEast;
+            auto const offsetTargets = blue::ComputePatrolTargets(parameters, offset, roles);
+            auto parallel = offset;
+            parallel.blues[leader].north += 60.F * std::cos(heading);
+            parallel.blues[leader].east += 60.F * std::sin(heading);
+            auto closer = offset;
+            closer.blues[leader].north -= 50.F * nNorth;
+            closer.blues[leader].east -= 50.F * nEast;
+            auto farther = offset;
+            farther.blues[leader].north += 50.F * nNorth;
+            farther.blues[leader].east += 50.F * nEast;
+            auto reward = [&](blue::GeneralizedRuntimeState const& state) {
+                return blue::GeneralizedPatrolConvergenceShaping(
+                    parameters, offset, state, offsetTargets,
+                    blue::ComputePatrolTargets(parameters, state, roles),
+                    roles, leader, settings);
+            };
+            // A 2.5-km lateral offset must NOT earn a positive reward for
+            // travelling parallel to the curve while never converging.
+            if (!(reward(parallel) <= 0.F && reward(closer) > 0.1F
+                    && reward(farther) < -0.1F))
+                return false;
+
+            auto combat = before;
+            combat.counts.redMobiles = 1U;
+            combat.reds[0] = {combat.blues[leader].north + 10000.F,
+                combat.blues[leader].east, 0.F, 220.F, 0.F, true};
+            auto towards = combat;
+            towards.blues[leader].north += 60.F;
+            auto away = combat;
+            away.blues[leader].north -= 60.F;
+            auto redMotionOnly = combat;
+            redMotionOnly.reds[0].north -= 100.F;
+            if (blue::GeneralizedSingleRedLeaderProgress(
+                    parameters, combat, towards, roles) < 0.39F
+                || blue::GeneralizedSingleRedLeaderProgress(
+                    parameters, combat, away, roles) > -0.39F
+                || blue::GeneralizedSingleRedLeaderProgress(
+                    parameters, combat, redMotionOnly, roles) != 0.F)
+                return false;
+            combat.counts.redMobiles = 2U;
+            towards.counts.redMobiles = 2U;
+            combat.reds[1] = {12000.F, -10000.F, 0.F, 220.F, 0.F, true};
+            towards.reds[1] = combat.reds[1];
+            if (blue::GeneralizedSingleRedLeaderProgress(
+                    parameters, combat, towards, roles) != 0.F)
+                return false;
+        }
+    }
+    return true;
+}
 }
 
 int main()
@@ -258,5 +346,8 @@ int main()
     if (!References()) { std::cerr << "references\n"; return 1; }
     if (!Feasibility()) { std::cerr << "feasibility\n"; return 2; }
     if (!ShapingAndLaps()) { std::cerr << "shaping/laps\n"; return 3; }
+    if (!TestConvergenceAndSingleRed()) {
+        std::cerr << "convergence/single-red\n"; return 4;
+    }
     return 0;
 }

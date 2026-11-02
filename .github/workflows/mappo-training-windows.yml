@@ -304,6 +304,24 @@ jobs:
           $manifest | ConvertTo-Json -Depth 8 | Set-Content `
             -LiteralPath "build/mappo-telemetry/run-manifest.json" -Encoding utf8
 
+      - name: Render Blue diagnostic HTML and GitHub run Summary
+        if: always()
+        env:
+          PYTHONPATH: tools/blue_training_diagnostics
+          PYTHONIOENCODING: utf-8
+        run: |
+          python -m blue_diagnostics.ci_report
+          if ($LASTEXITCODE -ne 0) { Write-Warning "Blue diagnostic HTML generation failed" }
+
+      - name: Publish Blue diagnostic HTML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blue-mappo-diagnostic
+          path: build/mappo-telemetry/diagnostic.html
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Publish MAPPO telemetry CSV and SVG curves
         if: always()
         uses: actions/upload-artifact@v4
