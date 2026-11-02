@@ -883,6 +883,69 @@ void DrawTacticalRoleBadges(entt::registry const& snapshot,
 }
 
 /**
+ * @brief Draws screen-facing labels for role-ordered patrol references.
+ * @param overlay Exact references last supplied to generalized MAPPO.
+ * @param camera Camera used to project reference positions.
+ * @param width Render-target width in pixels.
+ * @param height Render-target height in pixels.
+ * @param worldScale World-to-render scale.
+ */
+void DrawPatrolReferenceLabels(
+    ppo::model::sPatrolReferenceOverlay const& overlay,
+    Camera3D const& camera, int const width, int const height,
+    float const worldScale)
+{
+    if (!overlay.Valid() || width <= 0 || height <= 0)
+        return;
+
+    Vector3 const cameraForward =
+        VectorNormalizeSafe(VectorSub(camera.target, camera.position));
+    float const fontSize = std::clamp(
+        0.045F * static_cast<float>(std::min(width, height)), 13.F, 20.F);
+    float const radius = fontSize * 0.78F;
+    Font const font = GetFontDefault();
+    for (std::size_t roleIndex = 0U;
+         roleIndex < overlay.m_activeReferenceCount; ++roleIndex)
+    {
+        auto const& reference = overlay.m_references[roleIndex];
+        if (!reference.m_valid)
+            continue;
+
+        Vector3 world = ToWorld3D(reference.m_projectedNorth,
+                                  reference.m_projectedEast,
+                                  -0.48F * worldScale, worldScale);
+        if (VectorDot(cameraForward, VectorSub(world, camera.position)) <= 0.F)
+            continue;
+        Vector2 const screen = GetWorldToScreenEx(world, camera, width, height);
+        if (screen.x < -radius || screen.x > static_cast<float>(width) + radius
+            || screen.y < -radius
+            || screen.y > static_cast<float>(height) + radius)
+        {
+            continue;
+        }
+
+        Color const accent = TacticalRoleColor(
+            roleIndex == 0U ? TacticalRole::Leader : TacticalRole::Teammate);
+        char marker[4]{};
+        if (roleIndex == 0U)
+            std::snprintf(marker, sizeof(marker), "L");
+        else
+            std::snprintf(marker, sizeof(marker), "W%u",
+                          static_cast<unsigned>(roleIndex));
+        DrawCircleV(Vector2{screen.x + 2.F, screen.y + 2.F}, radius,
+                    Fade(BLACK, 0.62F));
+        DrawCircleV(screen, radius, Fade(accent, 0.92F));
+        DrawCircleLines(static_cast<int>(screen.x), static_cast<int>(screen.y),
+                        radius, Fade(WHITE, 0.88F));
+        Vector2 const textSize = MeasureTextEx(font, marker, fontSize, 1.F);
+        DrawTextEx(font, marker,
+                   Vector2{screen.x - 0.5F * textSize.x,
+                           screen.y - 0.54F * textSize.y},
+                   fontSize, 1.F, Color{12, 20, 28, 255});
+    }
+}
+
+/**
 * @brief Draws a north/east rectangle on the tactical ground plane.
 */
 void DrawDefendedArea3D(ppo::model::sDefendedArea const& area, float scale,
@@ -956,6 +1019,70 @@ void DrawPatrolTrack3D(ppo::model::sPatrolTrackOverlay const& overlay,
         {
             DrawLineEx3D(tip, left, 0.06F, color);
             DrawLineEx3D(tip, right, 0.06F, color);
+        }
+    }
+}
+
+/**
+ * @brief Draws projected markers and observation-guidance arrows for MAPPO.
+ * @param overlay Exact role-ordered references last supplied to the policy.
+ * @param scale World-to-render scale.
+ * @param reducedDetail True to use cheaper primitives in multi-camera views.
+ */
+void DrawPatrolReferences3D(
+    ppo::model::sPatrolReferenceOverlay const& overlay,
+    float const scale, bool const reducedDetail)
+{
+    if (!overlay.Valid())
+        return;
+
+    for (std::size_t roleIndex = 0U;
+         roleIndex < overlay.m_activeReferenceCount; ++roleIndex)
+    {
+        auto const& reference = overlay.m_references[roleIndex];
+        if (!reference.m_valid)
+            continue;
+
+        Color const accent = TacticalRoleColor(
+            roleIndex == 0U ? TacticalRole::Leader : TacticalRole::Teammate);
+        Vector3 const projected = ToWorld3D(
+            reference.m_projectedNorth, reference.m_projectedEast,
+            -0.08F * scale, scale);
+        Vector3 const guidance = ToWorld3D(
+            reference.m_guidanceNorth, reference.m_guidanceEast,
+            -0.12F * scale, scale);
+        DrawCylinderWires(projected, 0.32F, 0.32F, 0.07F,
+                          reducedDetail ? 12 : 24, Fade(accent, 0.96F));
+        if (reducedDetail)
+            DrawLine3D(projected, guidance, Fade(accent, 0.48F));
+        else
+            DrawLineEx3D(projected, guidance, 0.035F,
+                         Fade(accent, 0.48F));
+        DrawSphere(guidance, reducedDetail ? 0.07F : 0.10F,
+                   Fade(accent, 0.88F));
+
+        Vector3 const forward = HeadingForward(reference.m_guidanceHeading);
+        Vector3 const side{-forward.z, 0.F, forward.x};
+        float const arrowLength = reducedDetail ? 0.72F : 1.05F;
+        Vector3 const tip = VectorAdd(
+            guidance, VectorScale(forward, arrowLength));
+        Vector3 const arrowBase = VectorSub(
+            tip, VectorScale(forward, 0.34F));
+        Vector3 const left = VectorAdd(
+            arrowBase, VectorScale(side, 0.20F));
+        Vector3 const right = VectorSub(
+            arrowBase, VectorScale(side, 0.20F));
+        if (reducedDetail)
+        {
+            DrawLine3D(guidance, tip, accent);
+            DrawLine3D(tip, left, accent);
+            DrawLine3D(tip, right, accent);
+        }
+        else
+        {
+            DrawLineEx3D(guidance, tip, 0.065F, accent);
+            DrawLineEx3D(tip, left, 0.055F, accent);
+            DrawLineEx3D(tip, right, 0.055F, accent);
         }
     }
 }
@@ -1623,6 +1750,8 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
             m_showSimulation = section.value("showSimulation", m_showSimulation);
             m_showPseudoLidar = section.value("showPseudoLidar", m_showPseudoLidar);
             m_showPatrolTrack = section.value("showPatrolTrack", m_showPatrolTrack);
+            m_showPatrolReferences = section.value(
+                "showPatrolReferences", m_showPatrolReferences);
             m_showHardBoundary = section.value("showHardBoundary", m_showHardBoundary);
             m_focusSelectionInMinimap = section.value("focusSelectionInMinimap", m_focusSelectionInMinimap);
             m_cameraDistance = std::clamp(section.value("cameraDistance", m_cameraDistance), 5.F, 60.F);
@@ -1680,6 +1809,7 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
             section["showSimulation"] = m_showSimulation;
             section["showPseudoLidar"] = m_showPseudoLidar;
             section["showPatrolTrack"] = m_showPatrolTrack;
+            section["showPatrolReferences"] = m_showPatrolReferences;
             section["showHardBoundary"] = m_showHardBoundary;
             section["focusSelectionInMinimap"] = m_focusSelectionInMinimap;
             section["cameraDistance"] = m_cameraDistance;
@@ -2531,6 +2661,8 @@ EnvironmentRenderer::DrawSimulationControls(entt::registry const& snapshot)
     ImGui::Checkbox("Show pseudo lidar", &m_showPseudoLidar);
     if (snapshot.ctx().contains<ppo::model::sPatrolTrackOverlay>())
         ImGui::Checkbox("Show patrol track", &m_showPatrolTrack);
+    if (snapshot.ctx().contains<ppo::model::sPatrolReferenceOverlay>())
+        ImGui::Checkbox("Show patrol references", &m_showPatrolReferences);
     if (snapshot.ctx().contains<ppo::model::sHardBoundaryOverlay>())
         ImGui::Checkbox("Show outer failure boundary", &m_showHardBoundary);
     ImGui::Checkbox("Show destroyed markers", &m_showDestroyed);
@@ -2976,6 +3108,13 @@ EnvironmentRenderer::RenderTacticalScene(
         DrawPatrolTrack3D(
             snapshot.ctx().get<ppo::model::sPatrolTrackOverlay>(),
             m_worldScale, reducedDetail);
+    if (m_showPatrolReferences
+        && snapshot.ctx().contains<ppo::model::sPatrolReferenceOverlay>())
+    {
+        DrawPatrolReferences3D(
+            snapshot.ctx().get<ppo::model::sPatrolReferenceOverlay>(),
+            m_worldScale, reducedDetail);
+    }
 
     entt::entity primaryTarget = entt::null;
     entt::entity pseudoLidarEntity = entt::null;
@@ -3122,6 +3261,14 @@ EnvironmentRenderer::RenderTacticalScene(
           DrawExplosion3D(effect, m_worldScale);
 
       EndMode3D();
+      if (m_showPatrolReferences
+          && snapshot.ctx().contains<ppo::model::sPatrolReferenceOverlay>())
+      {
+          DrawPatrolReferenceLabels(
+              snapshot.ctx().get<ppo::model::sPatrolReferenceOverlay>(),
+              camera, target.texture.width, target.texture.height,
+              m_worldScale);
+      }
       DrawTacticalRoleBadges(snapshot, camera, target.texture.width,
                              target.texture.height, m_worldScale);
       EndTextureMode();
@@ -3505,6 +3652,62 @@ EnvironmentRenderer::DrawMinimapWindow(entt::registry const& snapshot)
                 ImVec2 const right{base.x + 3.5F * forwardY,
                                    base.y - 3.5F * forwardX};
                 draw->AddTriangleFilled(tip, left, right, color);
+            }
+        }
+    }
+    if (m_showPatrolReferences
+        && snapshot.ctx().contains<ppo::model::sPatrolReferenceOverlay>())
+    {
+        auto const& overlay =
+            snapshot.ctx().get<ppo::model::sPatrolReferenceOverlay>();
+        if (overlay.Valid())
+        {
+            for (std::size_t roleIndex = 0U;
+                 roleIndex < overlay.m_activeReferenceCount; ++roleIndex)
+            {
+                auto const& reference = overlay.m_references[roleIndex];
+                if (!reference.m_valid)
+                    continue;
+
+                Color const accent = TacticalRoleColor(
+                    roleIndex == 0U
+                        ? TacticalRole::Leader : TacticalRole::Teammate);
+                ImU32 const color = IM_COL32(
+                    accent.r, accent.g, accent.b, 245);
+                ImVec2 const projected = toMinimap(
+                    reference.m_projectedNorth, reference.m_projectedEast);
+                ImVec2 const guidance = toMinimap(
+                    reference.m_guidanceNorth, reference.m_guidanceEast);
+                draw->AddLine(projected, guidance,
+                              IM_COL32(accent.r, accent.g, accent.b, 115),
+                              1.4F);
+                draw->AddCircle(projected, 5.2F, color, 20, 2.F);
+                draw->AddCircleFilled(guidance, 2.6F, color, 12);
+
+                float const forwardX = std::sin(
+                    reference.m_guidanceHeading);
+                float const forwardY = -std::cos(
+                    reference.m_guidanceHeading);
+                ImVec2 const tip{guidance.x + 11.F * forwardX,
+                                 guidance.y + 11.F * forwardY};
+                ImVec2 const base{tip.x - 5.F * forwardX,
+                                  tip.y - 5.F * forwardY};
+                ImVec2 const left{base.x - 3.F * forwardY,
+                                  base.y + 3.F * forwardX};
+                ImVec2 const right{base.x + 3.F * forwardY,
+                                   base.y - 3.F * forwardX};
+                draw->AddLine(guidance, tip, color, 2.F);
+                draw->AddTriangleFilled(tip, left, right, color);
+
+                char marker[4]{};
+                if (roleIndex == 0U)
+                    std::snprintf(marker, sizeof(marker), "L");
+                else
+                    std::snprintf(marker, sizeof(marker), "W%u",
+                                  static_cast<unsigned>(roleIndex));
+                draw->AddText(
+                    ImVec2{projected.x + 7.F, projected.y - 8.F},
+                    color, marker);
             }
         }
     }

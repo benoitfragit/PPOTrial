@@ -325,6 +325,11 @@ void BlueDefenseWorldRules::CopySnapshot(entt::registry& source, entt::registry&
             && context.patrolTrackOverlay.m_sampleCount >= 2U)
             target.ctx().emplace<ppo::model::sPatrolTrackOverlay>(
                 context.patrolTrackOverlay);
+        if (context.patrolReferenceOverlay.Valid())
+        {
+            target.ctx().emplace<ppo::model::sPatrolReferenceOverlay>(
+                context.patrolReferenceOverlay);
+        }
         if (context.blueTeamRoles && context.blueTeamRoles->IsValid())
         {
             target.ctx().emplace<ppo::model::sBlueTeamRoleOverlay>(

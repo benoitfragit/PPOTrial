@@ -34,6 +34,7 @@
         "showHardBoundary": false,
         "showInspection": false,
         "showMinimap": false,
+        "showPatrolReferences": true,
         "showPatrolTrack": true,
         "showPseudoLidar": false,
         "showSimulation": true,

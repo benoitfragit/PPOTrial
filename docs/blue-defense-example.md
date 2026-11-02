@@ -70,6 +70,13 @@ vues et sur la mini-carte. Le changement de cible, la destruction du mobile
 suivi et les téléportations de reset provoquent un recalage déterministe de la
 caméra ; le déplacement continu utilise un lissage indépendant du FPS.
 
+`Show patrol references`, dans **World and display settings**, commande un
+overlay distinct de l'hippodrome. Pour `L` puis chaque slot `W1` à `W8`, un
+anneau montre la projection instantanée de suivi et une flèche montre la pose
+anticipée (position et cap) réellement fournie dans l'observation MAPPO. Les
+données sont copiées après leur calcul par le runtime, dans un stockage borné
+de neuf entrées, puis consommées uniquement par la vue 3D et la mini-carte.
+
 ## Compatibilité de checkpoints
 
 Le moteur MAPPO conserve le chargement des modèles v8 ainsi que des lecteurs

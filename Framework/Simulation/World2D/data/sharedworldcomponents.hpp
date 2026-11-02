@@ -195,6 +195,54 @@ struct sPatrolTrackOverlay final
 };
 
 /**
+ * @brief One role-ordered patrol reference published only for visualization.
+ *
+ * The projected point is the instantaneous position used by patrol-quality
+ * evaluation. The guidance point and heading are the anticipatory reference
+ * encoded in the corresponding agent observation.
+ */
+struct sPatrolReferenceOverlayEntry final
+{
+    /** @brief Instantaneous projected north coordinate in metres. */
+    float m_projectedNorth{};
+    /** @brief Instantaneous projected east coordinate in metres. */
+    float m_projectedEast{};
+    /** @brief Anticipatory guidance north coordinate in metres. */
+    float m_guidanceNorth{};
+    /** @brief Anticipatory guidance east coordinate in metres. */
+    float m_guidanceEast{};
+    /** @brief Anticipatory guidance heading in radians. */
+    float m_guidanceHeading{};
+    /** @brief True when all published coordinates describe an active target. */
+    bool m_valid{};
+};
+
+/**
+ * @brief Fixed-capacity leader and wedge references consumed by rendering.
+ *
+ * Entry zero is the leader. Entries one through eight are wedge slots W1 to
+ * W8. This snapshot-only view cannot influence observations, rewards, policy
+ * inference, physics, or role assignment.
+ */
+struct sPatrolReferenceOverlay final
+{
+    /** @brief Maximum leader-plus-wedge cardinality supported by BlueDefense. */
+    static constexpr std::size_t ReferenceCapacity = 9U;
+
+    /** @brief References ordered as leader, then stable wedge slot. */
+    std::array<sPatrolReferenceOverlayEntry, ReferenceCapacity> m_references{};
+    /** @brief Number of active role positions, including the leader. */
+    std::size_t m_activeReferenceCount{};
+
+    /** @brief Returns true when the active prefix fits the fixed storage. */
+    constexpr bool Valid() const noexcept
+    {
+        return m_activeReferenceCount != 0U
+            && m_activeReferenceCount <= ReferenceCapacity;
+    }
+};
+
+/**
  * @brief Snapshot-only blue role information consumed by tactical rendering.
  *
  * This view model mirrors an already sampled episode assignment. It cannot

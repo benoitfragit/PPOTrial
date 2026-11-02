@@ -398,6 +398,16 @@ void TestPatrolOverlaySnapshot()
         sourceOverlay.m_north[sample] = pose.north;
         sourceOverlay.m_east[sample] = pose.east;
     }
+    auto& sourceReferences = context.patrolReferenceOverlay;
+    sourceReferences.m_activeReferenceCount = 4U;
+    for (std::size_t roleIndex = 0U; roleIndex < 4U; ++roleIndex)
+    {
+        float const role = static_cast<float>(roleIndex);
+        sourceReferences.m_references[roleIndex] = {
+            100.F + role, 200.F + role,
+            300.F + role, 400.F + role,
+            0.1F * role, true};
+    }
 
     entt::registry snapshot;
     ppo::examples::bluedefense::BlueDefenseWorldRules rules;
@@ -418,6 +428,28 @@ void TestPatrolOverlaySnapshot()
     Require(roles.Valid() && roles.m_activeBlueCount == 4U
                 && roles.m_leaderPhysicalIndex == 2U,
             "blue role visualization overlay changed the sampled assignment");
+    Require(snapshot.ctx().contains<sPatrolReferenceOverlay>(),
+            "BlueDefense snapshot has no patrol-reference overlay");
+    auto const& references =
+        snapshot.ctx().get<sPatrolReferenceOverlay>();
+    Require(references.Valid() && references.m_activeReferenceCount == 4U,
+            "patrol-reference overlay active prefix is invalid");
+    Require(references.m_references[0U].m_valid
+                && references.m_references[3U].m_valid
+                && references.m_references[0U].m_projectedNorth == 100.F
+                && references.m_references[3U].m_guidanceEast == 403.F
+                && references.m_references[3U].m_guidanceHeading == 0.3F,
+            "patrol-reference overlay changed exact policy guidance data");
+
+    sPatrolReferenceOverlay capacity{};
+    capacity.m_activeReferenceCount = 1U;
+    Require(capacity.Valid(), "P=1 patrol-reference overlay was rejected");
+    capacity.m_activeReferenceCount = capacity.ReferenceCapacity;
+    Require(capacity.Valid(), "P=9 patrol-reference overlay was rejected");
+    capacity.m_activeReferenceCount = 0U;
+    Require(!capacity.Valid(), "empty patrol-reference overlay was accepted");
+    capacity.m_activeReferenceCount = capacity.ReferenceCapacity + 1U;
+    Require(!capacity.Valid(), "oversized patrol-reference overlay was accepted");
 }
 
 /**

@@ -43,6 +43,8 @@ struct InitializerContext {
     defenders::PatrolGeometry patrolGeometry{};
     /** @brief Snapshot-only rendering samples generated once per episode. */
     ppo::model::sPatrolTrackOverlay patrolTrackOverlay{};
+    /** @brief Exact role-ordered patrol references last supplied to MAPPO. */
+    ppo::model::sPatrolReferenceOverlay patrolReferenceOverlay{};
     /** @brief True after a feasible geometry has been sampled for the reset. */
     bool patrolGeometryReady{false};
     /** @brief Signals an exhausted bounded sampling attempt sequence. */

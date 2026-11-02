@@ -92,6 +92,50 @@ std::size_t AliveCount(std::array<Mobile, Capacity> const& mobiles,
 }
 
 /**
+ * @brief Publishes the exact patrol references supplied to policy inference.
+ * @param context Scenario context receiving render-only fixed-capacity data.
+ * @param targets Physical-index targets computed for the current observation.
+ * @param roles Immutable physical-to-role assignment for the episode.
+ */
+void PublishPatrolReferenceOverlay(
+    InitializerContext& context, GeneralizedPatrolTargets const& targets,
+    BlueTeamRoles const& roles) noexcept
+{
+    auto& overlay = context.patrolReferenceOverlay;
+    overlay = ppo::model::sPatrolReferenceOverlay{};
+    if (!roles.IsValid())
+        return;
+
+    overlay.m_activeReferenceCount = roles.ActiveBlueCount();
+    for (std::size_t physicalIndex = 0U;
+         physicalIndex < roles.ActiveBlueCount(); ++physicalIndex)
+    {
+        auto const assignment = roles.Assignment(physicalIndex);
+        if (!assignment)
+            continue;
+        std::size_t const roleIndex = assignment->role == BlueRole::Leader
+            ? 0U : assignment->formationSlot + 1U;
+        if (roleIndex >= overlay.m_activeReferenceCount)
+            continue;
+
+        GeneralizedPatrolTarget const& target = targets[physicalIndex];
+        if (!target.valid || !FinitePatrolPose(target.pose)
+            || !FinitePatrolPose(target.guidancePose))
+        {
+            continue;
+        }
+
+        overlay.m_references[roleIndex] = {
+            target.pose.north,
+            target.pose.east,
+            target.guidancePose.north,
+            target.guidancePose.east,
+            target.guidancePose.heading,
+            true};
+    }
+}
+
+/**
  * @brief Réalise l'opération CombatMask; voir les préconditions et effets dans son corps C++.
  * @details Consulte ou modifie des composants ECS.
  */
@@ -592,8 +636,15 @@ void GeneralizedPatrolMappoAgent::ChooseAction()
         beforeStep_ = ReadState(parameters);
         std::array<GeneralizedObservation,
                    TeamCapacity::MaximumBlueMobiles> observations{};
-        beforeTargets_ = ComputePatrolTargets(parameters, beforeStep_, Roles(),
+        BlueTeamRoles const& roles = Roles();
+        beforeTargets_ = ComputePatrolTargets(parameters, beforeStep_, roles,
             training_.noThreatPatrol.lookaheadSeconds);
+        if (registry_->ctx().contains<InitializerContext>())
+        {
+            PublishPatrolReferenceOverlay(
+                registry_->ctx().get<InitializerContext>(),
+                beforeTargets_, roles);
+        }
         BuildObservations(parameters, beforeStep_, observations, beforeTargets_);
 
         beforeAvailability_.fill(false);

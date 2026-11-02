@@ -99,6 +99,14 @@ immédiatement lors d'un changement de cible ou d'un reset et reste indépendant
 du nombre d'images par seconde. L'inspection affiche uniquement les données
 opérationnelles utiles ; le navigateur de méta-réflexion a été retiré de l'IHM.
 
+La case `Show patrol references` de **World and display settings** affiche les
+références exactes du dernier calcul fourni à MAPPO, dans la vue 3D et sur la
+mini-carte. Un anneau repère la projection instantanée utilisée pour mesurer le
+suivi ; une flèche repère la cible anticipée et son cap, effectivement encodés
+dans l'observation. Le leader `L` est doré et les slots `W1` à `W8` sont cyan.
+Cet overlay à capacité fixe est exclusivement visuel et ne modifie ni la
+politique, ni les rewards, ni la physique.
+
 ## Validation
 
 Pour exécuter les tests de base sans interface :

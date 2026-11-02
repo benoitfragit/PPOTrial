@@ -88,6 +88,8 @@ void InitializeEntity(ppo::model::Entity& entity)
     if (config.next == 0)
     {
         config.elapsedSteps = 0U;
+        config.patrolReferenceOverlay =
+            ppo::model::sPatrolReferenceOverlay{};
         auto const& world = registry->ctx().get<ppo::model::sEnvironmentState>();
         auto const bounds = WorldBounds{
             0.5F * world.m_maxNorth, 0.5F * world.m_maxEast};

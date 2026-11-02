@@ -614,6 +614,8 @@ private:
     bool m_showPseudoLidar{ false };
     /** @brief True when the TwoVsTwo analytical patrol overlay is visible. */
     bool m_showPatrolTrack{ false };
+    /** @brief True when MAPPO leader and wedge references are visible. */
+    bool m_showPatrolReferences{ true };
     /** @brief Toggle the MAPPO hard failure boundary from the world/scene UI. */
     bool m_showHardBoundary{ false };
     /**
