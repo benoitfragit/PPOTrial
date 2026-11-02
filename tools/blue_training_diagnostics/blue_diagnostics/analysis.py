@@ -293,6 +293,10 @@ def _latest_evaluation_cases(rows: Sequence[Dict[str, str]]) -> Dict[tuple, Dict
 
 def _patrol_summary(dataset: RunDataset) -> Dict[str, Any]:
     episodes = dataset.patrol_episodes
+    no_threat_episodes = [
+        row for row in episodes if _optional_float(row.get("N")) == 0.0
+    ]
+    progress = _patrol_progress_summary(dataset, no_threat_episodes)
     circuit = _numeric_values(episodes, "circuit_m")
     qualified = _numeric_values(episodes, "qualified_m")
     spacing = [
@@ -322,29 +326,36 @@ def _patrol_summary(dataset: RunDataset) -> Dict[str, Any]:
         )
     return {
         "episodes": len(episodes),
+        "progress": progress,
         "phases": Counter(row.get("phase", "unknown") for row in episodes),
-        "modes": Counter(row.get("mode", "unknown") for row in episodes),
+        "modes": Counter(row.get("mode", "unknown") for row in no_threat_episodes),
         "terminations": Counter(
             row.get("termination", "unknown") for row in episodes
         ),
-        "latest_mode": episodes[-1].get("mode", "unknown") if episodes else "unknown",
+        "latest_mode": progress["latest"].get("mode", "unknown"),
         "validated_waypoints_max": max(
-            (_safe_int(row.get("validated_waypoints")) for row in episodes),
+            (_safe_int(row.get("validated_waypoints")) for row in no_threat_episodes),
             default=0,
         ),
         "active_waypoint_max": max(
-            (_safe_int(row.get("active_waypoint")) for row in episodes),
+            (_safe_int(row.get("active_waypoint")) for row in no_threat_episodes),
             default=0,
         ),
         "waypoint_distance": _distribution(
-            _numeric_values(episodes, "waypoint_distance_m")
+            _numeric_values(no_threat_episodes, "waypoint_distance_m")
         ),
-        "cross_track": _distribution(_numeric_values(episodes, "cross_track_m")),
+        "cross_track": _distribution(
+            [abs(value) for value in _numeric_values(no_threat_episodes, "cross_track_m")]
+        ),
         "heading_error": _distribution(
-            _numeric_values(episodes, "heading_error_rad")
+            _numeric_values(no_threat_episodes, "heading_error_rad")
         ),
-        "speed": _distribution(_numeric_values(episodes, "speed_mps")),
-        "arclength": _distribution(_numeric_values(episodes, "arclength_m")),
+        "speed": _distribution(_numeric_values(no_threat_episodes, "speed_mps")),
+        "arclength": _distribution(_numeric_values(no_threat_episodes, "arclength_m")),
+        "rally_seconds": _distribution(_numeric_values(no_threat_episodes, "rally_seconds")),
+        "qualified_lap_percent": _distribution(
+            _numeric_values(no_threat_episodes, "qualified_lap_percent")
+        ),
         "distance_m": sum(_numeric_values(episodes, "distance_m")),
         "qualified_m": sum(qualified),
         "circuit_m": sum(circuit),
@@ -356,6 +367,26 @@ def _patrol_summary(dataset: RunDataset) -> Dict[str, Any]:
         "spacing_margin": _distribution(spacing),
         "steps": _distribution(_numeric_values(episodes, "steps")),
         "trend": trend,
+    }
+
+
+def _patrol_progress_summary(
+    dataset: RunDataset, episodes: Sequence[Dict[str, str]]
+) -> Dict[str, Any]:
+    """Summarize observed transitions without joining separate episode paths."""
+    events = [
+        row for row in dataset.patrol_progress if _optional_float(row.get("N")) == 0.0
+    ]
+    records = list(episodes) + events
+    latest = (
+        max(reversed(records), key=lambda row: _safe_int(row.get("_order")))
+        if records else {}
+    )
+    return {
+        "events": events,
+        "episodes": episodes,
+        "event_counts": Counter(row.get("event", "unknown") for row in events),
+        "latest": latest,
     }
 
 

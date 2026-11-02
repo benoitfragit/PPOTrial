@@ -97,6 +97,13 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         cxx_std_17)
     add_test(NAME BlueDefenseGeneralizedPatrolWaypointTests
         COMMAND BlueDefenseGeneralizedPatrolWaypointTests)
+    add_executable(BlueDefenseGeneralizedEpisodeOutcomeTests
+        ../../tests/generalized_episode_outcome_tests.cpp)
+    target_link_libraries(BlueDefenseGeneralizedEpisodeOutcomeTests PRIVATE
+        BlueDefenseDefenderBackend)
+    target_compile_features(BlueDefenseGeneralizedEpisodeOutcomeTests PRIVATE cxx_std_17)
+    add_test(NAME BlueDefenseGeneralizedEpisodeOutcomeTests
+        COMMAND BlueDefenseGeneralizedEpisodeOutcomeTests)
     add_executable(BlueDefenseGeneralizedAdvantageTests
         ../../tests/generalized_advantage_tests.cpp)
     target_link_libraries(BlueDefenseGeneralizedAdvantageTests PRIVATE
@@ -128,6 +135,7 @@ add_library(BlueDefensePatrolRuntime STATIC
     Runtime/generalized_patrol_team_agent.hpp
     Runtime/generalized_patrol_production_policy.hpp
     Runtime/generalized_runtime_state.hpp
+    Runtime/generalized_episode_outcome.hpp
     Runtime/generalized_reward_shaping.hpp
     Runtime/generalized_patrol_team_agent.cpp
     Training/attention_actor.hpp

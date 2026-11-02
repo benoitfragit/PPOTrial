@@ -1,6 +1,6 @@
 # Blue MAPPO V10 — patrouille séquencée sur dix waypoints
 
-Date : 2026-11-02  
+Date : 2026-11-02
 Périmètre : `GeneralizedPatrolMappoAgent`, scénarios N=0 uniquement.
 
 ## Décisions et contraintes
@@ -34,8 +34,10 @@ donc au seul leader logique.
 
 - **RALLY** : la cible d'observation reste la prévision historique calculée
   depuis la projection. Le couloir est acquis sous
-  `rallyEnterDistanceMeters`; il est relâché au-dessus de
-  `rallyExitDistanceMeters` tant que FOLLOW n'a pas commencé.
+  `rallyEnterDistanceMeters`, puis confirmé à l'observation suivante si la
+  distance reste sous `rallyExitDistanceMeters`. La bande entre les seuils
+  conserve l'acquisition ; sortir au-delà du seuil extérieur l'annule avant
+  confirmation. Ce délai d'un seul pas donne un effet réel aux deux seuils.
 - **FOLLOW** : depuis l'abscisse projetée à l'acquisition, dix poses sont
   calculées par `EvaluatePatrolCurve()` aux distances `L/10 ... 10L/10`.
   Positions, caps tangents, vitesses et distances requises sont stockés dans
@@ -82,6 +84,12 @@ globale existante : 480 s donnent 2400 pas à `dt=0.2`. Son expiration pose
 `truncated=true`, `terminated=false` en l'absence d'une autre cause et ne
 déclenche aucun succès. Les scénarios N>0 ne consultent pas cette limite.
 
+Le résolveur interne `generalized_episode_detail::EvaluateOutcome()` est partagé
+par le contrôleur ECS et les tests déterministes. Il applique les mêmes priorités
+succès/échec/timeout à la récompense, aux flags PPO/GAE et à la classification
+diagnostique. La victoire combat reste un succès, y compris si le dernier Rouge
+est neutralisé au même pas qu'une sortie de limite avec objectif et Bleu survivants.
+
 ## Observation et checkpoints
 
 - observation : version 10 ;
@@ -102,6 +110,15 @@ distance au waypoint, l'écart latéral réel, l'erreur de cap, la vitesse,
 l'abscisse parcourue et la cause `success`, `timeout` ou `failure`. Le rapport
 HTML agrège ces champs sans ajouter de travail significatif par pas.
 
+`MAPPO_PATROL_PROGRESS` complète le bilan par des événements `follow_entered`,
+`waypoint_advanced`, `sequence_completed` et `sequence_invalidated`. Chaque ligne
+porte l'identifiant local d'épisode, la phase, P/N, le pas, le waypoint actif,
+le nombre validé, la durée de RALLY et le pourcentage de tour qualifié
+(`100 × qualified_m / circuit_m`, borné de 0 à 100). La première invalidation
+est journalisée une seule fois. Le HTML affiche ces événements séparément par
+épisode, sans joindre les trajectoires de plusieurs épisodes. Les statistiques
+de distance latérale utilisent la valeur absolue ; le log garde le signe.
+
 Le snapshot ECS transporte séparément dix entrées de rendu. La case
 `Show patrol waypoints`, persistée comme `Show patrol references`, contrôle les
 marqueurs `WP1` à `WP10` dans la vue 3D et la mini-carte. L'actif est doré, les
@@ -116,3 +133,10 @@ orbite locale, P=1/2/3/4/9, le wedge, le chemin combat historique, le timeout
 et les en-têtes de checkpoint. Debug, Release et CTest vérifient les contrats
 logiciels ; seule une campagne d'évaluation V10 sur plusieurs graines
 indépendantes peut établir la convergence apprise.
+
+Les tests d'issue d'épisode relient les deux validateurs au canal existant
+`Mission outcome` sur P=1/3/9 dans les deux sens. Ils vérifient l'absence de
+bonus avant WPT10 ou sans tour qualifié, la troncature exacte au pas 2400,
+la priorité d'un vrai terminal sur le timeout et le bootstrap GAE correspondant.
+Les régressions numériques de guidage figé couvrent P=1/3 sur piste, à proximité,
+hors piste et en récupération, ainsi que le changement de waypoint après physique.

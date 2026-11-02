@@ -156,6 +156,7 @@ class RunDataset:
     log_errors: List[str]
     checkpoint_files: List[Path]
     curriculum_progress: Dict[str, Any]
+    patrol_progress: List[Dict[str, str]] = field(default_factory=list)
 
 
 @dataclass

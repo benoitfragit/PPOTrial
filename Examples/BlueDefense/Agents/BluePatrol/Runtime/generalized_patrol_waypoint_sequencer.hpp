@@ -169,9 +169,12 @@ public:
 
         if (!Following())
         {
+            bool const previouslyAcquired = rallyCorridorLatched_;
             UpdateRallyCorridorLatch(
                 currentProjection.distance, settings);
-            if (!rallyCorridorLatched_)
+            // Confirm acquisition on the following sample, allowing the
+            // deadband to retain it and the exit threshold to cancel it.
+            if (!previouslyAcquired || !rallyCorridorLatched_)
                 return GeneralizedWaypointUpdate::None;
             Generate(parameters, currentProjection.pose);
             return GeneralizedWaypointUpdate::EnteredFollow;
@@ -252,7 +255,11 @@ public:
     }
 
 private:
-    /** @brief Updates the two-threshold RALLY corridor latch. */
+    /**
+     * @brief Arms RALLY acquisition inside enter and cancels it outside exit.
+     * @param distance Current analytical distance to the patrol curve.
+     * @param settings Inner acquisition and outer release thresholds.
+     */
     void UpdateRallyCorridorLatch(
         float const distance,
         PatrolNoThreatSettings const& settings) noexcept

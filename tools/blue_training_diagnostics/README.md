@@ -78,6 +78,10 @@ Le rapport autonome contient notamment :
 - séquence de patrouille : mode RALLY/FOLLOW, waypoint actif, nombre validé,
   distance au waypoint, écart à la piste, erreur de cap, vitesse, abscisse
   curviligne et cause de terminaison ;
+- progression des patrouilles N=0 : transitions RALLY → FOLLOW, temps de
+  ralliement, waypoint actif récent et pourcentage du tour correctement suivi ;
+  chronologie et bilans finaux séparés par journal, épisode local, phase,
+  composition P/N et nombre de pas ;
 - décomposition de chaque canal de récompense par rôle ;
 - pertes Blue par cause et agent, avec vitesse, variation de vitesse, carburant et
   commande d’accélération au moment de la perte ;
@@ -93,6 +97,24 @@ Le rapport autonome contient notamment :
 Les seuils KL `> 0,05`, clipping `> 50 %` et variance expliquée `< 0` sont des
 heuristiques signalées comme telles. Ils servent à orienter l’inspection et ne
 constituent pas des critères automatiques de promotion.
+
+Les événements `[MAPPO_PATROL_PROGRESS]` signalent `follow_entered`,
+`waypoint_advanced`, `sequence_completed` et `sequence_invalidated`. Le champ
+`episode` est un identifiant local au journal, à conserver avec la phase et
+P/N. Les tableaux présentent au maximum les 200 dernières lignes de chaque
+type ; les compteurs portent sur tous les événements lus. Ils ne raccordent
+pas plusieurs épisodes en un même parcours.
+
+`rally_seconds` mesure le temps jusqu’à l’entrée en FOLLOW, ou le temps RALLY
+écoulé si l’épisode n’a pas atteint FOLLOW. `qualified_lap_percent` vaut
+`100 × distance qualifiée / longueur du circuit`, borné entre 0 et 100 : c’est
+la portion du tour total correctement parcourue, et non le taux de qualité du
+trajet déjà parcouru. Ces mesures et les waypoints sont réservés à N=0 ; les
+statistiques de terminaison conservent aussi les épisodes de combat. Les
+anciens journaux restent lisibles et affichent `n/a` lorsque les nouveaux
+champs manquent. Les écarts latéraux restent signés dans les journaux ; leurs
+statistiques de distance utilisent la valeur absolue pour mesurer le pire
+écart de chaque côté de la piste.
 
 ## Diagnostic automatique dans GitHub Actions
 

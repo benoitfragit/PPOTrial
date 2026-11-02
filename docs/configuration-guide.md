@@ -194,8 +194,12 @@ chaque pas produit P transitions, une par Bleu initialement présent.
 Les valeurs usuelles sont 512, 1024, 2048 et 4096.
 Les paramètres sont chargés depuis `Training/BluePatrol.json`.
 `rallyEnterDistanceMeters` et `rallyExitDistanceMeters` définissent le couloir
-à hystérésis acquis avant de figer les dix waypoints. La transition vers FOLLOW
-est irréversible pour l'épisode. `maxEpisodeSeconds` ne s'applique qu'à N=0 et
+à hystérésis acquis avant de figer les dix waypoints. Un premier échantillon sous
+le seuil d'entrée arme l'acquisition ; l'observation suivante la confirme si
+l'avion reste sous le seuil de sortie, y compris dans la bande entre les seuils.
+Une sortie du couloir avant confirmation annule l'acquisition. La transition
+vers FOLLOW est ensuite irréversible pour l'épisode.
+`maxEpisodeSeconds` ne s'applique qu'à N=0 et
 est converti en pas depuis `dt` : 480 s à 0,2 s donnent 2400 pas. L'expiration
 est une troncature, pas une terminaison réussie ni une destruction.
 

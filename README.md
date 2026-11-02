@@ -118,6 +118,12 @@ La case `Show patrol waypoints`, placée au même endroit, affiche `WP1` à
 waypoints sont verts et ceux déjà validés sont grisés. L'état de la case est
 persisté comme celui des références de patrouille.
 
+Le diagnostic HTML affiche les transitions RALLY → FOLLOW, leur durée de
+ralliement, le waypoint actif et une chronologie par épisode. Le pourcentage
+de tour correctement suivi vaut `100 × distance qualifiée / longueur du circuit`
+et reste distinct du nombre de waypoints validés. Les événements sont émis aux
+changements de mode ou de waypoint, sans journalisation à chaque pas.
+
 ## Validation
 
 Pour exécuter les tests de base sans interface :
@@ -142,6 +148,11 @@ le dossier Téléchargements de l'utilisateur.
 Une CI verte vérifie la compilation et les contrats testés ; la
 **convergence** sur plusieurs seeds et compositions P/N nécessite
 une campagne de validation distincte.
+
+Les régressions ciblées vérifient ensemble WPT1–WPT10, la validation physique
+du tour, le bonus terminal existant et le bootstrap PPO/GAE au timeout de 480 s.
+Elles couvrent aussi l'hystérésis sur deux observations et les valeurs numériques
+des rewards avec guidage figé.
 
 ## Documentation
 

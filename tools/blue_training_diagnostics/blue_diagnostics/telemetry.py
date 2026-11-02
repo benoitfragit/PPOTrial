@@ -36,6 +36,7 @@ LOSS_MARKER = "[MAPPO_EVAL_LOSS]"
 TIMING_MARKER = "[MAPPO_TIMING]"
 STATUS_MARKER = "[MAPPO_STATUS]"
 PATROL_EPISODE_MARKER = "[MAPPO_PATROL_EPISODE]"
+PATROL_PROGRESS_MARKER = "[MAPPO_PATROL_PROGRESS]"
 PATROL_AGENT_MARKER = "[MAPPO_PATROL_AGENT]"
 ROLE_REWARD_MARKER = "[MAPPO_ROLE_REWARD]"
 ERROR_MARKERS = ("[MAPPO_ERROR]", "[MAPPO_EVAL_ERROR]", "[CURRICULUM_ERROR]")
@@ -76,6 +77,7 @@ def load_run(run_root: Path) -> RunDataset:
         log_errors=parsed["errors"],
         checkpoint_files=checkpoints,
         curriculum_progress=curriculum,
+        patrol_progress=parsed["patrol_progress"],
     )
 
 
@@ -174,10 +176,12 @@ def _parse_logs(paths: Iterable[Path]):
     evaluations = []
     losses = []
     patrol_episodes = []
+    patrol_progress = []
     patrol_agents = []
     role_rewards = []
     errors = []
     score_records = []
+    patrol_order = 0
     for path in paths:
         try:
             lines = path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
@@ -213,7 +217,16 @@ def _parse_logs(paths: Iterable[Path]):
                 fields = _text_fields(line.split(PATROL_EPISODE_MARKER, 1)[1])
                 if all(key in fields for key in ("phase", "P", "N", "steps")):
                     fields["_log"] = label
+                    fields["_order"] = str(patrol_order)
+                    patrol_order += 1
                     patrol_episodes.append(fields)
+            if PATROL_PROGRESS_MARKER in line:
+                fields = _text_fields(line.split(PATROL_PROGRESS_MARKER, 1)[1])
+                if all(key in fields for key in ("phase", "P", "N", "steps", "event")):
+                    fields["_log"] = label
+                    fields["_order"] = str(patrol_order)
+                    patrol_order += 1
+                    patrol_progress.append(fields)
             if PATROL_AGENT_MARKER in line:
                 fields = _text_fields(line.split(PATROL_AGENT_MARKER, 1)[1])
                 if all(key in fields for key in ("blue", "role", "valid")):
@@ -243,6 +256,7 @@ def _parse_logs(paths: Iterable[Path]):
         "evaluations": evaluations,
         "losses": losses,
         "patrol_episodes": patrol_episodes,
+        "patrol_progress": patrol_progress,
         "patrol_agents": patrol_agents,
         "role_rewards": role_rewards,
         "errors": errors,

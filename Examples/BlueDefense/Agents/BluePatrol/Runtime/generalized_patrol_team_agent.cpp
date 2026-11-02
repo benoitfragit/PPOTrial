@@ -6,6 +6,7 @@
  */
 #include "generalized_patrol_team_agent.hpp"
 #include "generalized_patrol_production_policy.hpp"
+#include "generalized_episode_outcome.hpp"
 
 #include "generalized_cooperative_reward.hpp"
 #include "generalized_patrol_learner.hpp"
@@ -366,6 +367,8 @@ GeneralizedPatrolMappoAgent::~GeneralizedPatrolMappoAgent()
 void GeneralizedPatrolMappoAgent::Init()
 {
     episodeStep_ = 0U;
+    ++diagnosticEpisode_;
+    followTransitionStep_ = 0U;
     waypointSequencer_.Reset();
     noThreatLap_.Reset();
     roleRewardSums_ = {};
@@ -582,6 +585,37 @@ GeneralizedPatrolMappoAgent::BuildEvaluationSample(
     return result;
 }
 
+void GeneralizedPatrolMappoAgent::WritePatrolProgress(
+    Parameters const& parameters, GeneralizedWaypointUpdate const update) const
+{
+    char const* event = nullptr;
+    switch (update)
+    {
+    case GeneralizedWaypointUpdate::EnteredFollow: event = "follow_entered"; break;
+    case GeneralizedWaypointUpdate::Advanced: event = "waypoint_advanced"; break;
+    case GeneralizedWaypointUpdate::Completed: event = "sequence_completed"; break;
+    case GeneralizedWaypointUpdate::Invalidated: event = "sequence_invalidated"; break;
+    default: return;
+    }
+    float const qualifiedPercent = Clamp(100.F * noThreatLap_.QualifiedDistanceMeters()
+        / CircuitLength(parameters.geometry), 0.F, 100.F);
+    std::size_t const waypoint = waypointSequencer_.Following()
+        ? std::min(waypointSequencer_.ActiveWaypointIndex() + 1U,
+            GeneralizedPatrolWaypointSequencer::WaypointCount) : 0U;
+    std::cout << "[MAPPO_PATROL_PROGRESS] phase="
+              << (evaluation_.InProgress() ? "evaluation" : "training")
+              << " episode=" << diagnosticEpisode_
+              << " P=" << counts_.blueMobiles << " N=" << counts_.redMobiles
+              << " steps=" << episodeStep_ << " event=" << event
+              << " mode=" << (waypointSequencer_.Following() ? "FOLLOW" : "RALLY")
+              << " active_waypoint=" << waypoint
+              << " validated_waypoints=" << waypointSequencer_.ValidatedWaypointCount()
+              << " rally_seconds=" << static_cast<float>(followTransitionStep_ == 0U
+                    ? episodeStep_ : followTransitionStep_) * parameters.dt
+              << " arclength_m=" << waypointSequencer_.DistanceMeters()
+              << " qualified_lap_percent=" << qualifiedPercent << '\n';
+}
+
 void GeneralizedPatrolMappoAgent::WritePatrolDiagnostics(
     Parameters const& parameters, GeneralizedRuntimeState const& state,
     GeneralizedPatrolTargets const& targets, char const* const phase,
@@ -614,6 +648,7 @@ void GeneralizedPatrolMappoAgent::WritePatrolDiagnostics(
             GeneralizedPatrolWaypointSequencer::WaypointCount)
         : 0U;
     std::cout << "[MAPPO_PATROL_EPISODE] phase=" << phase
+              << " episode=" << diagnosticEpisode_
               << " P=" << counts_.blueMobiles << " N=" << counts_.redMobiles
               << " steps=" << episodeStep_
               << " mode=" << (waypointSequencer_.Following()
@@ -628,6 +663,11 @@ void GeneralizedPatrolMappoAgent::WritePatrolDiagnostics(
                     leader.heading - headingReference.heading, kPatrolTwoPi))
               << " speed_mps=" << leader.speed
               << " arclength_m=" << waypointSequencer_.DistanceMeters()
+              << " rally_seconds=" << static_cast<float>(followTransitionStep_ == 0U
+                    ? episodeStep_ : followTransitionStep_) * parameters.dt
+              << " qualified_lap_percent=" << Clamp(
+                    100.F * noThreatLap_.QualifiedDistanceMeters()
+                        / CircuitLength(parameters.geometry), 0.F, 100.F)
               << " distance_m=" << noThreatLap_.DistanceMeters()
               << " qualified_m=" << noThreatLap_.QualifiedDistanceMeters()
               << " circuit_m=" << CircuitLength(parameters.geometry)
@@ -786,13 +826,17 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                 beforeTargets_[leaderIndex].guidancePose)
             : ComputePatrolTargets(parameters, after, roles,
                 training_.noThreatPatrol.lookaheadSeconds);
+        bool const sequenceWasValid = waypointSequencer_.CircuitValid();
         GeneralizedWaypointUpdate const waypointUpdate =
             counts_.redMobiles == 0U
             ? waypointSequencer_.Observe(parameters, beforeStep_, after,
                 roles, training_.noThreatPatrol)
             : GeneralizedWaypointUpdate::None;
         if (waypointUpdate == GeneralizedWaypointUpdate::EnteredFollow)
+        {
+            followTransitionStep_ = episodeStep_;
             noThreatLap_.Reset();
+        }
         GeneralizedPatrolTargets const afterTargets =
             waypointSequencer_.Targets(
                 parameters, after, roles, training_.noThreatPatrol);
@@ -810,10 +854,6 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                 && HasPendingThreats(*context.episodeLayout,
                                      context.elapsedSteps);
         }
-        bool const noThreatRemains = counts_.redMobiles > 0U
-            && AliveCount(after.reds, counts_.redMobiles) == 0U
-            && AliveCount(after.blues, counts_.blueMobiles) > 0U
-            && after.objectiveAvailable && !pendingThreats;
         // N=0 can end successfully after one correctly flown lap.
         // Pending red activations never trigger the no-red mission outcome.
         bool lapCompleted = false;
@@ -825,27 +865,16 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                 parameters, beforeStep_, after, roles,
                 training_.noThreatPatrol, beforeTargets_, frozenAfterTargets);
         }
-        bool const patrolCompleted = counts_.redMobiles == 0U
-            && !pendingThreats && !after.failed && after.objectiveAvailable
-            && waypointSequencer_.Completed()
-            && waypointSequencer_.CircuitValid() && lapCompleted;
-        bool const patrolTeamLost = GeneralizedNoThreatTeamLost(after);
-        // If the last red is destroyed in the same step as a hard-boundary
-        // excursion, neutralization takes precedence while the objective
-        // and at least one blue survive.
-        bool const missionFailed = (after.failed && !noThreatRemains)
-            || !after.objectiveAvailable || patrolTeamLost;
-        bool const terminated = missionFailed || noThreatRemains
-            || patrolCompleted;
-        std::size_t episodeLimit = evaluation_.InProgress()
-            ? training_.evaluation.maxSteps : parameters.episodeSteps;
-        if (counts_.redMobiles == 0U)
-        {
-            episodeLimit = NoThreatEpisodeLimitSteps(
-                training_.noThreatPatrol, parameters.dt, episodeLimit);
-        }
-        bool const truncated = !terminated
-            && episodeStep_ >= episodeLimit;
+        auto const outcome = generalized_episode_detail::EvaluateOutcome(
+            after, pendingThreats, waypointSequencer_, lapCompleted,
+            training_.noThreatPatrol, parameters.dt, episodeStep_,
+            evaluation_.InProgress()
+                ? training_.evaluation.maxSteps : parameters.episodeSteps);
+        bool const noThreatRemains = outcome.noThreatRemains;
+        bool const patrolCompleted = outcome.patrolCompleted;
+        bool const missionFailed = outcome.missionFailed;
+        bool const terminated = outcome.terminated;
+        bool const truncated = outcome.truncated;
 
         if (executionMode_
             == GeneralizedPatrolExecutionMode::ProductionInference)
@@ -858,6 +887,12 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             currentReward_ = 0.F;
             lastRewardChannels_.fill(0.F);
             return episodeDone_;
+        }
+
+        if (waypointUpdate != GeneralizedWaypointUpdate::Invalidated
+            || sequenceWasValid)
+        {
+            WritePatrolProgress(parameters, waypointUpdate);
         }
 
         if (evaluation_.InProgress())
@@ -910,8 +945,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             if (episodeDone_)
             {
                 WritePatrolDiagnostics(parameters, after, afterTargets,
-                    "evaluation", patrolCompleted ? "success"
-                        : truncated ? "timeout" : "failure");
+                    "evaluation", outcome.DiagnosticCause());
                 // One bounded diagnostic row per evaluation episode. The
                 // production physics and the training rollout stay untouched.
                 auto const test = evaluation_.CurrentCase();
@@ -1103,8 +1137,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         lastRewardChannels_ = rewardBreakdown.team.values;
         if (terminated || truncated)
             WritePatrolDiagnostics(parameters, after, afterTargets,
-                "training", patrolCompleted ? "success"
-                    : truncated ? "timeout" : "failure");
+                "training", outcome.DiagnosticCause());
 
         bool const updated = learner_->Observe(
             observations, rewards, availability, terminated, truncated);

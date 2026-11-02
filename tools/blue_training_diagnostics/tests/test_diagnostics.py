@@ -48,7 +48,7 @@ class BlueDiagnosticsTests(unittest.TestCase):
     def test_complete_run_analysis_and_html_report(self):
         with tempfile.TemporaryDirectory() as directory:
             run_root = Path(directory) / "run-42"
-            self._write_run(run_root, 42, "v3", "4", "4")
+            self._write_run(run_root, 42, "v3", "4", "0")
             analysis = analyze(load_run(run_root))
             self.assertEqual(analysis.metrics["end_update"], 12)
             self.assertEqual(analysis.metrics["completed_updates"], 2)
@@ -59,6 +59,9 @@ class BlueDiagnosticsTests(unittest.TestCase):
             self.assertEqual(analysis.metrics["patrol"]["episodes"], 1)
             self.assertEqual(analysis.metrics["patrol"]["latest_mode"], "FOLLOW")
             self.assertEqual(analysis.metrics["patrol"]["validated_waypoints_max"], 6)
+            self.assertEqual(analysis.metrics["patrol"]["progress"]["events"], [])
+            self.assertEqual(analysis.metrics["patrol"]["rally_seconds"]["count"], 0)
+            self.assertEqual(analysis.metrics["patrol"]["qualified_lap_percent"]["count"], 0)
             self.assertEqual(analysis.metrics["tolerance_by_role"]["samples"], 2)
             self.assertEqual(analysis.metrics["reward_by_role"]["samples"], 1)
             self.assertAlmostEqual(analysis.metrics["optimizer_ms_mean"], 1450.0)
@@ -71,6 +74,69 @@ class BlueDiagnosticsTests(unittest.TestCase):
             self.assertIn("Récompenses par rôle", content)
             self.assertIn("<svg", content)
             self.assertNotIn("nan", content.lower())
+
+    def test_patrol_progress_preserves_episode_context_and_latest_record_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run_root = Path(directory) / "run-42"
+            self._write_run(run_root, 42, "v3", "1", "0")
+            log = next(run_root.rglob("mappo-training.log"))
+            records = (
+                ("MAPPO_PATROL_PROGRESS", "episode=11 phase=training P=1 N=0 steps=10 "
+                 "event=follow_entered mode=FOLLOW active_waypoint=1 validated_waypoints=0 "
+                 "rally_seconds=2 qualified_lap_percent=0"),
+                ("MAPPO_PATROL_PROGRESS", "episode=11 phase=training P=1 N=0 steps=100 "
+                 "event=waypoint_advanced mode=FOLLOW active_waypoint=2 validated_waypoints=1 "
+                 "rally_seconds=2 qualified_lap_percent=10"),
+                ("MAPPO_PATROL_PROGRESS", "episode=11 phase=training P=1 N=0 steps=500 "
+                 "event=sequence_completed mode=FOLLOW active_waypoint=10 validated_waypoints=10 "
+                 "rally_seconds=2 qualified_lap_percent=100"),
+                ("MAPPO_PATROL_EPISODE", "episode=11 phase=training P=1 N=0 steps=500 "
+                 "mode=FOLLOW active_waypoint=10 validated_waypoints=10 termination=success "
+                 "rally_seconds=2 qualified_lap_percent=100"),
+                ("MAPPO_PATROL_PROGRESS", "episode=12 phase=evaluation P=9 N=0 steps=20 "
+                 "event=follow_entered mode=FOLLOW active_waypoint=1 validated_waypoints=0 "
+                 "rally_seconds=4 qualified_lap_percent=0"),
+                ("MAPPO_PATROL_PROGRESS", "episode=12 phase=evaluation P=9 N=0 steps=40 "
+                 "event=sequence_invalidated mode=FOLLOW active_waypoint=1 validated_waypoints=0 "
+                 "rally_seconds=4 qualified_lap_percent=5"),
+                ("MAPPO_PATROL_EPISODE", "episode=12 phase=evaluation P=9 N=0 steps=50 "
+                 "mode=FOLLOW active_waypoint=1 validated_waypoints=0 termination=failure "
+                 "rally_seconds=4 qualified_lap_percent=5"),
+                ("MAPPO_PATROL_EPISODE", "episode=13 phase=evaluation P=9 N=2 steps=80 "
+                 "mode=RALLY active_waypoint=9 validated_waypoints=9 termination=success "
+                 "rally_seconds=999 qualified_lap_percent=99"),
+            )
+            with log.open("a", encoding="utf-8") as stream:
+                for marker, fields in records:
+                    stream.write("[{}] {}\n".format(marker, fields))
+            analysis = analyze(load_run(run_root))
+            patrol = analysis.metrics["patrol"]
+            progress = patrol["progress"]
+            self.assertEqual(progress["event_counts"]["follow_entered"], 2)
+            self.assertEqual(progress["event_counts"]["waypoint_advanced"], 1)
+            self.assertEqual(progress["event_counts"]["sequence_completed"], 1)
+            self.assertEqual(progress["event_counts"]["sequence_invalidated"], 1)
+            self.assertEqual(progress["latest"]["episode"], "12")
+            self.assertEqual(progress["latest"]["steps"], "50")
+            self.assertEqual(progress["latest"]["active_waypoint"], "1")
+            self.assertEqual(progress["latest"]["qualified_lap_percent"], "5")
+            self.assertEqual(patrol["rally_seconds"]["count"], 2)
+            self.assertEqual(patrol["rally_seconds"]["mean"], 3.0)
+            self.assertEqual(patrol["qualified_lap_percent"]["mean"], 52.5)
+            self.assertEqual(patrol["terminations"]["success"], 2)
+            self.assertEqual(patrol["latest_mode"], "FOLLOW")
+            report = write_single_report(analysis, run_root / "report.html")
+            content = report.read_text(encoding="utf-8")
+            self.assertIn("Transitions RALLY → FOLLOW", content)
+            self.assertIn("Chronologie des waypoints par épisode", content)
+            self.assertIn("Bilan final par épisode", content)
+            self.assertNotIn("<td>13</td><td>evaluation</td><td>9/2</td>", content)
+            self.assertIn("Tour correctement suivi récent", content)
+            self.assertIn("<td>11</td><td>training</td><td>1/0</td><td>100</td>"
+                          "<td>Waypoint validé</td><td>FOLLOW</td><td>2</td><td>1</td>", content)
+            self.assertIn("<td>12</td><td>evaluation</td><td>9/0</td><td>50</td>"
+                          "<td>failure</td><td>FOLLOW</td><td>1</td><td>0</td>"
+                          '<td class="numeric">4.0</td><td class="numeric">5.0</td>', content)
 
     def test_comparison_rejects_different_evaluation_contexts(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -89,6 +155,39 @@ class BlueDiagnosticsTests(unittest.TestCase):
             content = report.read_text(encoding="utf-8")
             self.assertIn("Comparaison descriptive uniquement", content)
             self.assertIn("Contexte différent", content)
+
+    def test_cross_track_summary_uses_distance_and_preserves_signed_samples(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run_root = Path(directory) / "run-42"
+            self._write_run(run_root, 42, "v3", "1", "0")
+            log = next(run_root.rglob("mappo-training.log"))
+            log.write_text(
+                log.read_text(encoding="utf-8").replace(
+                    "cross_track_m=20", "cross_track_m=-4000"
+                )
+                + "[MAPPO_PATROL_EPISODE] phase=training P=1 N=0 steps=400 "
+                "cross_track_m=100\n",
+                encoding="utf-8",
+            )
+            dataset = load_run(run_root)
+            analysis = analyze(dataset)
+            self.assertEqual(
+                [row["cross_track_m"] for row in dataset.patrol_episodes],
+                ["-4000", "100"],
+            )
+            cross_track = analysis.metrics["patrol"]["cross_track"]
+            self.assertEqual(cross_track["count"], 2)
+            self.assertEqual(cross_track["max"], 4000.0)
+            self.assertEqual(cross_track["mean"], 2050.0)
+            self.assertEqual(cross_track["min"], 100.0)
+            report = write_single_report(analysis, run_root / "report.html")
+            self.assertIn(
+                '<tr><td>Écart latéral piste</td><td>2</td>'
+                '<td class="numeric">2 050.0</td><td class="numeric">2 050.0</td>'
+                '<td class="numeric">4 000.0</td><td class="numeric">4 000.0</td>'
+                '<td>m</td></tr>',
+                report.read_text(encoding="utf-8"),
+            )
 
     def test_paired_comparison_uses_common_seed_case_and_context(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -511,6 +511,8 @@ def _patrol_section(analysis: RunAnalysis) -> str:
         ("Erreur de cap", "heading_error", "rad", 3),
         ("Vitesse", "speed", "m/s", 1),
         ("Abscisse parcourue", "arclength", "m", 1),
+        ("Temps de ralliement", "rally_seconds", "s", 1),
+        ("Tour correctement suivi", "qualified_lap_percent", "%", 1),
     )
     for label, key, unit, digits in sequence_metrics:
         distribution = patrol[key]
@@ -557,6 +559,85 @@ def _patrol_section(analysis: RunAnalysis) -> str:
         modes, terminations,
         "".join(sequence_rows),
         "".join(rows) or '<tr><td colspan="7" class="muted">Télémétrie de patrouille indisponible.</td></tr>',
+    ) + _patrol_progress_section(analysis)
+
+
+def _patrol_progress_section(analysis: RunAnalysis) -> str:
+    """Show per-episode patrol events without inventing a continuous global lap."""
+    progress = analysis.metrics["patrol"]["progress"]
+    latest = progress["latest"]
+    events = progress["events"]
+    context = "{} · P={} N={} · épisode {} · pas {}".format(
+        latest.get("phase", "n/a"), latest.get("P", "n/a"),
+        latest.get("N", "n/a"), latest.get("episode", "n/a"),
+        latest.get("steps", "n/a"),
+    )
+    cards = _cards((
+        ("Waypoint actif récent", _optional_number(latest.get("active_waypoint"), 0),
+         context),
+        ("Transitions RALLY → FOLLOW",
+         str(progress["event_counts"]["follow_entered"]) if events else "n/a",
+         "transitions effectivement journalisées"),
+        ("Temps de ralliement récent", _optional_number(latest.get("rally_seconds"), 1),
+         "secondes jusqu’à FOLLOW, ou temps RALLY écoulé"),
+        ("Tour correctement suivi récent",
+         _optional_number(latest.get("qualified_lap_percent"), 1),
+         "% du circuit total parcouru dans les tolérances"),
+    ))
+    return cards + """
+    <h3>Chronologie des waypoints par épisode</h3>
+    <p class="muted">{} événement(s) observé(s), les 200 derniers au maximum sont affichés.
+    Chaque ligne conserve sa phase, sa composition P/N et son épisode local au journal ;
+    seules les patrouilles N=0 sont incluses, sans raccordement en un tour global. Les anciens journaux
+    sans ces mesures affichent n/a.</p>
+    {}<h3>Bilan final par épisode N=0</h3>{}
+    """.format(
+        len(events), _patrol_progress_table(analysis, events, True),
+        _patrol_progress_table(analysis, progress["episodes"], False),
+    )
+
+
+def _patrol_progress_table(
+    analysis: RunAnalysis, records: Sequence[Dict[str, str]], progress_events: bool
+) -> str:
+    """Render bounded event or episode rows with their original local context."""
+    labels = {
+        "follow_entered": "RALLY → FOLLOW",
+        "waypoint_advanced": "Waypoint validé",
+        "sequence_completed": "Séquence terminée",
+        "sequence_invalidated": "Séquence invalidée",
+    }
+    rows = []
+    for row in records[-200:]:
+        source_path = Path(row.get("_log", "journal inconnu"))
+        try:
+            source = source_path.relative_to(analysis.dataset.root).as_posix()
+        except ValueError:
+            source = source_path.name
+        text_cells = (
+            source, row.get("episode", "n/a"), row.get("phase", "n/a"),
+            "{}/{}".format(row.get("P", "n/a"), row.get("N", "n/a")),
+            row.get("steps", "n/a"),
+            labels.get(row.get("event"), row.get("event", "inconnu"))
+            if progress_events else row.get("termination", "n/a"),
+            row.get("mode", "n/a"), row.get("active_waypoint", "n/a"),
+            row.get("validated_waypoints", "n/a"),
+        )
+        cells = "".join("<td>{}</td>".format(html.escape(str(value))) for value in text_cells)
+        cells += '<td class="numeric">{}</td><td class="numeric">{}</td>'.format(
+            _optional_number(row.get("rally_seconds"), 1),
+            _optional_number(row.get("qualified_lap_percent"), 1),
+        )
+        rows.append("<tr>{}</tr>".format(cells))
+    return """
+    <div class="table-wrap"><table><thead><tr>
+    <th>Journal</th><th>Épisode local</th><th>Phase</th><th>P/N</th><th>Pas</th>
+    <th>{}</th><th>Mode</th><th>WP actif</th><th>WP validés / 10</th>
+    <th>Ralliement (s)</th><th>Tour correct (%)</th>
+    </tr></thead><tbody>{}</tbody></table></div>
+    """.format(
+        "Événement" if progress_events else "Terminaison",
+        "".join(rows) or '<tr><td colspan="11" class="muted">Mesures indisponibles.</td></tr>',
     )
 
 
@@ -854,7 +935,10 @@ def _run_label(analysis: RunAnalysis) -> str:
 
 def _number(value, digits: int) -> str:
     try:
-        return ("{:,.%df}" % digits).format(float(value)).replace(",", " ")
+        number = float(value)
+        if not math.isfinite(number):
+            return "n/a"
+        return ("{:,.%df}" % digits).format(number).replace(",", " ")
     except (TypeError, ValueError):
         return "n/a"
 

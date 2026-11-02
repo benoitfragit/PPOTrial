@@ -52,6 +52,22 @@ bool Near(float const first, float const second,
     return std::abs(first - second) <= tolerance;
 }
 
+/** @brief Arms and confirms RALLY acquisition on two consecutive samples. */
+bool EnterFollow(
+    blue::GeneralizedPatrolWaypointSequencer& sequencer,
+    blue::Parameters const& parameters,
+    blue::GeneralizedRuntimeState const& state,
+    blue::BlueTeamRoles const& roles,
+    blue::PatrolNoThreatSettings const& settings)
+{
+    return sequencer.Observe(parameters, state, state, roles, settings)
+            == blue::GeneralizedWaypointUpdate::None
+        && !sequencer.Following()
+        && sequencer.Observe(parameters, state, state, roles, settings)
+            == blue::GeneralizedWaypointUpdate::EnteredFollow
+        && sequencer.Following();
+}
+
 bool RallyAndGeneration()
 {
     blue::Parameters parameters = TestParameters();
@@ -83,6 +99,29 @@ bool RallyAndGeneration()
     acquired.blues[0].north += 2490.F * -std::sin(heading);
     acquired.blues[0].east += 2490.F * std::cos(heading);
     if (sequencer.Observe(parameters, deadband, acquired, roles, settings)
+            != blue::GeneralizedWaypointUpdate::None
+        || sequencer.Following() || sequencer.ActiveWaypoint() != nullptr)
+    {
+        return false;
+    }
+
+    // Crossing the outer threshold cancels the first acquired sample. A
+    // subsequent deadband sample alone must not confirm the cancelled latch.
+    if (sequencer.Observe(parameters, acquired, far, roles, settings)
+            != blue::GeneralizedWaypointUpdate::None
+        || sequencer.Observe(parameters, far, deadband, roles, settings)
+            != blue::GeneralizedWaypointUpdate::None
+        || sequencer.Following())
+    {
+        return false;
+    }
+
+    // Reacquisition is retained in the deadband and confirmed on the next
+    // resolved step, making both thresholds observable before FOLLOW.
+    if (sequencer.Observe(parameters, deadband, acquired, roles, settings)
+            != blue::GeneralizedWaypointUpdate::None
+        || sequencer.Following()
+        || sequencer.Observe(parameters, acquired, deadband, roles, settings)
             != blue::GeneralizedWaypointUpdate::EnteredFollow
         || !sequencer.Following()
         || sequencer.ActiveWaypointIndex() != 0U)
@@ -112,7 +151,13 @@ bool RallyAndGeneration()
             return false;
         }
     }
-    return true;
+    // Once confirmed, FOLLOW and its frozen waypoints cannot be reset by
+    // leaving the outer corridor.
+    return sequencer.Observe(parameters, far, far, roles, settings)
+            == blue::GeneralizedWaypointUpdate::None
+        && sequencer.Following()
+        && sequencer.ActiveWaypointIndex() == 0U
+        && Near(sequencer.Waypoints()[0].pose.arclength, 1700.F + spacing);
 }
 
 bool CompleteSequence(int const direction, std::size_t const blueCount)
@@ -124,8 +169,7 @@ bool CompleteSequence(int const direction, std::size_t const blueCount)
     settings.minimumQualifiedFraction = 0.95F;
     blue::GeneralizedPatrolWaypointSequencer sequencer{};
     auto initial = StateAt(parameters, roles, 0.F);
-    if (sequencer.Observe(parameters, initial, initial, roles, settings)
-            != blue::GeneralizedWaypointUpdate::EnteredFollow)
+    if (!EnterFollow(sequencer, parameters, initial, roles, settings))
     {
         return false;
     }
@@ -157,7 +201,8 @@ bool NoPrematureAdvanceOrShortcut()
     blue::PatrolNoThreatSettings settings{};
     blue::GeneralizedPatrolWaypointSequencer sequencer{};
     auto const start = StateAt(parameters, roles, 0.F);
-    sequencer.Observe(parameters, start, start, roles, settings);
+    if (!EnterFollow(sequencer, parameters, start, roles, settings))
+        return false;
     float const circuit = blue::CircuitLength(parameters.geometry);
     auto const oneStep = StateAt(parameters, roles, 60.F);
     sequencer.Observe(parameters, start, oneStep, roles, settings);
@@ -168,7 +213,8 @@ bool NoPrematureAdvanceOrShortcut()
     }
 
     blue::GeneralizedPatrolWaypointSequencer shortcut{};
-    shortcut.Observe(parameters, start, start, roles, settings);
+    if (!EnterFollow(shortcut, parameters, start, roles, settings))
+        return false;
     auto const halfway = StateAt(parameters, roles, 0.04F * circuit);
     shortcut.Observe(parameters, start, halfway, roles, settings);
     // A physically impossible branch-cut shortcut invalidates the lap and
@@ -184,7 +230,8 @@ bool OrbitCannotAdvanceSequence()
     blue::PatrolNoThreatSettings settings{};
     blue::GeneralizedPatrolWaypointSequencer sequencer{};
     auto previous = StateAt(parameters, roles, 0.F);
-    sequencer.Observe(parameters, previous, previous, roles, settings);
+    if (!EnterFollow(sequencer, parameters, previous, roles, settings))
+        return false;
 
     float const spacing = blue::CircuitLength(parameters.geometry)
         / static_cast<float>(
@@ -232,7 +279,8 @@ bool WedgeAndCombatCompatibility()
         auto const roles = *blue::BlueTeamRoles::Create(count, count - 1U);
         auto state = StateAt(parameters, roles, 2500.F);
         blue::GeneralizedPatrolWaypointSequencer sequencer{};
-        sequencer.Observe(parameters, state, state, roles, settings);
+        if (!EnterFollow(sequencer, parameters, state, roles, settings))
+            return false;
         auto const targets = sequencer.Targets(
             parameters, state, roles, settings);
         auto const* active = sequencer.ActiveWaypoint();

@@ -154,6 +154,13 @@ private:
         GeneralizedRuntimeState const& state,
         GeneralizedPatrolTargets const& targets, char const* phase,
         char const* terminationCause) const;
+    /**
+     * @brief Logs one RALLY/FOLLOW or waypoint event without per-step output.
+     * @param parameters Current geometry and simulated step duration.
+     * @param update State-machine event after both progress validators ran.
+     */
+    void WritePatrolProgress(Parameters const& parameters,
+        GeneralizedWaypointUpdate update) const;
 /**
  * @brief Sérialise ou écrit les données associées à SaveAtUpdateBoundary selon les garanties implémentées.
  * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
@@ -217,6 +224,10 @@ private:
     std::array<Action, TeamCapacity::MaximumBlueMobiles> lastActions_{};
     std::array<bool, TeamCapacity::MaximumBlueMobiles> beforeAvailability_{};
     std::size_t episodeStep_{};
+    /** @brief Process-local episode identifier used only to group diagnostics. */
+    std::uint64_t diagnosticEpisode_{};
+    /** @brief Resolved step at RALLY/FOLLOW acquisition; zero until acquired. */
+    std::size_t followTransitionStep_{};
     std::uint64_t lastSavedUpdate_{};
     unsigned long long id_{ppo::model::GetNewUniqId()};
     float currentReward_{};

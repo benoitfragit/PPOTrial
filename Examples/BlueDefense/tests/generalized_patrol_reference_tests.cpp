@@ -339,6 +339,161 @@ bool TestConvergenceAndSingleRed()
     }
     return true;
 }
+
+/** @brief Moves only the leader along its local track normal, in metres. */
+void OffsetLeader(
+    blue::GeneralizedRuntimeState& state, blue::BlueTeamRoles const& roles,
+    float const distanceMeters) noexcept
+{
+    auto& leader = state.blues[roles.LeaderPhysicalIndex()];
+    leader.north -= distanceMeters * std::sin(leader.heading);
+    leader.east += distanceMeters * std::cos(leader.heading);
+}
+
+/** @brief Fixed guidance must preserve every legacy track measurement. */
+bool SamePatrolMeasurements(
+    blue::GeneralizedRuntimeState const& state,
+    blue::GeneralizedPatrolTargets const& legacy,
+    blue::GeneralizedPatrolTargets const& fixed,
+    blue::PatrolNoThreatSettings const& settings) noexcept
+{
+    for (std::size_t index = 0U; index < state.counts.blueMobiles; ++index)
+    {
+        auto const& from = legacy[index];
+        auto const& to = fixed[index];
+        auto const previous = blue::GeneralizedNoThreatError(
+            state, from, index, settings);
+        auto const current = blue::GeneralizedNoThreatError(
+            state, to, index, settings);
+        if (!from.valid || !to.valid
+            || !Near(from.pose.north, to.pose.north, 0.0001F)
+            || !Near(from.pose.east, to.pose.east, 0.0001F)
+            || !Near(from.pose.heading, to.pose.heading, 0.0001F)
+            || !Near(from.pose.arclength, to.pose.arclength, 0.0001F)
+            || !Near(from.pose.phase, to.pose.phase, 0.0001F)
+            || !Near(from.pose.curvature, to.pose.curvature, 0.0001F)
+            || !Near(from.speed, to.speed, 0.0001F)
+            || !Near(previous.position, current.position, 0.0001F)
+            || !Near(previous.speed, current.speed, 0.0001F)
+            || !Near(previous.heading, current.heading, 0.0001F))
+            return false;
+    }
+    return true;
+}
+
+/**
+ * @brief Checks numerical rewards and isolates a waypoint change after physics.
+ * @param startArc Arclength at which the ten-waypoint FOLLOW lap began.
+ * @param expectedConvergence Independently calculated dense convergence reward.
+ * @param expectedTransition Independently calculated tracking transition reward.
+ */
+bool CheckFrozenWaypointRewards(
+    blue::Parameters const& parameters, blue::BlueTeamRoles const& roles,
+    blue::GeneralizedRuntimeState const& before,
+    blue::GeneralizedRuntimeState const& after, float const startArc,
+    float const expectedConvergence, float const expectedTransition)
+{
+    blue::PatrolNoThreatSettings settings{};
+    settings.stepRewardScale = 0.004F;
+    float const spacing = blue::CircuitLength(parameters.geometry) / 10.F;
+    auto const waypoint = blue::EvaluatePatrolCurve(
+        parameters.geometry, startArc + spacing);
+    auto const nextWaypoint = blue::EvaluatePatrolCurve(
+        parameters.geometry, startArc + 2.F * spacing);
+    auto const beforeTargets = blue::ComputePatrolWaypointTargets(
+        parameters, before, roles, waypoint);
+    auto const afterTargets = blue::ComputePatrolWaypointTargets(
+        parameters, after, roles, waypoint);
+    auto const advancedTargets = blue::ComputePatrolWaypointTargets(
+        parameters, after, roles, nextWaypoint);
+    if (!SamePatrolMeasurements(before,
+            blue::ComputePatrolTargets(parameters, before, roles), beforeTargets, settings)
+        || !SamePatrolMeasurements(after,
+            blue::ComputePatrolTargets(parameters, after, roles), afterTargets, settings)
+        || !SamePatrolMeasurements(after, afterTargets, advancedTargets, settings))
+        return false;
+
+    std::size_t const leader = roles.LeaderPhysicalIndex();
+    float const convergence = blue::GeneralizedPatrolConvergenceShaping(
+        parameters, before, after, beforeTargets, afterTargets, roles, leader, settings);
+    float const transition = blue::GeneralizedPatrolTransitionShaping(
+        parameters, before, after, beforeTargets, afterTargets, roles, leader, settings);
+    if (!Near(convergence, expectedConvergence, 0.00015F)
+        || !Near(transition, expectedTransition, 0.000002F))
+    {
+        std::cerr << "frozen rewards: " << convergence << "/" << transition
+            << " expected " << expectedConvergence << "/" << expectedTransition << '\n';
+        return false;
+    }
+    // A newly selected after-step waypoint changes the next observation, not
+    // the reward for movement made towards the beginning-of-step waypoint.
+    for (std::size_t index = 0U; index < before.counts.blueMobiles; ++index)
+    {
+        float const originalConvergence = blue::GeneralizedPatrolConvergenceShaping(
+            parameters, before, after, beforeTargets, afterTargets, roles, index, settings);
+        float const originalTransition = blue::GeneralizedPatrolTransitionShaping(
+            parameters, before, after, beforeTargets, afterTargets, roles, index, settings);
+        if (!Near(originalConvergence, blue::GeneralizedPatrolConvergenceShaping(
+                parameters, before, after, beforeTargets, advancedTargets,
+                roles, index, settings), 0.000001F)
+            || !Near(originalTransition, blue::GeneralizedPatrolTransitionShaping(
+                parameters, before, after, beforeTargets, advancedTargets,
+                roles, index, settings), 0.000001F)
+            || std::hypot(afterTargets[index].guidancePose.north
+                    - advancedTargets[index].guidancePose.north,
+                afterTargets[index].guidancePose.east
+                    - advancedTargets[index].guidancePose.east) < 1000.F)
+            return false;
+    }
+    return true;
+}
+
+/** @brief Locks fixed-waypoint reward values on and off a straight in both directions. */
+bool TestFrozenWaypointRewardRegression()
+{
+    auto parameters = Parameters();
+    parameters.dt = 0.2F;
+    parameters.geometry.heading = 0.F;
+    for (int direction : {-1, 1})
+    {
+        parameters.geometry.direction = direction;
+        // Both starts and WPT1 lie on a straight; no turn approximation is
+        // involved in the independent 60-m / 150-m reward calculations.
+        float const start = direction > 0 ? 6000.F
+            : blue::CircuitLength(parameters.geometry) - 18000.F;
+        for (std::size_t count : {1U, 3U})
+        {
+            auto const roles = *blue::BlueTeamRoles::Create(count, count - 1U);
+            auto const onTrack = OnTargets(parameters, roles, start);
+            auto const forward = OnTargets(parameters, roles, start + 60.F);
+            if (!CheckFrozenWaypointRewards(parameters, roles, onTrack, forward,
+                    start, 0.804F, 0.004F))
+                return false;
+
+            auto nearBefore = onTrack;
+            auto nearAfter = forward;
+            OffsetLeader(nearBefore, roles, 1250.F);
+            OffsetLeader(nearAfter, roles, 1250.F);
+            if (!CheckFrozenWaypointRewards(parameters, roles, nearBefore, nearAfter,
+                    start, 0.3890886F, 0.002166667F))
+                return false;
+
+            auto farBefore = onTrack;
+            auto farParallel = forward;
+            OffsetLeader(farBefore, roles, 3000.F);
+            OffsetLeader(farParallel, roles, 3000.F);
+            if (!CheckFrozenWaypointRewards(parameters, roles, farBefore, farParallel,
+                    start, -0.008162837F, 0.0004545455F))
+                return false;
+            auto recovering = onTrack;
+            OffsetLeader(recovering, roles, 2940.F);
+            if (!CheckFrozenWaypointRewards(parameters, roles, farBefore, recovering,
+                    start, 0.7998379F, -0.00006133021F))
+                return false;
+        }
+    }
+    return true;
+}
 }
 
 int main()
@@ -348,6 +503,9 @@ int main()
     if (!ShapingAndLaps()) { std::cerr << "shaping/laps\n"; return 3; }
     if (!TestConvergenceAndSingleRed()) {
         std::cerr << "convergence/single-red\n"; return 4;
+    }
+    if (!TestFrozenWaypointRewardRegression()) {
+        std::cerr << "frozen-waypoint rewards\n"; return 5;
     }
     return 0;
 }
