@@ -90,7 +90,10 @@
       "stepRewardScale": 0.004,
       "minimumSeparationMeters": 2500,
       "lookaheadSeconds": 3,
-      "minimumQualifiedFraction": 0.95
+      "minimumQualifiedFraction": 0.95,
+      "rallyEnterDistanceMeters": 2500,
+      "rallyExitDistanceMeters": 3000,
+      "maxEpisodeSeconds": 480
     }
   }
 }

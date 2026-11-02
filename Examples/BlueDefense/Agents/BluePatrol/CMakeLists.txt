@@ -53,7 +53,7 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     target_compile_features(BlueDefenseInferenceCheckpointFixture PRIVATE
         cxx_std_17)
     set(_blue_inference_model
-        "${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/prod/blue_patrol_generalized_v9.txt")
+        "${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt")
     set(_blue_inference_marker
         "${CMAKE_BINARY_DIR}/blue_inference_fixture.marker")
     add_test(NAME BlueDefenseInferenceFixtureSetup
@@ -89,6 +89,14 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         BlueDefenseDefenderBackend)
     add_test(NAME BlueDefenseGeneralizedPatrolReferenceTests
         COMMAND BlueDefenseGeneralizedPatrolReferenceTests)
+    add_executable(BlueDefenseGeneralizedPatrolWaypointTests
+        ../../tests/generalized_patrol_waypoint_sequencer_tests.cpp)
+    target_link_libraries(BlueDefenseGeneralizedPatrolWaypointTests PRIVATE
+        BlueDefenseDefenderBackend)
+    target_compile_features(BlueDefenseGeneralizedPatrolWaypointTests PRIVATE
+        cxx_std_17)
+    add_test(NAME BlueDefenseGeneralizedPatrolWaypointTests
+        COMMAND BlueDefenseGeneralizedPatrolWaypointTests)
     add_executable(BlueDefenseGeneralizedAdvantageTests
         ../../tests/generalized_advantage_tests.cpp)
     target_link_libraries(BlueDefenseGeneralizedAdvantageTests PRIVATE

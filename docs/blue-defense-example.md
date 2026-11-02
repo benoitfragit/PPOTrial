@@ -77,12 +77,19 @@ anticipée (position et cap) réellement fournie dans l'observation MAPPO. Les
 données sont copiées après leur calcul par le runtime, dans un stockage borné
 de neuf entrées, puis consommées uniquement par la vue 3D et la mini-carte.
 
+`Show patrol waypoints` commande séparément l'affichage des dix points figés
+de la patrouille sans Rouge. `WP1` à `WP10` sont rendus en vue 3D et sur la
+mini-carte : actif en doré, futurs en vert et validés en gris. Les deux cases
+sont persistées indépendamment. Le stockage de l'overlay est borné à dix
+entrées et n'intervient ni dans la physique, ni dans la politique.
+
 ## Compatibilité de checkpoints
 
-Le moteur MAPPO conserve le chargement des modèles v8 ainsi que des lecteurs
-de migration V4/V7 **uniquement pour convertir d'anciens poids**. Ces lecteurs
-ne créent aucun contrôleur à deux agents. L'entraînement MAPPO s'enregistre
-dans `resources/model/BluePatrol/latest`.
+Le runtime courant exige l'acteur V10 et l'état d'entraînement V7. Le guidage
+figé change la sémantique des colonnes de patrouille sans changer leur taille :
+les poids V9, dont ceux du run 22, sont donc incompatibles et ne sont pas
+repris silencieusement. L'entraînement MAPPO V10 repart de zéro et
+s'enregistre dans `resources/model/BluePatrol/latest`.
 
 ## Vérification
 

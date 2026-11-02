@@ -30,7 +30,7 @@ namespace ppo::examples::bluedefense::defenders {
 struct GeneralizedObservationLayout final
 {
     /** @brief New raw-observation contract version. */
-    static constexpr std::uint32_t Version = 9U;
+    static constexpr std::uint32_t Version = 10U;
     /** @brief Historical own-platform features retained for v7 migration. */
     static constexpr std::size_t Own = ObservationLayout::Own;
     /** @brief Exact pseudo-LiDAR ray count. */

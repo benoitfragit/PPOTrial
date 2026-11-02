@@ -57,6 +57,8 @@ class BlueDiagnosticsTests(unittest.TestCase):
             self.assertAlmostEqual(analysis.metrics["blue_survival_rate"], 0.5)
             self.assertEqual(analysis.metrics["loss_sources"]["low_speed"], 1)
             self.assertEqual(analysis.metrics["patrol"]["episodes"], 1)
+            self.assertEqual(analysis.metrics["patrol"]["latest_mode"], "FOLLOW")
+            self.assertEqual(analysis.metrics["patrol"]["validated_waypoints_max"], 6)
             self.assertEqual(analysis.metrics["tolerance_by_role"]["samples"], 2)
             self.assertEqual(analysis.metrics["reward_by_role"]["samples"], 1)
             self.assertAlmostEqual(analysis.metrics["optimizer_ms_mean"], 1450.0)
@@ -113,7 +115,7 @@ class BlueDiagnosticsTests(unittest.TestCase):
             csv_source = next(run_root.rglob("mappo-training.csv"))
             summary = root / "step-summary.md"
             output = run_root / "diagnostic.html"
-            checkpoint = next(run_root.rglob("blue_patrol_generalized_training_v6.txt"))
+            checkpoint = next(run_root.rglob("blue_patrol_generalized_training_v7.txt"))
             report = generate_ci_report(
                 run_root, csv_source, output, summary,
                 {"run_number": 123, "id": 20260123}, (checkpoint,),
@@ -217,8 +219,10 @@ class BlueDiagnosticsTests(unittest.TestCase):
             "source=low_speed speed_before=4 speed=1 accel_cmd=-0.5 low_speed=1 "
             "fuel_empty=0 fuel_remaining=80 fuel_capacity=100\n"
             + "[MAPPO_PATROL_EPISODE] phase=training P={} N={} steps=400 "
+            "mode=FOLLOW active_waypoint=7 validated_waypoints=6 waypoint_distance_m=80 "
+            "cross_track_m=20 heading_error_rad=0.1 speed_mps=300 arclength_m=60000 "
             "distance_m=100 qualified_m=60 circuit_m=100 resets=1 reset_cause=collision "
-            "tracking_violations=2 spacing_applicable=1 spacing_margin_m=120\n".format(blue, red)
+            "tracking_violations=2 termination=timeout spacing_applicable=1 spacing_margin_m=120\n".format(blue, red)
             + "[MAPPO_PATROL_AGENT] blue=1 role=leader valid=1 "
             "position_tolerances=2 speed_tolerances=3 heading_tolerances=4\n"
             + "[MAPPO_PATROL_AGENT] blue=2 role=teammate valid=1 "
@@ -241,10 +245,10 @@ class BlueDiagnosticsTests(unittest.TestCase):
             run_root
             / "artifacts"
             / "blue-mappo-checkpoints-2"
-            / "blue_patrol_generalized_training_v6.txt"
+            / "blue_patrol_generalized_training_v7.txt"
         )
         checkpoint.parent.mkdir(parents=True)
-        checkpoint.write_text("BLUE_TEAM_TRAINING_V6 6 9 fixture\n", encoding="utf-8")
+        checkpoint.write_text("BLUE_TEAM_TRAINING_V7 7 10 fixture\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

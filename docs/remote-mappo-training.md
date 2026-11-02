@@ -43,11 +43,11 @@ checkpoint exists.
 
 The learner writes these files at completed PPO-update boundaries:
 
-- `resources/model/BluePatrol/latest/blue_patrol_generalized_v9.txt`:
+- `resources/model/BluePatrol/latest/blue_patrol_generalized_v10.txt`:
   inference actor.
-- `resources/model/BluePatrol/latest/blue_patrol_generalized_training_v6.txt`:
-  **full training state**, using internal format `BLUE_TEAM_TRAINING_V6`.
-- `resources/model/BluePatrol/prod/blue_patrol_generalized_v9.txt`:
+- `resources/model/BluePatrol/latest/blue_patrol_generalized_training_v7.txt`:
+  **full training state**, using internal format `BLUE_TEAM_TRAINING_V7`.
+- `resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt`:
   promoted actor only after successful evaluation, when present.
 
 Training-state serialization includes actor, critic, Adam moments,
@@ -112,18 +112,18 @@ exists on the default branch.
 
 Select curriculum_enabled=true, curriculum_version=v3, resume_run_id empty,
 max_seconds=14400 and save_every_updates=1. V3 starts random actor/critic/Adam
-state at update zero, with observation v9 and 2048-step rollouts. It does not
-migrate run 16 or any older actor. Twelve phases total 1200 PPO updates, from
+state at update zero, with observation v10 and 2048-step rollouts. It does not
+migrate run 22 or any older actor. Twelve phases total 1200 PPO updates, from
 1vs0 / 2vs0 / 3vs0 / 4vs0 to progressive combat and a final 4vs4. Rehearsal
 uses 24 primary updates followed by 6 updates from earlier phases, round-robin.
 The first phase has no earlier task; every phase ends with its primary task.
 
 To continue this new run across jobs, select its own run ID with the same V3
-JSON fingerprint and observation v9. Old V2/V3 progress is rejected. The runner
+JSON fingerprint and observation v10. Old V2/V3 progress is rejected. The runner
 only resets current Blue files in its temporary checkout on fresh start;
 archived candidate files and RLMission are untouched. The old training filename
-ending in v5 is no longer loaded by the runtime. Format V6 remains the full
-optimizer envelope, with an independently checked observation version of 9.
+ending in v6 is no longer loaded by the runtime. Format V7 is the full
+optimizer envelope, with an independently checked observation version of 10.
 
 The 4-hour budget is a wall-clock limit, not a guarantee that all 1200 updates
 finish in one job. Incomplete progressing blocks continue while time remains;

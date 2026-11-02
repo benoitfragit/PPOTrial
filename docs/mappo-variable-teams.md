@@ -83,20 +83,16 @@ verified instead of inferring convergence from motion alone.
 
 ## Checkpoint compatibility
 
-- **Inference actor**: keeps the existing generalized V8 binary/text
-  parameter dimensions (128-wide). It can be loaded with its old weights.
-  The observation semantics and rewards have changed, so retraining and
-  evaluation are recommended.
-- **Full generalized training state**: V6
-  (`BLUE_TEAM_TRAINING_V6`) contains the new 470-input/256-wide critic.
+- **Inference actor**: V10 keeps the 128-wide parameter dimensions, but uses
+  the fixed-waypoint guidance semantics. V9 and older weights are rejected;
+  V10 requires a fresh training run.
+- **Full generalized training state**: V7
+  (`BLUE_TEAM_TRAINING_V7`) contains the 470-input/256-wide critic and requires
+  the waypoint-guidance observation contract V10.
   Same architecture can resume across different P/N episode counts.
-- **Historical V5 full training state**: the runtime keeps an untouched
-  `.v5.bak` and migrates the compatible V8 actor, while creating a fresh
-  critic and optimizer state. The update counter restarts at zero. The
-  migration is logged explicitly. Incompatible or malformed files must fail
-  rather than being silently accepted.
-- **Historical V4/v7 actor migrations**: retain their earlier strict
-  contracts and do not modify the legacy model classes.
+- **Historical states**: archived files remain untouched, but are not valid
+  warm starts for the V10 observation semantics. Incompatible or malformed
+  files fail rather than being silently accepted.
 
 ## Regression coverage and open evaluation
 
@@ -145,8 +141,9 @@ per-step survival bonus. This fixes cumulative reward imbalance.
 Distant threats reduce patrol/formation priority, allowing individual pursuit.
 As hostile mobiles approach the team, the relative formation preference grows;
 imminent objective danger can still relax it. The transition is continuous,
-using the configured `teammateThreatDistanceMeters` and objective pressure;
-there is no external waypoint or target assignment. Pursuit progress measures
+using the configured `teammateThreatDistanceMeters` and objective pressure.
+The ten-waypoint sequencer is internal to no-threat patrol and never assigns a
+red target. Pursuit progress measures
 the **blues' displacement** toward each living red with red positions frozen
 at the beginning of the step, and uses objective risk as a weighting. Red-only
 movement cannot generate pursuit reward. It is a shared team coverage signal,

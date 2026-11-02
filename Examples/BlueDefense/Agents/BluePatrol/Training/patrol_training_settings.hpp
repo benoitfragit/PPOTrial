@@ -30,7 +30,7 @@ inline constexpr bool IsSupportedRolloutSize(std::size_t steps) noexcept
 /**
  * @brief Optional Blue-only P-versus-zero patrol task.
  *
- * V3 uses observation v9 and starts fresh. These runtime settings are carried
+ * V3 uses observation v10 and starts fresh. These runtime settings are carried
  * by JSON, while checkpoint headers independently validate the observation
  * semantics. The curriculum fingerprint validates its own scheduling contract.
  */
@@ -46,6 +46,12 @@ struct PatrolNoThreatSettings final
     float lookaheadSeconds{3.F};
     /** @brief Strict by default; a small V3 transition budget is explicit in JSON. */
     float minimumQualifiedFraction{1.F};
+    /** @brief Cross-track distance that arms the irreversible FOLLOW mode. */
+    float rallyEnterDistanceMeters{2500.F};
+    /** @brief Wider release threshold used by the RALLY corridor latch. */
+    float rallyExitDistanceMeters{3000.F};
+    /** @brief N=0 simulated-time horizon; other scenarios keep their own limit. */
+    float maxEpisodeSeconds{480.F};
 };
 
 /** @brief Validate dimensioned patrol tolerances and bounded shaping. */
@@ -68,7 +74,37 @@ inline bool Valid(PatrolNoThreatSettings const& settings) noexcept
         && settings.lookaheadSeconds >= 0.F && settings.lookaheadSeconds <= 30.F
         && std::isfinite(settings.minimumQualifiedFraction)
         && settings.minimumQualifiedFraction >= 0.8F
-        && settings.minimumQualifiedFraction <= 1.F;
+        && settings.minimumQualifiedFraction <= 1.F
+        && std::isfinite(settings.rallyEnterDistanceMeters)
+        && settings.rallyEnterDistanceMeters > 0.F
+        && std::isfinite(settings.rallyExitDistanceMeters)
+        && settings.rallyExitDistanceMeters
+            > settings.rallyEnterDistanceMeters
+        && std::isfinite(settings.maxEpisodeSeconds)
+        && settings.maxEpisodeSeconds > 0.F;
+}
+
+/**
+ * @brief Converts the N=0 simulated-time horizon to a bounded step count.
+ * @param settings Valid no-threat patrol settings.
+ * @param dt Simulation step duration in seconds.
+ * @param fallbackSteps Existing scenario or evaluation step horizon.
+ * @return The earlier positive horizon, rounded up to the first expired step.
+ */
+inline std::size_t NoThreatEpisodeLimitSteps(
+    PatrolNoThreatSettings const& settings, float const dt,
+    std::size_t const fallbackSteps) noexcept
+{
+    if (!Valid(settings) || !std::isfinite(dt) || dt <= 0.F
+        || fallbackSteps == 0U)
+    {
+        return fallbackSteps;
+    }
+    double const exact = static_cast<double>(settings.maxEpisodeSeconds)
+        / static_cast<double>(dt);
+    double const bounded = std::min(
+        std::ceil(exact), static_cast<double>(fallbackSteps));
+    return static_cast<std::size_t>(std::max(1.0, bounded));
 }
 
 /**

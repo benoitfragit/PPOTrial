@@ -1,24 +1,32 @@
-# MAPPO Bleu — curriculum V3 (depuis zéro ou reprise V9 explicite)
+# MAPPO Bleu — curriculum V3 et observation V10
 
-V3 reste le nom du curriculum. Le numéro **v9** identifie séparément le
-contrat d'observation et l'acteur : les huit premières colonnes de patrouille
-changent de sens, malgré une dimension de réseau inchangée.
+V3 reste le nom du curriculum. Le numéro **v10** identifie séparément le
+contrat d'observation et l'acteur. La taille du réseau reste inchangée, mais le
+guidage de patrouille sans Rouge devient un waypoint figé : V9 et V10 ne sont
+donc pas interchangeables.
 
 ## Références et observation
 
-Le runtime calcule une seule projection du leader par snapshot, puis P
-références dans un tableau de capacité 9. ChooseAction conserve celles de
-l'état avant ; SetNewState calcule celles de l'état après. Observation,
-reward, tour qualifiant, métriques et diagnostics réutilisent ces tableaux.
+En N=0, le runtime commence en RALLY avec la référence historique issue de la
+projection. Lorsque le couloir à hystérésis est acquis, il génère exactement
+dix poses équidistantes sur un tour et entre définitivement en FOLLOW. Le
+leader possède l'unique séquenceur ; les P−1 références wedge sont dérivées du
+waypoint actif. ChooseAction conserve la cible pendant tout le pas, puis
+SetNewState peut avancer d'un waypoint au maximum.
+
+La projection analytique instantanée reste la référence de mesure de l'écart à
+la piste, du cap et de la progression. Observation, reward, tour qualifiant,
+métriques et diagnostics utilisent donc une mesure géométrique de piste et non
+une fausse distance latérale au waypoint.
 Les primitives géométriques restent pures dans Core ; aucune référence ne
 produit directement une commande ou une attribution de cible de combat.
 
 Chaque référence contient une pose/vitesse instantanée de mesure et une
-pose/vitesse avancée de 3 secondes pour l'observation. La dérivée analytique
-du slot donne son cap et sa vitesse propres en virage. Les rewards utilisent
-la référence instantanée, sans pénaliser le décalage du lookahead.
+pose/vitesse de guidage pour l'observation. Cette dernière est la prévision
+historique en RALLY ou en combat et le waypoint actif figé en FOLLOW. Les
+rewards continuent d'utiliser la référence instantanée.
 
-| Colonne patrouille | Contenu v9 |
+| Colonne patrouille | Contenu v10 |
 | --- | --- |
 | 0–1 | Position de la cible avancée relative au Bleu, normalisée aux dimensions du monde |
 | 2–3 | Vitesse vectorielle relative, normalisée à la vitesse maximale |
@@ -50,13 +58,17 @@ le progrès de poursuite et la formation relative au leader physique prennent
 progressivement la priorité. Les canaux de sécurité, de pertes et de
 neutralisation conservent leurs identifiants et leur ordre.
 
-En Pvs0, la victoire exige un tour physique complet, avec au moins **95 % de
-la distance** parcourue dans les tolérances de tous les Bleus. La séparation
+En Pvs0, la victoire exige WPT1 à WPT10 dans l'ordre et un tour physique
+complet, avec au moins **95 % de la distance** parcourue dans les tolérances de
+tous les Bleus. Un franchissement dirigé, un rayon adapté à `dt` et à la vitesse
+et une progression projetée plausible empêchent les raccourcis, le retour en
+arrière et l'orbite locale. La séparation
 reste obligatoire à chaque pas ; perte d'un Bleu, marche arrière, arrêt ou
 saut impossible invalident la progression. Une perte termine immédiatement
 la mission Pvs0. Le budget de 5 % couvre les transitoires des raccords de
 courbure de l'hippodrome ; il ne constitue pas une exemption de sécurité.
-Le timeout reste une troncature et reçoit maintenant sa pénalité en Pvs0.
+Le timeout N=0 est 480 secondes simulées par défaut, soit 2400 pas à `dt=0.2`.
+Il reste une troncature, sans succès, et reçoit sa pénalité en Pvs0.
 En PvsN, la neutralisation du dernier Rouge reste terminale immédiatement,
 hors activations différées encore attendues.
 
@@ -105,64 +117,36 @@ Workflow "MAPPO training (Windows Release)" :
 Le budget horaire peut interrompre le programme avant 1200 updates. Reprendre
 alors uniquement avec l'ID de ce nouveau run V3, son empreinte JSON et ses
 checkpoints. Le runtime ne migre automatiquement aucun ancien poids.
-L'acteur est blue_patrol_generalized_v9.txt ; l'état complet est
-blue_patrol_generalized_training_v6.txt, enveloppe V6 avec observation 9.
+L'acteur est blue_patrol_generalized_v10.txt ; l'état complet est
+blue_patrol_generalized_training_v7.txt, enveloppe V7 avec observation 10.
 Les anciens candidats restent sous leurs anciens noms.
 
 Les journaux contiennent MAPPO_PATROL_EPISODE (distance, distance qualifiée,
-remises à zéro, violations, marge de séparation), MAPPO_PATROL_AGENT
+remises à zéro, violations, marge de séparation, mode, index actif, nombre
+validé, distance au waypoint, écart piste, cap, vitesse, abscisse et
+terminaison), MAPPO_PATROL_AGENT
 (erreurs normalisées par Bleu) et MAPPO_ROLE_REWARD (moyennes pondérées par
 pas d'agent et par rôle pour les canaux patrouille, formation, effort et basse
 vitesse). L'évaluation réutilise la même géométrie de référence.
 
-## Reprendre le candidat V9 du run 19 dans V3
+## Incompatibilité explicite avec V9 et le run 22
 
-Le mode par défaut V3 reste un entraînement intégral **depuis zéro**. Une
-**importation explicite, unique** peut désormais démarrer les 1200 mises à jour
-V3 à partir d'un checkpoint d'apprentissage V9 compatible, sans recréer
-l'acteur, le critic ou l'optimiseur. L'enveloppe V6 avec observation 9 et
-le marqueur UPDATES sont vérifiés. L'import ne convertit pas les anciens
-modèles V8 et ne touche pas au modèle Rouge RLMission.
+Le séquencement change la signification temporelle de la cible encodée dans les
+huit colonnes de patrouille. Charger un acteur V9 lui présenterait donc des
+entrées de même dimension mais de sens différent. L'acteur V10, l'enveloppe
+d'entraînement V7 et l'observation 10 sont vérifiés ensemble ; les checkpoints
+V9 du run 22 sont conservés comme archives et rejetés par le runtime courant.
 
-Pour la première exécution depuis le run 19 dans GitHub Actions :
-
-- `curriculum_enabled=true` ; `curriculum_version=v3`
-- `resume_run_id=41286282285`
-- `curriculum_warm_start=true` **uniquement à l'import initial**
-- `max_seconds=14400` ; `save_every_updates=1`
-
-Les checkpoints complets `latest` et le candidat `prod` du run 19 sont
-restaurés, mais seul le **checkpoint complet latest** de l'update 538 sert à
-reprendre l'optimiseur. Le meilleur acteur `prod` reste isolé et disponible
-comme référence 4vs4, sous réserve des règles normales de promotion.
-
-Le progrès V3 est créé avec `baselineUpdates=538`,
-`initializationSource=warm-v9`, `nextStage=0` et la même empreinte de
-configuration V3. Les phases restent déterministes, et leur cible finale
-est l'update 1738 (538 + 1200). Les 160 premières mises à jour de
-patrouille 1vs0 comprennent déjà des rappels 4vs4 tous les 24/6
-updates ; dans les autres phases, les 6 updates de répétition alternent
-entre le 4vs4 et les tâches antérieures. L'objectif est de limiter l'oubli
-du combat tout en acquérant la patrouille et le wedge, sans garantir une
-convergence à l'avance.
-
-**Pour la reprise après ce premier run V3 :** fournir l'identifiant du
-nouveau run V3 comme `resume_run_id`, et repasser
-`curriculum_warm_start=false`. La progression restaurée détermine la
-phase et la répétition ; demander une nouvelle importation si une
-progression existe déjà provoque un rejet explicite, plutôt qu'un reset.
-
-Sans `resume_run_id`, le workflow utilise toujours `--fresh-start`
-avec un V3 à update 0. Avec un `resume_run_id` V9 sans progression V3,
-il exige explicitement `curriculum_warm_start=true`.
-Les checkpoints V8 / historiques et les progressions V2 incompatibles
-sont rejetés.
+Le premier run V10 doit utiliser `--fresh-start` avec acteur, critic, Adam et
+RNG neufs. Une reprise est autorisée uniquement depuis un checkpoint complet
+V7/observation 10 et une progression V3 ayant la même empreinte JSON. Cette
+règle ne touche ni le contrôleur RLMission ni les poids des Rouges.
 
 ## Validation
 
-Les tests déterministes couvrent P=1/2/3/9, N=0 et N>0, directions de tour,
-dérivées des slots, masques, perte du leader, séparation, stationnement,
-transitoires de vitesse et fin de tour. Les tests Python vérifient le départ
+Les tests déterministes couvrent P=1/2/3/4/9, N=0 et N>0, les dix waypoints,
+les deux directions, l'orbite locale, les raccourcis, les masques, le wedge,
+la séparation, le timeout et la fin de tour. Les tests Python vérifient le départ
 à zéro, la reprise compatible, le refus des anciens états et la répétition
 des tâches. Exécuter Debug/Release et CTest ; vérifier la CI VS2022 avant
 fusion. Seule une évaluation de politiques entraînées sur des graines

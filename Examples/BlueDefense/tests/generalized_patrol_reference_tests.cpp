@@ -1,5 +1,5 @@
 /** @file
- * @brief Deterministic v9 references, physical laps and V3 reward regressions.
+ * @brief Deterministic v10 references, physical laps and V3 reward regressions.
  */
 #include "generalized_reward_shaping.hpp"
 

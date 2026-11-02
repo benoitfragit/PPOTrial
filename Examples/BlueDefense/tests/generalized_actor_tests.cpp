@@ -235,8 +235,8 @@ int main()
     static_assert(RawLayout::BlueTracks == 8U);
     static_assert(RawLayout::ObjectiveTracks == 1U);
     static_assert(RawLayout::Version != LegacyLayout::Version);
-    static_assert(blue::kGeneralizedPolicyCheckpointVersion == 9U);
-    static_assert(blue::kGeneralizedTrainingCheckpointVersion == 6U);
+    static_assert(blue::kGeneralizedPolicyCheckpointVersion == 10U);
+    static_assert(blue::kGeneralizedTrainingCheckpointVersion == 7U);
 
     blue::Observation legacyObservation{};
     for (std::size_t index = 0; index < LegacyLayout::Own; ++index)
@@ -487,22 +487,24 @@ int main()
     }
 
     std::string wrongVersion = serializedPolicy;
-    auto const headerVersion = wrongVersion.find("BLUE_TEAM_MAPPO_V9 9");
+    auto const headerVersion = wrongVersion.find("BLUE_TEAM_MAPPO_V10 10");
     if (headerVersion == std::string::npos)
         return 13;
     std::string oldObservation = serializedPolicy;
-    auto const observationHeader = oldObservation.find("BLUE_TEAM_MAPPO_V9 9 9 ");
+    auto const observationHeader = oldObservation.find("BLUE_TEAM_MAPPO_V10 10 10 ");
     if (observationHeader == std::string::npos)
         return 16;
     oldObservation.replace(observationHeader,
-        std::string{"BLUE_TEAM_MAPPO_V9 9 9 "}.size(), "BLUE_TEAM_MAPPO_V9 9 8 ");
+        std::string{"BLUE_TEAM_MAPPO_V10 10 10 "}.size(),
+        "BLUE_TEAM_MAPPO_V10 10 9 ");
     if (!ThrowsRuntimeError([&] {
             std::stringstream input{oldObservation};
             blue::ReadGeneralizedPolicy(input, loadedActor);
         }))
         return 17;
-    wrongVersion[headerVersion + std::string{"BLUE_TEAM_MAPPO_V9 "}.size()]
-        = '8';
+    wrongVersion.replace(
+        headerVersion + std::string{"BLUE_TEAM_MAPPO_V10 "}.size(),
+        2U, "9");
     if (!ThrowsRuntimeError([&] {
             std::stringstream input{wrongVersion};
             blue::ReadGeneralizedPolicy(input, loadedActor);
@@ -570,11 +572,11 @@ int main()
 
     std::string wrongTrainingVersion = serializedTraining;
     auto const trainingVersion =
-        wrongTrainingVersion.find("BLUE_TEAM_TRAINING_V6 6");
+        wrongTrainingVersion.find("BLUE_TEAM_TRAINING_V7 7");
     if (trainingVersion == std::string::npos)
         return 18;
     wrongTrainingVersion[
-        trainingVersion + std::string{"BLUE_TEAM_TRAINING_V6 "}.size()] = '5';
+        trainingVersion + std::string{"BLUE_TEAM_TRAINING_V7 "}.size()] = '6';
     if (!ThrowsRuntimeError([&] {
             std::stringstream input{wrongTrainingVersion};
             blue::ReadGeneralizedTrainingState(

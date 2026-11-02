@@ -14,14 +14,14 @@ Deux modes utilisent la même scène `Scenarios/BlueDefense.json` (par défaut P
 
 ## Observation par Bleu
 
-`Runtime/generalized_runtime_state.hpp` copie les états ECS dans `GeneralizedRuntimeState`, valide la finitude et crée **P observations décentralisées**. `Core/generalized_observation.hpp` fixe le contrat v8, ses offsets et masques :
+`Runtime/generalized_runtime_state.hpp` copie les états ECS dans `GeneralizedRuntimeState`, valide la finitude et crée **P observations décentralisées**. `Core/generalized_observation.hpp` fixe le contrat v10, ses offsets et masques :
 
 - État propre, **61 rayons** pseudo-LiDAR, rôle explicite et position normalisée dans le wedge.
 - Jusqu'à **10 pistes rouges** et **8 pistes de Bleus voisins**, avec masques d'existence.
 - Objectif séparé, géométrie de patrouille, variables globales, effectifs P/N normalisés.
 - Les pistes sont normalisées et validées; l'attention n'est pas censée prendre en compte les slots masqués.
 
-Le tableau brut v8 et le compactage du réseau sont définis par les constantes du code, **pas** par un réarrangement arbitraire de JSON. `Training/generalized_attention_actor.hpp` construit des résumés invariants à l'ordre (attention masquée, moyenne et maximum) avant le réseau acteur. Le critic est centralisé et utilise des informations d'équipe et l'identité de l'agent, via `generalized_critic_observation.hpp`.
+Le tableau brut v10 et le compactage du réseau sont définis par les constantes du code, **pas** par un réarrangement arbitraire de JSON. En N=0, le guidage passe irréversiblement de RALLY à une séquence figée de dix waypoints ; la projection instantanée reste la mesure d'écart à l'hippodrome. `Training/generalized_attention_actor.hpp` construit des résumés invariants à l'ordre (attention masquée, moyenne et maximum) avant le réseau acteur. Le critic est centralisé et utilise des informations d'équipe et l'identité de l'agent, via `generalized_critic_observation.hpp`.
 
 ## Actions et boucle d'entraînement
 
@@ -36,9 +36,9 @@ Le tableau brut v8 et le compactage du réseau sont définis par les constantes 
 Dans `GeneralizedPatrolMappoAgent::SetNewState` :
 
 - `noThreatRemains` : **N > 0**, aucun Rouge vivant, **aucune menace retardée encore en attente**.
-- `terminated` : échec de l'équipe bleue, objectif détruit ou `noThreatRemains`.
-- `truncated` : pas d'arrêt terminal et compteur de pas atteignant `training_.evaluation.maxSteps` (en campagne) ou `parameters.episodeSteps` (en entraînement).
-- Avec **N=0**, la condition « tous les rouges détruits » n'est **pas** une victoire terminale; l'épisode de patrouille se termine à l'horizon ou sur échec physique/objectif.
+- `terminated` : échec de l'équipe bleue, objectif détruit, `noThreatRemains` ou tour N=0 validé jusqu'à WPT10.
+- `truncated` : pas d'arrêt terminal et compteur atteignant la plus petite limite entre l'horizon courant et `ceil(maxEpisodeSeconds/dt)` en N=0.
+- Avec **N=0**, le succès exige WPT1→WPT10, un tour physique valide et les tolérances de formation. Le timeout de 480 secondes simulées est une troncature sans succès.
 
 Le test `GeneralizedBlueTeamFailed` et les règles ECS définissent l'échec des Bleus et les frontières. Il ne faut pas déduire d'une pénalité de frontière qu'elle cause directement la destruction. La limite de pas est une **troncature**, à ne pas confondre avec le succès de mission. Le fuel est un effet de la physique et des paramètres véhicule, pas une condition générique de réussite ajoutée par le moteur PPO.
 
@@ -56,8 +56,8 @@ Le test `GeneralizedBlueTeamFailed` et les règles ECS définissent l'échec des
 | Red neutralization | Neutralisations rouges normalisées par N (zéro pour N=0). |
 | Threat containment | Diminution du danger sur l'objectif. |
 | Objective survival | Évènement de destruction de l'objectif. |
-| Mission outcome | -1 sur échec, +1 si N>0 et tous les rouges éliminés sans attente. |
-| Timeout | Pénalité de troncature si des rouges restent / sont attendus. |
+| Mission outcome | -1 sur échec, +1 si N>0 et tous les rouges sont éliminés sans attente, ou si le tour N=0 est validé. |
+| Timeout | Pénalité de troncature, y compris à la limite spécifique N=0. |
 | Blue separation | Risque de proximité entre Bleus. |
 | Restricted zone clearance | Risque lié aux zones interdites. |
 | Boundary clearance | Risque de proximité/dépassement de frontière. |
@@ -74,8 +74,8 @@ La responsabilité `lowSpeedRisk` ne doit pas être confondue avec l'éliminatio
 
 ## Checkpoints et reprise
 
-`latest/blue_patrol_generalized_v8.txt` : poids acteur d'inférence.
-`latest/blue_patrol_generalized_training_v5.txt` : état d'entraînement complet (signature interne V6 : acteur, critic, Adam, RNG, compteur). `prod/blue_patrol_generalized_v8.txt` : acteur promu si meilleur résultat. Le contenu du rollout incomplet n'est pas sérialisé. Les lecteurs de migration v7/v4 sont des voies de **conversion**, pas une reprise binaire complète des anciens 2v2. Ne pas mélanger les checkpoints MAPPO et RLMission.
+`latest/blue_patrol_generalized_v10.txt` : poids acteur d'inférence.
+`latest/blue_patrol_generalized_training_v7.txt` : état d'entraînement complet (signature `BLUE_TEAM_TRAINING_V7` : acteur, critic, Adam, RNG, compteur). `prod/blue_patrol_generalized_v10.txt` : acteur promu si meilleur résultat. Le contenu du rollout incomplet n'est pas sérialisé. Les poids V9 du run 22 sont incompatibles avec la nouvelle sémantique de guidage et ne sont pas repris. Ne pas mélanger les checkpoints MAPPO et RLMission.
 
 ## Diagnostic guidé par le code
 

@@ -65,7 +65,7 @@ class CurriculumTests(unittest.TestCase):
     def fake_checkpoint(self, updates: int) -> None:
         curriculum.LATEST.parent.mkdir(parents=True, exist_ok=True)
         curriculum.LATEST.write_text(
-            f"BLUE_TEAM_TRAINING_V6 6 9 200\nUPDATES {updates}\n",
+            f"BLUE_TEAM_TRAINING_V7 7 10 200\nUPDATES {updates}\n",
             encoding="utf-8",
         )
 
@@ -443,7 +443,7 @@ class CurriculumTests(unittest.TestCase):
 
     def v3_config(self) -> dict:
         cfg = test_stages()
-        cfg.update(formatVersion=3, totalUpdates=5, observationVersion=9,
+        cfg.update(formatVersion=3, totalUpdates=5, observationVersion=10,
                    initialization="scratch",
                    rehearsal={"primaryUpdates": 2, "priorUpdates": 1})
         curriculum.write_json(self.curriculum_path, cfg)
@@ -488,7 +488,7 @@ class CurriculumTests(unittest.TestCase):
     def test_v3_rejects_old_schema_and_previous_curriculum(self) -> None:
         self.v3_config()
         self.fake_checkpoint(796)
-        curriculum.LATEST.write_text("BLUE_TEAM_TRAINING_V6 6 8 200\nUPDATES 796\n")
+        curriculum.LATEST.write_text("BLUE_TEAM_TRAINING_V7 7 9 200\nUPDATES 796\n")
         with self.assertRaisesRegex(ValueError, "schema mismatch"):
             curriculum.run(self.args())
         self.assertFalse(curriculum.PROGRESS.exists())
@@ -514,7 +514,7 @@ class CurriculumTests(unittest.TestCase):
         config["stages"][0]["updates"] = 7
         config["totalUpdates"] = 9
         curriculum.write_json(self.curriculum_path, config)
-        self.fake_checkpoint(538)  # Full V9 training state from run 19.
+        self.fake_checkpoint(538)  # Full V10 training state from a prior run.
         original_production = curriculum.PROD.read_bytes()
         original_score = curriculum.PROD_SCORE.read_bytes()
         clock = [0.0]
@@ -537,7 +537,7 @@ class CurriculumTests(unittest.TestCase):
         self.assertEqual(curriculum.read_updates(), 540)
         progress = json.loads(curriculum.PROGRESS.read_text())
         self.assertEqual(progress["formatVersion"], 3)
-        self.assertEqual(progress["initializationSource"], "warm-v9")
+        self.assertEqual(progress["initializationSource"], "warm-v10")
         self.assertEqual(progress["baselineUpdates"], 538)
         self.assertEqual(progress["nextStage"], 0)
         self.assertEqual(progress["targetUpdates"], 9)
@@ -573,12 +573,12 @@ class CurriculumTests(unittest.TestCase):
         self.v3_config()
         args = self.args()
         args.warm_start = True
-        with self.assertRaisesRegex(ValueError, "nonzero V9"):
+        with self.assertRaisesRegex(ValueError, "nonzero V10"):
             curriculum.run(args)
         self.assertFalse(curriculum.PROGRESS.exists())
         self.fake_checkpoint(538)
         curriculum.LATEST.write_text(
-            "BLUE_TEAM_TRAINING_V6 6 8 200\nUPDATES 538\n", encoding="utf-8")
+            "BLUE_TEAM_TRAINING_V7 7 9 200\nUPDATES 538\n", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "schema mismatch"):
             curriculum.run(args)
         self.fake_checkpoint(538)

@@ -375,11 +375,11 @@ bool LoadScenario(
                     "red_" + std::to_string(index + 1U)).get();
 
             auto const generalizedLatest = modelRoot / "latest"
-                / "blue_patrol_generalized_v9.txt";
+                / "blue_patrol_generalized_v10.txt";
             auto const generalizedTraining = modelRoot / "latest"
-                / "blue_patrol_generalized_training_v6.txt";
+                / "blue_patrol_generalized_training_v7.txt";
             auto const generalizedProduction = modelRoot / "prod"
-                / "blue_patrol_generalized_v9.txt";
+                / "blue_patrol_generalized_v10.txt";
             auto controller = environment.CreateAgent<
                 defenders::GeneralizedPatrolMappoAgent>(
                     guards, configuredBlueCount, attackers, redCount,

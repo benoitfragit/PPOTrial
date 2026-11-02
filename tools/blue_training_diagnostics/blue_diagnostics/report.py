@@ -504,6 +504,35 @@ def _patrol_section(analysis: RunAnalysis) -> str:
                 )
             )
     spacing = patrol["spacing_margin"]
+    sequence_rows = []
+    sequence_metrics = (
+        ("Distance au waypoint", "waypoint_distance", "m", 1),
+        ("Écart latéral piste", "cross_track", "m", 1),
+        ("Erreur de cap", "heading_error", "rad", 3),
+        ("Vitesse", "speed", "m/s", 1),
+        ("Abscisse parcourue", "arclength", "m", 1),
+    )
+    for label, key, unit, digits in sequence_metrics:
+        distribution = patrol[key]
+        sequence_rows.append(
+            "<tr><td>{}</td><td>{}</td><td class=\"numeric\">{}</td>"
+            "<td class=\"numeric\">{}</td><td class=\"numeric\">{}</td>"
+            "<td class=\"numeric\">{}</td><td>{}</td></tr>".format(
+                label, distribution["count"],
+                _optional_number(distribution["mean"], digits),
+                _optional_number(distribution["median"], digits),
+                _optional_number(distribution["p95"], digits),
+                _optional_number(distribution["max"], digits), unit,
+            )
+        )
+    modes = ", ".join(
+        "{}: {}".format(html.escape(str(key)), value)
+        for key, value in sorted(patrol["modes"].items())
+    ) or "indisponible"
+    terminations = ", ".join(
+        "{}: {}".format(html.escape(str(key)), value)
+        for key, value in sorted(patrol["terminations"].items())
+    ) or "indisponible"
     return _cards(
         (
             ("Épisodes", str(patrol["episodes"]), "patrouilles journalisées"),
@@ -512,12 +541,23 @@ def _patrol_section(analysis: RunAnalysis) -> str:
             ("Violations", str(patrol["tracking_violations"]), "suivi de patrouille"),
             ("Marge médiane", _optional_number(spacing["median"], 1), "mètres"),
             ("Mesures valides", _percent(tolerances["valid_rate"]), "par agent et rôle"),
+            ("Mode récent", html.escape(str(patrol["latest_mode"])), "RALLY ou FOLLOW"),
+            ("Waypoints validés", str(patrol["validated_waypoints_max"]), "maximum WPT1 à WPT10"),
         )
     ) + """
+    <h3>Séquence de waypoints</h3>
+    <p class="muted">Modes : {}. Terminaisons : {}.</p>
+    <div class="table-wrap"><table><thead><tr>
+      <th>Mesure</th><th>N</th><th>Moyenne</th><th>Médiane</th><th>P95</th><th>Pire</th><th>Unité</th>
+      </tr></thead><tbody>{}</tbody></table></div>
     <h3>Tolérances par rôle</h3><div class="table-wrap"><table><thead><tr>
       <th>Rôle</th><th>Mesure</th><th>N</th><th>Moyenne</th><th>Médiane</th><th>P95</th><th>Pire</th>
       </tr></thead><tbody>{}</tbody></table></div>
-    """.format("".join(rows) or '<tr><td colspan="7" class="muted">Télémétrie de patrouille indisponible.</td></tr>')
+    """.format(
+        modes, terminations,
+        "".join(sequence_rows),
+        "".join(rows) or '<tr><td colspan="7" class="muted">Télémétrie de patrouille indisponible.</td></tr>',
+    )
 
 
 def _reward_section(analysis: RunAnalysis) -> str:

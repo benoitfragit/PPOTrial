@@ -7,14 +7,15 @@ contrôleur MAPPO P/N**. Les attaquants rouges utilisent RLMission en production
 ## Démarrage
 
 ```powershell
-cmake -S . -B build/desktop -G "Visual Studio 17 2022" -A x64 -DPPO_BUILD_DESKTOP=ON
-cmake --build build/desktop --config Debug
-build/desktop/Main/Debug/PPO.exe --list-examples
-build/desktop/Main/Debug/PPO.exe --example blue-defense
-build/desktop/Main/Debug/PPO.exe --example blue-defense-inference
+cmake -S . -B build/debug -G "Visual Studio 17 2022" -A x64 -DCMAKE_CONFIGURATION_TYPES=Debug -DPPO_LIBTORCH_VARIANT=Debug -DPPO_BUILD_DESKTOP=ON
+cmake --build build/debug --config Debug
+build/debug/Main/Debug/PPO.exe --list-examples
+build/debug/Main/Debug/PPO.exe --example blue-defense
+build/debug/Main/Debug/PPO.exe --example blue-defense-inference
 ```
 
-Les chemins de l'exécutable dépendent du générateur et du preset sélectionné.
+Les builds x64 utilisent toujours `build/debug` et `build/release`, conformément
+à `AGENTS.md` et aux deux raccourcis présents à la racine.
 Sans `--example`, l'application affiche le sélecteur graphique. Avec
 `--check-example`, l'exemple est initialisé sans démarrer la fenêtre.
 
@@ -47,6 +48,9 @@ cas, les Rouges conservent leur contrôleur RLMission production historique.
 - Critic centralisé individualisé de largeur 256.
 - Un seul hippodrome analytique par épisode : longueur, largeur,
   orientation, ancrage et wedge échantillonnés dans les plages configurées.
+- Sans Rouge, le leader rejoint d'abord la piste, puis suit une séquence figée
+  de dix waypoints équidistants en abscisse curviligne ; les équipiers dérivent
+  leurs cibles wedge du waypoint actif.
 - Un Bleu leader ; les P−1 autres se positionnent dans leur slot de
   formation, selon le cap **physique** du leader.
 - Reward du leader fondé sur la progression, l'écart latéral et le cap.
@@ -71,12 +75,14 @@ Les paramètres, le rollout et les poids de récompense sont définis dans
 ## Sauvegardes et compatibilité
 
 Les modèles généralisés se trouvent sous `resources/model/BluePatrol` :
-`latest/blue_patrol_generalized_v9.txt` pour l'acteur et
-`latest/blue_patrol_generalized_training_v6.txt` pour l'état complet
+`latest/blue_patrol_generalized_v10.txt` pour l'acteur et
+`latest/blue_patrol_generalized_training_v7.txt` pour l'état complet
 d'apprentissage. La promotion après évaluation utilise `prod/`.
 
-Les lecteurs des formats anciens V4/V7 sont conservés **pour migration
-explicite uniquement**, hors du runtime v9. Aucun ancien acteur n’est repris automatiquement. Ils ne réactivent pas d'ancien agent ou entraînement 2v2.
+Le guidage de patrouille de l'observation V10 n'a plus la sémantique V9 : les
+checkpoints du run 22 restent archivés, mais ne sont ni chargés ni migrés vers
+V10. Un nouvel entraînement est requis. Les lecteurs historiques conservés ne
+réactivent pas d'ancien agent ou entraînement 2v2.
 Les règles RLMission et les modèles des Rouges restent inchangés.
 
 ## IHM
@@ -106,6 +112,11 @@ suivi ; une flèche repère la cible anticipée et son cap, effectivement encod�
 dans l'observation. Le leader `L` est doré et les slots `W1` à `W8` sont cyan.
 Cet overlay à capacité fixe est exclusivement visuel et ne modifie ni la
 politique, ni les rewards, ni la physique.
+
+La case `Show patrol waypoints`, placée au même endroit, affiche `WP1` à
+`WP10` en vue 3D et sur la mini-carte. Le waypoint actif est doré, les futurs
+waypoints sont verts et ceux déjà validés sont grisés. L'état de la case est
+persisté comme celui des références de patrouille.
 
 ## Validation
 
@@ -139,6 +150,7 @@ une campagne de validation distincte.
 - [Configuration JSON et paramètres](docs/configuration-guide.md)
 - [Instructions pour les contributions](AGENTS.md)
 - [Entraînement distant MAPPO Windows Release / GitHub Actions](docs/remote-mappo-training.md)
+- [Architecture du séquenceur de dix waypoints](docs/2026-11-02_Blue_V10_Ten_Waypoint_Patrol_Architecture.md)
 - [Téléchargement, diagnostic et comparaison des runs Blue](tools/blue_training_diagnostics/README.md)
 
-Le curriculum **V3 depuis zéro** et le contrat d’observation v9 sont décrits dans [docs/blue-mappo-v3.md](docs/blue-mappo-v3.md).
+Le curriculum **V3 depuis zéro** et le contrat d’observation v10 sont décrits dans [docs/blue-mappo-v3.md](docs/blue-mappo-v3.md).

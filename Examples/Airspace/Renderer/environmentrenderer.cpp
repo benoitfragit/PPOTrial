@@ -946,6 +946,63 @@ void DrawPatrolReferenceLabels(
 }
 
 /**
+ * @brief Draws screen-facing labels for the ten frozen patrol waypoints.
+ * @param overlay Generated waypoint sequence and active index.
+ * @param camera Camera used to project waypoint positions.
+ * @param width Render-target width in pixels.
+ * @param height Render-target height in pixels.
+ * @param worldScale World-to-render scale.
+ */
+void DrawPatrolWaypointLabels(
+    ppo::model::sPatrolWaypointOverlay const& overlay,
+    Camera3D const& camera, int const width, int const height,
+    float const worldScale)
+{
+    if (!overlay.Valid() || width <= 0 || height <= 0)
+        return;
+    Vector3 const cameraForward =
+        VectorNormalizeSafe(VectorSub(camera.target, camera.position));
+    float const fontSize = std::clamp(
+        0.032F * static_cast<float>(std::min(width, height)), 10.F, 15.F);
+    Font const font = GetFontDefault();
+    for (std::size_t index = 0U;
+         index < ppo::model::sPatrolWaypointOverlay::WaypointCount; ++index)
+    {
+        auto const& waypoint = overlay.m_waypoints[index];
+        Vector3 world = ToWorld3D(
+            waypoint.m_north, waypoint.m_east,
+            -0.40F * worldScale, worldScale);
+        if (VectorDot(cameraForward, VectorSub(world, camera.position)) <= 0.F)
+            continue;
+        Vector2 const screen = GetWorldToScreenEx(world, camera, width, height);
+        if (screen.x < -30.F || screen.x > static_cast<float>(width) + 30.F
+            || screen.y < -20.F
+            || screen.y > static_cast<float>(height) + 20.F)
+        {
+            continue;
+        }
+        bool const active = index == overlay.m_activeWaypointIndex;
+        bool const validated = index < overlay.m_validatedWaypointCount;
+        Color const color = active ? Color{255, 205, 72, 255}
+            : validated ? Color{115, 135, 148, 210}
+            : Color{90, 225, 170, 235};
+        char marker[6]{};
+        std::snprintf(marker, sizeof(marker), "WP%u",
+            static_cast<unsigned>(index + 1U));
+        Vector2 const textSize = MeasureTextEx(font, marker, fontSize, 1.F);
+        DrawRectangleRounded(
+            Rectangle{screen.x - 0.5F * textSize.x - 3.F,
+                screen.y - 0.5F * textSize.y - 2.F,
+                textSize.x + 6.F, textSize.y + 4.F},
+            0.25F, 4, Fade(BLACK, 0.62F));
+        DrawTextEx(font, marker,
+            Vector2{screen.x - 0.5F * textSize.x,
+                screen.y - 0.54F * textSize.y},
+            fontSize, 1.F, color);
+    }
+}
+
+/**
 * @brief Draws a north/east rectangle on the tactical ground plane.
 */
 void DrawDefendedArea3D(ppo::model::sDefendedArea const& area, float scale,
@@ -1084,6 +1141,42 @@ void DrawPatrolReferences3D(
             DrawLineEx3D(tip, left, 0.055F, accent);
             DrawLineEx3D(tip, right, 0.055F, accent);
         }
+    }
+}
+
+/**
+ * @brief Draws the complete frozen waypoint sequence and its tangent headings.
+ * @param overlay Generated ten-waypoint render view.
+ * @param scale World-to-render scale.
+ * @param reducedDetail True to use cheaper primitives in multi-camera views.
+ */
+void DrawPatrolWaypoints3D(
+    ppo::model::sPatrolWaypointOverlay const& overlay,
+    float const scale, bool const reducedDetail)
+{
+    if (!overlay.Valid())
+        return;
+    for (std::size_t index = 0U;
+         index < ppo::model::sPatrolWaypointOverlay::WaypointCount; ++index)
+    {
+        auto const& waypoint = overlay.m_waypoints[index];
+        bool const active = index == overlay.m_activeWaypointIndex;
+        bool const validated = index < overlay.m_validatedWaypointCount;
+        Color const color = active ? Color{255, 205, 72, 255}
+            : validated ? Color{105, 125, 140, 190}
+            : Color{90, 225, 170, 230};
+        Vector3 const center = ToWorld3D(
+            waypoint.m_north, waypoint.m_east, -0.16F * scale, scale);
+        float const radius = active ? 0.38F : 0.25F;
+        DrawCylinderWires(center, radius, radius, 0.08F,
+            reducedDetail ? 10 : 20, color);
+        Vector3 const forward = HeadingForward(waypoint.m_heading);
+        Vector3 const tip = VectorAdd(
+            center, VectorScale(forward, active ? 0.95F : 0.58F));
+        if (reducedDetail)
+            DrawLine3D(center, tip, color);
+        else
+            DrawLineEx3D(center, tip, active ? 0.065F : 0.04F, color);
     }
 }
 
@@ -1752,6 +1845,8 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
             m_showPatrolTrack = section.value("showPatrolTrack", m_showPatrolTrack);
             m_showPatrolReferences = section.value(
                 "showPatrolReferences", m_showPatrolReferences);
+            m_showPatrolWaypoints = section.value(
+                "showPatrolWaypoints", m_showPatrolWaypoints);
             m_showHardBoundary = section.value("showHardBoundary", m_showHardBoundary);
             m_focusSelectionInMinimap = section.value("focusSelectionInMinimap", m_focusSelectionInMinimap);
             m_cameraDistance = std::clamp(section.value("cameraDistance", m_cameraDistance), 5.F, 60.F);
@@ -1810,6 +1905,7 @@ EnvironmentRenderer::EnvironmentRenderer(std::string const& title) :
             section["showPseudoLidar"] = m_showPseudoLidar;
             section["showPatrolTrack"] = m_showPatrolTrack;
             section["showPatrolReferences"] = m_showPatrolReferences;
+            section["showPatrolWaypoints"] = m_showPatrolWaypoints;
             section["showHardBoundary"] = m_showHardBoundary;
             section["focusSelectionInMinimap"] = m_focusSelectionInMinimap;
             section["cameraDistance"] = m_cameraDistance;
@@ -2663,6 +2759,8 @@ EnvironmentRenderer::DrawSimulationControls(entt::registry const& snapshot)
         ImGui::Checkbox("Show patrol track", &m_showPatrolTrack);
     if (snapshot.ctx().contains<ppo::model::sPatrolReferenceOverlay>())
         ImGui::Checkbox("Show patrol references", &m_showPatrolReferences);
+    if (snapshot.ctx().contains<ppo::model::sPatrolWaypointOverlay>())
+        ImGui::Checkbox("Show patrol waypoints", &m_showPatrolWaypoints);
     if (snapshot.ctx().contains<ppo::model::sHardBoundaryOverlay>())
         ImGui::Checkbox("Show outer failure boundary", &m_showHardBoundary);
     ImGui::Checkbox("Show destroyed markers", &m_showDestroyed);
@@ -3115,6 +3213,13 @@ EnvironmentRenderer::RenderTacticalScene(
             snapshot.ctx().get<ppo::model::sPatrolReferenceOverlay>(),
             m_worldScale, reducedDetail);
     }
+    if (m_showPatrolWaypoints
+        && snapshot.ctx().contains<ppo::model::sPatrolWaypointOverlay>())
+    {
+        DrawPatrolWaypoints3D(
+            snapshot.ctx().get<ppo::model::sPatrolWaypointOverlay>(),
+            m_worldScale, reducedDetail);
+    }
 
     entt::entity primaryTarget = entt::null;
     entt::entity pseudoLidarEntity = entt::null;
@@ -3266,6 +3371,14 @@ EnvironmentRenderer::RenderTacticalScene(
       {
           DrawPatrolReferenceLabels(
               snapshot.ctx().get<ppo::model::sPatrolReferenceOverlay>(),
+              camera, target.texture.width, target.texture.height,
+              m_worldScale);
+      }
+      if (m_showPatrolWaypoints
+          && snapshot.ctx().contains<ppo::model::sPatrolWaypointOverlay>())
+      {
+          DrawPatrolWaypointLabels(
+              snapshot.ctx().get<ppo::model::sPatrolWaypointOverlay>(),
               camera, target.texture.width, target.texture.height,
               m_worldScale);
       }
@@ -3652,6 +3765,41 @@ EnvironmentRenderer::DrawMinimapWindow(entt::registry const& snapshot)
                 ImVec2 const right{base.x + 3.5F * forwardY,
                                    base.y - 3.5F * forwardX};
                 draw->AddTriangleFilled(tip, left, right, color);
+            }
+        }
+    }
+    if (m_showPatrolWaypoints
+        && snapshot.ctx().contains<ppo::model::sPatrolWaypointOverlay>())
+    {
+        auto const& overlay =
+            snapshot.ctx().get<ppo::model::sPatrolWaypointOverlay>();
+        if (overlay.Valid())
+        {
+            for (std::size_t index = 0U;
+                 index < ppo::model::sPatrolWaypointOverlay::WaypointCount;
+                 ++index)
+            {
+                auto const& waypoint = overlay.m_waypoints[index];
+                bool const active = index == overlay.m_activeWaypointIndex;
+                bool const validated = index < overlay.m_validatedWaypointCount;
+                ImU32 const color = active ? IM_COL32(255, 205, 72, 255)
+                    : validated ? IM_COL32(105, 125, 140, 205)
+                    : IM_COL32(90, 225, 170, 235);
+                ImVec2 const point = toMinimap(
+                    waypoint.m_north, waypoint.m_east);
+                draw->AddCircle(point, active ? 6.F : 4.F,
+                    color, 16, active ? 2.5F : 1.6F);
+                float const forwardX = std::sin(waypoint.m_heading);
+                float const forwardY = -std::cos(waypoint.m_heading);
+                draw->AddLine(point,
+                    ImVec2{point.x + 8.F * forwardX,
+                           point.y + 8.F * forwardY},
+                    color, active ? 2.F : 1.2F);
+                char marker[6]{};
+                std::snprintf(marker, sizeof(marker), "WP%u",
+                    static_cast<unsigned>(index + 1U));
+                draw->AddText(
+                    ImVec2{point.x + 6.F, point.y - 7.F}, color, marker);
             }
         }
     }

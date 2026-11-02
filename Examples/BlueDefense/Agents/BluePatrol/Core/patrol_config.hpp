@@ -281,6 +281,18 @@ ParsePatrolTrainingSettings(nlohmann::json const& document)
         if (noThreat->contains("minimumQualifiedFraction"))
             result.noThreatPatrol.minimumQualifiedFraction =
                 patrol_config_detail::FiniteNumber(*noThreat, "minimumQualifiedFraction");
+        if (noThreat->contains("rallyEnterDistanceMeters"))
+            result.noThreatPatrol.rallyEnterDistanceMeters =
+                patrol_config_detail::FiniteNumber(
+                    *noThreat, "rallyEnterDistanceMeters");
+        if (noThreat->contains("rallyExitDistanceMeters"))
+            result.noThreatPatrol.rallyExitDistanceMeters =
+                patrol_config_detail::FiniteNumber(
+                    *noThreat, "rallyExitDistanceMeters");
+        if (noThreat->contains("maxEpisodeSeconds"))
+            result.noThreatPatrol.maxEpisodeSeconds =
+                patrol_config_detail::FiniteNumber(
+                    *noThreat, "maxEpisodeSeconds");
     }
 
     if (!Valid(result) || !weights.is_object()

@@ -23,7 +23,7 @@ Main / BlueDefense
   EvaluationWorker : thread
     EvaluationWorld : independent Environment / ECS registry
       Red[i] : the existing production RLMission controller (unchanged)
-      Blue team : inference-only frozen generalized V8 actor, no optimizer/critic
+      Blue team : inference-only frozen generalized V10 actor, no optimizer/critic
       Reproduce 8 scenario cases, up to 4096 steps each
       Publish progress and final evaluation result via mutex/atomic snapshot
                         |
@@ -35,7 +35,7 @@ Main / BlueDefense
 ## Implementation requirements
 
 1. **World isolation.** Avoid a second `Environment` instance overwriting the process-wide `Serializer` singleton registrations. Evaluation construction must use an isolated, read-only configuration path and must not mutate the existing training instance.
-2. **Actor-only runtime.** Construct a standalone generalized actor and reusable inference buffers. Load V8 actor weights once using `ReadGeneralizedPolicy`. No `GeneralizedPatrolLearner`, critic, GAE, Adam optimizer, rollout storage or sampling RNG in the evaluation agent. Apply deterministic actor means, preserve action clamp and LiDAR masks.
+2. **Actor-only runtime.** Construct a standalone generalized actor and reusable inference buffers. Load V10 actor weights once using `ReadGeneralizedPolicy`. No `GeneralizedPatrolLearner`, critic, GAE, Adam optimizer, rollout storage or sampling RNG in the evaluation agent. Apply deterministic actor means, preserve action clamp and LiDAR masks.
 3. **Real scenario.** Use exactly the production ECS physics, BlueDefenseWorldRules, randomized geometry and scenario parameters. Build separate entity and agent objects; never share `entt::registry`, pointers, `RLMission` agent instances or live neural buffers. **Do not edit RLMission.**
 4. **Immutable snapshot.** On evaluation boundary, freeze the trained actor before resuming collection. Tie the result to the update id and checkpoint source, and promote only this frozen actor when the full campaign is complete and better than the previous best.
 5. **Thread synchronization.** Evaluation worker manages its own lifetime with RAII; cancellation and thread join are safe during shutdown. Publish progress and results through immutable message copies protected by a mutex. No ECS or Torch/actor accesses from the GUI thread. Limit to one active evaluation and use a documented bounded queue policy for later checkpoints.

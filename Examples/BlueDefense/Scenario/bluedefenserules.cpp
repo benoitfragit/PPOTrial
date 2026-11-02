@@ -330,6 +330,12 @@ void BlueDefenseWorldRules::CopySnapshot(entt::registry& source, entt::registry&
             target.ctx().emplace<ppo::model::sPatrolReferenceOverlay>(
                 context.patrolReferenceOverlay);
         }
+        if (context.patrolWaypointOverlay
+            && context.patrolWaypointOverlay->Valid())
+        {
+            target.ctx().emplace<ppo::model::sPatrolWaypointOverlay>(
+                *context.patrolWaypointOverlay);
+        }
         if (context.blueTeamRoles && context.blueTeamRoles->IsValid())
         {
             target.ctx().emplace<ppo::model::sBlueTeamRoleOverlay>(

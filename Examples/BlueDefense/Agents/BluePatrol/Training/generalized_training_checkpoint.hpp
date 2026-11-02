@@ -22,7 +22,7 @@
 namespace ppo::examples::bluedefense::defenders {
 
 /** @brief Version of the complete generalized P/N training-state contract. */
-inline constexpr unsigned kGeneralizedTrainingCheckpointVersion = 6U;
+inline constexpr unsigned kGeneralizedTrainingCheckpointVersion = 7U;
 
 /**
  * @brief Explicit scope of a legacy training-state migration.
@@ -87,7 +87,7 @@ void WriteGeneralizedTrainingState(
     RandomEngine const& randomEngine, std::uint64_t const completedUpdates,
     GeneralizedCheckpointMetadata const metadata)
 {
-    stream << "BLUE_TEAM_TRAINING_V6 "
+    stream << "BLUE_TEAM_TRAINING_V7 "
            << kGeneralizedTrainingCheckpointVersion << ' '
            << GeneralizedObservationLayout::Version << ' '
            << GeneralizedObservationLayout::Size << ' '
@@ -158,7 +158,7 @@ std::uint64_t ReadGeneralizedTrainingState(
     if (!(stream >> magic >> formatVersion >> observationVersion
           >> rawInput >> compactInput >> output >> actorHidden >> actorLayers
           >> criticInput >> criticHidden >> criticLayers)
-        || magic != "BLUE_TEAM_TRAINING_V6"
+        || magic != "BLUE_TEAM_TRAINING_V7"
         || formatVersion != kGeneralizedTrainingCheckpointVersion
         || observationVersion != GeneralizedObservationLayout::Version
         || rawInput != GeneralizedObservationLayout::Size

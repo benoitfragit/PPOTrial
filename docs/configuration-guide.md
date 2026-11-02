@@ -171,6 +171,11 @@ les profils LibTorch historiques :
   },
   "rewards": {
     "clamp": 100.0,
+    "noThreatPatrol": {
+      "rallyEnterDistanceMeters": 2500.0,
+      "rallyExitDistanceMeters": 3000.0,
+      "maxEpisodeSeconds": 480.0
+    },
     "weights": {
       "Patrol tracking": 1.0,
       "Formation safety": 1.0,
@@ -188,6 +193,11 @@ Ici, `rolloutSteps` compte les pas ECS synchronisés de l'équipe :
 chaque pas produit P transitions, une par Bleu initialement présent.
 Les valeurs usuelles sont 512, 1024, 2048 et 4096.
 Les paramètres sont chargés depuis `Training/BluePatrol.json`.
+`rallyEnterDistanceMeters` et `rallyExitDistanceMeters` définissent le couloir
+à hystérésis acquis avant de figer les dix waypoints. La transition vers FOLLOW
+est irréversible pour l'épisode. `maxEpisodeSeconds` ne s'applique qu'à N=0 et
+est converti en pas depuis `dt` : 480 s à 0,2 s donnent 2400 pas. L'expiration
+est une troncature, pas une terminaison réussie ni une destruction.
 
 Le MAPPO actuel utilise des canaux séparés pour la progression sur
 l'hippodrome (leader), le maintien du wedge (équipiers), la poursuite des
@@ -205,11 +215,10 @@ influencent continûment la priorité patrouille/formation/défense.
 Cela n'établit pas, à lui seul, la convergence de la politique.
 
 `checkpointEvery` demande une campagne d'évaluation déterministe.
-Les checkpoints d'acteur `blue_patrol_generalized_v8.txt` et
-d'entraînement `blue_patrol_generalized_training_v5.txt` (format
-interne V6) sont enregistrés sous `resources/model/BluePatrol/latest/`.
-Les anciens fichiers V4/V7 sont uniquement des sources de migration
-de poids compatibles, et ne démarrent pas un autre entraîneur.
+Les checkpoints courants sont `blue_patrol_generalized_v10.txt` pour l'acteur
+et `blue_patrol_generalized_training_v7.txt` pour l'état complet, sous
+`resources/model/BluePatrol/latest/`. Les poids V9 ne sont pas repris : le
+guidage figé modifie la sémantique de l'observation de patrouille.
 
 Les deux modes lancés depuis l'IHM utilisent exactement la scène
 `Scenarios/BlueDefense.json` : `blue-defense` entraîne le MAPPO généralisé,

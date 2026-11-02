@@ -45,6 +45,8 @@ struct InitializerContext {
     ppo::model::sPatrolTrackOverlay patrolTrackOverlay{};
     /** @brief Exact role-ordered patrol references last supplied to MAPPO. */
     ppo::model::sPatrolReferenceOverlay patrolReferenceOverlay{};
+    /** @brief Frozen ten-waypoint patrol sequence exposed only to rendering. */
+    std::optional<ppo::model::sPatrolWaypointOverlay> patrolWaypointOverlay{};
     /** @brief True after a feasible geometry has been sampled for the reset. */
     bool patrolGeometryReady{false};
     /** @brief Signals an exhausted bounded sampling attempt sequence. */

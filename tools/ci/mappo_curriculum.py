@@ -20,13 +20,13 @@ from pathlib import Path
 TRAINING_FILE = Path("resources/settings/Training/BluePatrol.json")
 SCENARIO_FILE = Path("resources/settings/Scenarios/BlueDefense.json")
 MODEL_ROOT = Path("resources/model/BluePatrol")
-LATEST = MODEL_ROOT / "latest/blue_patrol_generalized_training_v6.txt"
-PROD = MODEL_ROOT / "prod/blue_patrol_generalized_v9.txt"
+LATEST = MODEL_ROOT / "latest/blue_patrol_generalized_training_v7.txt"
+PROD = MODEL_ROOT / "prod/blue_patrol_generalized_v10.txt"
 PROD_SCORE = Path(str(PROD) + ".score")
 PROGRESS = MODEL_ROOT / "curriculum-progress.json"
 TELEMETRY = MODEL_ROOT / "telemetry/mappo-training.csv"
 # Only the current Blue contract is reset; old candidate files remain available.
-FRESH_SEEDS = (LATEST, MODEL_ROOT / "latest/blue_patrol_generalized_v9.txt",
+FRESH_SEEDS = (LATEST, MODEL_ROOT / "latest/blue_patrol_generalized_v10.txt",
                PROD, PROD_SCORE)
 OUTPUT = Path("build/mappo-telemetry")
 EVAL_PATTERN = re.compile(
@@ -41,7 +41,7 @@ def read_updates(path: Path = LATEST) -> int:
         return 0
     with path.open("r", encoding="utf-8") as stream:
         first = stream.readline()
-        if not first.startswith("BLUE_TEAM_TRAINING_V6 "):
+        if not first.startswith("BLUE_TEAM_TRAINING_V7 "):
             raise ValueError(f"Unsupported training checkpoint header: {path}")
         for line in stream:
             if line.startswith("UPDATES "):
@@ -213,9 +213,9 @@ def validate_curriculum_v2(document: dict) -> tuple[list[dict], int, int]:
     if sum(stage["updates"] for stage in stages) != total:
         raise ValueError("V2 stage quotas must sum to totalUpdates")
     if document["formatVersion"] == 3 and (
-            document.get("observationVersion") != 9
+            document.get("observationVersion") != 10
             or document.get("initialization") != "scratch"):
-        raise ValueError("V3 requires observationVersion 9 and initialization scratch")
+        raise ValueError("V3 requires observationVersion 10 and initialization scratch")
     return stages, primary, prior
 
 
@@ -226,7 +226,7 @@ def choose_rehearsal_block(stages: list[dict], phase_index: int,
                            ) -> tuple[dict, int]:
     """Deterministic stage-dependent rehearsal, safe after partial checkpoints.
 
-    With a warm V9 seed, the first phase also rehearses the reference 4v4
+    With a warm V10 seed, the first phase also rehearses the reference 4v4
     scenario. Later phases alternate that 4v4 reference with earlier tasks.
     Without a warm seed, the historical from-scratch schedule is unchanged.
     Every phase finishes with its primary task.
@@ -253,7 +253,7 @@ def choose_rehearsal_block(stages: list[dict], phase_index: int,
 
 
 def run_v2(args: argparse.Namespace, config: dict) -> int:
-    """Versioned rehearsal; V3 allows explicit V9 warm import or scratch."""
+    """Versioned rehearsal; V3 allows explicit V10 warm import or scratch."""
     stages, primary_updates, prior_updates = validate_curriculum_v2(config)
     version = config["formatVersion"]
     binary = Path(args.binary)
@@ -273,12 +273,12 @@ def run_v2(args: argparse.Namespace, config: dict) -> int:
     if version == 3 and LATEST.exists():
         with LATEST.open(encoding="utf-8") as checkpoint:
             header = checkpoint.readline().split()
-        if len(header) < 3 or header[2] != "9":
+        if len(header) < 3 or header[2] != "10":
             raise ValueError("V3 observation schema mismatch; start from scratch")
     if warm_start and (PROGRESS.exists() or not LATEST.is_file()
                        or updates <= 0):
         raise ValueError(
-            "V3 warm start requires a nonzero V9 training checkpoint "
+            "V3 warm start requires a nonzero V10 training checkpoint "
             "without existing curriculum progress")
     if version == 3 and not PROGRESS.exists() and not args.fresh_start and not warm_start:
         raise ValueError("New V3 has no compatible progress; use --fresh-start")
@@ -288,9 +288,9 @@ def run_v2(args: argparse.Namespace, config: dict) -> int:
             source = progress.get("initializationSource", "scratch")
             baseline = progress.get("baselineUpdates")
             if (not LATEST.is_file()
-                    or source not in ("scratch", "warm-v9")
+                    or source not in ("scratch", "warm-v10")
                     or (source == "scratch" and baseline != 0)
-                    or (source == "warm-v9" and (type(baseline) is not int
+                    or (source == "warm-v10" and (type(baseline) is not int
                                                 or baseline <= 0))):
                 raise ValueError("V3 resume needs compatible checkpoint provenance")
         if (progress.get("formatVersion") != version
@@ -314,10 +314,10 @@ def run_v2(args: argparse.Namespace, config: dict) -> int:
             "targetUpdates": config["totalUpdates"],
         }
         if version == 3:
-            progress["initializationSource"] = "warm-v9" if warm_start else "scratch"
+            progress["initializationSource"] = "warm-v10" if warm_start else "scratch"
         write_json(PROGRESS, progress)
         if warm_start:
-            print(f"[CURRICULUM_V3] Imported complete V9 optimizer at update "
+            print(f"[CURRICULUM_V3] Imported complete V10 optimizer at update "
                   f"{updates}; 4v4 reference rehearsal enabled.", flush=True)
     baseline_updates = progress["baselineUpdates"]
     next_stage = progress["nextStage"]
@@ -340,7 +340,7 @@ def run_v2(args: argparse.Namespace, config: dict) -> int:
     stage_root.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + args.max_seconds
     seed_source = progress.get("initializationSource", "scratch")
-    reference_stage = stages[-1] if version == 3 and seed_source == "warm-v9" else None
+    reference_stage = stages[-1] if version == 3 and seed_source == "warm-v10" else None
     summary = [
         f"# Blue MAPPO curriculum V{version} — interleaved rehearsal",
         "",
@@ -348,7 +348,7 @@ def run_v2(args: argparse.Namespace, config: dict) -> int:
         f"Start update: {updates}; target: "
         f"{baseline_updates + config['totalUpdates']}.",
         f"Rehearsal: {primary_updates} primary / {prior_updates} previous "
-        "updates per cycle (warm V9: include 4v4 reference).",
+        "updates per cycle (warm V10: include 4v4 reference).",
         "",
         "| Phase | Scenario | P/N | Zones | Update | Last evaluation |",
         "| --- | --- | --- | --- | ---: | --- |",
@@ -560,7 +560,7 @@ def main() -> int:
     parser.add_argument("--fresh-start", action="store_true",
                         help="ignore checked-in legacy Blue seeds (no resume run ID)")
     parser.add_argument("--warm-start", action="store_true",
-                        help="one-time import of a full V9 checkpoint into V3")
+                        help="one-time import of a full V10 checkpoint into V3")
     args = parser.parse_args()
     if not 1 <= args.max_seconds <= 18000:
         parser.error("--max-seconds must be in [1, 18000]")

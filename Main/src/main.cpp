@@ -289,7 +289,7 @@ int main(int argc, char** argv)
         }
         auto const latest = resourcePath.parent_path() / "model"
             / "BluePatrol" / "latest"
-            / "blue_patrol_generalized_training_v6.txt";
+            / "blue_patrol_generalized_training_v7.txt";
         if (!std::filesystem::is_regular_file(latest))
         {
             std::cerr << "[HEADLESS] No resumable training checkpoint\n";

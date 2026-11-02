@@ -616,6 +616,8 @@ private:
     bool m_showPatrolTrack{ false };
     /** @brief True when MAPPO leader and wedge references are visible. */
     bool m_showPatrolReferences{ true };
+    /** @brief True when the frozen ten-waypoint patrol sequence is visible. */
+    bool m_showPatrolWaypoints{ true };
     /** @brief Toggle the MAPPO hard failure boundary from the world/scene UI. */
     bool m_showHardBoundary{ false };
     /**

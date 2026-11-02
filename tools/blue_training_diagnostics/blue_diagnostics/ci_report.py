@@ -62,6 +62,9 @@ def _append_summary(path: Path, metrics: Dict[str, object], errors: int) -> None
         "| Épisodes de patrouille analysés | {} |".format(patrol["episodes"]),
         "| Distance de patrouille qualifiée | {:.0f} m |".format(patrol["qualified_m"]),
         "| Violations de suivi de patrouille | {} |".format(patrol["tracking_violations"]),
+        "| Waypoints validés (maximum) | {} / 10 |".format(
+            patrol["validated_waypoints_max"]
+        ),
         "| Erreurs MAPPO détectées | {} |".format(errors),
         "",
         "Le rapport HTML contient les courbes, distributions, pertes, "
@@ -91,8 +94,8 @@ def main() -> None:
     }
     checkpoint_root = Path("resources/model/BluePatrol/latest")
     checkpoints = (
-        checkpoint_root / "blue_patrol_generalized_training_v6.txt",
-        checkpoint_root / "blue_patrol_generalized_v9.txt",
+        checkpoint_root / "blue_patrol_generalized_training_v7.txt",
+        checkpoint_root / "blue_patrol_generalized_v10.txt",
     )
     result = generate_ci_report(
         root,

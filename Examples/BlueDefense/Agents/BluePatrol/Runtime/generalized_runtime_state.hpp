@@ -1,6 +1,6 @@
 /**
  * @file Examples/BlueDefense/Agents/BluePatrol/Runtime/generalized_runtime_state.hpp
- * @brief État physique compact et construction des observations v9 depuis le registre ECS.
+ * @brief État physique compact et construction des observations v10 depuis le registre ECS.
  * @details Référence de l'unité, de ses types et de ses fonctions C++.
  * Les implémentations sont accessibles via le navigateur de sources Doxygen.
  */
@@ -330,6 +330,60 @@ inline bool GeneralizedHasActiveRed(GeneralizedRuntimeState const& state) noexce
     return false;
 }
 
+namespace generalized_runtime_detail {
+
+/**
+ * @brief Expands one leader measurement/guidance pair to every wedge slot.
+ * @param parameters Valid vehicle and patrol geometry.
+ * @param state Current fixed-capacity runtime snapshot.
+ * @param roles Immutable leader and formation assignments.
+ * @param projection Instantaneous leader projection used for track errors.
+ * @param guidance Leader reference encoded in the observation.
+ * @return Allocation-free role-indexed targets, masked on invalid input.
+ */
+inline GeneralizedPatrolTargets ExpandPatrolTargets(
+    Parameters const& parameters, GeneralizedRuntimeState const& state,
+    BlueTeamRoles const& roles, PatrolCurvePose const& projection,
+    PatrolCurvePose const& guidance) noexcept
+{
+    GeneralizedPatrolTargets targets{};
+    for (std::size_t index = 0U; index < state.counts.blueMobiles; ++index)
+    {
+        if (!state.blues[index].available)
+            continue;
+        BlueRoleAssignment const assignment = *roles.Assignment(index);
+        PatrolFormationReference const geometry = assignment.role == BlueRole::Leader
+            ? PatrolFormationReference{projection, parameters.cruiseSpeed}
+            : EvaluateFormationReference(parameters.geometry, projection,
+                assignment.formationSlot, parameters.cruiseSpeed);
+        PatrolFormationReference const guidanceReference =
+            assignment.role == BlueRole::Leader
+            ? PatrolFormationReference{guidance, parameters.cruiseSpeed}
+            : EvaluateFormationReference(parameters.geometry, guidance,
+                assignment.formationSlot, parameters.cruiseSpeed);
+        if (!FinitePatrolPose(geometry.pose)
+            || !FinitePatrolPose(guidanceReference.pose)
+            || !std::isfinite(geometry.speed) || geometry.speed <= 0.F
+            || geometry.speed > parameters.maxSpeed
+            || !std::isfinite(guidanceReference.speed)
+            || guidanceReference.speed <= 0.F
+            || guidanceReference.speed > parameters.maxSpeed
+            || std::abs(geometry.speed * geometry.pose.curvature)
+                > parameters.maxRotationRate
+            || std::abs(guidanceReference.speed
+                    * guidanceReference.pose.curvature)
+                > parameters.maxRotationRate)
+        {
+            continue;
+        }
+        targets[index] = {geometry.pose, geometry.speed,
+            guidanceReference.pose, guidanceReference.speed, true};
+    }
+    return targets;
+}
+
+} // namespace generalized_runtime_detail
+
 /**
  * @brief Computes all P targets from one leader projection for this snapshot.
  * Invalid/padded/dead participants have a zero target and a false mask. A lost
@@ -352,31 +406,37 @@ inline GeneralizedPatrolTargets ComputePatrolTargets(
         parameters.geometry, leader.north, leader.east).pose;
     PatrolCurvePose const preview = EvaluatePatrolCurve(parameters.geometry,
         projection.arclength + parameters.cruiseSpeed * lookaheadSeconds);
-    for (std::size_t index = 0U; index < state.counts.blueMobiles; ++index)
+    return generalized_runtime_detail::ExpandPatrolTargets(
+        parameters, state, roles, projection, preview);
+}
+
+/**
+ * @brief Computes track measurements while keeping one fixed leader waypoint.
+ * @param parameters Valid patrol and vehicle parameters.
+ * @param state Current runtime snapshot.
+ * @param roles Immutable episode role assignment.
+ * @param leaderWaypoint Fixed active waypoint owned by the leader sequencer.
+ * @return Dynamic measurement poses and fixed role-derived guidance poses.
+ */
+inline GeneralizedPatrolTargets ComputePatrolWaypointTargets(
+    Parameters const& parameters, GeneralizedRuntimeState const& state,
+    BlueTeamRoles const& roles,
+    PatrolCurvePose const& leaderWaypoint) noexcept
+{
+    GeneralizedPatrolTargets targets{};
+    if (!Valid(parameters) || !Valid(state) || !roles.IsValid()
+        || roles.ActiveBlueCount() != state.counts.blueMobiles
+        || !FinitePatrolPose(leaderWaypoint))
     {
-        if (!state.blues[index].available)
-            continue;
-        BlueRoleAssignment const assignment = *roles.Assignment(index);
-        PatrolFormationReference const geometry = assignment.role == BlueRole::Leader
-            ? PatrolFormationReference{projection, parameters.cruiseSpeed}
-            : EvaluateFormationReference(parameters.geometry, projection,
-                assignment.formationSlot, parameters.cruiseSpeed);
-        PatrolFormationReference const guidance = assignment.role == BlueRole::Leader
-            ? PatrolFormationReference{preview, parameters.cruiseSpeed}
-            : EvaluateFormationReference(parameters.geometry, preview,
-                assignment.formationSlot, parameters.cruiseSpeed);
-        if (!FinitePatrolPose(geometry.pose) || !FinitePatrolPose(guidance.pose)
-            || !std::isfinite(geometry.speed) || geometry.speed <= 0.F
-            || geometry.speed > parameters.maxSpeed
-            || !std::isfinite(guidance.speed) || guidance.speed <= 0.F
-            || guidance.speed > parameters.maxSpeed
-            || std::abs(geometry.speed * geometry.pose.curvature) > parameters.maxRotationRate
-            || std::abs(guidance.speed * guidance.pose.curvature) > parameters.maxRotationRate)
-            continue;
-        targets[index] = {geometry.pose, geometry.speed,
-            guidance.pose, guidance.speed, true};
+        return targets;
     }
-    return targets;
+    Mobile const& leader = state.blues[roles.LeaderPhysicalIndex()];
+    if (!leader.available)
+        return targets;
+    PatrolCurvePose const projection = ProjectOnPatrolCurve(
+        parameters.geometry, leader.north, leader.east).pose;
+    return generalized_runtime_detail::ExpandPatrolTargets(
+        parameters, state, roles, projection, leaderWaypoint);
 }
 
 /** @brief Compatibility convenience for tests; production reuses snapshot targets. */

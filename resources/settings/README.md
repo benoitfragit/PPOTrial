@@ -37,11 +37,16 @@ par pas d'équipe. Le mini-batch interne de 128 n'est pas la longueur du
 rollout. `checkpointEvery` déclenche la campagne déterministe configurée ; le
 checkpoint de production n'est remplacé qu'après un meilleur score.
 
-Après une mise à jour PPO, `model/BluePatrol/latest/` contient l'acteur v9 et
-`blue_patrol_generalized_training_v6.txt` (état interne V6). Ce dernier permet
+Après une mise à jour PPO, `model/BluePatrol/latest/` contient l'acteur v10 et
+`blue_patrol_generalized_training_v7.txt` (état interne V7). Ce dernier permet
 une vraie reprise de l'acteur,
 du critique, d'Adam, du compteur et du RNG ; le buffer de rollout repart vide.
 `model/BluePatrol/prod/` ne contient que le meilleur acteur évalué.
+
+`rewards.noThreatPatrol` configure aussi le ralliement puis le suivi des dix
+waypoints : `rallyEnterDistanceMeters`, `rallyExitDistanceMeters` et
+`maxEpisodeSeconds`. Cette dernière valeur est une durée simulée ; avec
+`dt=0.2`, 480 secondes donnent 2400 pas et une troncature sans succès.
 
 Les capacités propres aux défenseurs bleus sont dans
 `Platforms/Mobile/defender_car.json`. `FlightModel.CruiseSpeed` fixe leur

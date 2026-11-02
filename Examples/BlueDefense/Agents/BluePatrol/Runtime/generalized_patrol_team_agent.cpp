@@ -136,6 +136,32 @@ void PublishPatrolReferenceOverlay(
 }
 
 /**
+ * @brief Publishes the frozen leader waypoint sequence for rendering only.
+ * @param context Scenario context receiving the fixed-size snapshot view.
+ * @param sequencer Leader-owned RALLY/FOLLOW state.
+ */
+void PublishPatrolWaypointOverlay(
+    InitializerContext& context,
+    GeneralizedPatrolWaypointSequencer const& sequencer) noexcept
+{
+    if (!sequencer.Following())
+    {
+        context.patrolWaypointOverlay.reset();
+        return;
+    }
+    ppo::model::sPatrolWaypointOverlay overlay{};
+    overlay.m_activeWaypointIndex = sequencer.ActiveWaypointIndex();
+    overlay.m_validatedWaypointCount = sequencer.ValidatedWaypointCount();
+    for (std::size_t index = 0U;
+         index < GeneralizedPatrolWaypointSequencer::WaypointCount; ++index)
+    {
+        PatrolCurvePose const& pose = sequencer.Waypoints()[index].pose;
+        overlay.m_waypoints[index] = {pose.north, pose.east, pose.heading};
+    }
+    context.patrolWaypointOverlay = overlay;
+}
+
+/**
  * @brief Réalise l'opération CombatMask; voir les préconditions et effets dans son corps C++.
  * @details Consulte ou modifie des composants ECS.
  */
@@ -297,7 +323,7 @@ GeneralizedPatrolMappoAgent::GeneralizedPatrolMappoAgent(
         productionPolicy_ =
             std::make_unique<GeneralizedPatrolProductionPolicy>(
                 counts_, productionCheckpoint_);
-        std::cout << "[BLUE MAPPO V9] Loaded promoted production actor for "
+        std::cout << "[BLUE MAPPO V10] Loaded promoted production actor for "
                      "deterministic inference.\n";
     }
     else
@@ -306,20 +332,20 @@ GeneralizedPatrolMappoAgent::GeneralizedPatrolMappoAgent(
             counts_, training_.seed, training_.rolloutSteps);
         if (std::filesystem::exists(trainingCheckpoint_))
         {
-            // Observation v9 is semantically incompatible with v8. The strict
+            // Observation v10 is semantically incompatible with v9. The strict
             // reader checks its schema before mutating the actor or optimizer.
             learner_->LoadTrainingState(trainingCheckpoint_);
-            std::cout << "[BLUE MAPPO V9] Resumed matching training update "
+            std::cout << "[BLUE MAPPO V10] Resumed matching training update "
                       << learner_->StepCount() << ".\n";
         }
         else if (std::filesystem::exists(actorCheckpoint_))
         {
             learner_->LoadActor(actorCheckpoint_);
-            std::cout << "[BLUE MAPPO V9] Loaded matching actor.\n";
+            std::cout << "[BLUE MAPPO V10] Loaded matching actor.\n";
         }
         else
         {
-            std::cout << "[BLUE MAPPO V9] Fresh random actor and critic; update=0.\n";
+            std::cout << "[BLUE MAPPO V10] Fresh random actor and critic; update=0.\n";
         }
         lastSavedUpdate_ = learner_->StepCount();
         finished_ = learner_->StepCount() >= training_.maxUpdates;
@@ -340,6 +366,7 @@ GeneralizedPatrolMappoAgent::~GeneralizedPatrolMappoAgent()
 void GeneralizedPatrolMappoAgent::Init()
 {
     episodeStep_ = 0U;
+    waypointSequencer_.Reset();
     noThreatLap_.Reset();
     roleRewardSums_ = {};
     roleRewardSteps_ = {};
@@ -557,7 +584,8 @@ GeneralizedPatrolMappoAgent::BuildEvaluationSample(
 
 void GeneralizedPatrolMappoAgent::WritePatrolDiagnostics(
     Parameters const& parameters, GeneralizedRuntimeState const& state,
-    GeneralizedPatrolTargets const& targets, char const* const phase) const
+    GeneralizedPatrolTargets const& targets, char const* const phase,
+    char const* const terminationCause) const
 {
     float spacing = 0.F;
     bool pair = false;
@@ -572,20 +600,45 @@ void GeneralizedPatrolMappoAgent::WritePatrolDiagnostics(
             spacing = pair ? std::min(spacing, distance) : distance;
             pair = true;
         }
+    auto const& roles = Roles();
+    std::size_t const leaderIndex = roles.LeaderPhysicalIndex();
+    Mobile const& leader = state.blues[leaderIndex];
+    PatrolProjection const projection = ProjectOnPatrolCurve(
+        parameters.geometry, leader.north, leader.east);
+    GeneralizedPatrolWaypoint const* const active =
+        waypointSequencer_.ActiveWaypoint();
+    PatrolCurvePose const& headingReference = active != nullptr
+        ? active->pose : projection.pose;
+    std::size_t const displayedWaypoint = waypointSequencer_.Following()
+        ? std::min(waypointSequencer_.ActiveWaypointIndex() + 1U,
+            GeneralizedPatrolWaypointSequencer::WaypointCount)
+        : 0U;
     std::cout << "[MAPPO_PATROL_EPISODE] phase=" << phase
               << " P=" << counts_.blueMobiles << " N=" << counts_.redMobiles
               << " steps=" << episodeStep_
+              << " mode=" << (waypointSequencer_.Following()
+                    ? "FOLLOW" : "RALLY")
+              << " active_waypoint=" << displayedWaypoint
+              << " validated_waypoints="
+              << waypointSequencer_.ValidatedWaypointCount()
+              << " waypoint_distance_m="
+              << waypointSequencer_.DistanceToActiveWaypoint(state, roles)
+              << " cross_track_m=" << projection.signedCrossTrackError
+              << " heading_error_rad=" << std::abs(std::remainder(
+                    leader.heading - headingReference.heading, kPatrolTwoPi))
+              << " speed_mps=" << leader.speed
+              << " arclength_m=" << waypointSequencer_.DistanceMeters()
               << " distance_m=" << noThreatLap_.DistanceMeters()
               << " qualified_m=" << noThreatLap_.QualifiedDistanceMeters()
               << " circuit_m=" << CircuitLength(parameters.geometry)
               << " resets=" << noThreatLap_.ResetCount()
               << " reset_cause=" << noThreatLap_.LastResetCause()
               << " tracking_violations=" << noThreatLap_.TrackingViolationSteps()
+              << " termination=" << terminationCause
               << " spacing_applicable=" << pair
               << " spacing_margin_m=" << (pair ? spacing - std::max(
                     training_.noThreatPatrol.minimumSeparationMeters,
                     parameters.collisionDistance) : 0.F) << '\n';
-    auto const& roles = Roles();
     for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
     {
         auto const error = GeneralizedNoThreatError(
@@ -619,7 +672,7 @@ void GeneralizedPatrolMappoAgent::WritePatrolDiagnostics(
 }
 
 /**
- * @brief Capture l'état ECS, construit les observations v9 et calcule les commandes synchronisées; utilise l'acteur déterministe lors d'une campagne d'évaluation.
+ * @brief Capture l'état ECS, construit les observations v10 et calcule les commandes synchronisées; utilise l'acteur déterministe lors d'une campagne d'évaluation.
  * @details Consulte ou modifie des composants ECS.
  */
 void GeneralizedPatrolMappoAgent::ChooseAction()
@@ -637,13 +690,14 @@ void GeneralizedPatrolMappoAgent::ChooseAction()
         std::array<GeneralizedObservation,
                    TeamCapacity::MaximumBlueMobiles> observations{};
         BlueTeamRoles const& roles = Roles();
-        beforeTargets_ = ComputePatrolTargets(parameters, beforeStep_, roles,
-            training_.noThreatPatrol.lookaheadSeconds);
+        beforeTargets_ = waypointSequencer_.Targets(
+            parameters, beforeStep_, roles, training_.noThreatPatrol);
         if (registry_->ctx().contains<InitializerContext>())
         {
+            auto& context = registry_->ctx().get<InitializerContext>();
             PublishPatrolReferenceOverlay(
-                registry_->ctx().get<InitializerContext>(),
-                beforeTargets_, roles);
+                context, beforeTargets_, roles);
+            PublishPatrolWaypointOverlay(context, waypointSequencer_);
         }
         BuildObservations(parameters, beforeStep_, observations, beforeTargets_);
 
@@ -674,7 +728,7 @@ void GeneralizedPatrolMappoAgent::ChooseAction()
     }
     catch (std::exception const& error)
     {
-        std::cerr << "[BLUE MAPPO V9][MAPPO_ERROR] caught_at="
+        std::cerr << "[BLUE MAPPO V10][MAPPO_ERROR] caught_at="
                   << __FILE__ << ':' << __LINE__
                   << " phase=ChooseAction update="
                   << (learner_ ? learner_->StepCount() : 0U)
@@ -702,7 +756,7 @@ void GeneralizedPatrolMappoAgent::ChooseAction()
         if (initializationFailed)
         {
             finished_ = true;
-            std::cerr << "[BLUE MAPPO V9][MAPPO_FATAL] Episode bootstrap failed; "
+            std::cerr << "[BLUE MAPPO V10][MAPPO_FATAL] Episode bootstrap failed; "
                          "stopping instead of retrying the same invalid reset.\n";
             throw;
         }
@@ -724,8 +778,24 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         GeneralizedRuntimeState const after = ReadState(parameters);
         std::array<GeneralizedObservation,
                    TeamCapacity::MaximumBlueMobiles> observations{};
-        GeneralizedPatrolTargets const afterTargets = ComputePatrolTargets(
-            parameters, after, Roles(), training_.noThreatPatrol.lookaheadSeconds);
+        BlueTeamRoles const& roles = Roles();
+        std::size_t const leaderIndex = roles.LeaderPhysicalIndex();
+        GeneralizedPatrolTargets const frozenAfterTargets =
+            beforeTargets_[leaderIndex].valid
+            ? ComputePatrolWaypointTargets(parameters, after, roles,
+                beforeTargets_[leaderIndex].guidancePose)
+            : ComputePatrolTargets(parameters, after, roles,
+                training_.noThreatPatrol.lookaheadSeconds);
+        GeneralizedWaypointUpdate const waypointUpdate =
+            counts_.redMobiles == 0U
+            ? waypointSequencer_.Observe(parameters, beforeStep_, after,
+                roles, training_.noThreatPatrol)
+            : GeneralizedWaypointUpdate::None;
+        if (waypointUpdate == GeneralizedWaypointUpdate::EnteredFollow)
+            noThreatLap_.Reset();
+        GeneralizedPatrolTargets const afterTargets =
+            waypointSequencer_.Targets(
+                parameters, after, roles, training_.noThreatPatrol);
         BuildObservations(parameters, after, observations, afterTargets);
 
         std::array<bool, TeamCapacity::MaximumBlueMobiles> availability{};
@@ -746,11 +816,19 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             && after.objectiveAvailable && !pendingThreats;
         // N=0 can end successfully after one correctly flown lap.
         // Pending red activations never trigger the no-red mission outcome.
+        bool lapCompleted = false;
+        if (counts_.redMobiles == 0U && !pendingThreats
+            && waypointSequencer_.Following()
+            && waypointUpdate != GeneralizedWaypointUpdate::EnteredFollow)
+        {
+            lapCompleted = noThreatLap_.Observe(
+                parameters, beforeStep_, after, roles,
+                training_.noThreatPatrol, beforeTargets_, frozenAfterTargets);
+        }
         bool const patrolCompleted = counts_.redMobiles == 0U
             && !pendingThreats && !after.failed && after.objectiveAvailable
-            && noThreatLap_.Observe(
-                parameters, beforeStep_, after, Roles(),
-                training_.noThreatPatrol, beforeTargets_, afterTargets);
+            && waypointSequencer_.Completed()
+            && waypointSequencer_.CircuitValid() && lapCompleted;
         bool const patrolTeamLost = GeneralizedNoThreatTeamLost(after);
         // If the last red is destroyed in the same step as a hard-boundary
         // excursion, neutralization takes precedence while the objective
@@ -759,8 +837,13 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             || !after.objectiveAvailable || patrolTeamLost;
         bool const terminated = missionFailed || noThreatRemains
             || patrolCompleted;
-        std::size_t const episodeLimit = evaluation_.InProgress()
+        std::size_t episodeLimit = evaluation_.InProgress()
             ? training_.evaluation.maxSteps : parameters.episodeSteps;
+        if (counts_.redMobiles == 0U)
+        {
+            episodeLimit = NoThreatEpisodeLimitSteps(
+                training_.noThreatPatrol, parameters.dt, episodeLimit);
+        }
         bool const truncated = !terminated
             && episodeStep_ >= episodeLimit;
 
@@ -826,7 +909,9 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             currentReward_ = 0.F;
             if (episodeDone_)
             {
-                WritePatrolDiagnostics(parameters, after, afterTargets, "evaluation");
+                WritePatrolDiagnostics(parameters, after, afterTargets,
+                    "evaluation", patrolCompleted ? "success"
+                        : truncated ? "timeout" : "failure");
                 // One bounded diagnostic row per evaluation episode. The
                 // production physics and the training rollout stay untouched.
                 auto const test = evaluation_.CurrentCase();
@@ -877,7 +962,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                         PromoteEvaluatedActor();
                     GeneralizedEvaluationMetrics const metrics =
                         evaluation_.Metrics();
-                    std::cout << "[BLUE MAPPO V9] Evaluation #"
+                    std::cout << "[BLUE MAPPO V10] Evaluation #"
                               << evaluation_.CompletedCampaigns()
                               << " P=" << counts_.blueMobiles
                               << " N=" << counts_.redMobiles
@@ -905,7 +990,6 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         transition.responsibilities.threatContainment = Clamp(
             ObjectiveThreatLevel(beforeStep_, parameters)
                 - ObjectiveThreatLevel(after, parameters), -1.F, 1.F);
-        BlueTeamRoles const& roles = Roles();
         float const cooperation =
             beforeStep_.blues[roles.LeaderPhysicalIndex()].available
             && after.blues[roles.LeaderPhysicalIndex()].available
@@ -1018,7 +1102,9 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             : rewardSum / static_cast<float>(rewardCount);
         lastRewardChannels_ = rewardBreakdown.team.values;
         if (terminated || truncated)
-            WritePatrolDiagnostics(parameters, after, afterTargets, "training");
+            WritePatrolDiagnostics(parameters, after, afterTargets,
+                "training", patrolCompleted ? "success"
+                    : truncated ? "timeout" : "failure");
 
         bool const updated = learner_->Observe(
             observations, rewards, availability, terminated, truncated);
@@ -1044,7 +1130,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
     }
     catch (std::exception const& error)
     {
-        std::cerr << "[BLUE MAPPO V9][MAPPO_ERROR] caught_at="
+        std::cerr << "[BLUE MAPPO V10][MAPPO_ERROR] caught_at="
                   << __FILE__ << ':' << __LINE__
                   << " phase=SetNewState update="
                   << (learner_ ? learner_->StepCount() : 0U)
@@ -1095,12 +1181,12 @@ void GeneralizedPatrolMappoAgent::SaveAtUpdateBoundary(
         learner_->SaveActor(actorCheckpoint_);
         learner_->SaveTrainingState(trainingCheckpoint_);
         lastSavedUpdate_ = learner_->StepCount();
-        std::cout << "[BLUE MAPPO V9] Saved actor and training checkpoint at update "
+        std::cout << "[BLUE MAPPO V10] Saved actor and training checkpoint at update "
                   << lastSavedUpdate_ << '\n';
     }
     catch (std::exception const& error)
     {
-        std::cerr << "[BLUE MAPPO V9] Checkpoint failed: "
+        std::cerr << "[BLUE MAPPO V10] Checkpoint failed: "
                   << error.what() << '\n';
     }
 }
@@ -1131,7 +1217,7 @@ void GeneralizedPatrolMappoAgent::StartEvaluation()
         RestoreTrainingInitializer();
         throw;
     }
-    std::cout << "[BLUE MAPPO V9] Starting deterministic P="
+    std::cout << "[BLUE MAPPO V10] Starting deterministic P="
               << counts_.blueMobiles << " N=" << counts_.redMobiles
               << " evaluation after update " << learner_->StepCount()
               << " (" << evaluation_.TestCount() << " cases)\n";
@@ -1190,12 +1276,12 @@ void GeneralizedPatrolMappoAgent::PromoteEvaluatedActor() noexcept
     {
         learner_->SaveActor(productionCheckpoint_);
         SavePromotedScore();
-        std::cout << "[BLUE MAPPO V9] Promoted evaluated generalized actor to "
+        std::cout << "[BLUE MAPPO V10] Promoted evaluated generalized actor to "
                   << productionCheckpoint_.string() << '\n';
     }
     catch (std::exception const& error)
     {
-        std::cerr << "[BLUE MAPPO V9] Actor promotion failed: "
+        std::cerr << "[BLUE MAPPO V10] Actor promotion failed: "
                   << error.what() << '\n';
     }
 }
@@ -1327,7 +1413,7 @@ GeneralizedPatrolMappoAgent::GetSnapshot() const noexcept
     snapshot.m_common.m_checkpoint = static_cast<unsigned int>(
         trainingMode ? training_.checkpointEvery : 0U);
     // The renderer uses m_version as the completed PPO update counter.
-    // The observation schema version remains in the V9 policy checkpoint.
+    // The observation schema version remains in the V10 policy checkpoint.
     snapshot.m_common.m_version = learner_
         ? static_cast<unsigned int>(std::min<std::uint64_t>(
             learner_->StepCount(), std::numeric_limits<unsigned int>::max()))

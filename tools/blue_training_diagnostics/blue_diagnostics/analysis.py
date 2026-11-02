@@ -323,6 +323,28 @@ def _patrol_summary(dataset: RunDataset) -> Dict[str, Any]:
     return {
         "episodes": len(episodes),
         "phases": Counter(row.get("phase", "unknown") for row in episodes),
+        "modes": Counter(row.get("mode", "unknown") for row in episodes),
+        "terminations": Counter(
+            row.get("termination", "unknown") for row in episodes
+        ),
+        "latest_mode": episodes[-1].get("mode", "unknown") if episodes else "unknown",
+        "validated_waypoints_max": max(
+            (_safe_int(row.get("validated_waypoints")) for row in episodes),
+            default=0,
+        ),
+        "active_waypoint_max": max(
+            (_safe_int(row.get("active_waypoint")) for row in episodes),
+            default=0,
+        ),
+        "waypoint_distance": _distribution(
+            _numeric_values(episodes, "waypoint_distance_m")
+        ),
+        "cross_track": _distribution(_numeric_values(episodes, "cross_track_m")),
+        "heading_error": _distribution(
+            _numeric_values(episodes, "heading_error_rad")
+        ),
+        "speed": _distribution(_numeric_values(episodes, "speed_mps")),
+        "arclength": _distribution(_numeric_values(episodes, "arclength_m")),
         "distance_m": sum(_numeric_values(episodes, "distance_m")),
         "qualified_m": sum(qualified),
         "circuit_m": sum(circuit),

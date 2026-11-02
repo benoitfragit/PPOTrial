@@ -17,7 +17,7 @@ on:
         type: boolean
         default: true
       curriculum_version:
-        description: "V3 complete training (observation v9), V2 or V1 legacy"
+        description: "V3 complete training (observation v10), V2 or V1 legacy"
         required: true
         type: choice
         default: v3
@@ -26,7 +26,7 @@ on:
           - v2
           - v1
       curriculum_warm_start:
-        description: "One-time V3 import of a V9 checkpoint from resume_run_id (NOT for subsequent V3 resumes)"
+        description: "One-time V3 import of a V10 checkpoint from resume_run_id (NOT for subsequent V3 resumes)"
         required: true
         type: boolean
         default: false
@@ -201,8 +201,8 @@ jobs:
       - name: Validate fresh resumable checkpoint
         run: |
           $root = "resources/model/BluePatrol/latest"
-          $training = Join-Path $root "blue_patrol_generalized_training_v6.txt"
-          $actor = Join-Path $root "blue_patrol_generalized_v9.txt"
+          $training = Join-Path $root "blue_patrol_generalized_training_v7.txt"
+          $actor = Join-Path $root "blue_patrol_generalized_v10.txt"
           $start = (Get-Item ".mappo-training-start").LastWriteTimeUtc
           foreach ($path in @($training, $actor)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Checkpoint missing: $path" }
@@ -213,7 +213,7 @@ jobs:
             Write-Host "$path : $($file.Length) bytes"
           }
           $header = Get-Content -LiteralPath $training -TotalCount 1
-          if (-not $header.StartsWith("BLUE_TEAM_TRAINING_V6 6 9 ")) {
+          if (-not $header.StartsWith("BLUE_TEAM_TRAINING_V7 7 10 ")) {
             throw "Unexpected full-training checkpoint format"
           }
 
@@ -223,10 +223,10 @@ jobs:
         with:
           name: blue-mappo-checkpoints
           path: |
-            resources/model/BluePatrol/latest/blue_patrol_generalized_v9.txt
-            resources/model/BluePatrol/latest/blue_patrol_generalized_training_v6.txt
-            resources/model/BluePatrol/prod/blue_patrol_generalized_v9.txt
-            resources/model/BluePatrol/prod/blue_patrol_generalized_v9.txt.score
+            resources/model/BluePatrol/latest/blue_patrol_generalized_v10.txt
+            resources/model/BluePatrol/latest/blue_patrol_generalized_training_v7.txt
+            resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt
+            resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt.score
             resources/model/BluePatrol/curriculum-progress.json
           if-no-files-found: warn
           retention-days: 30

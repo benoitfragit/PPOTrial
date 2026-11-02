@@ -75,6 +75,9 @@ Le rapport autonome contient notamment :
 - patrouilles : distance qualifiée, circuit déclaré, resets, violations de suivi,
   marge d’espacement et tolérances position/vitesse/cap par rôle avec moyenne,
   médiane, p95 et pire valeur ;
+- séquence de patrouille : mode RALLY/FOLLOW, waypoint actif, nombre validé,
+  distance au waypoint, écart à la piste, erreur de cap, vitesse, abscisse
+  curviligne et cause de terminaison ;
 - décomposition de chaque canal de récompense par rôle ;
 - pertes Blue par cause et agent, avec vitesse, variation de vitesse, carburant et
   commande d’accélération au moment de la perte ;

@@ -1,7 +1,7 @@
 {
   "formatVersion": 3,
-  "description": "Complete V3 curriculum from random initialization, observation v9; no run-16 migration. Each later phase rehearses earlier tasks.",
-  "observationVersion": 9,
+  "description": "Complete V3 curriculum from random initialization, observation v10; no V9/run-22 migration. Each later phase rehearses earlier tasks.",
+  "observationVersion": 10,
   "initialization": "scratch",
   "totalUpdates": 1200,
   "rehearsal": {

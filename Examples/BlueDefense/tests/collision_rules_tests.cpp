@@ -408,6 +408,17 @@ void TestPatrolOverlaySnapshot()
             300.F + role, 400.F + role,
             0.1F * role, true};
     }
+    ppo::model::sPatrolWaypointOverlay waypointOverlay{};
+    waypointOverlay.m_activeWaypointIndex = 3U;
+    waypointOverlay.m_validatedWaypointCount = 3U;
+    for (std::size_t index = 0U;
+         index < waypointOverlay.WaypointCount; ++index)
+    {
+        float const value = static_cast<float>(index);
+        waypointOverlay.m_waypoints[index] = {
+            500.F + value, 600.F + value, 0.2F * value};
+    }
+    context.patrolWaypointOverlay = waypointOverlay;
 
     entt::registry snapshot;
     ppo::examples::bluedefense::BlueDefenseWorldRules rules;
@@ -440,6 +451,13 @@ void TestPatrolOverlaySnapshot()
                 && references.m_references[3U].m_guidanceEast == 403.F
                 && references.m_references[3U].m_guidanceHeading == 0.3F,
             "patrol-reference overlay changed exact policy guidance data");
+    Require(snapshot.ctx().contains<sPatrolWaypointOverlay>(),
+            "BlueDefense snapshot has no patrol-waypoint overlay");
+    auto const& waypoints = snapshot.ctx().get<sPatrolWaypointOverlay>();
+    Require(waypoints.Valid() && waypoints.m_activeWaypointIndex == 3U
+                && waypoints.m_validatedWaypointCount == 3U
+                && waypoints.m_waypoints[9U].m_north == 509.F,
+            "patrol-waypoint overlay changed the frozen sequence");
 
     sPatrolReferenceOverlay capacity{};
     capacity.m_activeReferenceCount = 1U;

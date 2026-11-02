@@ -7,6 +7,7 @@
 #pragma once
 
 #include "generalized_evaluation_campaign.hpp"
+#include "generalized_patrol_waypoint_sequencer.hpp"
 #include "generalized_runtime_state.hpp"
 #include "generalized_cooperative_reward.hpp"
 #include "generalized_reward_shaping.hpp"
@@ -57,9 +58,9 @@ public:
      * @param parameters Patrol, vehicle, and world parameters.
      * @param training Embedded learner settings.
      * @param executionMode Training or promoted-production inference.
-     * @param actorCheckpoint New generalized v9 actor path.
-     * @param trainingCheckpoint Full V6 state with observation v9.
-     * @param productionCheckpoint Separate promoted generalized v9 actor path.
+     * @param actorCheckpoint New generalized v10 actor path.
+     * @param trainingCheckpoint Full V7 state with observation v10.
+     * @param productionCheckpoint Separate promoted generalized v10 actor path.
      */
     GeneralizedPatrolMappoAgent(
         std::array<ppo::model::BaseEntity*,
@@ -141,10 +142,18 @@ private:
         Parameters const& parameters, GeneralizedRuntimeState const& state,
         bool missionFailed, bool timeout, bool patrolCompleted,
         GeneralizedPatrolTargets const& targets) const;
-    /** @brief Bounded per-episode geometry and weighted reward diagnostics. */
+    /**
+     * @brief Writes one bounded episode geometry and waypoint diagnostic row.
+     * @param parameters Current patrol geometry and vehicle limits.
+     * @param state Final physical state of the episode.
+     * @param targets Final role-ordered measurement and guidance references.
+     * @param phase Stable training or evaluation label.
+     * @param terminationCause Stable success, timeout or failure label.
+     */
     void WritePatrolDiagnostics(Parameters const& parameters,
         GeneralizedRuntimeState const& state,
-        GeneralizedPatrolTargets const& targets, char const* phase) const;
+        GeneralizedPatrolTargets const& targets, char const* phase,
+        char const* terminationCause) const;
 /**
  * @brief Sérialise ou écrit les données associées à SaveAtUpdateBoundary selon les garanties implémentées.
  * @details Consulte ou modifie des composants ECS. Utilise des fichiers ou chemins.
@@ -211,6 +220,8 @@ private:
     std::uint64_t lastSavedUpdate_{};
     unsigned long long id_{ppo::model::GetNewUniqId()};
     float currentReward_{};
+    /** @brief Leader-owned, fixed-capacity RALLY/FOLLOW waypoint state. */
+    GeneralizedPatrolWaypointSequencer waypointSequencer_{};
     GeneralizedPatrolLapProgress noThreatLap_{};
     std::array<GeneralizedRewardValues, 2U> roleRewardSums_{};
     std::array<std::size_t, 2U> roleRewardSteps_{};

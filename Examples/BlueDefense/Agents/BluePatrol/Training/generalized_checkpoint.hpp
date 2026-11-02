@@ -22,7 +22,7 @@
 namespace ppo::examples::bluedefense::defenders {
 
 /** @brief Version of the generalized P/N actor checkpoint contract. */
-inline constexpr unsigned kGeneralizedPolicyCheckpointVersion = 9U;
+inline constexpr unsigned kGeneralizedPolicyCheckpointVersion = 10U;
 
 /**
  * @brief Maximum absolute action-mean drift accepted after a 2v2 migration.
@@ -246,7 +246,7 @@ template<typename Actor>
 void WriteGeneralizedPolicy(std::ostream& stream, Actor const& actor,
                             GeneralizedCheckpointMetadata const metadata)
 {
-    stream << "BLUE_TEAM_MAPPO_V9 " << kGeneralizedPolicyCheckpointVersion
+    stream << "BLUE_TEAM_MAPPO_V10 " << kGeneralizedPolicyCheckpointVersion
            << ' ' << GeneralizedObservationLayout::Version << ' '
            << GeneralizedObservationLayout::Size << ' '
            << ObservationLayout::Size << ' '
@@ -283,7 +283,7 @@ GeneralizedCheckpointMetadata ReadGeneralizedPolicyParameters(
     std::size_t rawInput{}, compactInput{}, output{}, hidden{}, layers{};
     if (!(stream >> magic >> checkpointVersion >> observationVersion
           >> rawInput >> compactInput >> output >> hidden >> layers)
-        || magic != "BLUE_TEAM_MAPPO_V9"
+        || magic != "BLUE_TEAM_MAPPO_V10"
         || checkpointVersion != kGeneralizedPolicyCheckpointVersion
         || observationVersion != GeneralizedObservationLayout::Version
         || rawInput != GeneralizedObservationLayout::Size
