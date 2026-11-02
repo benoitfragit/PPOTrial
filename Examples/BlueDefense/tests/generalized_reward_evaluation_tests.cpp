@@ -720,6 +720,37 @@ bool TestDeterministicCampaignBoundary()
         && Near(metrics.redNeutralizationRate, 1.F);
 }
 
+
+/** @brief One Red credits pursuit to leader; multi-Red remains cooperative. */
+bool TestSingleRedRoleAttribution()
+{
+    auto const roles = BlueTeamRoles::Create(3U, 1U);
+    if (!roles)
+        return false;
+    GeneralizedRewardTransition transition{};
+    transition.before = MakeState(3U, 1U);
+    transition.after = transition.before;
+    transition.responsibilities.leaderOnlyPursuit = true;
+    transition.responsibilities.pursuitProgress = 0.8F;
+    GeneralizedCooperativeRewards result{};
+    if (AggregateGeneralizedCooperativeRewards(*roles, transition, {}, result)
+        != GeneralizedRewardStatus::Applied
+        || !Near(Channel(result.perBlue[0], GeneralizedRewardChannel::PursuitProgress), 0.F)
+        || !Near(Channel(result.perBlue[1], GeneralizedRewardChannel::PursuitProgress), 0.8F)
+        || !Near(Channel(result.perBlue[2], GeneralizedRewardChannel::PursuitProgress), 0.F)
+        || !Near(Channel(result.team, GeneralizedRewardChannel::PursuitProgress), 0.8F/3.F))
+        return false;
+    transition.responsibilities.leaderOnlyPursuit = false;
+    transition.before = MakeState(3U, 2U);
+    transition.after = transition.before;
+    if (AggregateGeneralizedCooperativeRewards(*roles, transition, {}, result)
+        != GeneralizedRewardStatus::Applied)
+        return false;
+    for (std::size_t i = 0U; i < 3U; ++i)
+        if (!Near(Channel(result.perBlue[i], GeneralizedRewardChannel::PursuitProgress), 0.8F))
+            return false;
+    return Near(Channel(result.team, GeneralizedRewardChannel::PursuitProgress), 0.8F);
+}
 } // namespace
 
 /**
@@ -743,6 +774,8 @@ int main()
         return 24;
     if (!TestIndependentRoleAndPursuitWeights())
         return 7;
+    if (!TestSingleRedRoleAttribution())
+        return 27;
     if (!TestNineVersusTenAndMaskValidation())
         return 3;
     if (!TestPermutationInvarianceAndInvalidQuality())

@@ -91,6 +91,22 @@ Les seuils KL `> 0,05`, clipping `> 50 %` et variance expliquée `< 0` sont des
 heuristiques signalées comme telles. Ils servent à orienter l’inspection et ne
 constituent pas des critères automatiques de promotion.
 
+## Diagnostic automatique dans GitHub Actions
+
+À chaque fin du workflow `mappo-training-windows.yml`, même après un échec
+d'entraînement, l'action `python -m blue_diagnostics.ci_report` réutilise
+**localement** les journaux, CSV, fichiers curriculum, manifeste et checkpoints
+du runner. Aucun téléchargement ni identifiant GitHub n'est nécessaire.
+
+- **Run → Summary** : tableau Markdown compact (score, PPO, patrouille, erreurs).
+- **Run → Artifacts → `blue-mappo-diagnostic`** : téléchargement du fichier
+  `diagnostic.html`, consultable dans le navigateur hors connexion.
+- `blue-mappo-telemetry` et `blue-mappo-checkpoints` restent inchangés.
+
+GitHub Actions ne permet pas d'intégrer une véritable page HTML interactive
+directement dans le Summary. Une visualisation HTML publique dans le navigateur
+nécessiterait un hébergement distinct, tel que GitHub Pages (non activé ici).
+
 ## Comparaison de deux runs
 
 Le comparateur superpose les courbes de qualité, scores, récompenses et durées
