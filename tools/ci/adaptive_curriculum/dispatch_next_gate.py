@@ -17,12 +17,29 @@ from pathlib import Path
 from progressive_gate import validate_gates, GATES_FILE, RESULT_FILE
 
 
+def matching_gate_fingerprint(recorded: object, config_bytes: bytes) -> bool:
+    """Accept only identical gate bytes apart from Git checkout LF/CRLF.
+
+    GitHub Actions trains on Windows but dispatches on Ubuntu. Windows checkout
+    hashes CRLF bytes in the checkpoint; Ubuntu sees LF bytes for the same file.
+    Both encodings are equivalent without relaxing the actual gate definition.
+    """
+    if not isinstance(recorded, str):
+        return False
+    lf_bytes = config_bytes.replace(b"\r\n", b"\n")
+    crlf_bytes = lf_bytes.replace(b"\n", b"\r\n")
+    return recorded in {
+        hashlib.sha256(lf_bytes).hexdigest(),
+        hashlib.sha256(crlf_bytes).hexdigest(),
+    }
+
+
 def next_dispatch(result: dict, config_bytes: bytes, run_id: str) -> dict | None:
     document = json.loads(config_bytes)
     stages = validate_gates(document)
     if (not isinstance(result, dict)
-            or result.get("gateConfigSha256")
-            != hashlib.sha256(config_bytes).hexdigest()):
+            or not matching_gate_fingerprint(
+                result.get("gateConfigSha256"), config_bytes)):
         raise ValueError("Gate configuration fingerprint mismatch")
     names = [item["id"] for item in stages]
     current = result.get("gate")
