@@ -1,0 +1,395 @@
+name: Blue Defense (Windows Release)
+
+on:
+  workflow_dispatch:
+    inputs:
+      curriculum_enabled:
+        description: "Enable staged curriculum (fresh or resumed)"
+        required: true
+        type: boolean
+        default: true
+      curriculum_version:
+        description: "V3 complete training (observation v10), V2 or V1 legacy"
+        required: true
+        type: choice
+        default: v3
+        options:
+          - v3
+          - v2
+          - v1
+      curriculum_warm_start:
+        description: "One-time V3 import of a V10 checkpoint from resume_run_id (NOT for subsequent V3 resumes)"
+        required: true
+        type: boolean
+        default: false
+      max_seconds:
+        description: "Training time budget in seconds (leave headroom for build/artifacts)"
+        required: true
+        type: number
+        default: 14400
+      save_every_updates:
+        description: "Save actor and complete training state every N PPO updates"
+        required: true
+        type: number
+        default: 1
+      resume_run_id:
+        description: "Previous workflow run ID for optimizer and gate continuation"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mappo-blue-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: windows-2022
+    timeout-minutes: 350
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout exact training sources
+        uses: actions/checkout@v4
+
+      - name: Restore previous training checkpoint (optional)
+        if: ${{ inputs.resume_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: blue-mappo-checkpoints
+          run-id: ${{ inputs.resume_run_id }}
+          github-token: ${{ github.token }}
+          path: resources/model/BluePatrol
+
+      - name: Verify existing RLMission production model
+        run: |
+          $red = "resources/model/RLMission/prod/model.pt"
+          if (-not (Test-Path -LiteralPath $red -PathType Leaf)) {
+            throw "The unchanged red production RLMission model is missing: $red"
+          }
+
+      - name: Restore Release runtime cache (PPO.exe and LibTorch DLLs)
+        id: runtime_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/release/Main/Release
+          key: mappo-runtime-${{ runner.os }}-x64-msvc2022-Release-libtorch291cpu-${{ github.sha }}
+
+      - name: Validate cached runtime dependencies
+        id: runtime_probe
+        run: |
+          $root = "build/release/Main/Release"
+          $exe = Join-Path $root "PPO.exe"
+          $valid = $false
+          if ("${{ steps.runtime_cache.outputs.cache-hit }}" -eq "true" -and
+              (Test-Path -LiteralPath $exe -PathType Leaf) -and
+              (Test-Path -LiteralPath (Join-Path $root "torch_cpu.dll") -PathType Leaf) -and
+              (Test-Path -LiteralPath (Join-Path $root "c10.dll") -PathType Leaf)) {
+            try {
+              & $exe --example blue-defense --check-example
+              $valid = $LASTEXITCODE -eq 0
+            } catch {
+              Write-Warning "Cached Release runtime failed validation: $_"
+            }
+          }
+          "usable=$($valid.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
+      - name: Configure MSVC 2022 x64 Release and LibTorch 2.9.1 CPU Release
+        if: steps.runtime_probe.outputs.usable != 'true'
+        run: |
+          cmake -S . -B build/release -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_CONFIGURATION_TYPES=Release `
+            -DPPO_LIBTORCH_VARIANT=Release `
+            -DPPO_BUILD_DESKTOP=ON `
+            -DPPO_BUILD_CORE_TESTS=OFF `
+            -DPPO_BUILD_CHECKPOINT_TESTS=OFF
+          if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
+
+      - name: Compile PPO.exe Release
+        if: steps.runtime_probe.outputs.usable != 'true'
+        run: |
+          cmake --build build/release --config Release --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Release build failed" }
+
+      - name: Verify Blue Defense runtime and dependencies
+        run: |
+          $exe = "build/release/Main/Release/PPO.exe"
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+            throw "Missing PPO.exe Release runtime"
+          }
+          & $exe --example blue-defense --check-example
+          if ($LASTEXITCODE -ne 0) { throw "PPO.exe runtime validation failed" }
+
+      - name: Cache validated Release runtime (exe and adjacent DLLs)
+        if: steps.runtime_probe.outputs.usable != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/release/Main/Release
+          key: mappo-runtime-${{ runner.os }}-x64-msvc2022-Release-libtorch291cpu-${{ github.sha }}
+
+      - name: Validate MAPPO telemetry report logic
+        run: |
+          python -m unittest discover -s tools/ci -p "test_mappo_metrics.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "MAPPO telemetry tests failed" }
+
+      - name: Validate MAPPO curriculum configuration and orchestrator
+        run: |
+          python -m unittest discover -s tools/ci -p "test_mappo_curriculum.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "MAPPO curriculum tests failed" }
+          python -m unittest discover -s tools/ci/adaptive_curriculum -p "test_*.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "MAPPO progressive gate tests failed" }
+
+      - name: Validate Blue training diagnostic tool
+        env:
+          PYTHONPATH: tools/blue_training_diagnostics
+        run: |
+          python -m unittest discover -s tools/blue_training_diagnostics/tests -p "test_*.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "Blue diagnostic tests failed" }
+
+      - name: Configure independent frequent checkpoints
+        env:
+          SAVE_EVERY_UPDATES: ${{ inputs.save_every_updates }}
+        run: |
+          $value = 0L
+          if (-not [long]::TryParse($env:SAVE_EVERY_UPDATES, [ref]$value) -or $value -lt 1) {
+            throw "save_every_updates must be a positive integer"
+          }
+          $path = "resources/settings/Training/BluePatrol.json"
+          $config = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+          $config.training | Add-Member -MemberType NoteProperty -Name saveEveryUpdates -Value $value -Force
+          $config | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $path -Encoding utf8
+          Write-Host "Checkpoint every $value update(s); evaluation cadence unchanged."
+          # Each run produces fresh telemetry, not restored timestamps.
+          Remove-Item "resources/model/BluePatrol/telemetry/mappo-training.csv" -Force -ErrorAction SilentlyContinue
+          # Must be newer than any restored checkpoint to reject no-op training.
+          New-Item -Path ".mappo-training-start" -ItemType File -Force | Out-Null
+          (Get-Item ".mappo-training-start").LastWriteTimeUtc = [DateTime]::UtcNow
+
+      - name: Train MAPPO without GUI
+        if: ${{ !inputs.curriculum_enabled }}
+        env:
+          SCENARIO: blue-defense
+          MAX_SECONDS: ${{ inputs.max_seconds }}
+        run: |
+          $seconds = 0
+          if (-not [int]::TryParse($env:MAX_SECONDS, [ref]$seconds) -or $seconds -lt 1 -or $seconds -gt 18000) {
+            throw "max_seconds must be an integer in [1, 18000]"
+          }
+          New-Item -ItemType Directory -Path "build/mappo-telemetry" -Force | Out-Null
+          $trainingLog = "build/mappo-telemetry/mappo-training.log"
+          & build/release/Main/Release/PPO.exe --no-gui --example $env:SCENARIO --max-seconds $seconds 2>&1 |
+            Tee-Object -FilePath $trainingLog
+          if ($LASTEXITCODE -ne 0) { throw "Headless training exited with code $LASTEXITCODE" }
+
+      - name: Train staged MAPPO curriculum without recompiling between levels
+        if: ${{ inputs.curriculum_enabled }}
+        env:
+          MAX_SECONDS: ${{ inputs.max_seconds }}
+          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
+          CURRICULUM_VERSION: ${{ inputs.curriculum_version }}
+          WARM_START: ${{ inputs.curriculum_warm_start }}
+        run: |
+          $seconds = 0
+          if (-not [int]::TryParse($env:MAX_SECONDS, [ref]$seconds) -or $seconds -lt 1 -or $seconds -gt 18000) {
+            throw "max_seconds must be an integer in [1, 18000]"
+          }
+          $fresh = @()
+          $warm = @()
+          if ($env:WARM_START -eq "true") {
+            if ($env:CURRICULUM_VERSION -ne "v3" -or
+                [string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) {
+              throw "V3 warm start requires curriculum_version=v3 and resume_run_id"
+            }
+            $warm = @("--warm-start")
+          }
+          if ([string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) {
+            # Fresh start only resets progress in this runner checkout.
+            Remove-Item "resources/model/BluePatrol/curriculum-progress.json" -Force -ErrorAction SilentlyContinue
+            $fresh = @("--fresh-start")
+          }
+          $curriculumConfig = if ($env:CURRICULUM_VERSION -eq "v3") {
+            "resources/settings/Training/BluePatrolCurriculumV3.json"
+          } elseif ($env:CURRICULUM_VERSION -eq "v2") {
+            "resources/settings/Training/BluePatrolCurriculumV2.json"
+          } else {
+            "resources/settings/Training/BluePatrolCurriculum.json"
+          }
+          Write-Host "Curriculum version=$env:CURRICULUM_VERSION config=$curriculumConfig"
+          python -u tools/ci/mappo_curriculum.py --curriculum $curriculumConfig --max-seconds $seconds @fresh @warm
+          if ($LASTEXITCODE -ne 0) { throw "MAPPO curriculum failed with code $LASTEXITCODE" }
+
+      - name: Validate resumable checkpoint
+        env:
+          SCENARIO: blue-defense
+          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
+        run: |
+          $root = "resources/model/BluePatrol/latest"
+          $training = Join-Path $root "blue_patrol_generalized_training_v7.txt"
+          $actor = Join-Path $root "blue_patrol_generalized_v10.txt"
+          $start = (Get-Item ".mappo-training-start").LastWriteTimeUtc
+          $progressive = $env:SCENARIO -eq "progressive-blue-defense"
+          $resume = $progressive -and (-not [string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID))
+          foreach ($path in @($training, $actor)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Checkpoint missing: $path"
+            }
+            $file = Get-Item -LiteralPath $path
+            if ($file.Length -le 0) {
+              throw "Empty Blue checkpoint: $path"
+            }
+            if ($file.LastWriteTimeUtc -le $start) {
+              if (-not $resume) {
+                throw "No new checkpoint during this run: $path"
+              }
+              Write-Warning "Gate unfinished without a fresh PPO update; preserving prior valid checkpoint: $path"
+            }
+            Write-Host "$path : $($file.Length) bytes"
+          }
+          $trainingHeader = Get-Content -LiteralPath $training -TotalCount 1
+          $actorHeader = Get-Content -LiteralPath $actor -TotalCount 1
+          if (-not $trainingHeader.StartsWith("BLUE_TEAM_TRAINING_V7 7 10 ")) {
+            throw "Unexpected full-training checkpoint format"
+          }
+          if ($progressive) {
+            if (-not $actorHeader.StartsWith("BLUE_TEAM_MAPPO_V10 10 10 ") -or
+                -not $trainingHeader.Contains("UNIFIED_PHYSICAL_GUIDANCE_V1") -or
+                -not $actorHeader.Contains("UNIFIED_PHYSICAL_GUIDANCE_V1")) {
+              throw "Progressive checkpoint is not a unified-guidance V10 actor with full V7 optimizer"
+            }
+            $progressPath = "resources/model/BluePatrol/adaptive-curriculum-progress.json"
+            if (-not (Test-Path $progressPath -PathType Leaf)) {
+              throw "Progressive checkpoint is missing its gate state"
+            }
+          }
+
+      - name: Publish Blue MAPPO checkpoints (including after training failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blue-mappo-checkpoints
+          path: |
+            resources/model/BluePatrol/latest/blue_patrol_generalized_v10.txt
+            resources/model/BluePatrol/latest/blue_patrol_generalized_training_v7.txt
+            resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt
+            resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt.score
+            resources/model/BluePatrol/curriculum-progress.json
+            resources/model/BluePatrol/adaptive-curriculum-progress.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Summarize MAPPO telemetry and render progress charts
+        if: always()
+        env:
+          MAPPO_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PYTHONIOENCODING: utf-8
+          CURRICULUM: ${{ inputs.curriculum_enabled }}
+        run: |
+          $log = "build/mappo-telemetry/mappo-training.log"
+          if ($env:CURRICULUM -eq "true") {
+            # Cross-level scores are NOT comparable; report only the current level.
+            $stageLogs = @(Get-ChildItem "build/mappo-telemetry/curriculum" -Filter "training.log" -Recurse -ErrorAction SilentlyContinue | Sort-Object FullName)
+            if ($stageLogs.Count -gt 0) { $log = $stageLogs[-1].FullName }
+            $curriculumSummary = "build/mappo-telemetry/curriculum-summary.md"
+            if (Test-Path $curriculumSummary) {
+              Get-Content $curriculumSummary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            }
+          }
+          if (Test-Path "tools/ci/mappo_metrics.py") {
+            python tools/ci/mappo_metrics.py `
+              --csv resources/model/BluePatrol/telemetry/mappo-training.csv `
+              --log $log `
+              --out build/mappo-telemetry `
+              --summary $env:GITHUB_STEP_SUMMARY
+            if ($LASTEXITCODE -ne 0) { Write-Warning "MAPPO telemetry report generation failed" }
+          } else {
+            Write-Warning "MAPPO telemetry script unavailable (checkout failed?)"
+          }
+
+      - name: Record reproducible diagnostic manifest
+        if: always()
+        env:
+          SCENARIO: blue-defense
+          CURRICULUM_ENABLED: ${{ inputs.curriculum_enabled }}
+          CURRICULUM_VERSION: ${{ inputs.curriculum_version }}
+          CURRICULUM_WARM_START: ${{ inputs.curriculum_warm_start }}
+          MAX_SECONDS: ${{ inputs.max_seconds }}
+          SAVE_EVERY_UPDATES: ${{ inputs.save_every_updates }}
+          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
+        run: |
+          New-Item -ItemType Directory -Path "build/mappo-telemetry" -Force | Out-Null
+          $hashes = [ordered]@{}
+          foreach ($path in @(
+            "resources/settings/Training/BluePatrol.json",
+            "resources/settings/Training/BluePatrolCurriculumV3.json",
+            "resources/settings/Scenarios/BlueDefense.json"
+          )) {
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+              $hashes[$path] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+          }
+          $manifest = [ordered]@{
+            schema_version = 1
+            repository = "${{ github.repository }}"
+            run_id = [long]"${{ github.run_id }}"
+            run_number = [long]"${{ github.run_number }}"
+            run_attempt = [long]"${{ github.run_attempt }}"
+            head_sha = "${{ github.sha }}"
+            ref = "${{ github.ref }}"
+            generated_utc = [DateTime]::UtcNow.ToString("o")
+            inputs = [ordered]@{
+              scenario = $env:SCENARIO
+              curriculum_enabled = ($env:CURRICULUM_ENABLED -eq "true")
+              curriculum_version = $env:CURRICULUM_VERSION
+              curriculum_warm_start = ($env:CURRICULUM_WARM_START -eq "true")
+              max_seconds = [long]$env:MAX_SECONDS
+              save_every_updates = [long]$env:SAVE_EVERY_UPDATES
+              resume_run_id = $env:RESUME_RUN_ID
+            }
+            configuration_sha256 = $hashes
+          }
+          $manifest | ConvertTo-Json -Depth 8 | Set-Content `
+            -LiteralPath "build/mappo-telemetry/run-manifest.json" -Encoding utf8
+
+      - name: Render Blue diagnostic HTML and GitHub run Summary
+        if: always()
+        env:
+          PYTHONPATH: tools/blue_training_diagnostics
+          PYTHONIOENCODING: utf-8
+        run: |
+          python -m blue_diagnostics.ci_report
+          if ($LASTEXITCODE -ne 0) { Write-Warning "Blue diagnostic HTML generation failed" }
+
+      - name: Publish Blue diagnostic HTML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blue-mappo-diagnostic
+          path: build/mappo-telemetry/diagnostic.html
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish MAPPO telemetry CSV and SVG curves
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blue-mappo-telemetry
+          path: |
+            resources/model/BluePatrol/telemetry/mappo-training.csv
+            build/mappo-telemetry/mappo-summary.md
+            build/mappo-telemetry/mappo-progress.svg
+            build/mappo-telemetry/mappo-losses.csv
+            build/mappo-telemetry/mappo-optimizer.csv
+            build/mappo-telemetry/mappo-training.log
+            build/mappo-telemetry/run-manifest.json
+            build/mappo-telemetry/curriculum-summary.md
+            build/mappo-telemetry/curriculum/**
+            build/mappo-telemetry/adaptive-gate-result.json
+            build/mappo-telemetry/adaptive-gates/**
+          if-no-files-found: warn
+          retention-days: 30
+

@@ -68,18 +68,20 @@ def validate_gates(document: dict) -> list[dict]:
 
 
 def select_training_stage(stages: list[dict], index: int, block: int,
-                          rehearsal_every: int) -> dict:
-    """Most blocks train the active gate; periodically revisit prior gates.
+                          rehearsal_every: int,
+                          validated_gates: list[str] | None = None) -> dict:
+    """Rehearse only truly passed earlier gates, never gates skipped by choice.
 
-    Selection is independent of success, episode totals or PPO update limits.
-    block counts completed training blocks, persisted across GitHub run retries.
+    Omitted validated_gates retains the original sequential caller behavior.
+    Selection remains independent of PPO update quotas.
     """
     if not 0 <= index < len(stages) or block < 0 or rehearsal_every < 2:
         raise ValueError("Invalid rehearsal selection")
-    if index == 0 or (block + 1) % rehearsal_every:
+    prior = stages[:index] if validated_gates is None else [
+        stage for stage in stages[:index] if stage["id"] in validated_gates]
+    if not prior or (block + 1) % rehearsal_every:
         return stages[index]
-    prior = (block // rehearsal_every) % index
-    return stages[prior]
+    return prior[(block // rehearsal_every) % len(prior)]
 
 
 def matching_success(log: Path, blue: int, red: int) -> float | None:
@@ -132,15 +134,34 @@ def initialize_state(stages: list[dict], gate: str, resume: bool,
         # A crash may have saved a newer update before progress was persisted.
         # Never discard that checkpoint merely because the log metadata lagged.
         state["lastCheckpointUpdates"] = checkpoint_updates
-        expected = state["gateIndex"] + (1 if state.get("passed") else 0)
-        if expected >= len(stages):
-            raise ValueError("All gates have already passed")
-        if state["gate"] != names[state["gateIndex"]] or gate != names[expected]:
-            raise ValueError("Resume gate is neither unfinished nor next passed gate")
-        if state.get("passed"):
-            state.update(gateIndex=expected, gate=gate, passed=False,
+        if state["gate"] != names[state["gateIndex"]]:
+            raise ValueError("Checkpoint gate index/name mismatch")
+        validated = state.get("validatedGates")
+        if validated is None:
+            # One-time conversion of sequential checkpoints (runs <= 34).
+            # The former code enforced every preceding gate; none was skipped.
+            validated = names[:state["gateIndex"]]
+            if state["passed"]:
+                validated.append(state["gate"])
+        elif (not isinstance(validated, list)
+              or any(type(item) is not str or item not in names
+                     or names.index(item) > state["gateIndex"]
+                     for item in validated)
+              or len(set(validated)) != len(validated)
+              or (state["gate"] in validated) != state["passed"]):
+            raise ValueError("Invalid verified-gate checkpoint history")
+        target = names.index(gate)
+        if target < state["gateIndex"]:
+            raise ValueError("Backward gate selection requires a separate checkpoint")
+        if target == state["gateIndex"] and state["passed"]:
+            raise ValueError("Gate already passed: select a later gate")
+        if target > state["gateIndex"]:
+            # Explicit dropdown selection advances directly. Intermediate gates
+            # are skipped, not certified; the PPO optimizer remains untouched.
+            state.update(gateIndex=target, gate=gate, passed=False,
                          elapsedSeconds=0.0, bestSuccessPercent=0.0,
                          lastSuccessPercent=None, blockIndex=0)
+        state["validatedGates"] = validated
         return state
     if gate != names[0]:
         raise ValueError("Later gates require resume_run_id from the previous gate")
@@ -150,11 +171,14 @@ def initialize_state(stages: list[dict], gate: str, resume: bool,
     return dict(formatVersion=1, gateConfigSha256=config_hash, gateIndex=0,
                 gate=gate, passed=False, elapsedSeconds=0.0,
                 bestSuccessPercent=0.0, lastSuccessPercent=None,
-                blockIndex=0, lastCheckpointUpdates=0)
+                blockIndex=0, lastCheckpointUpdates=0,
+                validatedGates=[])
 
 
 def record_result(state: dict, stages: list[dict], threshold: float,
                   passed: bool, updates: int) -> None:
+    if passed and state["gate"] not in state["validatedGates"]:
+        state["validatedGates"].append(state["gate"])
     index = state["gateIndex"]
     next_gate = stages[index + 1]["id"] if passed and index + 1 < len(stages) else ""
     result = dict(gate=state["gate"], passed=passed,
@@ -239,7 +263,7 @@ def run_gate(args: argparse.Namespace) -> dict:
             target = updates + args.block_updates
             selected = select_training_stage(
                 stages, state["gateIndex"], state["blockIndex"],
-                rehearsal_every)
+                rehearsal_every, state["validatedGates"])
             block_dir = stage_root / (
                 f"block-{state['blockIndex']:06d}-{selected['id']}"
                 f"-updates-{updates:06d}-{target:06d}")

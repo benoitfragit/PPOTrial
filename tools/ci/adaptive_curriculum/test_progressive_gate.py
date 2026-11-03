@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -169,22 +170,56 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertTrue(second["passed"])
         self.assertEqual(gate.existing.read_updates(), 10)
 
-    def test_invalid_resume_or_future_gate_fails_closed(self) -> None:
+    def test_explicit_skip_preserves_optimizer_without_fake_success(self) -> None:
         stages = gate.validate_gates(sample_gates())
         cfg_hash = hashlib.sha256(gate.GATES_FILE.read_bytes()).hexdigest()
         with self.assertRaisesRegex(ValueError, "Later gates"):
-            gate.initialize_state(stages, "1v1", False, cfg_hash)
+            gate.initialize_state(stages, "4v4", False, cfg_hash)
         with self.assertRaisesRegex(ValueError, "requires complete"):
             gate.initialize_state(stages, "1v0", True, cfg_hash)
-        self.checkpoint(7)
+        self.checkpoint(240)
+        # Old checkpoints had no validatedGates; they enforced sequential order.
         gate.existing.write_json(gate.STATE_FILE, {
             "formatVersion": 1, "gateConfigSha256": cfg_hash,
-            "gateIndex": 0, "gate": "1v0", "passed": False,
-            "elapsedSeconds": 30.0, "blockIndex": 0,
-            "lastCheckpointUpdates": 7, "bestSuccessPercent": 0.0,
-            "lastSuccessPercent": None,
+            "gateIndex": 0, "gate": "1v0", "passed": True,
+            "elapsedSeconds": 3600.0, "blockIndex": 2,
+            "lastCheckpointUpdates": 240, "bestSuccessPercent": 87.5,
+            "lastSuccessPercent": 87.5,
         })
-        with self.assertRaisesRegex(ValueError, "neither unfinished nor next"):
+        state = gate.initialize_state(stages, "4v4", True, cfg_hash)
+        self.assertEqual(state["gate"], "4v4")
+        self.assertEqual(state["gateIndex"], 2)
+        self.assertEqual(state["validatedGates"], ["1v0"])
+        self.assertEqual(state["lastCheckpointUpdates"], 240)
+        self.assertEqual(gate.existing.read_updates(), 240)
+        self.assertFalse(state["passed"])
+        self.assertEqual(state["bestSuccessPercent"], 0.0)
+        self.assertEqual(state["blockIndex"], 0)
+        rehearsed = gate.select_training_stage(
+            stages, 2, 7, 8, state["validatedGates"])
+        self.assertEqual(rehearsed["id"], "1v0")
+        gate.existing.write_json(gate.STATE_FILE, state)
+        with self.assertRaisesRegex(ValueError, "Backward"):
+            gate.initialize_state(stages, "1v1", True, cfg_hash)
+
+    def test_skip_unfinished_gate_does_not_certify_it(self) -> None:
+        stages = gate.validate_gates(sample_gates())
+        cfg_hash = hashlib.sha256(gate.GATES_FILE.read_bytes()).hexdigest()
+        self.checkpoint(245)
+        gate.existing.write_json(gate.STATE_FILE, {
+            "formatVersion": 1, "gateConfigSha256": cfg_hash,
+            "gateIndex": 1, "gate": "1v1", "passed": False,
+            "elapsedSeconds": 60.0, "blockIndex": 3,
+            "lastCheckpointUpdates": 245, "bestSuccessPercent": 20.0,
+            "lastSuccessPercent": 20.0, "validatedGates": ["1v0"],
+        })
+        state = gate.initialize_state(stages, "4v4", True, cfg_hash)
+        self.assertEqual(state["validatedGates"], ["1v0"])
+        self.assertEqual(state["gate"], "4v4")
+        gate.existing.write_json(gate.STATE_FILE, state)
+        with self.assertRaisesRegex(ValueError, "history"):
+            state["validatedGates"] = ["1v0", "1v1"]
+            gate.existing.write_json(gate.STATE_FILE, state)
             gate.initialize_state(stages, "4v4", True, cfg_hash)
 
     def test_rehearsal_candidate_never_overwrites_four_v_four_production(self) -> None:
@@ -358,6 +393,45 @@ class ProgressiveGateTests(unittest.TestCase):
             dispatcher.next_dispatch(result, config_lf, "41703576142")
 
 
+    def test_workflow_gate_choices_match_configuration(self) -> None:
+        root = Path(__file__).resolve().parents[3]
+        prog = (root / ".github/workflows/mappo-training-windows.yml"
+                ).read_text(encoding="utf-8")
+        blue = (root / ".github/workflows/mappo-blue-defense-windows.yml"
+                ).read_text(encoding="utf-8")
+        expected = [item["id"] for item in json.loads(
+            (root / "tools/ci/adaptive_curriculum/gates.json").read_text()
+        )["gates"]]
+        choices = prog.split("      progressive_gate:\n", 1)[1].split(
+            "      success_percent:\n", 1)[0]
+        self.assertIn("type: choice", choices)
+        self.assertEqual(re.findall(r"^          - (\dv\d+)$",
+                                    choices, re.MULTILINE), expected)
+        self.assertNotIn("blue-patrol", prog + blue)
+        self.assertNotIn("scenario:\n", prog.split("permissions:", 1)[0])
+        self.assertNotIn("progressive_gate:", blue)
+        self.assertIn("Train staged MAPPO curriculum", blue)
+        self.assertNotIn("Train staged MAPPO curriculum", prog)
+        self.assertIn("Train one progressive MAPPO gate", prog)
+        self.assertNotIn("Train one progressive MAPPO gate", blue)
+
+    def test_both_workflows_cache_complete_runtime_and_verify_libtorch(self) -> None:
+        root = Path(__file__).resolve().parents[3] / ".github/workflows"
+        for name in ("mappo-training-windows.yml",
+                     "mappo-blue-defense-windows.yml"):
+            with self.subTest(workflow=name):
+                contents = (root / name).read_text(encoding="utf-8")
+                self.assertIn("actions/cache/restore@v4", contents)
+                self.assertIn("actions/cache/save@v4", contents)
+                self.assertIn("build/release/Main/Release", contents)
+                self.assertIn("torch_cpu.dll", contents)
+                self.assertIn("c10.dll", contents)
+                self.assertIn("PPO.exe --check-example", contents.replace(
+                    "--example blue-defense", ""))
+                self.assertIn("if: steps.runtime_probe.outputs.usable != 'true'",
+                              contents)
+                self.assertIn("libtorch291cpu-${{ github.sha }}", contents)
+
     def test_auto_advance_is_explicit_and_validated(self) -> None:
         config = gate.GATES_FILE.read_bytes()
         digest = hashlib.sha256(config).hexdigest()
@@ -370,6 +444,8 @@ class ProgressiveGateTests(unittest.TestCase):
         payload = dispatcher.next_dispatch(result, config, "987654")
         self.assertEqual(payload["progressive_gate"], "1v1")
         self.assertEqual(payload["resume_run_id"], "987654")
+        self.assertNotIn("scenario", payload)
+        self.assertNotIn("curriculum_enabled", payload)
         self.assertEqual(payload["success_percent"], "80")
         result["autoAdvance"] = False
         self.assertIsNone(dispatcher.next_dispatch(result, config, "987654"))
