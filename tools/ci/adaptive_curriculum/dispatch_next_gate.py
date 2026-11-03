@@ -57,10 +57,6 @@ def next_dispatch(result: dict, config_bytes: bytes, run_id: str) -> dict | None
             or not isinstance(run_id, str) or not run_id.isdigit()):
         raise ValueError("Invalid next gate handoff")
     return {
-        "scenario": "progressive-blue-defense",
-        "curriculum_enabled": "false",
-        "curriculum_version": "v3",
-        "curriculum_warm_start": "false",
         "max_seconds": str(next_gate["maxSeconds"]),
         "save_every_updates": "1",
         "resume_run_id": run_id,

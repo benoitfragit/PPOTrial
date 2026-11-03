@@ -1,36 +1,8 @@
-name: MAPPO training (Windows Release)
+name: Progressive Blue Defense (Windows Release)
 
 on:
   workflow_dispatch:
     inputs:
-      scenario:
-        description: "MAPPO scenario to train"
-        required: true
-        type: choice
-        default: blue-defense
-        options:
-          - blue-defense
-          - blue-patrol
-          - progressive-blue-defense
-      curriculum_enabled:
-        description: "Enable staged curriculum (fresh or resumed)"
-        required: true
-        type: boolean
-        default: true
-      curriculum_version:
-        description: "V3 complete training (observation v10), V2 or V1 legacy"
-        required: true
-        type: choice
-        default: v3
-        options:
-          - v3
-          - v2
-          - v1
-      curriculum_warm_start:
-        description: "One-time V3 import of a V10 checkpoint from resume_run_id (NOT for subsequent V3 resumes)"
-        required: true
-        type: boolean
-        default: false
       max_seconds:
         description: "Training time budget in seconds (leave headroom for build/artifacts)"
         required: true
@@ -47,10 +19,28 @@ on:
         type: string
         default: ""
       progressive_gate:
-        description: "Current progressive gate (start 1v0 or resume an unfinished/passed gate)"
+        description: "Gate to train (selecting a later gate skips intermediate gates)"
         required: true
-        type: string
+        type: choice
         default: "1v0"
+        options:
+          - 1v0
+          - 2v0
+          - 3v0
+          - 4v0
+          - 1v1
+          - 2v1
+          - 3v1
+          - 4v1
+          - 1v2
+          - 2v2
+          - 3v2
+          - 4v2
+          - 1v3
+          - 2v3
+          - 3v3
+          - 4v3
+          - 4v4
       success_percent:
         description: "Minimum evaluated gate mission success percent [0,100]"
         required: true
@@ -67,7 +57,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: mappo-training-${{ github.ref }}
+  group: mappo-progressive-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -97,7 +87,34 @@ jobs:
             throw "The unchanged red production RLMission model is missing: $red"
           }
 
+      - name: Restore Release runtime cache (PPO.exe and LibTorch DLLs)
+        id: runtime_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/release/Main/Release
+          key: mappo-runtime-${{ runner.os }}-x64-msvc2022-Release-libtorch291cpu-${{ github.sha }}
+
+      - name: Validate cached runtime dependencies
+        id: runtime_probe
+        run: |
+          $root = "build/release/Main/Release"
+          $exe = Join-Path $root "PPO.exe"
+          $valid = $false
+          if ("${{ steps.runtime_cache.outputs.cache-hit }}" -eq "true" -and
+              (Test-Path -LiteralPath $exe -PathType Leaf) -and
+              (Test-Path -LiteralPath (Join-Path $root "torch_cpu.dll") -PathType Leaf) -and
+              (Test-Path -LiteralPath (Join-Path $root "c10.dll") -PathType Leaf)) {
+            try {
+              & $exe --example blue-defense --check-example
+              $valid = $LASTEXITCODE -eq 0
+            } catch {
+              Write-Warning "Cached Release runtime failed validation: $_"
+            }
+          }
+          "usable=$($valid.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
       - name: Configure MSVC 2022 x64 Release and LibTorch 2.9.1 CPU Release
+        if: steps.runtime_probe.outputs.usable != 'true'
         run: |
           cmake -S . -B build/release -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_CONFIGURATION_TYPES=Release `
@@ -108,22 +125,26 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
 
       - name: Compile PPO.exe Release
+        if: steps.runtime_probe.outputs.usable != 'true'
         run: |
           cmake --build build/release --config Release --parallel 2
           if ($LASTEXITCODE -ne 0) { throw "Release build failed" }
 
-      - name: Check scenario startup without graphics
-        env:
-          SCENARIO: ${{ inputs.scenario }}
-          CURRICULUM: ${{ inputs.curriculum_enabled }}
+      - name: Verify Blue Defense runtime and dependencies
         run: |
           $exe = "build/release/Main/Release/PPO.exe"
           if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
-            throw "Missing Release executable: $exe"
+            throw "Missing PPO.exe Release runtime"
           }
-          $scenario = if ($env:CURRICULUM -eq "true" -or $env:SCENARIO -eq "progressive-blue-defense") { "blue-defense" } else { $env:SCENARIO }
-          & $exe --example $scenario --check-example
-          if ($LASTEXITCODE -ne 0) { throw "Scenario bootstrap failed" }
+          & $exe --example blue-defense --check-example
+          if ($LASTEXITCODE -ne 0) { throw "PPO.exe runtime validation failed" }
+
+      - name: Cache validated Release runtime (exe and adjacent DLLs)
+        if: steps.runtime_probe.outputs.usable != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/release/Main/Release
+          key: mappo-runtime-${{ runner.os }}-x64-msvc2022-Release-libtorch291cpu-${{ github.sha }}
 
       - name: Validate MAPPO telemetry report logic
         run: |
@@ -163,61 +184,7 @@ jobs:
           New-Item -Path ".mappo-training-start" -ItemType File -Force | Out-Null
           (Get-Item ".mappo-training-start").LastWriteTimeUtc = [DateTime]::UtcNow
 
-      - name: Train MAPPO without GUI
-        if: ${{ !inputs.curriculum_enabled && inputs.scenario != 'progressive-blue-defense' }}
-        env:
-          SCENARIO: ${{ inputs.scenario }}
-          MAX_SECONDS: ${{ inputs.max_seconds }}
-        run: |
-          $seconds = 0
-          if (-not [int]::TryParse($env:MAX_SECONDS, [ref]$seconds) -or $seconds -lt 1 -or $seconds -gt 18000) {
-            throw "max_seconds must be an integer in [1, 18000]"
-          }
-          New-Item -ItemType Directory -Path "build/mappo-telemetry" -Force | Out-Null
-          $trainingLog = "build/mappo-telemetry/mappo-training.log"
-          & build/release/Main/Release/PPO.exe --no-gui --example $env:SCENARIO --max-seconds $seconds 2>&1 |
-            Tee-Object -FilePath $trainingLog
-          if ($LASTEXITCODE -ne 0) { throw "Headless training exited with code $LASTEXITCODE" }
-
-      - name: Train staged MAPPO curriculum without recompiling between levels
-        if: ${{ inputs.curriculum_enabled && inputs.scenario != 'progressive-blue-defense' }}
-        env:
-          MAX_SECONDS: ${{ inputs.max_seconds }}
-          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
-          CURRICULUM_VERSION: ${{ inputs.curriculum_version }}
-          WARM_START: ${{ inputs.curriculum_warm_start }}
-        run: |
-          $seconds = 0
-          if (-not [int]::TryParse($env:MAX_SECONDS, [ref]$seconds) -or $seconds -lt 1 -or $seconds -gt 18000) {
-            throw "max_seconds must be an integer in [1, 18000]"
-          }
-          $fresh = @()
-          $warm = @()
-          if ($env:WARM_START -eq "true") {
-            if ($env:CURRICULUM_VERSION -ne "v3" -or
-                [string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) {
-              throw "V3 warm start requires curriculum_version=v3 and resume_run_id"
-            }
-            $warm = @("--warm-start")
-          }
-          if ([string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) {
-            # Fresh start only resets progress in this runner checkout.
-            Remove-Item "resources/model/BluePatrol/curriculum-progress.json" -Force -ErrorAction SilentlyContinue
-            $fresh = @("--fresh-start")
-          }
-          $curriculumConfig = if ($env:CURRICULUM_VERSION -eq "v3") {
-            "resources/settings/Training/BluePatrolCurriculumV3.json"
-          } elseif ($env:CURRICULUM_VERSION -eq "v2") {
-            "resources/settings/Training/BluePatrolCurriculumV2.json"
-          } else {
-            "resources/settings/Training/BluePatrolCurriculum.json"
-          }
-          Write-Host "Curriculum version=$env:CURRICULUM_VERSION config=$curriculumConfig"
-          python -u tools/ci/mappo_curriculum.py --curriculum $curriculumConfig --max-seconds $seconds @fresh @warm
-          if ($LASTEXITCODE -ne 0) { throw "MAPPO curriculum failed with code $LASTEXITCODE" }
-
       - name: Train one progressive MAPPO gate (time- and success-bounded)
-        if: ${{ inputs.scenario == 'progressive-blue-defense' }}
         env:
           GATE: ${{ inputs.progressive_gate }}
           SUCCESS_PERCENT: ${{ inputs.success_percent }}
@@ -243,7 +210,7 @@ jobs:
 
       - name: Validate resumable checkpoint
         env:
-          SCENARIO: ${{ inputs.scenario }}
+          SCENARIO: progressive-blue-defense
           RESUME_RUN_ID: ${{ inputs.resume_run_id }}
         run: |
           $root = "resources/model/BluePatrol/latest"
@@ -301,7 +268,7 @@ jobs:
           retention-days: 30
 
       - name: Publish progressive gate result
-        if: ${{ always() && inputs.scenario == 'progressive-blue-defense' }}
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: blue-mappo-gate
@@ -314,7 +281,7 @@ jobs:
         env:
           MAPPO_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           PYTHONIOENCODING: utf-8
-          CURRICULUM: ${{ inputs.curriculum_enabled }}
+          CURRICULUM: 'false'
         run: |
           $log = "build/mappo-telemetry/mappo-training.log"
           if ($env:CURRICULUM -eq "true") {
@@ -340,10 +307,10 @@ jobs:
       - name: Record reproducible diagnostic manifest
         if: always()
         env:
-          SCENARIO: ${{ inputs.scenario }}
-          CURRICULUM_ENABLED: ${{ inputs.curriculum_enabled }}
-          CURRICULUM_VERSION: ${{ inputs.curriculum_version }}
-          CURRICULUM_WARM_START: ${{ inputs.curriculum_warm_start }}
+          SCENARIO: progressive-blue-defense
+          CURRICULUM_ENABLED: 'false'
+          CURRICULUM_VERSION: v3
+          CURRICULUM_WARM_START: 'false'
           MAX_SECONDS: ${{ inputs.max_seconds }}
           SAVE_EVERY_UPDATES: ${{ inputs.save_every_updates }}
           RESUME_RUN_ID: ${{ inputs.resume_run_id }}
@@ -423,7 +390,7 @@ jobs:
   advance:
     name: Dispatch next progressive gate (no build)
     needs: train
-    if: ${{ needs.train.result == 'success' && inputs.scenario == 'progressive-blue-defense' && inputs.auto_advance }}
+    if: ${{ needs.train.result == 'success' && inputs.auto_advance }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
