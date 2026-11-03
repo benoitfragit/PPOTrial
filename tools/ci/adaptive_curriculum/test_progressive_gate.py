@@ -218,7 +218,7 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertEqual(state["gate"], "4v4")
         gate.existing.write_json(gate.STATE_FILE, state)
         with self.assertRaisesRegex(ValueError, "history"):
-            state["validatedGates"] = ["1v0", "1v1"]
+            state["validatedGates"] = ["1v0", "4v4"]
             gate.existing.write_json(gate.STATE_FILE, state)
             gate.initialize_state(stages, "4v4", True, cfg_hash)
 
@@ -426,8 +426,8 @@ class ProgressiveGateTests(unittest.TestCase):
                 self.assertIn("build/release/Main/Release", contents)
                 self.assertIn("torch_cpu.dll", contents)
                 self.assertIn("c10.dll", contents)
-                self.assertIn("PPO.exe --check-example", contents.replace(
-                    "--example blue-defense", ""))
+                self.assertIn("& $exe --example blue-defense --check-example",
+                              contents)
                 self.assertIn("if: steps.runtime_probe.outputs.usable != 'true'",
                               contents)
                 self.assertIn("libtorch291cpu-${{ github.sha }}", contents)
