@@ -132,6 +132,19 @@ public:
     }
 
     /**
+     * @brief Common guidance reference for every P/N: leader curve/waypoint,
+     * teammates on instantaneous physical leader slots. The actor decides.
+     */
+    GeneralizedPatrolTargets PhysicalTargets(
+        Parameters const& parameters, GeneralizedRuntimeState const& state,
+        BlueTeamRoles const& roles,
+        PatrolNoThreatSettings const& settings) const noexcept
+    {
+        return ComputePhysicalWedgeTargets(
+            parameters, state, roles, Targets(parameters, state, roles, settings));
+    }
+
+    /**
      * @brief Observes one resolved step and advances at most one waypoint.
      * @param parameters Current patrol and vehicle parameters.
      * @param before State before physics.

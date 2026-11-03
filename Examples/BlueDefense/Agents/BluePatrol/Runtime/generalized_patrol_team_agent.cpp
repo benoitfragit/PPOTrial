@@ -730,7 +730,7 @@ void GeneralizedPatrolMappoAgent::ChooseAction()
         std::array<GeneralizedObservation,
                    TeamCapacity::MaximumBlueMobiles> observations{};
         BlueTeamRoles const& roles = Roles();
-        beforeTargets_ = waypointSequencer_.Targets(
+        beforeTargets_ = waypointSequencer_.PhysicalTargets(
             parameters, beforeStep_, roles, training_.noThreatPatrol);
         if (registry_->ctx().contains<InitializerContext>())
         {
@@ -820,12 +820,15 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                    TeamCapacity::MaximumBlueMobiles> observations{};
         BlueTeamRoles const& roles = Roles();
         std::size_t const leaderIndex = roles.LeaderPhysicalIndex();
-        GeneralizedPatrolTargets const frozenAfterTargets =
+        GeneralizedPatrolTargets const baselineFrozenTargets =
             beforeTargets_[leaderIndex].valid
             ? ComputePatrolWaypointTargets(parameters, after, roles,
                 beforeTargets_[leaderIndex].guidancePose)
             : ComputePatrolTargets(parameters, after, roles,
                 training_.noThreatPatrol.lookaheadSeconds);
+        GeneralizedPatrolTargets const frozenAfterTargets =
+            ComputePhysicalWedgeTargets(
+                parameters, after, roles, baselineFrozenTargets);
         bool const sequenceWasValid = waypointSequencer_.CircuitValid();
         GeneralizedWaypointUpdate const waypointUpdate =
             counts_.redMobiles == 0U
@@ -837,9 +840,18 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             followTransitionStep_ = episodeStep_;
             noThreatLap_.Reset();
         }
-        GeneralizedPatrolTargets const afterTargets =
-            waypointSequencer_.Targets(
+        GeneralizedPatrolTargets afterTargets =
+            waypointSequencer_.PhysicalTargets(
                 parameters, after, roles, training_.noThreatPatrol);
+        for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
+        {
+            if (roles.Assignment(index)->role != BlueRole::Teammate
+                || !afterTargets[index].valid)
+                continue;
+            afterTargets[index].physicallyFeasible =
+                GeneralizedPhysicalSlotRotationFeasible(
+                    parameters, beforeTargets_[index], afterTargets[index]);
+        }
         BuildObservations(parameters, after, observations, afterTargets);
 
         std::array<bool, TeamCapacity::MaximumBlueMobiles> availability{};
@@ -1024,59 +1036,40 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         transition.responsibilities.threatContainment = Clamp(
             ObjectiveThreatLevel(beforeStep_, parameters)
                 - ObjectiveThreatLevel(after, parameters), -1.F, 1.F);
-        float const cooperation =
-            beforeStep_.blues[roles.LeaderPhysicalIndex()].available
-            && after.blues[roles.LeaderPhysicalIndex()].available
-            ? GeneralizedCooperationWeight(parameters, beforeStep_) : 0.F;
-        float const engagement = std::max(
-            GeneralizedEngagementWeight(parameters, beforeStep_),
-            GeneralizedEngagementWeight(parameters, after));
-        std::size_t const redBefore = GeneralizedLiveRedCount(beforeStep_);
-        std::size_t const redAfter = GeneralizedLiveRedCount(after);
-        bool const noVisibleRed = redBefore == 0U && redAfter == 0U;
-        bool const singleVisibleRed = redBefore == 1U && redAfter == 1U;
         float const patrolWeight = rewardWeights_[static_cast<std::size_t>(
             GeneralizedRewardChannel::PatrolTracking)];
         float const formationWeight = rewardWeights_[static_cast<std::size_t>(
             GeneralizedRewardChannel::FormationKeeping)];
-        // Multi-Red combat keeps its previous shaping; no-Red gains recovery.
-        float const leaderTracking = noVisibleRed
-            ? GeneralizedPatrolConvergenceShaping(
+        // Reward the objective applicable to the observed physical state.
+        // This is NOT a controller switch: the same MAPPO actor always picks
+        // actions using all Red masks, objective and guidance observations.
+        // Never reward tracking an unrelated racetrack during an interception.
+        bool const patrolRelevant =
+            GeneralizedPatrolRewardRelevant(beforeStep_, after);
+        transition.responsibilities.leaderPatrol = patrolRelevant
+            ? GeneralizedUnifiedPatrolConvergenceShaping(
                 parameters, beforeStep_, after, beforeTargets_, afterTargets,
                 roles, roles.LeaderPhysicalIndex(), training_.noThreatPatrol)
-            : GeneralizedPatrolTransitionShaping(
-                parameters, beforeStep_, after, beforeTargets_, afterTargets,
-                roles, roles.LeaderPhysicalIndex(), training_.noThreatPatrol);
-        transition.responsibilities.leaderPatrol = singleVisibleRed ? 0.F
-            : (1.F - 0.9F * engagement) * leaderTracking
-                / std::max(patrolWeight, 1.F);
-        // One Red: leader chases; wingmen retain their physical leader wedge.
-        transition.responsibilities.leaderOnlyPursuit = singleVisibleRed;
-        transition.responsibilities.pursuitProgress = singleVisibleRed
-            ? GeneralizedSingleRedLeaderProgress(
-                parameters, beforeStep_, after, roles)
-            : engagement * GeneralizedPursuitProgress(
-                parameters, beforeStep_, after);
+                / std::max(patrolWeight, 1.F)
+            : 0.F;
+        transition.responsibilities.leaderOnlyPursuit = false;
+        // No distance gate: a far-away live Red still requires interception.
+        transition.responsibilities.pursuitProgress =
+            GeneralizedPursuitProgress(parameters, beforeStep_, after);
         for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
         {
             BlueRoleAssignment const assignment = *roles.Assignment(index);
             if (assignment.role == BlueRole::Teammate)
             {
-                float const formationTracking = noVisibleRed
-                    ? GeneralizedPatrolConvergenceShaping(
+                transition.responsibilities.formationSlots[assignment.formationSlot] =
+                    patrolRelevant
+                    ? GeneralizedUnifiedPatrolConvergenceShaping(
                         parameters, beforeStep_, after, beforeTargets_, afterTargets,
                         roles, index, training_.noThreatPatrol)
-                    : GeneralizedPatrolTransitionShaping(
-                        parameters, beforeStep_, after, beforeTargets_, afterTargets,
-                        roles, index, training_.noThreatPatrol);
-                transition.responsibilities.formationSlots[assignment.formationSlot] =
-                    singleVisibleRed
-                        ? GeneralizedFormationProgressReward(
-                            parameters, beforeStep_, after, roles, index)
-                        : (1.F - engagement) * formationTracking
-                            / std::max(formationWeight, 1.F)
-                          + engagement * cooperation * GeneralizedFormationProgressReward(
-                              parameters, beforeStep_, after, roles, index);
+                        / std::max(formationWeight, 1.F)
+                    : GeneralizedCooperationWeight(parameters, beforeStep_)
+                        * GeneralizedFormationProgressReward(
+                            parameters, beforeStep_, after, roles, index);
             }
             transition.responsibilities.controlEffort[index] =
                 GeneralizedControlEffortPenalty(

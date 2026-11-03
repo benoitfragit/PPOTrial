@@ -14,6 +14,7 @@
 #include <iomanip>
 #include <istream>
 #include <limits>
+#include <sstream>
 #include <ostream>
 #include <stdexcept>
 #include <string>
@@ -21,8 +22,11 @@
 
 namespace ppo::examples::bluedefense::defenders {
 
-/** @brief Version of the generalized P/N actor checkpoint contract. */
+/** @brief Legacy transport header stays V10 for the existing V3 runner. */
 inline constexpr unsigned kGeneralizedPolicyCheckpointVersion = 10U;
+/** @brief Semantic version required by the unified physical guidance contract. */
+inline constexpr char kGeneralizedUnifiedGuidanceSemanticVersion[] =
+    "UNIFIED_PHYSICAL_GUIDANCE_V1";
 
 /**
  * @brief Maximum absolute action-mean drift accepted after a 2v2 migration.
@@ -179,6 +183,29 @@ inline GeneralizedCheckpointMetadata ReadMetadata(std::istream& stream)
     return metadata;
 }
 
+/**
+ * @brief Reads the optional *versioned* suffix of a legacy-compatible header.
+ * An old, untagged V10 can run only on the historical PvsN path.
+ */
+inline void ReadUnifiedGuidanceSemanticVersion(
+    std::istream& stream, bool const requireCurrent)
+{
+    std::string suffix;
+    std::getline(stream, suffix);
+    std::istringstream tokens{suffix};
+    std::string version;
+    if (!(tokens >> version))
+    {
+        if (requireCurrent)
+            throw std::runtime_error(
+                "Untagged V10 Blue checkpoint incompatible with Pvs0 physical wedge");
+        return;
+    }
+    std::string extra;
+    if (version != kGeneralizedUnifiedGuidanceSemanticVersion || tokens >> extra)
+        throw std::runtime_error("Invalid Blue unified guidance checkpoint semantic version");
+}
+
 } // namespace generalized_checkpoint_detail
 
 /**
@@ -254,7 +281,7 @@ void WriteGeneralizedPolicy(std::ostream& stream, Actor const& actor,
            << TrainingParameters::ACTOR_HIDDEN_DIM << ' '
            << TrainingParameters::ACTOR_NUM_LAYERS << ' ';
     generalized_checkpoint_detail::WriteMetadata(stream, metadata);
-    stream << '\n'
+    stream << ' ' << kGeneralizedUnifiedGuidanceSemanticVersion << '\n'
            << std::setprecision(std::numeric_limits<float>::max_digits10);
     WritePatrolAttention(stream, actor.red);
     WritePatrolAttention(stream, actor.friendlies);
@@ -276,7 +303,8 @@ void WriteGeneralizedPolicy(std::ostream& stream, Actor const& actor,
  */
 template<typename Actor>
 GeneralizedCheckpointMetadata ReadGeneralizedPolicyParameters(
-    std::istream& stream, Actor& actor)
+    std::istream& stream, Actor& actor,
+    bool const requireUnifiedGuidanceSemanticVersion = false)
 {
     std::string magic;
     unsigned checkpointVersion{}, observationVersion{};
@@ -296,6 +324,8 @@ GeneralizedCheckpointMetadata ReadGeneralizedPolicyParameters(
             "Incompatible generalized blue MAPPO actor contract");
     }
     auto const metadata = generalized_checkpoint_detail::ReadMetadata(stream);
+    generalized_checkpoint_detail::ReadUnifiedGuidanceSemanticVersion(
+        stream, requireUnifiedGuidanceSemanticVersion);
     ReadPatrolAttention(stream, actor.red);
     ReadPatrolAttention(stream, actor.friendlies);
     ReadPatrolLayer(stream, actor.input_layer);
@@ -319,9 +349,11 @@ template<typename Actor>
  * @details Utilise des fichiers ou chemins. Peut signaler un état invalide par exception.
  */
 GeneralizedCheckpointMetadata ReadGeneralizedPolicy(std::istream& stream,
-                                                     Actor& actor)
+                                                     Actor& actor,
+                                                     bool const requireUnifiedGuidanceSemanticVersion = false)
 {
-    auto const metadata = ReadGeneralizedPolicyParameters(stream, actor);
+    auto const metadata = ReadGeneralizedPolicyParameters(
+        stream, actor, requireUnifiedGuidanceSemanticVersion);
     std::string trailing;
     if (stream >> trailing)
         throw std::runtime_error(

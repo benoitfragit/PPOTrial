@@ -342,6 +342,20 @@ inline std::size_t GeneralizedLiveRedCount(
 }
 
 /**
+ * @brief The existing patrol reward applies only while no hostile aircraft
+ * can be engaged. This selects a training objective, never the actor's action.
+ * Both snapshots must agree: first appearances and kills cannot earn an
+ * unrelated racetrack reward on the same transition.
+ */
+inline bool GeneralizedPatrolRewardRelevant(
+    GeneralizedRuntimeState const& before,
+    GeneralizedRuntimeState const& after) noexcept
+{
+    return GeneralizedLiveRedCount(before) == 0U
+        && GeneralizedLiveRedCount(after) == 0U;
+}
+
+/**
  * @brief Relative progress towards a fixed beginning-of-step waypoint.
  * Uses the exact same normalization in single-Red pursuit and patrol.
  */
@@ -562,6 +576,81 @@ inline float GeneralizedPatrolConvergenceShaping(
                 - 0.15F * error.BoundedCost()),
         -1.F, 1.F);
 }
+
+/**
+ * @brief Physical Pvs0 wedge qualification, distinct from numeric tracking.
+ * Unreachable references retain observations and their speed/position errors.
+ */
+inline bool GeneralizedPvs0WedgeHeld(
+    GeneralizedRuntimeState const& state,
+    GeneralizedPatrolTarget const& target, std::size_t const index,
+    PatrolNoThreatSettings const& settings) noexcept
+{
+    return target.valid && target.physicallyFeasible
+        && GeneralizedNoThreatError(state, target, index, settings).InTolerance();
+}
+
+/**
+ * @brief Unified patrol/formation convergence from frozen references.
+ * Applies equally when red slots are configured but currently inactive.
+ */
+inline float GeneralizedUnifiedPatrolConvergenceShaping(
+    Parameters const& parameters, GeneralizedRuntimeState const& before,
+    GeneralizedRuntimeState const& after,
+    GeneralizedPatrolTargets const& beforeTargets,
+    GeneralizedPatrolTargets const& afterTargets, BlueTeamRoles const& roles,
+    std::size_t const index, PatrolNoThreatSettings const& settings) noexcept
+{
+    if (!settings.enabled || !roles.IsValid()
+        || !Valid(before.counts) || !Valid(after.counts)
+        || roles.ActiveBlueCount() != before.counts.blueMobiles
+        || roles.ActiveBlueCount() != after.counts.blueMobiles
+        || index >= before.counts.blueMobiles
+        || index >= after.counts.blueMobiles
+        || !before.blues[index].available || !after.blues[index].available
+        || !beforeTargets[index].valid || !afterTargets[index].valid)
+        return 0.F;
+
+    Mobile const& previous = before.blues[index];
+    Mobile const& current = after.blues[index];
+    PatrolCurvePose const& track = beforeTargets[index].pose;
+    PatrolCurvePose const& waypoint = beforeTargets[index].guidancePose;
+    GeneralizedPatrolError const error = GeneralizedNoThreatError(
+        after, afterTargets[index], index, settings);
+    float const trackGate = Clamp(1.F - error.position, 0.F, 1.F);
+    float const waypointClosing = GeneralizedFrozenWaypointProgress(
+        parameters, previous, current, waypoint.north, waypoint.east);
+    float const trackClosing = GeneralizedFrozenWaypointProgress(
+        parameters, previous, current, track.north, track.east);
+    float const closing = trackGate * waypointClosing
+        + (1.F - trackGate) * trackClosing;
+
+    float const speedReference = afterTargets[index].speed;
+    float const speedRatio = speedReference > 0.F
+        ? std::min(1.F, speedReference / std::max(current.speed, speedReference))
+        : 0.F;
+    float const speedGate = speedRatio * speedRatio;
+    float const rawProgress = Clamp(2.F * closing, -1.F, 1.F);
+    // Never gate a negative progress: retreat under overspeed stays costly.
+    float const gatedProgress = rawProgress > 0.F
+        ? rawProgress * speedGate : rawProgress;
+    float const speedPenalty = 0.4F * error.speed / (1.F + error.speed);
+    float const alignment = Clamp(
+        1.F - std::max(error.speed, error.heading), 0.F, 1.F);
+    std::size_t const leader = roles.LeaderPhysicalIndex();
+    // Only physical leader arclength can earn leader forward-lap credit.
+    float const forward = index == leader
+        ? GeneralizedPatrolAdvance(
+            parameters, beforeTargets[leader], afterTargets[leader])
+        : 0.F;
+    return Clamp(
+        gatedProgress - speedPenalty
+            + settings.stepRewardScale * (
+                forward * trackGate * alignment * speedGate
+                - 0.15F * error.BoundedCost()),
+        -1.F, 1.F);
+}
+
 
 /**
  * @brief Accumulates one full physically attainable correctly flown lap.

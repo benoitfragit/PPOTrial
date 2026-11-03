@@ -99,7 +99,7 @@ void WriteGeneralizedTrainingState(
            << GeneralizedCriticConfig::HiddenDim << ' '
            << GeneralizedCriticConfig::Layers << ' ';
     generalized_checkpoint_detail::WriteMetadata(stream, metadata);
-    stream << '\n'
+    stream << ' ' << kGeneralizedUnifiedGuidanceSemanticVersion << '\n'
            << std::setprecision(std::numeric_limits<float>::max_digits10)
            << "ACTOR\n";
     WriteGeneralizedPolicy(stream, actor, metadata);
@@ -149,7 +149,8 @@ template<typename Actor, typename Critic, typename ActorOptimizer,
 std::uint64_t ReadGeneralizedTrainingState(
     std::istream& stream, Actor& actor, Critic& critic,
     ActorOptimizer& actorOptimizer, CriticOptimizer& criticOptimizer,
-    RandomEngine& randomEngine, GeneralizedCheckpointMetadata& metadata)
+    RandomEngine& randomEngine, GeneralizedCheckpointMetadata& metadata,
+    bool const requireUnifiedGuidanceSemanticVersion = false)
 {
     std::string magic;
     unsigned formatVersion{}, observationVersion{};
@@ -174,10 +175,13 @@ std::uint64_t ReadGeneralizedTrainingState(
             "Incompatible generalized blue training checkpoint contract");
     }
     metadata = generalized_checkpoint_detail::ReadMetadata(stream);
+    generalized_checkpoint_detail::ReadUnifiedGuidanceSemanticVersion(
+        stream, requireUnifiedGuidanceSemanticVersion);
 
     training_checkpoint_detail::RequirePatrolCheckpointToken(stream,
                                                               "ACTOR");
-    auto const actorMetadata = ReadGeneralizedPolicyParameters(stream, actor);
+    auto const actorMetadata = ReadGeneralizedPolicyParameters(
+        stream, actor, requireUnifiedGuidanceSemanticVersion);
     if (actorMetadata.activeBlueMobiles != metadata.activeBlueMobiles
         || actorMetadata.activeRedMobiles != metadata.activeRedMobiles)
     {

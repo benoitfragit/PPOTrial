@@ -61,7 +61,8 @@ public:
                     "Cannot open generalized blue production checkpoint: "
                     + checkpoint.string());
             }
-            (void)ReadGeneralizedPolicy(stream, actor_);
+            (void)ReadGeneralizedPolicy(
+                stream, actor_, true);
         }
         catch (...)
         {

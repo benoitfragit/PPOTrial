@@ -23,6 +23,8 @@ jobs:
         run: python -m unittest discover -s tools/ci -p "test_mappo_metrics.py" -v
       - name: MAPPO curriculum Python tests
         run: python -m unittest discover -s tools/ci -p "test_mappo_curriculum.py" -v
+      - name: MAPPO progressive gate Python tests
+        run: python -m unittest discover -s tools/ci/adaptive_curriculum -p "test_*.py" -v
       - name: Blue training diagnostic Python tests
         env:
           PYTHONPATH: tools/blue_training_diagnostics
