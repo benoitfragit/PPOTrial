@@ -4,7 +4,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
+import subprocess
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -272,6 +275,56 @@ class ProgressiveGateTests(unittest.TestCase):
             gate.RESULT_FILE.read_text())["lastSuccessPercent"])
         self.assertEqual(
             gate.initialize_state(stages, "1v0", True, config_hash)["gate"], "1v0")
+
+
+    def test_workflow_resume_powershell_argument_splatting(self) -> None:
+        """Run 32 regression: optional flags must remain whole argv tokens."""
+        workflow = (Path(__file__).resolve().parents[3] /
+                    ".github/workflows/mappo-training-windows.yml")
+        content = workflow.read_text(encoding="utf-8")
+        step = content.split(
+            "      - name: Train one progressive MAPPO gate (time- and success-bounded)\n",
+            1)[1].split("      - name: Validate resumable checkpoint\n", 1)[0]
+        self.assertIn("$pythonArgs = @(", step)
+        self.assertIn("& python @pythonArgs", step)
+        self.assertIn('$pythonArgs += "--resume"', step)
+        self.assertIn('$pythonArgs += "--auto-advance"', step)
+        self.assertNotIn("@resume @advance", step)
+        powershell = shutil.which("pwsh")
+        if powershell is None:
+            return  # Structural checks still run without PowerShell.
+        block = textwrap.dedent(step.split("        run: |\n", 1)[1].split(
+            "          if ($LASTEXITCODE", 1)[0])
+        cases = (
+            ("", "false", ()),
+            ("41690261169", "false", ("--resume",)),
+            ("41690261169", "true", ("--resume", "--auto-advance")),
+        )
+        for resume_id, auto_advance, flags in cases:
+            with self.subTest(resume=resume_id, auto_advance=auto_advance):
+                environment = os.environ.copy()
+                environment.update({
+                    "GATE": "1v0", "SUCCESS_PERCENT": "75",
+                    "MAX_SECONDS": "3600", "RESUME_RUN_ID": resume_id,
+                    "AUTO_ADVANCE": auto_advance,
+                })
+                script = (
+                    "function python { $script:captured = @($args) }\n"
+                    + block
+                    + "\nWrite-Output ('ARGV=' + "
+                    "(ConvertTo-Json -InputObject $script:captured -Compress))"
+                )
+                completed = subprocess.run(
+                    [powershell, "-NoProfile", "-NonInteractive",
+                     "-Command", script],
+                    env=environment, capture_output=True, text=True,
+                    timeout=20, check=False)
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                output = completed.stdout.rsplit("ARGV=", 1)[1].strip()
+                self.assertEqual(json.loads(output), [
+                    "-u", "tools/ci/adaptive_curriculum/progressive_gate.py",
+                    "--gate", "1v0", "--threshold-percent", "75",
+                    "--max-seconds", "3600", "--block-updates", "20", *flags])
 
     def test_auto_advance_is_explicit_and_validated(self) -> None:
         config = gate.GATES_FILE.read_bytes()
