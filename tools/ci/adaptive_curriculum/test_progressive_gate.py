@@ -326,6 +326,38 @@ class ProgressiveGateTests(unittest.TestCase):
                     "--gate", "1v0", "--threshold-percent", "75",
                     "--max-seconds", "3600", "--block-updates", "20", *flags])
 
+    def test_gate_dispatch_accepts_windows_and_linux_line_endings(self) -> None:
+        """Run 33: identical gates must dispatch despite checkout CRLF/LF."""
+        config_lf = gate.GATES_FILE.read_bytes().replace(b"\r\n", b"\n")
+        config_crlf = config_lf.replace(b"\n", b"\r\n")
+        self.assertNotEqual(
+            hashlib.sha256(config_lf).hexdigest(),
+            hashlib.sha256(config_crlf).hexdigest())
+        result = {
+            "gateConfigSha256": hashlib.sha256(config_crlf).hexdigest(),
+            "gate": "1v0", "passed": True, "autoAdvance": True,
+            "nextGate": "1v1", "nextThresholdPercent": 80,
+            "nextMaxSeconds": 12000,
+        }
+        payload = dispatcher.next_dispatch(result, config_lf, "41703576142")
+        self.assertEqual(payload["progressive_gate"], "1v1")
+        self.assertEqual(payload["resume_run_id"], "41703576142")
+        result["gateConfigSha256"] = hashlib.sha256(config_lf).hexdigest()
+        self.assertEqual(
+            dispatcher.next_dispatch(result, config_crlf, "41703576142"),
+            payload)
+
+        # Different valid gate definitions must still fail closed.
+        changed = json.loads(config_lf)
+        changed["rehearsalEveryBlocks"] += 1
+        changed_bytes = json.dumps(changed).encode("utf-8")
+        with self.assertRaisesRegex(ValueError, "fingerprint"):
+            dispatcher.next_dispatch(result, changed_bytes, "41703576142")
+        result["gateConfigSha256"] = None
+        with self.assertRaisesRegex(ValueError, "fingerprint"):
+            dispatcher.next_dispatch(result, config_lf, "41703576142")
+
+
     def test_auto_advance_is_explicit_and_validated(self) -> None:
         config = gate.GATES_FILE.read_bytes()
         digest = hashlib.sha256(config).hexdigest()
