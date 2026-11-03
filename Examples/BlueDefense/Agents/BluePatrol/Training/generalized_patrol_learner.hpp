@@ -503,7 +503,8 @@ public:
             throw std::runtime_error(
                 "Cannot open generalized blue actor checkpoint: "
                 + checkpoint.string());
-        (void)ReadGeneralizedPolicy(stream, actor_);
+        (void)ReadGeneralizedPolicy(
+            stream, actor_, true);
         rlt::reset_optimizer_state(device_, actorOptimizer_, actor_);
     }
 
@@ -679,7 +680,7 @@ public:
         GeneralizedCheckpointMetadata metadata{};
         std::uint64_t const updates = ReadGeneralizedTrainingState(
             stream, actor_, critic_, actorOptimizer_, criticOptimizer_, rng_,
-            metadata);
+            metadata, true);
         // P/N are properties of the saved episode, not model dimensions.
         // A new rollout is constructed with the current P/N and fresh masks.
         // Shared actor/critic weights and Adam moments remain compatible.

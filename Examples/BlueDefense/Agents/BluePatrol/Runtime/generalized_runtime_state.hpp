@@ -298,6 +298,8 @@ struct GeneralizedPatrolTarget final
     PatrolCurvePose guidancePose{};
     float guidanceSpeed{};
     bool valid{};
+    /** Physical feasibility is independent from an observable valid target. */
+    bool physicallyFeasible{true};
 };
 using GeneralizedPatrolTargets = std::array<GeneralizedPatrolTarget,
     TeamCapacity::MaximumBlueMobiles>;
@@ -436,6 +438,111 @@ inline GeneralizedPatrolTargets ComputePatrolWaypointTargets(
         parameters.geometry, leader.north, leader.east).pose;
     return generalized_runtime_detail::ExpandPatrolTargets(
         parameters, state, roles, projection, leaderWaypoint);
+}
+
+/**
+ * @brief Physical teammate slot from the *current physical leader*, not a WPT.
+ *
+ * Signed inboard offset is in the track direction; omega is the physical
+ * leader yaw rate. A high-speed/unreachable slot stays observable and valid.
+ */
+inline GeneralizedPatrolTarget GeneralizedPhysicalSlot(
+    Parameters const& parameters, Mobile const& leader,
+    FormationOffset const& offset) noexcept
+{
+    if (!leader.available || !std::isfinite(leader.north)
+        || !std::isfinite(leader.east) || !std::isfinite(leader.heading)
+        || !std::isfinite(leader.speed) || leader.speed < 0.F
+        || !std::isfinite(leader.turnRate))
+        return {};
+
+    float const tangentNorth = std::cos(leader.heading);
+    float const tangentEast = std::sin(leader.heading);
+    float const inward = static_cast<float>(parameters.geometry.direction)
+        * offset.inwardMeters;
+    float const deltaNorth = offset.longitudinalMeters * tangentNorth
+        - inward * tangentEast;
+    float const deltaEast = offset.longitudinalMeters * tangentEast
+        + inward * tangentNorth;
+    float const velocityNorth = leader.speed * tangentNorth
+        - leader.turnRate * deltaEast;
+    float const velocityEast = leader.speed * tangentEast
+        + leader.turnRate * deltaNorth;
+    float const slotSpeed = std::hypot(velocityNorth, velocityEast);
+
+    PatrolCurvePose pose{};
+    pose.north = leader.north + deltaNorth;
+    pose.east = leader.east + deltaEast;
+    pose.heading = slotSpeed > 0.F
+        ? std::atan2(velocityEast, velocityNorth) : leader.heading;
+    if (!FinitePatrolPose(pose) || !std::isfinite(slotSpeed))
+        return {};
+    // Do not clamp slotSpeed: a saturated target would contradict its pose.
+    return {pose, slotSpeed, pose, slotSpeed, true,
+        slotSpeed <= parameters.maxSpeed};
+}
+
+/**
+ * @brief Shared physical wedge reference in any mission. This is guidance
+ * data for the actor, never a hard-coded choice between patrol and defense.
+ */
+inline GeneralizedPatrolTargets ComputePhysicalWedgeTargets(
+    Parameters const& parameters, GeneralizedRuntimeState const& state,
+    BlueTeamRoles const& roles,
+    GeneralizedPatrolTargets const& leaderTargets) noexcept
+{
+    GeneralizedPatrolTargets targets{};
+    if (!Valid(parameters) || !Valid(state) || !roles.IsValid()
+        || roles.ActiveBlueCount() != state.counts.blueMobiles)
+        return targets;
+    std::size_t const leaderIndex = roles.LeaderPhysicalIndex();
+    Mobile const& leader = state.blues[leaderIndex];
+    if (!leader.available)
+        return targets;
+    targets = leaderTargets;
+    for (std::size_t index = 0U; index < state.counts.blueMobiles; ++index)
+    {
+        if (index == leaderIndex)
+            continue;
+        if (!state.blues[index].available)
+        {
+            targets[index] = {};
+            continue;
+        }
+        BlueRoleAssignment const assignment = *roles.Assignment(index);
+        if (assignment.role != BlueRole::Teammate)
+        {
+            targets[index] = {};
+            continue;
+        }
+        FormationOffset const offset = EvaluateFormationOffset(
+            assignment.formationSlot, parameters.geometry.separationDistance,
+            parameters.geometry.separationAngle);
+        targets[index] = GeneralizedPhysicalSlot(
+            parameters, leader, offset);
+    }
+    return targets;
+}
+
+
+/**
+ * @brief Physical slot turn feasibility from two resolved physical snapshots.
+ * A missing before reference cannot certify rotation but never masks guidance.
+ */
+inline bool GeneralizedPhysicalSlotRotationFeasible(
+    Parameters const& parameters, GeneralizedPatrolTarget const& before,
+    GeneralizedPatrolTarget const& after) noexcept
+{
+    if (!before.valid || !after.valid || !after.physicallyFeasible
+        || !std::isfinite(before.pose.heading)
+        || !std::isfinite(after.pose.heading)
+        || !std::isfinite(parameters.dt) || parameters.dt <= 0.F)
+        return false;
+    float const turnRate = std::abs(std::remainder(
+        after.pose.heading - before.pose.heading, kPatrolTwoPi))
+        / parameters.dt;
+    return std::isfinite(turnRate)
+        && turnRate <= parameters.maxRotationRate;
 }
 
 /** @brief Compatibility convenience for tests; production reuses snapshot targets. */

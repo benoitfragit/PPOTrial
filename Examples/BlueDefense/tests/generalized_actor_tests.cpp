@@ -486,6 +486,25 @@ int main()
         return 12;
     }
 
+    std::string untaggedPolicy = serializedPolicy;
+    auto const semanticTag = untaggedPolicy.find(
+        std::string{" "} + blue::kGeneralizedUnifiedGuidanceSemanticVersion);
+    if (semanticTag == std::string::npos)
+        return 20;
+    untaggedPolicy.erase(semanticTag,
+        std::string{" "}.size()
+            + std::string{blue::kGeneralizedUnifiedGuidanceSemanticVersion}.size());
+    // Historical PvsN models are still readable with the same weights.
+    {
+        std::stringstream input{untaggedPolicy};
+        (void)blue::ReadGeneralizedPolicy(input, loadedActor);
+    }
+    if (!ThrowsRuntimeError([&] {
+            std::stringstream input{untaggedPolicy};
+            blue::ReadGeneralizedPolicy(input, loadedActor, true);
+        }))
+        return 21;
+
     std::string wrongVersion = serializedPolicy;
     auto const headerVersion = wrongVersion.find("BLUE_TEAM_MAPPO_V10 10");
     if (headerVersion == std::string::npos)
@@ -569,6 +588,26 @@ int main()
     {
         return 17;
     }
+
+    std::string untaggedTraining = serializedTraining;
+    std::string const semanticField =
+        std::string{" "} + blue::kGeneralizedUnifiedGuidanceSemanticVersion;
+    std::size_t suffix = untaggedTraining.find(semanticField);
+    if (suffix == std::string::npos)
+        return 22;
+    untaggedTraining.erase(suffix, semanticField.size());
+    suffix = untaggedTraining.find(semanticField);
+    if (suffix == std::string::npos)
+        return 23;
+    untaggedTraining.erase(suffix, semanticField.size());
+    if (!ThrowsRuntimeError([&] {
+            std::stringstream input{untaggedTraining};
+            blue::ReadGeneralizedTrainingState(
+                input, loadedTrainingActor, loadedCritic,
+                loadedActorOptimizer, loadedCriticOptimizer,
+                loadedRandomEngine, trainingMetadata, true);
+        }))
+        return 24;
 
     std::string wrongTrainingVersion = serializedTraining;
     auto const trainingVersion =

@@ -628,7 +628,12 @@ class CurriculumTests(unittest.TestCase):
         self.assertEqual((stages[0]["blue"], stages[0]["red"]), (1, 0))
         self.assertEqual((stages[1]["blue"], stages[1]["red"]), (2, 0))
         self.assertEqual((stages[-1]["blue"], stages[-1]["red"]), (4, 4))
-        self.assertEqual((primary, prior), (24, 6))
+        self.assertEqual((primary, prior), (27, 3))
+        self.assertEqual(sum(stage["updates"] for stage in stages
+                             if stage["red"] == 0), 140)
+        self.assertEqual(sum(stage["updates"] for stage in stages
+                             if stage["red"] > 0), 1060)
+        self.assertEqual(stages[-1]["updates"], 460)
         self.assertTrue(all(count in {s["blue"] for s in stages if s["red"] == 0}
                             for count in (1, 2, 3, 4)))
         self.assertNotIn("resumeFromV2Hash", cfg)

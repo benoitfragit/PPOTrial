@@ -236,6 +236,7 @@ private:
     GeneralizedPatrolLapProgress noThreatLap_{};
     std::array<GeneralizedRewardValues, 2U> roleRewardSums_{};
     std::array<std::size_t, 2U> roleRewardSteps_{};
+    /** Latches only an immutable, confirmed initially empty Red layout. */
     bool hasBeforeStep_{};
     bool episodeDone_{};
     bool finished_{};

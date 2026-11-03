@@ -1,12 +1,12 @@
 {
   "formatVersion": 3,
-  "description": "Complete V3 curriculum from random initialization, observation v10; no V9/run-22 migration. Each later phase rehearses earlier tasks.",
+  "description": "V3 balanced: early combat exposure, limited auxiliary Pvs0, 460-update 4v4 consolidation; retains original V3 for exact legacy resumes.",
   "observationVersion": 10,
   "initialization": "scratch",
   "totalUpdates": 1200,
   "rehearsal": {
-    "primaryUpdates": 24,
-    "priorUpdates": 6
+    "primaryUpdates": 27,
+    "priorUpdates": 3
   },
   "stages": [
     {
@@ -14,84 +14,84 @@
       "blue": 1,
       "red": 0,
       "hostileZones": false,
-      "updates": 160
+      "updates": 30
     },
     {
       "id": "02-wedge",
       "blue": 2,
       "red": 0,
       "hostileZones": false,
-      "updates": 160
+      "updates": 30
     },
     {
       "id": "03-three-slots",
       "blue": 3,
       "red": 0,
       "hostileZones": false,
-      "updates": 80
+      "updates": 20
     },
     {
       "id": "04-four-slots",
       "blue": 4,
       "red": 0,
       "hostileZones": false,
-      "updates": 80
+      "updates": 20
     },
     {
       "id": "05-one-vs-one",
       "blue": 1,
       "red": 1,
       "hostileZones": false,
-      "updates": 100
+      "updates": 120
     },
     {
       "id": "06-one-vs-two",
       "blue": 1,
       "red": 2,
       "hostileZones": false,
-      "updates": 60
+      "updates": 80
     },
     {
       "id": "07-two-vs-one",
       "blue": 2,
       "red": 1,
       "hostileZones": false,
-      "updates": 60
+      "updates": 80
     },
     {
       "id": "08-two-vs-two",
       "blue": 2,
       "red": 2,
       "hostileZones": false,
-      "updates": 100
+      "updates": 120
     },
     {
       "id": "09-three-vs-two",
       "blue": 3,
       "red": 2,
       "hostileZones": true,
-      "updates": 80
+      "updates": 100
     },
     {
       "id": "10-three-vs-three",
       "blue": 3,
       "red": 3,
       "hostileZones": true,
-      "updates": 80
+      "updates": 100
     },
     {
       "id": "11-patrol-hostile-zones",
       "blue": 4,
       "red": 0,
       "hostileZones": true,
-      "updates": 80
+      "updates": 40
     },
     {
       "id": "12-reference-four-vs-four",
       "blue": 4,
       "red": 4,
       "hostileZones": true,
-      "updates": 160
+      "updates": 460
     }
   ]
 }

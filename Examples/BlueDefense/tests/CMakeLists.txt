@@ -1,5 +1,5 @@
 # Dependency-free generalized MAPPO regressions for the headless core CI.
-foreach(test IN ITEMS RewardEvaluation RewardShaping RuntimeState Advantage PatrolReference PatrolWaypoint EpisodeOutcome)
+foreach(test IN ITEMS RewardEvaluation RewardShaping RuntimeState Advantage PatrolReference PatrolWaypoint EpisodeOutcome UnifiedGuidance)
     if(test STREQUAL "RewardEvaluation")
         set(source generalized_reward_evaluation_tests.cpp)
     elseif(test STREQUAL "RewardShaping")
@@ -10,6 +10,8 @@ foreach(test IN ITEMS RewardEvaluation RewardShaping RuntimeState Advantage Patr
         set(source generalized_patrol_reference_tests.cpp)
     elseif(test STREQUAL "PatrolWaypoint")
         set(source generalized_patrol_waypoint_sequencer_tests.cpp)
+    elseif(test STREQUAL "UnifiedGuidance")
+        set(source generalized_unified_guidance_tests.cpp)
     elseif(test STREQUAL "EpisodeOutcome")
         set(source generalized_episode_outcome_tests.cpp)
     else()

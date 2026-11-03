@@ -11,6 +11,7 @@ on:
         options:
           - blue-defense
           - blue-patrol
+          - progressive-blue-defense
       curriculum_enabled:
         description: "Enable staged curriculum (fresh or resumed)"
         required: true
@@ -41,10 +42,25 @@ on:
         type: number
         default: 1
       resume_run_id:
-        description: "Optional previous training workflow run ID whose checkpoint artifact will be restored"
+        description: "Previous workflow run ID for optimizer and gate continuation"
         required: false
         type: string
         default: ""
+      progressive_gate:
+        description: "Current progressive gate (start 1v0 or resume an unfinished/passed gate)"
+        required: true
+        type: string
+        default: "1v0"
+      success_percent:
+        description: "Minimum evaluated gate mission success percent [0,100]"
+        required: true
+        type: number
+        default: 75
+      auto_advance:
+        description: "Launch the next independent GitHub run after gate PASS"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -105,7 +121,7 @@ jobs:
           if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
             throw "Missing Release executable: $exe"
           }
-          $scenario = if ($env:CURRICULUM -eq "true") { "blue-defense" } else { $env:SCENARIO }
+          $scenario = if ($env:CURRICULUM -eq "true" -or $env:SCENARIO -eq "progressive-blue-defense") { "blue-defense" } else { $env:SCENARIO }
           & $exe --example $scenario --check-example
           if ($LASTEXITCODE -ne 0) { throw "Scenario bootstrap failed" }
 
@@ -118,6 +134,8 @@ jobs:
         run: |
           python -m unittest discover -s tools/ci -p "test_mappo_curriculum.py" -v
           if ($LASTEXITCODE -ne 0) { throw "MAPPO curriculum tests failed" }
+          python -m unittest discover -s tools/ci/adaptive_curriculum -p "test_*.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "MAPPO progressive gate tests failed" }
 
       - name: Validate Blue training diagnostic tool
         env:
@@ -146,7 +164,7 @@ jobs:
           (Get-Item ".mappo-training-start").LastWriteTimeUtc = [DateTime]::UtcNow
 
       - name: Train MAPPO without GUI
-        if: ${{ !inputs.curriculum_enabled }}
+        if: ${{ !inputs.curriculum_enabled && inputs.scenario != 'progressive-blue-defense' }}
         env:
           SCENARIO: ${{ inputs.scenario }}
           MAX_SECONDS: ${{ inputs.max_seconds }}
@@ -162,7 +180,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Headless training exited with code $LASTEXITCODE" }
 
       - name: Train staged MAPPO curriculum without recompiling between levels
-        if: ${{ inputs.curriculum_enabled }}
+        if: ${{ inputs.curriculum_enabled && inputs.scenario != 'progressive-blue-defense' }}
         env:
           MAX_SECONDS: ${{ inputs.max_seconds }}
           RESUME_RUN_ID: ${{ inputs.resume_run_id }}
@@ -198,23 +216,64 @@ jobs:
           python -u tools/ci/mappo_curriculum.py --curriculum $curriculumConfig --max-seconds $seconds @fresh @warm
           if ($LASTEXITCODE -ne 0) { throw "MAPPO curriculum failed with code $LASTEXITCODE" }
 
-      - name: Validate fresh resumable checkpoint
+      - name: Train one progressive MAPPO gate (time- and success-bounded)
+        if: ${{ inputs.scenario == 'progressive-blue-defense' }}
+        env:
+          GATE: ${{ inputs.progressive_gate }}
+          SUCCESS_PERCENT: ${{ inputs.success_percent }}
+          MAX_SECONDS: ${{ inputs.max_seconds }}
+          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
+          AUTO_ADVANCE: ${{ inputs.auto_advance }}
+        run: |
+          $resume = if ([string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) { @() } else { @("--resume") }
+          $advance = if ($env:AUTO_ADVANCE -eq "true") { @("--auto-advance") } else { @() }
+          python -u tools/ci/adaptive_curriculum/progressive_gate.py `
+            --gate $env:GATE --threshold-percent $env:SUCCESS_PERCENT `
+            --max-seconds $env:MAX_SECONDS --block-updates 20 @resume @advance
+          if ($LASTEXITCODE -ne 0) { throw "Progressive gate training failed" }
+
+      - name: Validate resumable checkpoint
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
         run: |
           $root = "resources/model/BluePatrol/latest"
           $training = Join-Path $root "blue_patrol_generalized_training_v7.txt"
           $actor = Join-Path $root "blue_patrol_generalized_v10.txt"
           $start = (Get-Item ".mappo-training-start").LastWriteTimeUtc
+          $progressive = $env:SCENARIO -eq "progressive-blue-defense"
+          $resume = $progressive -and (-not [string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID))
           foreach ($path in @($training, $actor)) {
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Checkpoint missing: $path" }
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Checkpoint missing: $path"
+            }
             $file = Get-Item -LiteralPath $path
-            if ($file.Length -le 0 -or $file.LastWriteTimeUtc -le $start) {
-              throw "No new valid-size checkpoint saved during this run: $path"
+            if ($file.Length -le 0) {
+              throw "Empty Blue checkpoint: $path"
+            }
+            if ($file.LastWriteTimeUtc -le $start) {
+              if (-not $resume) {
+                throw "No new checkpoint during this run: $path"
+              }
+              Write-Warning "Gate unfinished without a fresh PPO update; preserving prior valid checkpoint: $path"
             }
             Write-Host "$path : $($file.Length) bytes"
           }
-          $header = Get-Content -LiteralPath $training -TotalCount 1
-          if (-not $header.StartsWith("BLUE_TEAM_TRAINING_V7 7 10 ")) {
+          $trainingHeader = Get-Content -LiteralPath $training -TotalCount 1
+          $actorHeader = Get-Content -LiteralPath $actor -TotalCount 1
+          if (-not $trainingHeader.StartsWith("BLUE_TEAM_TRAINING_V7 7 10 ")) {
             throw "Unexpected full-training checkpoint format"
+          }
+          if ($progressive) {
+            if (-not $actorHeader.StartsWith("BLUE_TEAM_MAPPO_V10 10 10 ") -or
+                -not $trainingHeader.Contains("UNIFIED_PHYSICAL_GUIDANCE_V1") -or
+                -not $actorHeader.Contains("UNIFIED_PHYSICAL_GUIDANCE_V1")) {
+              throw "Progressive checkpoint is not a unified-guidance V10 actor with full V7 optimizer"
+            }
+            $progressPath = "resources/model/BluePatrol/adaptive-curriculum-progress.json"
+            if (-not (Test-Path $progressPath -PathType Leaf)) {
+              throw "Progressive checkpoint is missing its gate state"
+            }
           }
 
       - name: Publish Blue MAPPO checkpoints (including after training failure)
@@ -228,6 +287,16 @@ jobs:
             resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt
             resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt.score
             resources/model/BluePatrol/curriculum-progress.json
+            resources/model/BluePatrol/adaptive-curriculum-progress.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish progressive gate result
+        if: ${{ always() && inputs.scenario == 'progressive-blue-defense' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: blue-mappo-gate
+          path: build/mappo-telemetry/adaptive-gate-result.json
           if-no-files-found: warn
           retention-days: 30
 
@@ -337,5 +406,27 @@ jobs:
             build/mappo-telemetry/run-manifest.json
             build/mappo-telemetry/curriculum-summary.md
             build/mappo-telemetry/curriculum/**
+            build/mappo-telemetry/adaptive-gate-result.json
+            build/mappo-telemetry/adaptive-gates/**
           if-no-files-found: warn
           retention-days: 30
+
+  advance:
+    name: Dispatch next progressive gate (no build)
+    needs: train
+    if: ${{ needs.train.result == 'success' && inputs.scenario == 'progressive-blue-defense' && inputs.auto_advance }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Retrieve the evaluated gate result
+        uses: actions/download-artifact@v4
+        with:
+          name: blue-mappo-gate
+          path: build/mappo-telemetry
+      - name: Validate gate and dispatch next independent workflow run
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python tools/ci/adaptive_curriculum/dispatch_next_gate.py
