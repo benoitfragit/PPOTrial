@@ -225,11 +225,20 @@ jobs:
           RESUME_RUN_ID: ${{ inputs.resume_run_id }}
           AUTO_ADVANCE: ${{ inputs.auto_advance }}
         run: |
-          $resume = if ([string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) { @() } else { @("--resume") }
-          $advance = if ($env:AUTO_ADVANCE -eq "true") { @("--auto-advance") } else { @() }
-          python -u tools/ci/adaptive_curriculum/progressive_gate.py `
-            --gate $env:GATE --threshold-percent $env:SUCCESS_PERCENT `
-            --max-seconds $env:MAX_SECONDS --block-updates 20 @resume @advance
+          $pythonArgs = @(
+            "-u", "tools/ci/adaptive_curriculum/progressive_gate.py",
+            "--gate", $env:GATE,
+            "--threshold-percent", $env:SUCCESS_PERCENT,
+            "--max-seconds", $env:MAX_SECONDS,
+            "--block-updates", "20"
+          )
+          if (-not [string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) {
+            $pythonArgs += "--resume"
+          }
+          if ($env:AUTO_ADVANCE -eq "true") {
+            $pythonArgs += "--auto-advance"
+          }
+          & python @pythonArgs
           if ($LASTEXITCODE -ne 0) { throw "Progressive gate training failed" }
 
       - name: Validate resumable checkpoint
