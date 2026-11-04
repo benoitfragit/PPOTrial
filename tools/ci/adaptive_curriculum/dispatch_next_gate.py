@@ -15,6 +15,7 @@ import urllib.request
 from pathlib import Path
 
 from progressive_gate import validate_gates, GATES_FILE, RESULT_FILE
+import champion_checkpoints as champion
 
 
 def matching_gate_fingerprint(recorded: object, config_bytes: bytes) -> bool:
@@ -169,6 +170,12 @@ def main() -> int:
     if inputs is None:
         print("[ADAPTIVE_GATE] No auto-dispatch; gate failed, stopped, or finished.")
         return 0
+    # The artifact must contain a verified actor + FULL optimizer pair.
+    # Never dispatch an apparently passing run with only a newer LATEST.
+    best = champion.read(result["gate"], CHECKPOINT_STATE_FILE.parent / "best")
+    if (best is None or not best["evaluatedForGate"]
+            or best["successPercent"] != state["bestSuccessPercent"]):
+        raise ValueError("Auto-dispatch requires a matching evaluated champion pair")
     token = os.environ["GITHUB_TOKEN"]
     repository = os.environ["GITHUB_REPOSITORY"]
     ref = os.environ["GITHUB_REF"]

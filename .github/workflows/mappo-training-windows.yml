@@ -262,6 +262,7 @@ jobs:
             resources/model/BluePatrol/latest/blue_patrol_generalized_training_v7.txt
             resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt
             resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt.score
+            resources/model/BluePatrol/best/**
             resources/model/BluePatrol/curriculum-progress.json
             resources/model/BluePatrol/adaptive-curriculum-progress.json
           if-no-files-found: warn
