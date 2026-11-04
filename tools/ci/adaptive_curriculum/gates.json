@@ -57,6 +57,15 @@
       "autoAdvance": true
     },
     {
+      "id": "3v1",
+      "blue": 3,
+      "red": 1,
+      "hostileZones": false,
+      "thresholdPercent": 75,
+      "maxSeconds": 14400,
+      "autoAdvance": true
+    },
+    {
       "id": "4v1",
       "blue": 4,
       "red": 1,
