@@ -318,18 +318,20 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
-          path: resources/model/BluePatrol
+          path: ${{ runner.temp }}/restart-cycle/model
 
       - name: Check whether fixed-threshold continuation is enabled
         id: optin
         if: steps.artifacts.outputs.available == 'true'
+        env:
+          CYCLE_MODEL_DIR: ${{ runner.temp }}/restart-cycle/model
         shell: bash
         run: |
           python - <<'PY'
           import json
           import os
           from pathlib import Path
-          state_file = Path('resources/model/BluePatrol/adaptive-curriculum-progress.json')
+          state_file = Path(os.environ['CYCLE_MODEL_DIR']) / 'adaptive-curriculum-progress.json'
           if not state_file.is_file():
               print('No adaptive state in completed run; skip.')
           else:
@@ -354,7 +356,7 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
-          path: build/mappo-telemetry
+          path: ${{ runner.temp }}/restart-cycle/gate
 
       - name: Validate gate handoff and dispatch the next independent run
         if: steps.optin.outputs.enabled == 'true'
@@ -362,6 +364,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           TRAIN_RUN_ID: ${{ github.event.workflow_run.id }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          CYCLE_MODEL_DIR: ${{ runner.temp }}/restart-cycle/model
+          CYCLE_GATE_DIR: ${{ runner.temp }}/restart-cycle/gate
         shell: bash
         run: |
           python - <<'PY'
@@ -384,10 +388,12 @@ jobs:
               with urllib.request.urlopen(request, timeout=30) as response:
                   return json.load(response)
 
-          model_root = Path('resources/model/BluePatrol')
+          # Completed-run artifacts are untrusted input: keep them outside the
+          # checked-out source tree before running privileged dispatch logic.
+          model_root = Path(os.environ['CYCLE_MODEL_DIR'])
           state = json.loads((model_root / 'adaptive-curriculum-progress.json').read_text(encoding='utf-8'))
           cycle = state['restartCycle']
-          result = json.loads(Path('build/mappo-telemetry/adaptive-gate-result.json').read_text(encoding='utf-8'))
+          result = json.loads((Path(os.environ['CYCLE_GATE_DIR']) / 'adaptive-gate-result.json').read_text(encoding='utf-8'))
           gates_bytes = Path('tools/ci/adaptive_curriculum/gates.json').read_bytes()
           stages = validate_gates(json.loads(gates_bytes))
           lf_bytes = gates_bytes.replace(b'\r\n', b'\n')
