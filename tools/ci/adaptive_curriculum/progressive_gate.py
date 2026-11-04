@@ -18,7 +18,9 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mappo_curriculum as existing  # noqa: E402
+import champion_checkpoints as champion  # noqa: E402
 
 
 GATES_FILE = Path("tools/ci/adaptive_curriculum/gates.json")
@@ -128,12 +130,16 @@ def initialize_state(stages: list[dict], gate: str, resume: bool,
                 or type(state.get("lastCheckpointUpdates")) is not int
                 or state["lastCheckpointUpdates"] < 0):
             raise ValueError("Incompatible adaptive checkpoint provenance")
+        recorded_updates = state["lastCheckpointUpdates"]
         checkpoint_updates = existing.read_updates()
-        if checkpoint_updates < state["lastCheckpointUpdates"]:
+        if checkpoint_updates < recorded_updates:
             raise ValueError("Restored optimizer checkpoint is older than gate progress")
         # A crash may have saved a newer update before progress was persisted.
         # Never discard that checkpoint merely because the log metadata lagged.
         state["lastCheckpointUpdates"] = checkpoint_updates
+        current_champion = champion.read(state["gate"])
+        if state.get("championRequired", False) and current_champion is None:
+            raise ValueError("Mandatory evaluated champion checkpoint is missing")
         if state["gate"] != names[state["gateIndex"]]:
             raise ValueError("Checkpoint gate index/name mismatch")
         validated = state.get("validatedGates")
@@ -156,11 +162,45 @@ def initialize_state(stages: list[dict], gate: str, resume: bool,
         if target == state["gateIndex"] and state["passed"]:
             raise ValueError("Gate already passed: select a later gate")
         if target > state["gateIndex"]:
-            # Explicit dropdown selection advances directly. Intermediate gates
-            # are skipped, not certified; the PPO optimizer remains untouched.
+            # Previous stages may have been skipped explicitly. Never mistake
+            # their unverified latest model for an evaluated champion.
+            previous_gate = state["gate"]
+            if champion.read(previous_gate) is None:
+                last = state["lastSuccessPercent"]
+                best = state["bestSuccessPercent"]
+                if (state["passed"] and last is not None
+                        and checkpoint_updates == recorded_updates):
+                    # Old artifacts stop after a passing final campaign, but
+                    # may have lost an EARLIER, higher-scoring model. Import
+                    # only the final evaluated V7, and never call it the
+                    # historical best if its last score was lower.
+                    champion.import_legacy_pass(previous_gate, last)
+                    print("[ADAPTIVE_GATE] Imported legacy FINAL passing "
+                          f"evaluation for {previous_gate}: success={last}%; "
+                          f"historical best={best}% (may be unavailable)",
+                          flush=True)
+                elif state["passed"]:
+                    raise ValueError(
+                        "Legacy passing checkpoint does not match its recorded "
+                        "evaluation update. Restore that run's evaluated V7 "
+                        "artifact; cannot certify a newer LATEST")
+                else:
+                    # Explicitly skipping an unfinished legacy gate is an
+                    # unverified warm start, never a fabricated gate success.
+                    champion.seed(previous_gate, None)
+                    print("[ADAPTIVE_GATE] Explicit legacy skip: using "
+                          "unverified V7 seed, not a certified champion",
+                          flush=True)
+            predecessor = champion.read(previous_gate)
+            if state["passed"] and not predecessor["evaluatedForGate"]:
+                raise ValueError(
+                    "Passed previous gate has no evaluated champion pair")
+            champion.seed(gate, previous_gate)
+            restored = champion.restore_latest(gate)
             state.update(gateIndex=target, gate=gate, passed=False,
                          elapsedSeconds=0.0, bestSuccessPercent=0.0,
-                         lastSuccessPercent=None, blockIndex=0)
+                         lastSuccessPercent=None, blockIndex=0,
+                         lastCheckpointUpdates=restored, championRequired=True)
         state["validatedGates"] = validated
         return state
     if gate != names[0]:
@@ -172,7 +212,7 @@ def initialize_state(stages: list[dict], gate: str, resume: bool,
                 gate=gate, passed=False, elapsedSeconds=0.0,
                 bestSuccessPercent=0.0, lastSuccessPercent=None,
                 blockIndex=0, lastCheckpointUpdates=0,
-                validatedGates=[])
+                validatedGates=[], championRequired=False)
 
 
 def record_result(state: dict, stages: list[dict], threshold: float,
@@ -237,17 +277,41 @@ def run_gate(args: argparse.Namespace) -> dict:
     state["autoAdvance"] = args.auto_advance
     if state["passed"] or state["gate"] != args.gate:
         raise ValueError("Inconsistent gate state")
+    # A completed deterministic campaign is durable evidence. Re-evaluating
+    # or further PPO updates are not necessary merely to certify a resumed
+    # gate whose saved BEST pair already satisfies the requested threshold.
+    existing_best = champion.read(stage["id"])
+    if (args.resume and existing_best is not None
+            and existing_best["evaluatedForGate"]
+            and existing_best["successPercent"] >= args.threshold_percent):
+        state["bestSuccessPercent"] = existing_best["successPercent"]
+        state["lastSuccessPercent"] = (
+            state["lastSuccessPercent"]
+            if state["lastSuccessPercent"] is not None
+            else existing_best["successPercent"])
+        state["championRequired"] = True
+        state["passed"] = True
+        print(f"[ADAPTIVE_GATE] gate={stage['id']} already satisfied by "
+              f"evaluated champion update={existing_best['updates']} "
+              f"success={existing_best['successPercent']}%", flush=True)
+        record_result(state, stages, args.threshold_percent, True,
+                      existing.read_updates())
+        return state
     # Every GitHub run receives a fresh wall-clock budget. elapsedSeconds is
     # cumulative telemetry only, never a gate quota.
     original_training_bytes = existing.TRAINING_FILE.read_bytes()
     original_scenario_bytes = existing.SCENARIO_FILE.read_bytes()
     original_training = json.loads(original_training_bytes)
     original_scenario = json.loads(original_scenario_bytes)
+    cadence = original_training["training"].get("checkpointEvery")
+    if type(cadence) is not int or cadence < 1:
+        raise ValueError("checkpointEvery must be a positive evaluation cadence")
     existing.OUTPUT.mkdir(parents=True, exist_ok=True)
     stage_root = existing.OUTPUT / "adaptive-gates" / stage["id"]
     stage_root.mkdir(parents=True, exist_ok=True)
-    # Persist progress before launching PPO; the full checkpoint remains the
-    # authoritative optimization state even if the run expires mid-gate.
+    # LATEST is allowed to regress. BEST is the authoritative gate handoff.
+    # Persist progress before launching PPO; optimizer checkpoints remain
+    # available even if the wall-clock budget expires.
     existing.write_json(STATE_FILE, state)
     # Candidate promotion from auxiliary gates must never replace a 4v4 model.
     previous_production = {
@@ -260,7 +324,10 @@ def run_gate(args: argparse.Namespace) -> dict:
     try:
         while time.monotonic() + 20 < deadline:
             updates = existing.read_updates()
-            target = updates + args.block_updates
+            # One completed evaluation per process block: otherwise a later
+            # worse PPO update can overwrite the checkpoint of an earlier win.
+            until_evaluation = cadence - (updates % cadence)
+            target = updates + min(args.block_updates, until_evaluation)
             selected = select_training_stage(
                 stages, state["gateIndex"], state["blockIndex"],
                 rehearsal_every, state["validatedGates"])
@@ -276,17 +343,25 @@ def run_gate(args: argparse.Namespace) -> dict:
                 path: path.read_bytes() if path.is_file() else None
                 for path in (existing.PROD, existing.PROD_SCORE)
             }
-            if (selected["blue"], selected["red"]) != (4, 4):
-                existing.PROD.unlink(missing_ok=True)
-                existing.PROD_SCORE.unlink(missing_ok=True)
+            # C++ evaluates against this gate's own incumbent. The global
+            # deployed 4v4 PROD is only a temporary scratch for this process,
+            # restored after the block, never published from another gate.
+            champion.install_production_for_stage(selected)
             print(f"[ADAPTIVE_GATE] gate={stage['id']} replay={selected['id']} "
                   f"updates={updates}->{target}", flush=True)
             try:
                 existing.run_stage(binary, selected, remaining, stage_log)
             finally:
-                # Non-reference stages cannot overwrite the production 4v4
-                # candidate, including when a rehearsal interrupts 4v4.
+                # The runtime PROD is temporary during any stage/rehearsal.
+                # The external 4v4 production actor must never be overwritten
+                # just because a different gate evaluated successfully.
                 existing.save_candidate_and_restore(baseline, selected, block_dir)
+                for path, previous in baseline.items():
+                    if previous is None:
+                        path.unlink(missing_ok=True)
+                    else:
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(previous)
             observed = existing.read_updates()
             if observed < updates or observed > target:
                 raise RuntimeError("Checkpoint update counter is inconsistent")
@@ -295,15 +370,22 @@ def run_gate(args: argparse.Namespace) -> dict:
             if observed > updates:
                 state["blockIndex"] += 1
                 state["lastCheckpointUpdates"] = observed
-                # A rehearsal evaluation never certifies the current gate.
-                if selected["id"] == stage["id"]:
-                    success = matching_success(
-                        stage_log, stage["blue"], stage["red"])
-                    if success is not None:
+                evaluated = champion.evaluation_at_update(
+                    stage_log, selected["blue"], selected["red"], observed)
+                if evaluated is not None:
+                    improved, best = champion.promote(
+                        selected["id"], evaluated, observed)
+                    print(f"[ADAPTIVE_GATE] champion gate={selected['id']} "
+                          f"update={best['updates']} "
+                          f"success={best['successPercent']} "
+                          f"promoted={improved}", flush=True)
+                    if selected["id"] == stage["id"]:
+                        state["championRequired"] = True
+                        # Rehearsals cannot certify the current gate.
+                        success = evaluated["successPercent"]
                         state["lastSuccessPercent"] = success
-                        state["bestSuccessPercent"] = max(
-                            state["bestSuccessPercent"], success)
-                        passed = success >= args.threshold_percent
+                        state["bestSuccessPercent"] = best["successPercent"]
+                        passed = best["successPercent"] >= args.threshold_percent
             state["elapsedSeconds"] += max(0.0, time.monotonic() - started)
             started = time.monotonic()
             state["passed"] = passed
@@ -322,6 +404,10 @@ def run_gate(args: argparse.Namespace) -> dict:
                     path.write_bytes(previous)
     state["elapsedSeconds"] += max(0.0, time.monotonic() - started)
     state["passed"] = passed
+    if passed:
+        certified = champion.read(stage["id"])
+        if certified is None or not certified["evaluatedForGate"]:
+            raise ValueError("Passing gate has no corresponding evaluated BEST pair")
     record_result(state, stages, args.threshold_percent, passed,
                   existing.read_updates())
     return state

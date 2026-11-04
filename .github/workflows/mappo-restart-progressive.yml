@@ -138,6 +138,7 @@ jobs:
           import os
           from pathlib import Path
           from tools.ci.adaptive_curriculum.progressive_gate import validate_gates
+          from tools.ci.adaptive_curriculum import champion_checkpoints as champion
           from tools.ci import mappo_curriculum
 
           root = Path('resources/model/BluePatrol')
@@ -178,6 +179,34 @@ jobs:
           if (type(saved_updates) is not int or updates < saved_updates or updates <= 0):
               raise RuntimeError('Source optimizer checkpoint/update counter is invalid')
 
+          # A new curriculum cycle starts from the matching evaluated FULL
+          # champion pair whenever the source run provides one. Legacy artifacts
+          # without such a pair remain usable as an explicit unverified warm start,
+          # never represented as a certified winning checkpoint.
+          source_gate = source.get('gate')
+          if source_gate not in stage_names:
+              raise RuntimeError('Source gate is missing from current contract')
+          source_best = champion.read(source_gate)
+          if source.get('championRequired', False) and source_best is None:
+              raise RuntimeError('Mandatory source champion pair is missing')
+          if source_best is not None:
+              updates = champion.restore_latest(source_gate)
+              if start_gate != source_gate:
+                  destination = champion.ROOT / start_gate
+                  if destination.exists():
+                      import shutil
+                      history = (champion.ROOT / 'history' /
+                                 os.environ['GITHUB_RUN_ID'] / start_gate)
+                      history.parent.mkdir(parents=True, exist_ok=True)
+                      shutil.copytree(destination, history)
+                  champion.seed(start_gate, source_gate)
+              print(f'[RESTART] restored BEST V7 pair from {source_gate}'
+                    f' at update={updates}')
+          else:
+              print('[RESTART] LEGACY source: no evaluated BEST pair in '
+                    'artifact. Continuing from LATEST V7; a new evaluation '
+                    'must establish the first champion.')
+
           threshold = float(os.environ["SUCCESS_PERCENT"])
           if not 0 < threshold <= 100:
               raise RuntimeError("success_percent must be in (0, 100]")
@@ -198,6 +227,7 @@ jobs:
               blockIndex=0,
               lastCheckpointUpdates=updates,
               validatedGates=[],
+              championRequired=source_best is not None,
               restartCycle=dict(
                   schemaVersion=1,
                   bootstrapRunId=int(os.environ["GITHUB_RUN_ID"]),
@@ -214,7 +244,8 @@ jobs:
                   f'- Source run: {os.environ["SOURCE_RUN_ID"]}\n'
                   f'- Retained PPO updates: {updates}\n'
                   f'- New first gate: {start_gate}\n'
-                  '- Actor, critic, Adam, and RNG: preserved unchanged\n'
+                  '- Actor, critic, Adam, and RNG: matched V7 epoch retained\n'
+                  f'- Source: {"BEST evaluated pair" if source_best else "LEGACY latest warm start"}\n'
                   '- Gate validation and rehearsal progression: reset for the new cycle\n'
                   f'- Same success threshold on every gate: {same_threshold}\n'
                   f'- Requested success threshold: {threshold:g}%\n'
@@ -232,6 +263,7 @@ jobs:
             resources/model/BluePatrol/latest/blue_patrol_generalized_training_v7.txt
             resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt
             resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt.score
+            resources/model/BluePatrol/best/**
             resources/model/BluePatrol/adaptive-curriculum-progress.json
           if-no-files-found: error
           retention-days: 30

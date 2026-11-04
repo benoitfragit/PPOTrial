@@ -39,6 +39,7 @@ class ProgressiveGateTests(unittest.TestCase):
         gate.existing.write_json(gate.GATES_FILE, sample_gates())
         gate.existing.write_json(gate.existing.TRAINING_FILE,
                                  {"training": {"maxUpdates": 300,
+                                               "checkpointEvery": 10,
                                                "saveEveryUpdates": 1}})
         gate.existing.write_json(gate.existing.SCENARIO_FILE,
                                  {"blueDefense": {
@@ -63,8 +64,24 @@ class ProgressiveGateTests(unittest.TestCase):
     def checkpoint(self, number: int) -> None:
         gate.existing.LATEST.parent.mkdir(parents=True, exist_ok=True)
         gate.existing.LATEST.write_text(
-            f"BLUE_TEAM_TRAINING_V7 7 10 200\nUPDATES {number}\n",
+            f"BLUE_TEAM_TRAINING_V7 7 10 200 UNIFIED_PHYSICAL_GUIDANCE_V1\n"
+            f"UPDATES {number}\n",
             encoding="utf-8")
+        gate.champion.LATEST_ACTOR.write_text(
+            f"BLUE_TEAM_MAPPO_V10 10 10 200 UNIFIED_PHYSICAL_GUIDANCE_V1\n"
+            f"ACTOR_UPDATE {number}\n",
+            encoding="utf-8")
+
+    def evaluation(self, stage: dict, success: float,
+                   score: float = 55.0) -> str:
+        return (
+            f"[BLUE MAPPO V10] Saved actor and training checkpoint at "
+            f"update {gate.existing.read_updates()}\n"
+            f"[BLUE MAPPO V10] Starting deterministic P={stage['blue']} "
+            f"N={stage['red']} evaluation after update "
+            f"{gate.existing.read_updates()} (8 cases)\n"
+            f"[BLUE MAPPO V10] Evaluation #1 P={stage['blue']} "
+            f"N={stage['red']} score={score} success={success}\n")
 
     def test_schema_has_no_fixed_gate_update_limit(self) -> None:
         stages = gate.validate_gates(sample_gates())
@@ -112,9 +129,7 @@ class ProgressiveGateTests(unittest.TestCase):
             )["training"]["maxUpdates"]
             self.checkpoint(target)
             rate = 0.875
-            log_path.write_text(
-                f"Evaluation #1 P={stage['blue']} N={stage['red']} "
-                f"score=55 success={rate}\n", encoding="utf-8")
+            log_path.write_text(self.evaluation(stage, rate), encoding="utf-8")
             return "evaluation"
 
         with patch.object(gate.existing, "run_stage", side_effect=simulate):
@@ -142,8 +157,7 @@ class ProgressiveGateTests(unittest.TestCase):
                     log_path: Path) -> str:
             attempted.append(stage["id"])
             self.checkpoint(gate.existing.read_updates() + 5)
-            log_path.write_text(
-                "Evaluation #1 P=1 N=0 score=99 success=0.25\n")
+            log_path.write_text(self.evaluation(stage, 0.25, score=99))
             clock[0] = 45.0
             return "no pass"
 
@@ -159,8 +173,7 @@ class ProgressiveGateTests(unittest.TestCase):
                          log_path: Path) -> str:
                 attempted.append(stage["id"])
                 self.checkpoint(gate.existing.read_updates() + 5)
-                log_path.write_text(
-                    "Evaluation #1 P=1 N=0 score=55 success=0.875\n")
+                log_path.write_text(self.evaluation(stage, 0.875))
                 clock[0] = 45.0
                 return "pass"
 
@@ -248,9 +261,7 @@ class ProgressiveGateTests(unittest.TestCase):
             self.checkpoint(target)
             gate.existing.PROD.write_text("candidate " + selected["id"])
             gate.existing.PROD_SCORE.write_text("candidate score")
-            log_path.write_text(
-                f"Evaluation #1 P={selected['blue']} N={selected['red']} "
-                "score=100 success=1\n")
+            log_path.write_text(self.evaluation(selected, 1.0, score=100))
             clock[0] = 45.0
             return "evaluation"
 
@@ -274,7 +285,13 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertEqual(observed, ["1v0", "4v4"])
         self.assertTrue(second["passed"])
         self.assertEqual(gate.existing.read_updates(), 25)
-        self.assertEqual(gate.existing.PROD.read_text(), "candidate 4v4")
+        # The pre-existing 4v4 production model is not replaced by a
+        # separate curriculum run. Its gate-local BEST is persisted instead.
+        self.assertEqual(gate.existing.PROD.read_text(), "promoted reference")
+        self.assertEqual(
+            (gate.champion.ROOT / "4v4" /
+             gate.champion.ACTOR_NAME).read_bytes(),
+            gate.champion.LATEST_ACTOR.read_bytes())
         self.assertEqual(gate.existing.TRAINING_FILE.read_bytes(),
                          self.training_bytes)
         self.assertEqual(gate.existing.SCENARIO_FILE.read_bytes(),
@@ -311,6 +328,192 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertEqual(
             gate.initialize_state(stages, "1v0", True, config_hash)["gate"], "1v0")
 
+
+    def test_best_full_checkpoint_survives_later_degraded_update(self) -> None:
+        """A 25%/100 score cannot replace an 87.5%/55 evaluated pair."""
+        clock = [0.0]
+        evaluations = []
+
+        def simulate(binary: Path, stage: dict, seconds: int,
+                     log_path: Path) -> str:
+            target = json.loads(
+                gate.existing.TRAINING_FILE.read_text()
+            )["training"]["maxUpdates"]
+            self.checkpoint(target)
+            success, score = [(0.875, 55), (0.25, 100)][len(evaluations)]
+            evaluations.append(target)
+            log_path.write_text(self.evaluation(stage, success, score))
+            if len(evaluations) == 2:
+                clock[0] = 45.0
+            return "evaluation"
+
+        with patch.object(gate.time, "monotonic", side_effect=lambda: clock[0]):
+            with patch.object(gate.existing, "run_stage", side_effect=simulate):
+                state = gate.run_gate(self.args(
+                    block_updates=20, threshold_percent=95, max_seconds=45))
+        self.assertEqual(evaluations, [10, 20])
+        self.assertEqual(gate.existing.read_updates(), 20)
+        record = gate.champion.read("1v0")
+        self.assertEqual(record["updates"], 10)
+        self.assertEqual(record["successPercent"], 87.5)
+        self.assertEqual(record["score"], 55)
+        self.assertEqual(state["bestSuccessPercent"], 87.5)
+        self.assertIn("UPDATES 10", (
+            gate.champion.ROOT / "1v0" /
+            gate.champion.TRAINING_NAME).read_text())
+
+    def test_gate_transition_restores_exact_previous_champion_pair(self) -> None:
+        self.checkpoint(100)
+        evaluated = {"successPercent": 87.5, "score": 80.0}
+        gate.champion.promote("1v0", evaluated, 100)
+        # Simulate additional, worse training with no new promotion.
+        self.checkpoint(120)
+        config_hash = hashlib.sha256(gate.GATES_FILE.read_bytes()).hexdigest()
+        gate.existing.write_json(gate.STATE_FILE, {
+            "formatVersion": 1, "gateConfigSha256": config_hash,
+            "gateIndex": 0, "gate": "1v0", "passed": True,
+            "elapsedSeconds": 100.0, "blockIndex": 2,
+            "lastCheckpointUpdates": 100, "bestSuccessPercent": 87.5,
+            "lastSuccessPercent": 87.5, "validatedGates": ["1v0"],
+            "championRequired": True,
+        })
+        stages = gate.validate_gates(sample_gates())
+        next_state = gate.initialize_state(stages, "1v1", True, config_hash)
+        self.assertEqual(next_state["lastCheckpointUpdates"], 100)
+        self.assertEqual(gate.existing.read_updates(), 100)
+        self.assertEqual((gate.champion.LATEST_ACTOR).read_bytes(), (
+            gate.champion.ROOT / "1v0" /
+            gate.champion.ACTOR_NAME).read_bytes())
+        seed = gate.champion.read("1v1")
+        self.assertFalse(seed["evaluatedForGate"])
+        self.assertEqual(seed["originGate"], "1v0")
+        self.assertEqual(seed["updates"], 100)
+        self.assertEqual(gate.champion.read("1v0")["successPercent"], 87.5)
+
+    def test_corrupt_champion_fails_closed_and_preserves_latest(self) -> None:
+        self.checkpoint(30)
+        gate.champion.promote(
+            "1v0", {"successPercent": 100.0, "score": 90.0}, 30)
+        (gate.champion.ROOT / "1v0" /
+         gate.champion.TRAINING_NAME).write_text("truncated checkpoint")
+        with self.assertRaisesRegex(ValueError, "champion"):
+            gate.champion.restore_latest("1v0")
+        self.assertEqual(gate.existing.read_updates(), 30)
+
+    def test_incomplete_evaluation_cannot_promote(self) -> None:
+        path = Path("incomplete.log")
+        path.write_text(
+            "[BLUE MAPPO V10] Saved actor and training checkpoint at update 40\n"
+            "[BLUE MAPPO V10] Starting deterministic P=1 N=0 "
+            "evaluation after update 40 (8 cases)\n"
+            "[BLUE MAPPO V10] Evaluation #1 P=1 N=0 score=80 success=1\n")
+        self.assertIsNone(gate.champion.evaluation_at_update(path, 1, 0, 50))
+        self.assertIsNone(gate.champion.evaluation_at_update(path, 2, 0, 40))
+        self.assertEqual(
+            gate.champion.evaluation_at_update(path, 1, 0, 40),
+            {"score": 80.0, "successPercent": 100.0})
+
+    def test_legacy_gate_pass_migrates_final_evaluated_not_lost_best(self) -> None:
+        # Real-world legacy pattern: historical 100%, final passing 87.5%.
+        # The lost historical 100% must not be fabricated or cause restart.
+        self.checkpoint(240)
+        config_hash = hashlib.sha256(gate.GATES_FILE.read_bytes()).hexdigest()
+        gate.existing.write_json(gate.STATE_FILE, {
+            "formatVersion": 1, "gateConfigSha256": config_hash,
+            "gateIndex": 0, "gate": "1v0", "passed": True,
+            "elapsedSeconds": 100.0, "blockIndex": 5,
+            "lastCheckpointUpdates": 240, "bestSuccessPercent": 100.0,
+            "lastSuccessPercent": 87.5, "validatedGates": ["1v0"],
+        })
+        state = gate.initialize_state(
+            gate.validate_gates(sample_gates()), "1v1", True, config_hash)
+        verified = gate.champion.read("1v0")
+        self.assertEqual(verified["successPercent"], 87.5)
+        self.assertEqual(verified["originGate"], "legacy-v1-gate-pass")
+        self.assertEqual(verified["updates"], 240)
+        self.assertEqual(gate.champion.read("1v1")["originGate"], "1v0")
+        self.assertEqual(gate.existing.read_updates(), 240)
+        self.assertEqual(state["gate"], "1v1")
+
+    def test_promote_requires_completed_matching_v7_save(self) -> None:
+        stage = sample_gates()["gates"][0]
+        self.checkpoint(40)
+        path = Path("evaluated.log")
+        full = self.evaluation(stage, 0.875)
+        path.write_text(full.replace(
+            "[BLUE MAPPO V10] Saved actor and training checkpoint at update 40\n",
+            ""), encoding="utf-8")
+        self.assertIsNone(gate.champion.evaluation_at_update(path, 1, 0, 40))
+        path.write_text(full.replace("checkpoint at update 40",
+                                     "checkpoint at update 39"), encoding="utf-8")
+        self.assertIsNone(gate.champion.evaluation_at_update(path, 1, 0, 40))
+        path.write_text(full, encoding="utf-8")
+        self.assertEqual(gate.champion.evaluation_at_update(path, 1, 0, 40),
+                         {"score": 55.0, "successPercent": 87.5})
+
+    def test_interleaved_evaluation_start_uses_verified_save(self) -> None:
+        self.checkpoint(40)
+        path = Path("interleaved.log")
+        path.write_text(
+            "[BLUE MAPPO V10] Saved actor and training checkpoint at update 40\n"
+            "[BLUE MAPPO V10] Starting deterministic P=1 N=0 "
+            "evaluation after upd[BLUE PATROL] Episode\n"
+            "ate 40 (8 cases)\n"
+            "[BLUE MAPPO V10] Evaluation #1 P=1 N=0 score=75 success=0.875\n",
+            encoding="utf-8")
+        self.assertEqual(gate.champion.evaluation_at_update(path, 1, 0, 40),
+                         {"score": 75.0, "successPercent": 87.5})
+
+    def test_legacy_import_rejects_latest_newer_than_passing_update(self) -> None:
+        self.checkpoint(250)
+        config_hash = hashlib.sha256(gate.GATES_FILE.read_bytes()).hexdigest()
+        gate.existing.write_json(gate.STATE_FILE, {
+            "formatVersion": 1, "gateConfigSha256": config_hash,
+            "gateIndex": 0, "gate": "1v0", "passed": True,
+            "elapsedSeconds": 100.0, "blockIndex": 5,
+            "lastCheckpointUpdates": 240, "bestSuccessPercent": 87.5,
+            "lastSuccessPercent": 87.5, "validatedGates": ["1v0"],
+        })
+        with self.assertRaisesRegex(ValueError, "does not match its recorded"):
+            gate.initialize_state(
+                gate.validate_gates(sample_gates()), "1v1",
+                True, config_hash)
+        self.assertIsNone(gate.champion.read("1v0"))
+        self.assertEqual(gate.existing.read_updates(), 250)
+
+    def test_resume_passes_from_existing_evaluated_best_without_updates(self) -> None:
+        self.checkpoint(110)
+        gate.champion.promote(
+            "1v0", {"successPercent": 87.5, "score": 90.0}, 110)
+        self.checkpoint(120)  # Newer LATEST must not become the champion.
+        config_hash = hashlib.sha256(gate.GATES_FILE.read_bytes()).hexdigest()
+        gate.existing.write_json(gate.STATE_FILE, {
+            "formatVersion": 1, "gateConfigSha256": config_hash,
+            "gateIndex": 0, "gate": "1v0", "passed": False,
+            "elapsedSeconds": 120.0, "blockIndex": 5,
+            "lastCheckpointUpdates": 120, "bestSuccessPercent": 87.5,
+            "lastSuccessPercent": 25.0, "validatedGates": [],
+            "championRequired": True,
+        })
+        with patch.object(gate.existing, "run_stage") as no_training:
+            state = gate.run_gate(self.args(
+                gate="1v0", threshold_percent=85, resume=True))
+        no_training.assert_not_called()
+        self.assertTrue(state["passed"])
+        self.assertEqual(gate.existing.read_updates(), 120)
+        self.assertEqual(gate.champion.read("1v0")["updates"], 110)
+        self.assertEqual(json.loads(gate.RESULT_FILE.read_text())["nextGate"],
+                         "1v1")
+
+    def test_both_workflows_publish_and_restart_from_best_pairs(self) -> None:
+        root = Path(__file__).resolve().parents[3] / ".github/workflows"
+        train = (root / "mappo-training-windows.yml").read_text(encoding="utf-8")
+        restart = (root / "mappo-restart-progressive.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("resources/model/BluePatrol/best/**", train)
+        self.assertIn("resources/model/BluePatrol/best/**", restart)
+        self.assertIn("champion.restore_latest(source_gate)", restart)
+        self.assertIn("champion.seed(start_gate, source_gate)", restart)
 
     def test_workflow_resume_powershell_argument_splatting(self) -> None:
         """Run 32 regression: optional flags must remain whole argv tokens."""
