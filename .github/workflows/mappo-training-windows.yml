@@ -45,7 +45,12 @@ on:
         description: "Minimum evaluated gate mission success percent [0,100]"
         required: true
         type: number
-        default: 75
+        default: 85
+      same_threshold_all_gates:
+        description: "Apply success_percent to EVERY gate (unchecked: use each gate's configured threshold)"
+        required: true
+        type: boolean
+        default: true
       auto_advance:
         description: "Launch the next independent GitHub run after gate PASS"
         required: true
@@ -191,6 +196,7 @@ jobs:
           MAX_SECONDS: ${{ inputs.max_seconds }}
           RESUME_RUN_ID: ${{ inputs.resume_run_id }}
           AUTO_ADVANCE: ${{ inputs.auto_advance }}
+          SAME_THRESHOLD_ALL_GATES: ${{ inputs.same_threshold_all_gates }}
         run: |
           $pythonArgs = @(
             "-u", "tools/ci/adaptive_curriculum/progressive_gate.py",
@@ -204,6 +210,9 @@ jobs:
           }
           if ($env:AUTO_ADVANCE -eq "true") {
             $pythonArgs += "--auto-advance"
+          }
+          if ($env:SAME_THRESHOLD_ALL_GATES -eq "false") {
+            $pythonArgs += "--per-gate-thresholds"
           }
           & python @pythonArgs
           if ($LASTEXITCODE -ne 0) { throw "Progressive gate training failed" }

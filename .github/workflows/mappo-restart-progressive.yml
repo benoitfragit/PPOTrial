@@ -303,8 +303,8 @@ jobs:
                   or not 1 <= seconds <= 18000):
               raise SystemExit('Invalid success_percent or max_seconds')
           PY
-          # In fixed-threshold mode, the NEW workflow advances gates itself;
-          # prevent the existing 75%-default dispatcher from running as well.
+          # The restart-cycle dispatcher owns continuation in fixed mode;
+          # keep its single-dispatch contract (no duplicate advance).
           TRAIN_AUTO_ADVANCE="$AUTO_ADVANCE"
           if [[ "$SAME_THRESHOLD" == "true" ]]; then
             TRAIN_AUTO_ADVANCE=false
@@ -315,6 +315,7 @@ jobs:
             -f "inputs[resume_run_id]=${GITHUB_RUN_ID}" \
             -f "inputs[progressive_gate]=${START_GATE}" \
             -f "inputs[success_percent]=${SUCCESS_PERCENT}" \
+            -f "inputs[same_threshold_all_gates]=${SAME_THRESHOLD}" \
             -f "inputs[max_seconds]=${MAX_SECONDS}" \
             -f 'inputs[save_every_updates]=1' \
             -f "inputs[auto_advance]=${TRAIN_AUTO_ADVANCE}"
