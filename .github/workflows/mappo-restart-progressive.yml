@@ -1,6 +1,9 @@
 name: Restart Progressive Blue Defense (checkpoint)
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/mappo-restart-progressive.yml
   workflow_run:
     workflows: ["Progressive Blue Defense (Windows Release)"]
     types: [completed]
@@ -64,6 +67,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate_workflow:
+    name: Lint GitHub Actions YAML and embedded scripts
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify workflow with actionlint
+        shell: bash
+        run: |
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -color .github/workflows/mappo-restart-progressive.yml
+
   bootstrap:
     # A rerun must not overwrite the original bootstrap artifact.
     if: github.event_name == 'workflow_dispatch' && github.run_attempt == 1
