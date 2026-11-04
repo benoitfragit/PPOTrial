@@ -527,6 +527,7 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertIn("& python @pythonArgs", step)
         self.assertIn('$pythonArgs += "--resume"', step)
         self.assertIn('$pythonArgs += "--auto-advance"', step)
+        self.assertIn('$pythonArgs += "--per-gate-thresholds"', step)
         self.assertNotIn("@resume @advance", step)
         powershell = shutil.which("pwsh")
         if powershell is None:
@@ -534,17 +535,20 @@ class ProgressiveGateTests(unittest.TestCase):
         block = textwrap.dedent(step.split("        run: |\n", 1)[1].split(
             "          if ($LASTEXITCODE", 1)[0])
         cases = (
-            ("", "false", ()),
-            ("41690261169", "false", ("--resume",)),
-            ("41690261169", "true", ("--resume", "--auto-advance")),
+            ("", "false", "true", ()),
+            ("41690261169", "false", "true", ("--resume",)),
+            ("41690261169", "true", "true", ("--resume", "--auto-advance")),
+            ("", "false", "false", ("--per-gate-thresholds",)),
         )
-        for resume_id, auto_advance, flags in cases:
-            with self.subTest(resume=resume_id, auto_advance=auto_advance):
+        for resume_id, auto_advance, same_threshold, flags in cases:
+            with self.subTest(resume=resume_id, auto_advance=auto_advance,
+                              uniform=same_threshold):
                 environment = os.environ.copy()
                 environment.update({
                     "GATE": "1v0", "SUCCESS_PERCENT": "75",
                     "MAX_SECONDS": "3600", "RESUME_RUN_ID": resume_id,
                     "AUTO_ADVANCE": auto_advance,
+                    "SAME_THRESHOLD_ALL_GATES": same_threshold,
                 })
                 script = (
                     "function python { $script:captured = @($args) }\n"
@@ -688,6 +692,7 @@ class ProgressiveGateTests(unittest.TestCase):
             "resume_run_id": "41798688051", "progressive_gate": "1v1",
             "success_percent": "85", "max_seconds": "12000",
             "save_every_updates": "1", "auto_advance": "false",
+            "same_threshold_all_gates": "true",
         })
         # A failed gate remains resumable; it does not dispatch a new run.
         state["passed"] = result["passed"] = False
@@ -700,6 +705,81 @@ class ProgressiveGateTests(unittest.TestCase):
         state["validatedGates"] = ["1v0"]
         self.assertIsNone(dispatcher.next_dispatch_from_checkpoint(
             result, state, config, "41798688051"))
+
+    def test_default_uniform_threshold_is_preserved_across_gates(self) -> None:
+        """85% on 1v0 must remain 85% on 1v1 and 4v4, not 80%/75%."""
+        config = gate.GATES_FILE.read_bytes()
+        digest = hashlib.sha256(config).hexdigest()
+        for current, nxt, config_next in (
+                ("1v0", "1v1", 80), ("1v1", "4v4", 85)):
+            with self.subTest(gate=current):
+                state = {
+                    "gateConfigSha256": digest, "gate": current,
+                    "gateIndex": ["1v0", "1v1", "4v4"].index(current),
+                    "lastCheckpointUpdates": 50,
+                    "passed": True,
+                    "validatedGates": ["1v0"] if current == "1v0"
+                    else ["1v0", "1v1"],
+                    "sameThresholdAllGates": True,
+                    "uniformThresholdPercent": 85.0,
+                }
+                result = {
+                    "gateConfigSha256": digest, "gate": current,
+                    "passed": True, "autoAdvance": True,
+                    "optimizerUpdates": 50,
+                    "thresholdPercent": 85.0,
+                    "sameThresholdAllGates": True,
+                    "uniformThresholdPercent": 85.0,
+                    "nextGate": nxt, "nextThresholdPercent": config_next,
+                    "nextMaxSeconds": 14400 if nxt == "4v4" else 12000,
+                }
+                payload = dispatcher.next_dispatch_from_checkpoint(
+                    result, state, config, "34567")
+                self.assertEqual(payload["success_percent"], "85")
+                self.assertEqual(payload["same_threshold_all_gates"], "true")
+                self.assertEqual(payload["progressive_gate"], nxt)
+                self.assertEqual(payload["resume_run_id"], "34567")
+
+    def test_uniform_threshold_rejects_corrupt_handoff(self) -> None:
+        config = gate.GATES_FILE.read_bytes()
+        digest = hashlib.sha256(config).hexdigest()
+        state = {
+            "gateConfigSha256": digest, "gate": "1v0", "gateIndex": 0,
+            "passed": True, "lastCheckpointUpdates": 10,
+            "validatedGates": ["1v0"],
+            "sameThresholdAllGates": True, "uniformThresholdPercent": 85.0,
+        }
+        result = {
+            "gateConfigSha256": digest, "gate": "1v0", "passed": True,
+            "optimizerUpdates": 10, "autoAdvance": True,
+            "thresholdPercent": 85.0,
+            "sameThresholdAllGates": True,
+            "uniformThresholdPercent": 85.0,
+            "nextGate": "1v1", "nextThresholdPercent": 80,
+            "nextMaxSeconds": 12000,
+        }
+        for bad in (
+                {"uniformThresholdPercent": 80.0},
+                {"sameThresholdAllGates": False},
+                {"thresholdPercent": 75.0}):
+            with self.subTest(bad=bad):
+                with self.assertRaisesRegex(ValueError, "uniform threshold"):
+                    dispatcher.next_dispatch_from_checkpoint(
+                        {**result, **bad}, state, config, "34567")
+
+    def test_workflow_uniform_choice_defaults_to_true_and_85(self) -> None:
+        root = Path(__file__).resolve().parents[3] / ".github/workflows"
+        train = (root / "mappo-training-windows.yml").read_text(encoding="utf-8")
+        restart = (root / "mappo-restart-progressive.yml").read_text(encoding="utf-8")
+        choice = train.split("      same_threshold_all_gates:\n", 1)[1].split(
+            "      auto_advance:\n", 1)[0]
+        self.assertIn("type: boolean", choice)
+        self.assertIn("default: true", choice)
+        threshold = train.split("      success_percent:\n", 1)[1].split(
+            "      same_threshold_all_gates:\n", 1)[0]
+        self.assertIn("default: 85", threshold)
+        self.assertIn("inputs[same_threshold_all_gates]", restart)
+        self.assertIn("SAME_THRESHOLD_ALL_GATES", train)
 
     def test_auto_dispatch_rejects_mixed_cycle_and_checkpoint(self) -> None:
         config = gate.GATES_FILE.read_bytes()
@@ -756,6 +836,7 @@ class ProgressiveGateTests(unittest.TestCase):
             result, state, config, "12345")
         self.assertEqual(inputs["success_percent"], "80")
         self.assertEqual(inputs["auto_advance"], "true")
+        self.assertEqual(inputs["same_threshold_all_gates"], "false")
         state["restartCycle"] = {
             "schemaVersion": 1, "bootstrapRunId": 10,
             "sourceRunId": 9, "sameThresholdAllGates": False,

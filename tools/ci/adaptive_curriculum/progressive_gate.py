@@ -233,6 +233,8 @@ def record_result(state: dict, stages: list[dict], threshold: float,
                      if next_gate else None),
                   nextMaxSeconds=(stages[index + 1]["maxSeconds"]
                      if next_gate else None),
+                  sameThresholdAllGates=state.get("sameThresholdAllGates", False),
+                  uniformThresholdPercent=state.get("uniformThresholdPercent"),
                   gateConfigSha256=state["gateConfigSha256"],
                   finished=passed and not next_gate)
     existing.write_json(STATE_FILE, state)
@@ -274,6 +276,23 @@ def run_gate(args: argparse.Namespace) -> dict:
     rehearsal_every = configuration["rehearsalEveryBlocks"]
     state = initialize_state(stages, args.gate, args.resume, config_hash)
     stage = stages[state["gateIndex"]]
+    cycle = state.get("restartCycle")
+    if cycle is not None:
+        # Preserve the separate restart action's previously agreed policy.
+        uniform = cycle["sameThresholdAllGates"]
+        if uniform and float(args.threshold_percent) != float(cycle["successPercent"]):
+            raise ValueError("Restart-cycle uniform threshold mismatch")
+    else:
+        uniform = getattr(args, "same_threshold_all_gates", True)
+    if type(uniform) is not bool:
+        raise ValueError("same_threshold_all_gates must be boolean")
+    state["sameThresholdAllGates"] = uniform
+    if uniform:
+        # The selected threshold belongs to this curriculum cycle and travels
+        # with the checkpoint; per-gate thresholds never replace it on dispatch.
+        state["uniformThresholdPercent"] = float(args.threshold_percent)
+    else:
+        state.pop("uniformThresholdPercent", None)
     state["autoAdvance"] = args.auto_advance
     if state["passed"] or state["gate"] != args.gate:
         raise ValueError("Inconsistent gate state")
@@ -422,6 +441,10 @@ def main() -> int:
     parser.add_argument("--block-updates", type=int, default=20)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--auto-advance", action="store_true")
+    parser.add_argument("--per-gate-thresholds", action="store_false",
+                        dest="same_threshold_all_gates",
+                        help="Opt out of the default uniform success threshold")
+    parser.set_defaults(same_threshold_all_gates=True)
     args = parser.parse_args()
     result = run_gate(args)
     print(f"[ADAPTIVE_GATE] gate={result['gate']} passed={result['passed']} "

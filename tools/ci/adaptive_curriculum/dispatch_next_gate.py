@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import sys
 import urllib.request
@@ -100,7 +101,28 @@ def next_dispatch_from_checkpoint(
 
     cycle = state.get("restartCycle")
     if cycle is None:
-        return next_dispatch(result, config_bytes, run_id)
+        inputs = next_dispatch(result, config_bytes, run_id)
+        if inputs is None:
+            return None
+        uniform = state.get("sameThresholdAllGates", False)
+        if type(uniform) is not bool:
+            raise ValueError("Invalid uniform gate threshold selection")
+        if uniform:
+            target = state.get("uniformThresholdPercent")
+            if (type(target) not in (int, float)
+                    or not math.isfinite(target)
+                    or not 0 < target <= 100
+                    or result.get("sameThresholdAllGates") is not True
+                    or result.get("uniformThresholdPercent") != target
+                    or result.get("thresholdPercent") != target):
+                raise ValueError("Gate result does not match selected uniform threshold")
+            inputs["success_percent"] = f"{target:g}"
+        else:
+            if result.get("sameThresholdAllGates") not in (None, False):
+                raise ValueError("Gate result contradicts per-gate threshold selection")
+        # Explicit input is essential: the GitHub action now defaults to true.
+        inputs["same_threshold_all_gates"] = ("true" if uniform else "false")
+        return inputs
     if (not isinstance(cycle, dict)
             or type(cycle.get("schemaVersion")) is not int
             or cycle["schemaVersion"] != 1
@@ -119,7 +141,10 @@ def next_dispatch_from_checkpoint(
     if not cycle["sameThresholdAllGates"]:
         if result.get("autoAdvance") is not cycle["autoAdvance"]:
             raise ValueError("Inconsistent auto-advance choice")
-        return next_dispatch(result, config_bytes, run_id)
+        inputs = next_dispatch(result, config_bytes, run_id)
+        if inputs is not None:
+            inputs["same_threshold_all_gates"] = "false"
+        return inputs
 
     # Only fixed-threshold cycles must retain the bootstrap success target.
     # In per-gate mode a later result legitimately uses a different threshold.
@@ -138,6 +163,7 @@ def next_dispatch_from_checkpoint(
     if inputs is not None:
         inputs["success_percent"] = f"{threshold:g}"
         inputs["auto_advance"] = "false"
+        inputs["same_threshold_all_gates"] = "true"
     return inputs
 
 
