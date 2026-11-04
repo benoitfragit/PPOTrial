@@ -65,7 +65,8 @@ concurrency:
 
 jobs:
   bootstrap:
-    if: github.event_name == 'workflow_dispatch'
+    # A rerun must not overwrite the original bootstrap artifact.
+    if: github.event_name == 'workflow_dispatch' && github.run_attempt == 1
     name: Create a fresh curriculum cycle from a verified training checkpoint
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -222,6 +223,8 @@ jobs:
   start_training:
     name: Dispatch the existing progressive training workflow (cached Release runtime)
     needs: bootstrap
+    # Never re-dispatch the same first gate on a manual workflow rerun.
+    if: github.event_name == 'workflow_dispatch' && github.run_attempt == 1
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -283,6 +286,10 @@ jobs:
       && github.event.workflow_run.conclusion == 'success'
       && github.event.workflow_run.event == 'workflow_dispatch'
       && github.event.workflow_run.head_branch == github.event.repository.default_branch
+      # Only the original training attempt and the first watcher attempt may
+      # dispatch a next gate; GitHub reruns must never create duplicate gates.
+      && github.event.workflow_run.run_attempt == 1
+      && github.run_attempt == 1
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
