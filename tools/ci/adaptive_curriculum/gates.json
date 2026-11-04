@@ -21,24 +21,6 @@
       "autoAdvance": true
     },
     {
-      "id": "3v0",
-      "blue": 3,
-      "red": 0,
-      "hostileZones": false,
-      "thresholdPercent": 75,
-      "maxSeconds": 14400,
-      "autoAdvance": true
-    },
-    {
-      "id": "4v0",
-      "blue": 4,
-      "red": 0,
-      "hostileZones": false,
-      "thresholdPercent": 75,
-      "maxSeconds": 14400,
-      "autoAdvance": true
-    },
-    {
       "id": "1v1",
       "blue": 1,
       "red": 1,
@@ -57,64 +39,10 @@
       "autoAdvance": true
     },
     {
-      "id": "3v1",
-      "blue": 3,
-      "red": 1,
-      "hostileZones": false,
-      "thresholdPercent": 75,
-      "maxSeconds": 14400,
-      "autoAdvance": true
-    },
-    {
-      "id": "4v1",
-      "blue": 4,
-      "red": 1,
-      "hostileZones": false,
-      "thresholdPercent": 75,
-      "maxSeconds": 14400,
-      "autoAdvance": true
-    },
-    {
       "id": "2v2",
       "blue": 2,
       "red": 2,
       "hostileZones": false,
-      "thresholdPercent": 75,
-      "maxSeconds": 14400,
-      "autoAdvance": true
-    },
-    {
-      "id": "3v2",
-      "blue": 3,
-      "red": 2,
-      "hostileZones": false,
-      "thresholdPercent": 75,
-      "maxSeconds": 14400,
-      "autoAdvance": true
-    },
-    {
-      "id": "3v3",
-      "blue": 3,
-      "red": 3,
-      "hostileZones": true,
-      "thresholdPercent": 75,
-      "maxSeconds": 14400,
-      "autoAdvance": true
-    },
-    {
-      "id": "4v3",
-      "blue": 4,
-      "red": 3,
-      "hostileZones": true,
-      "thresholdPercent": 75,
-      "maxSeconds": 14400,
-      "autoAdvance": true
-    },
-    {
-      "id": "4v4",
-      "blue": 4,
-      "red": 4,
-      "hostileZones": true,
       "thresholdPercent": 75,
       "maxSeconds": 14400,
       "autoAdvance": true

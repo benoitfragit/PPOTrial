@@ -83,7 +83,7 @@ class ProgressiveGateTests(unittest.TestCase):
             f"[BLUE MAPPO V10] Evaluation #1 P={stage['blue']} "
             f"N={stage['red']} score={score} success={success}\n")
 
-    def test_run62_linux_bootstrap_resumes_2v2_on_windows_crlf(self) -> None:
+    def test_reduced_bootstrap_resumes_2v2_on_windows_crlf(self) -> None:
         """A verified LF bootstrap must survive Git CRLF checkout on Windows."""
         production = (Path(__file__).resolve().parents[3] /
                       "tools/ci/adaptive_curriculum/gates.json")
@@ -92,17 +92,17 @@ class ProgressiveGateTests(unittest.TestCase):
         stages = gate.validate_gates(contract)
         names = [item["id"] for item in stages]
         target = names.index("2v2")
-        self.assertEqual(names[target - 1], "4v1")
+        self.assertEqual(names[target - 1], "2v1")
 
         self.checkpoint(620)
         for previous in names[:target]:
             gate.champion.promote(
                 previous, {"successPercent": 100.0, "score": 80.0}, 620)
-        gate.champion.seed("2v2", "4v1")
+        gate.champion.seed("2v2", "2v1")
         gate.champion.restore_latest("2v2")
         expected_actor = gate.champion.LATEST_ACTOR.read_bytes()
         expected_training = gate.existing.LATEST.read_bytes()
-        source_best = gate.champion.read("4v1")
+        source_best = gate.champion.read("2v1")
 
         # Linux bootstrap computes LF digest; Windows Git checkout may use
         # CRLF for the otherwise unchanged tracked gates.json.
@@ -131,7 +131,7 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertEqual(resumed["lastCheckpointUpdates"], 620)
         self.assertEqual(resumed["validatedGates"], names[:target])
         self.assertEqual(resumed["restartCycle"], cycle)
-        self.assertEqual(gate.champion.read("4v1"), source_best)
+        self.assertEqual(gate.champion.read("2v1"), source_best)
         self.assertEqual(gate.champion.LATEST_ACTOR.read_bytes(), expected_actor)
         self.assertEqual(gate.existing.LATEST.read_bytes(), expected_training)
         self.assertFalse(gate.champion.read("2v2")["evaluatedForGate"])
@@ -945,18 +945,14 @@ class ProgressiveGateTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[3]
         document = json.loads((root / "tools/ci/adaptive_curriculum/gates.json"
                                ).read_text(encoding="utf-8"))
-        expected = ["1v0", "2v0", "3v0", "4v0", "1v1", "2v1",
-                    "3v1", "4v1", "2v2", "3v2", "3v3", "4v3", "4v4"]
-        self.assertEqual([stage["id"] for stage in document["gates"]],
-                         expected)
+        expected = ["1v0", "2v0", "1v1", "2v1", "2v2"]
+        stages = gate.validate_gates(document)
+        self.assertEqual([stage["id"] for stage in stages], expected)
         self.assertEqual(document["rehearsalEveryBlocks"], 8)
-        self.assertEqual((document["gates"][6]["blue"],
-                          document["gates"][6]["red"]), (3, 1))
-        self.assertFalse(document["gates"][6]["hostileZones"])
-        self.assertEqual((document["gates"][7]["blue"],
-                          document["gates"][7]["red"]), (4, 1))
-        self.assertEqual(expected[8], "2v2")
-        self.assertNotIn("1v3", expected)
+        self.assertEqual((stages[-1]["blue"], stages[-1]["red"]), (2, 2))
+        self.assertTrue(all(stage["blue"] <= 2 and stage["red"] <= 2
+                            for stage in stages))
+        self.assertNotIn("1v2", expected)
         restart = (root / ".github/workflows/mappo-restart-progressive.yml"
                    ).read_text(encoding="utf-8")
         choices = restart.split("      start_gate:\n", 1)[1].split(
@@ -969,6 +965,20 @@ class ProgressiveGateTests(unittest.TestCase):
             "      success_percent:\n", 1)[0]
         self.assertEqual(re.findall(r"^          - (\dv\d+)$",
                                     training_choices, re.MULTILINE), expected)
+
+    def test_reduced_curriculum_rejects_forbidden_gate_counts(self) -> None:
+        root = Path(__file__).resolve().parents[3]
+        original = json.loads((root / "tools/ci/adaptive_curriculum/gates.json"
+                               ).read_text(encoding="utf-8"))
+        for blue, red in ((3, 0), (2, 3), (1, 2)):
+            with self.subTest(blue=blue, red=red):
+                bad = json.loads(json.dumps(original))
+                bad["gates"][2]["blue"] = blue
+                bad["gates"][2]["red"] = red
+                with self.assertRaisesRegex(ValueError, "Reduced curriculum"):
+                    gate.validate_gates(bad)
+        # Legacy 4v4 schemas remain readable for verified source-run provenance.
+        self.assertEqual(gate.validate_gates(sample_gates())[-1]["id"], "4v4")
 
     def test_twenty_evaluation_cases_use_distinct_holdout_seeds(self) -> None:
         root = Path(__file__).resolve().parents[3]
@@ -1032,8 +1042,7 @@ class ProgressiveGateTests(unittest.TestCase):
                    "3v1", "4v1"]
         retained = [stage_id for stage_id in names[:names.index(target)]
                     if stage_id in history]
-        self.assertEqual(retained, ["1v0", "2v0", "3v0", "4v0",
-                                    "1v1", "2v1", "3v1", "4v1"])
+        self.assertEqual(retained, ["1v0", "2v0", "1v1", "2v1"])
         with patch.object(gate.champion, "read",
                           return_value={"evaluatedForGate": True}):
             self.assertEqual(gate.validated_rehearsal_history(
