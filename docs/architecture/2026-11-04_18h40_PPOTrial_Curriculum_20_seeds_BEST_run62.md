@@ -1,6 +1,6 @@
 # PPOTrial — Curriculum ciblé, 20 évaluations et reprise BEST 62
 
-Date : 2026-11-04. Branche : `fix/progressive-20-evals-prune-gates-best62`.
+Date : 2026-11-04. Livraison : PR #53, correction de la gate 4v1 en PR #54.
 
 ## Décision
 

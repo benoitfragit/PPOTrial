@@ -890,6 +890,12 @@ class ProgressiveGateTests(unittest.TestCase):
             "      success_percent:\n", 1)[0]
         self.assertEqual(re.findall(r"^          - (\dv\d+)$",
                                     choices, re.MULTILINE), expected)
+        training = (root / ".github/workflows/mappo-training-windows.yml"
+                    ).read_text(encoding="utf-8")
+        training_choices = training.split("      progressive_gate:\n", 1)[1].split(
+            "      success_percent:\n", 1)[0]
+        self.assertEqual(re.findall(r"^          - (\dv\d+)$",
+                                    training_choices, re.MULTILINE), expected)
 
     def test_twenty_evaluation_cases_use_distinct_holdout_seeds(self) -> None:
         root = Path(__file__).resolve().parents[3]
