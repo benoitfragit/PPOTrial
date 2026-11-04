@@ -83,6 +83,75 @@ class ProgressiveGateTests(unittest.TestCase):
             f"[BLUE MAPPO V10] Evaluation #1 P={stage['blue']} "
             f"N={stage['red']} score={score} success={success}\n")
 
+    def test_run62_linux_bootstrap_resumes_2v2_on_windows_crlf(self) -> None:
+        """A verified LF bootstrap must survive Git CRLF checkout on Windows."""
+        production = (Path(__file__).resolve().parents[3] /
+                      "tools/ci/adaptive_curriculum/gates.json")
+        contract = json.loads(production.read_text(encoding="utf-8"))
+        gate.existing.write_json(gate.GATES_FILE, contract)
+        stages = gate.validate_gates(contract)
+        names = [item["id"] for item in stages]
+        target = names.index("2v2")
+        self.assertEqual(names[target - 1], "4v1")
+
+        self.checkpoint(620)
+        for previous in names[:target]:
+            gate.champion.promote(
+                previous, {"successPercent": 100.0, "score": 80.0}, 620)
+        gate.champion.seed("2v2", "4v1")
+        gate.champion.restore_latest("2v2")
+        expected_actor = gate.champion.LATEST_ACTOR.read_bytes()
+        expected_training = gate.existing.LATEST.read_bytes()
+        source_best = gate.champion.read("4v1")
+
+        # Linux bootstrap computes LF digest; Windows Git checkout may use
+        # CRLF for the otherwise unchanged tracked gates.json.
+        linux_bytes = gate.GATES_FILE.read_bytes().replace(b"\r\n", b"\n")
+        windows_bytes = linux_bytes.replace(b"\n", b"\r\n")
+        linux_hash = hashlib.sha256(linux_bytes).hexdigest()
+        windows_hash = hashlib.sha256(windows_bytes).hexdigest()
+        self.assertNotEqual(linux_hash, windows_hash)
+        cycle = {"schemaVersion": 1, "bootstrapRunId": 41883666492,
+                 "sourceRunId": 41865674608,
+                 "sameThresholdAllGates": True,
+                 "successPercent": 90.0, "autoAdvance": True}
+        gate.existing.write_json(gate.STATE_FILE, {
+            "formatVersion": 1, "gateConfigSha256": linux_hash,
+            "gateIndex": target, "gate": "2v2", "passed": False,
+            "elapsedSeconds": 0.0, "blockIndex": 0,
+            "lastCheckpointUpdates": 620, "bestSuccessPercent": 0.0,
+            "lastSuccessPercent": None,
+            "validatedGates": names[:target], "championRequired": True,
+            "restartCycle": cycle,
+        })
+        gate.GATES_FILE.write_bytes(windows_bytes)
+
+        resumed = gate.initialize_state(stages, "2v2", True, windows_hash)
+        self.assertEqual(resumed["gateConfigSha256"], windows_hash)
+        self.assertEqual(resumed["lastCheckpointUpdates"], 620)
+        self.assertEqual(resumed["validatedGates"], names[:target])
+        self.assertEqual(resumed["restartCycle"], cycle)
+        self.assertEqual(gate.champion.read("4v1"), source_best)
+        self.assertEqual(gate.champion.LATEST_ACTOR.read_bytes(), expected_actor)
+        self.assertEqual(gate.existing.LATEST.read_bytes(), expected_training)
+        self.assertFalse(gate.champion.read("2v2")["evaluatedForGate"])
+
+        # Continue the same cycle with the now-native Windows fingerprint.
+        gate.existing.write_json(gate.STATE_FILE, resumed)
+        second = gate.initialize_state(stages, "2v2", True, windows_hash)
+        self.assertEqual(second["gateConfigSha256"], windows_hash)
+
+        # A real curriculum change (even only a threshold) must still fail.
+        modified = windows_bytes.replace(
+            b'"thresholdPercent": 75', b'"thresholdPercent": 76', 1)
+        self.assertNotEqual(modified, windows_bytes)
+        gate.GATES_FILE.write_bytes(modified)
+        changed_hash = hashlib.sha256(modified).hexdigest()
+        with self.assertRaisesRegex(ValueError, "provenance"):
+            gate.initialize_state(stages, "2v2", True, changed_hash)
+        with self.assertRaisesRegex(ValueError, "current adaptive"):
+            gate.initialize_state(stages, "2v2", True, "0" * 64)
+
     def test_schema_has_no_fixed_gate_update_limit(self) -> None:
         stages = gate.validate_gates(sample_gates())
         self.assertEqual([s["id"] for s in stages], ["1v0", "1v1", "4v4"])
