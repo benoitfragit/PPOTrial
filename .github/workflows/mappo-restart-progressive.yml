@@ -1,0 +1,241 @@
+name: Restart Progressive Blue Defense (checkpoint)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Completed progressive run containing full V7 optimizer checkpoint"
+        required: true
+        type: string
+        default: "41768154448"
+      start_gate:
+        description: "First gate of the NEW cycle (previous gate progress is reset)"
+        required: true
+        type: choice
+        default: "1v0"
+        options:
+          - 1v0
+          - 2v0
+          - 3v0
+          - 4v0
+          - 1v1
+          - 2v1
+          - 3v1
+          - 4v1
+          - 1v2
+          - 2v2
+          - 3v2
+          - 4v2
+          - 1v3
+          - 2v3
+          - 3v3
+          - 4v3
+          - 4v4
+      success_percent:
+        description: "Evaluated mission-success threshold for the first gate"
+        required: true
+        type: number
+        default: 75
+      max_seconds:
+        description: "Training time budget for the first gate, in seconds"
+        required: true
+        type: number
+        default: 14400
+      auto_advance:
+        description: "After a passing gate, dispatch the next existing progressive run"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mappo-restart-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    name: Create a fresh curriculum cycle from a verified training checkpoint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout current training contract
+        uses: actions/checkout@v4
+
+      - name: Validate source run provenance and completion
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        shell: bash
+        run: |
+          if [[ ! "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo 'source_run_id must be a positive GitHub run ID' >&2
+            exit 1
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}" \
+            | jq -e --arg repo "$GITHUB_REPOSITORY" '
+                .status == "completed"
+                and .conclusion == "success"
+                and .repository.full_name == $repo
+                and (.path | startswith(".github/workflows/mappo-training-windows.yml"))
+              ' >/dev/null || { echo 'Source run must be a successful progressive training run in this repository' >&2; exit 1; }
+
+      - name: Clear only transient workspace Blue checkpoints
+        shell: bash
+        run: |
+          rm -rf resources/model/BluePatrol/latest resources/model/BluePatrol/prod
+          rm -f resources/model/BluePatrol/adaptive-curriculum-progress.json
+
+      - name: Restore source actor, critic, Adam and RNG
+        uses: actions/download-artifact@v4
+        with:
+          name: blue-mappo-checkpoints
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: resources/model/BluePatrol
+
+      - name: Verify full checkpoint and reset only curriculum progression
+        env:
+          START_GATE: ${{ inputs.start_gate }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from tools.ci.adaptive_curriculum.progressive_gate import validate_gates
+          from tools.ci import mappo_curriculum
+
+          root = Path('resources/model/BluePatrol')
+          actor = root / 'latest/blue_patrol_generalized_v10.txt'
+          training = root / 'latest/blue_patrol_generalized_training_v7.txt'
+          progress_path = root / 'adaptive-curriculum-progress.json'
+          for path in (actor, training, progress_path):
+              if not path.is_file() or path.stat().st_size == 0:
+                  raise RuntimeError(f'Missing or empty source artifact: {path}')
+
+          actor_header = actor.open(encoding='utf-8').readline().strip()
+          training_header = training.open(encoding='utf-8').readline().strip()
+          semantic = 'UNIFIED_PHYSICAL_GUIDANCE_V1'
+          if (not actor_header.startswith('BLUE_TEAM_MAPPO_V10 10 10 ')
+                  or semantic not in actor_header.split()
+                  or not training_header.startswith('BLUE_TEAM_TRAINING_V7 7 10 ')
+                  or semantic not in training_header.split()):
+              raise RuntimeError('Incompatible V10 actor or full V7 optimizer semantic contract')
+
+          gates_bytes = Path('tools/ci/adaptive_curriculum/gates.json').read_bytes()
+          stages = validate_gates(json.loads(gates_bytes))
+          stage_names = [stage['id'] for stage in stages]
+          start_gate = os.environ['START_GATE']
+          if start_gate not in stage_names:
+              raise RuntimeError('Unknown target gate')
+
+          source = json.loads(progress_path.read_text(encoding='utf-8'))
+          lf_bytes = gates_bytes.replace(b'\r\n', b'\n')
+          valid_hashes = {
+              hashlib.sha256(lf_bytes).hexdigest(),
+              hashlib.sha256(lf_bytes.replace(b'\n', b'\r\n')).hexdigest(),
+          }
+          if (source.get('formatVersion') != 1
+                  or source.get('gateConfigSha256') not in valid_hashes):
+              raise RuntimeError('Source curriculum config differs from current contract; refusing migration')
+          updates = mappo_curriculum.read_updates(training)
+          saved_updates = source.get('lastCheckpointUpdates')
+          if (type(saved_updates) is not int or updates < saved_updates or updates <= 0):
+              raise RuntimeError('Source optimizer checkpoint/update counter is invalid')
+
+          # Preserve original weights and optimizer bytes. Only the orchestrator
+          # progression is changed; prior gates must be revalidated this cycle.
+          fresh = dict(
+              formatVersion=1,
+              gateConfigSha256=source['gateConfigSha256'],
+              gateIndex=stage_names.index(start_gate),
+              gate=start_gate,
+              passed=False,
+              elapsedSeconds=0.0,
+              bestSuccessPercent=0.0,
+              lastSuccessPercent=None,
+              blockIndex=0,
+              lastCheckpointUpdates=updates,
+              validatedGates=[],
+          )
+          progress_path.write_text(json.dumps(fresh, indent=2) + '\n', encoding='utf-8')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              summary.write(
+                  f'### New progressive Blue Defense cycle\n'
+                  f'- Source run: {os.environ["SOURCE_RUN_ID"]}\n'
+                  f'- Retained PPO updates: {updates}\n'
+                  f'- New first gate: {start_gate}\n'
+                  '- Actor, critic, Adam, and RNG: preserved unchanged\n'
+                  '- Gate validation and rehearsal progression: reset for the new cycle\n'
+                  '- No training, compilation, or production promotion in this bootstrap job\n'
+              )
+          print(f'[RESTART] Source run {os.environ["SOURCE_RUN_ID"]}; update={updates}; gate={start_gate}')
+          PY
+
+      - name: Publish bootstrapped checkpoint for the EXISTING training workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: blue-mappo-checkpoints
+          path: |
+            resources/model/BluePatrol/latest/blue_patrol_generalized_v10.txt
+            resources/model/BluePatrol/latest/blue_patrol_generalized_training_v7.txt
+            resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt
+            resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt.score
+            resources/model/BluePatrol/adaptive-curriculum-progress.json
+          if-no-files-found: error
+          retention-days: 30
+
+  start_training:
+    name: Dispatch the existing progressive training workflow (cached Release runtime)
+    needs: bootstrap
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Dispatch first gate of new cycle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          START_GATE: ${{ inputs.start_gate }}
+          SUCCESS_PERCENT: ${{ inputs.success_percent }}
+          MAX_SECONDS: ${{ inputs.max_seconds }}
+          AUTO_ADVANCE: ${{ inputs.auto_advance }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
+            echo 'Restart is permitted only from the repository default branch' >&2
+            exit 1
+          fi
+          python - <<'PY'
+          import math
+          import os
+          threshold = float(os.environ['SUCCESS_PERCENT'])
+          seconds = float(os.environ['MAX_SECONDS'])
+          if (not math.isfinite(threshold) or not 0 < threshold <= 100
+                  or not math.isfinite(seconds) or not seconds.is_integer()
+                  or not 1 <= seconds <= 18000):
+              raise SystemExit('Invalid success_percent or max_seconds')
+          PY
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/mappo-training-windows.yml/dispatches" \
+            -f "ref=${GITHUB_REF_NAME}" \
+            -f "inputs[resume_run_id]=${GITHUB_RUN_ID}" \
+            -f "inputs[progressive_gate]=${START_GATE}" \
+            -f "inputs[success_percent]=${SUCCESS_PERCENT}" \
+            -f "inputs[max_seconds]=${MAX_SECONDS}" \
+            -f 'inputs[save_every_updates]=1' \
+            -f "inputs[auto_advance]=${AUTO_ADVANCE}"
+          {
+            echo '### Training dispatched'
+            echo "The existing Progressive Blue Defense workflow was dispatched from bootstrap run ${GITHUB_RUN_ID}."
+            echo "Gate: ${START_GATE}; threshold: ${SUCCESS_PERCENT}%; budget: ${MAX_SECONDS}s."
+            echo 'The normal training workflow handles Release-cache validation, compile fallback, checkpoint updates, evaluation, and subsequent gate dispatch.'
+            echo "[Open training runs](https://github.com/${GITHUB_REPOSITORY}/actions/workflows/mappo-training-windows.yml)"
+          } >> "$GITHUB_STEP_SUMMARY"
