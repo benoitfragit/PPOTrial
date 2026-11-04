@@ -30,14 +30,8 @@ on:
           - 4v0
           - 1v1
           - 2v1
-          - 3v1
-          - 4v1
-          - 1v2
           - 2v2
           - 3v2
-          - 4v2
-          - 1v3
-          - 2v3
           - 3v3
           - 4v3
           - 4v4
@@ -45,7 +39,7 @@ on:
         description: "Minimum evaluated gate mission success percent [0,100]"
         required: true
         type: number
-        default: 85
+        default: 92
       same_threshold_all_gates:
         description: "Apply success_percent to EVERY gate (unchecked: use each gate's configured threshold)"
         required: true
@@ -181,8 +175,11 @@ jobs:
           $path = "resources/settings/Training/BluePatrol.json"
           $config = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
           $config.training | Add-Member -MemberType NoteProperty -Name saveEveryUpdates -Value $value -Force
+          # Keep the standalone Blue Defense workflow unchanged.
+          $config.evaluation | Add-Member -MemberType NoteProperty -Name episodes -Value 20 -Force
+          $config.evaluation | Add-Member -MemberType NoteProperty -Name seed -Value 1004242 -Force
           $config | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $path -Encoding utf8
-          Write-Host "Checkpoint every $value update(s); evaluation cadence unchanged."
+          Write-Host "Checkpoint every $value update(s); progressive evaluation uses 20 independent seeds."
           # Each run produces fresh telemetry, not restored timestamps.
           Remove-Item "resources/model/BluePatrol/telemetry/mappo-training.csv" -Force -ErrorAction SilentlyContinue
           # Must be newer than any restored checkpoint to reject no-op training.

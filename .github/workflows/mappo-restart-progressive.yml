@@ -10,12 +10,12 @@ on:
         description: "Completed progressive run containing full V7 optimizer checkpoint"
         required: true
         type: string
-        default: "41768154448"
+        default: "41865674608"
       start_gate:
         description: "First gate of the NEW cycle (previous gate progress is reset)"
         required: true
         type: choice
-        default: "1v0"
+        default: "2v2"
         options:
           - 1v0
           - 2v0
@@ -23,14 +23,8 @@ on:
           - 4v0
           - 1v1
           - 2v1
-          - 3v1
-          - 4v1
-          - 1v2
           - 2v2
           - 3v2
-          - 4v2
-          - 1v3
-          - 2v3
           - 3v3
           - 4v3
           - 4v4
@@ -38,7 +32,7 @@ on:
         description: "Evaluated mission-success threshold (first gate, or ALL gates when switch is on)"
         required: true
         type: number
-        default: 85
+        default: 92
       same_threshold_all_gates:
         description: "Use same success threshold for all gates (not only the first)"
         required: true
@@ -53,7 +47,7 @@ on:
         description: "After a passing gate, dispatch the next existing progressive run"
         required: true
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -125,6 +119,7 @@ jobs:
 
       - name: Verify full checkpoint and reset only curriculum progression
         env:
+          GH_TOKEN: ${{ github.token }}
           START_GATE: ${{ inputs.start_gate }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           SUCCESS_PERCENT: ${{ inputs.success_percent }}
@@ -133,11 +128,15 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
+          import base64
           import hashlib
           import json
           import os
+          import subprocess
           from pathlib import Path
-          from tools.ci.adaptive_curriculum.progressive_gate import validate_gates
+          from tools.ci.adaptive_curriculum.progressive_gate import (
+              validate_gates, validate_source_gate_fingerprint,
+              validated_rehearsal_history)
           from tools.ci.adaptive_curriculum import champion_checkpoints as champion
           from tools.ci import mappo_curriculum
 
@@ -166,14 +165,29 @@ jobs:
               raise RuntimeError('Unknown target gate')
 
           source = json.loads(progress_path.read_text(encoding='utf-8'))
-          lf_bytes = gates_bytes.replace(b'\r\n', b'\n')
-          valid_hashes = {
-              hashlib.sha256(lf_bytes).hexdigest(),
-              hashlib.sha256(lf_bytes.replace(b'\n', b'\r\n')).hexdigest(),
-          }
-          if (source.get('formatVersion') != 1
-                  or source.get('gateConfigSha256') not in valid_hashes):
-              raise RuntimeError('Source curriculum config differs from current contract; refusing migration')
+          # Check the source run's OWN immutable commit, rather than assuming
+          # its gate schedule matches the new curriculum. The source may use a
+          # retired gate (e.g. 4v1 from run 62) but must be authentic.
+          source_run_id = os.environ['SOURCE_RUN_ID']
+          repository = os.environ['GITHUB_REPOSITORY']
+          run_metadata = json.loads(subprocess.check_output(
+              ['gh', 'api', f'repos/{repository}/actions/runs/{source_run_id}'],
+              text=True))
+          source_sha = run_metadata.get('head_sha')
+          if not isinstance(source_sha, str) or len(source_sha) != 40:
+              raise RuntimeError('Source run has no valid commit SHA')
+          source_config_payload = json.loads(subprocess.check_output(
+              ['gh', 'api', f'repos/{repository}/contents/'
+               f'tools/ci/adaptive_curriculum/gates.json?ref={source_sha}'],
+              text=True))
+          if source_config_payload.get('encoding') != 'base64':
+              raise RuntimeError('Source gate configuration cannot be decoded')
+          source_gates_bytes = base64.b64decode(source_config_payload['content'])
+          if source.get('formatVersion') != 1:
+              raise RuntimeError('Invalid source curriculum state')
+          source_gate = source.get('gate')
+          source_stages = validate_source_gate_fingerprint(
+              source_gates_bytes, source.get('gateConfigSha256'), source_gate)
           updates = mappo_curriculum.read_updates(training)
           saved_updates = source.get('lastCheckpointUpdates')
           if (type(saved_updates) is not int or updates < saved_updates or updates <= 0):
@@ -183,10 +197,13 @@ jobs:
           # champion pair whenever the source run provides one. Legacy artifacts
           # without such a pair remain usable as an explicit unverified warm start,
           # never represented as a certified winning checkpoint.
-          source_gate = source.get('gate')
-          if source_gate not in stage_names:
-              raise RuntimeError('Source gate is missing from current contract')
+          # A retired source gate remains readable as a historical BEST pair,
+          # but is NEVER reintroduced into the active training gate schedule.
           source_best = champion.read(source_gate)
+          if source_run_id == '41865674608' and (
+                  source_gate != '4v1' or source_best is None
+                  or not source_best['evaluatedForGate']):
+              raise RuntimeError('Run 62 requires its evaluated 4v1 BEST pair')
           if source.get('championRequired', False) and source_best is None:
               raise RuntimeError('Mandatory source champion pair is missing')
           if source_best is not None:
@@ -213,11 +230,25 @@ jobs:
           same_threshold = os.environ["SAME_THRESHOLD"].lower() == "true"
           auto_advance = os.environ["AUTO_ADVANCE"].lower() == "true"
 
-          # Preserve original weights and optimizer bytes. Only the orchestrator
-          # progression is changed; prior gates must be revalidated this cycle.
+          # Preserve the historical previously validated gates for rehearsal.
+          # Eight-case legacy certifications are NOT new 20-case gate proofs.
+          source_validated = source.get('validatedGates', [])
+          source_names = [stage['id'] for stage in source_stages]
+          if (not isinstance(source_validated, list)
+                  or any(type(gate_id) is not str
+                         or gate_id not in source_names
+                         or source_names.index(gate_id) > source_names.index(source_gate)
+                         for gate_id in source_validated)
+                  or (source_gate in source_validated) != source.get('passed')):
+              raise RuntimeError('Inconsistent source gate validation history')
+          rehearsal_history = validated_rehearsal_history(
+              stages, start_gate, source_validated)
+
+          # Keep the matched BEST weights, critic, Adam and RNG.
+          # The target gate is still unvalidated.
           fresh = dict(
               formatVersion=1,
-              gateConfigSha256=source['gateConfigSha256'],
+              gateConfigSha256=hashlib.sha256(gates_bytes).hexdigest(),
               gateIndex=stage_names.index(start_gate),
               gate=start_gate,
               passed=False,
@@ -226,7 +257,7 @@ jobs:
               lastSuccessPercent=None,
               blockIndex=0,
               lastCheckpointUpdates=updates,
-              validatedGates=[],
+              validatedGates=rehearsal_history,
               championRequired=source_best is not None,
               restartCycle=dict(
                   schemaVersion=1,
@@ -246,7 +277,7 @@ jobs:
                   f'- New first gate: {start_gate}\n'
                   '- Actor, critic, Adam, and RNG: matched V7 epoch retained\n'
                   f'- Source: {"BEST evaluated pair" if source_best else "LEGACY latest warm start"}\n'
-                  '- Gate validation and rehearsal progression: reset for the new cycle\n'
+                  f'- Earlier gates eligible for rehearsal: {rehearsal_history}\n'
                   f'- Same success threshold on every gate: {same_threshold}\n'
                   f'- Requested success threshold: {threshold:g}%\n'
                   '- No training, compilation, or production promotion in this bootstrap job\n'

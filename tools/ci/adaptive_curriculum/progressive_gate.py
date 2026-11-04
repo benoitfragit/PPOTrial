@@ -101,6 +101,55 @@ def matching_success(log: Path, blue: int, red: int) -> float | None:
     return value
 
 
+def validate_source_gate_fingerprint(source_bytes: bytes,
+                                     saved_digest: str | None,
+                                     source_gate: str | None) -> list[dict]:
+    """Validate a historical gate schedule at the source run's exact commit.
+
+    A changed current schedule is allowed only via a fresh bootstrap cycle,
+    never during a regular same-gate resume. The old fingerprint and gate must
+    match the downloaded source commit; no fake gate success is imported.
+    """
+    source_gates = validate_gates(json.loads(source_bytes))
+    normalized = source_bytes.replace(b"\r\n", b"\n")
+    allowed = {
+        hashlib.sha256(normalized).hexdigest(),
+        hashlib.sha256(normalized.replace(b"\n", b"\r\n")).hexdigest(),
+    }
+    if not isinstance(saved_digest, str) or saved_digest not in allowed:
+        raise ValueError("Source gate configuration fingerprint mismatch")
+    if source_gate not in [stage["id"] for stage in source_gates]:
+        raise ValueError("Source gate is absent from its original configuration")
+    return source_gates
+
+
+
+def validated_rehearsal_history(stages: list[dict], start_gate: str,
+                                historical: object) -> list[str]:
+    """Keep only prior, source-validated gates with intact evaluated BEST pairs.
+
+    Retired gates can remain in the historical archive, but must never be
+    replayed by the new curriculum. Reject missing or unevaluated BEST pairs
+    instead of silently losing the requested rehearsal capability.
+    """
+    names = [stage["id"] for stage in stages]
+    if start_gate not in names:
+        raise ValueError("Unknown resumed gate")
+    if (not isinstance(historical, list)
+            or any(type(value) is not str for value in historical)
+            or len(historical) != len(set(historical))):
+        raise ValueError("Invalid historical gate validation list")
+    retained = [gate_id for gate_id in names[:names.index(start_gate)]
+                if gate_id in historical]
+    for gate_id in retained:
+        best = champion.read(gate_id)
+        if best is None or not best["evaluatedForGate"]:
+            raise ValueError(
+                f"Missing evaluated BEST for historical rehearsal {gate_id}")
+    return retained
+
+
+
 def initialize_state(stages: list[dict], gate: str, resume: bool,
                      config_hash: str) -> dict:
     names = [stage["id"] for stage in stages]
