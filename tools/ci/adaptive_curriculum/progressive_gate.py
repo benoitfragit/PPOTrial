@@ -64,8 +64,16 @@ def validate_gates(document: dict) -> list[dict]:
             raise ValueError("Invalid gate dimensions")
     if (stages[0]["blue"], stages[0]["red"]) != (1, 0):
         raise ValueError("First gate must be 1v0")
-    if (stages[-1]["blue"], stages[-1]["red"]) != (4, 4):
-        raise ValueError("Final gate must be 4v4")
+    final = (stages[-1]["blue"], stages[-1]["red"])
+    if final == (2, 2):
+        # Enforce the reduced live curriculum while keeping historical 4v4
+        # contracts readable for provenance-verified checkpoint bootstraps.
+        if any(stage["blue"] > 2 or stage["red"] > 2
+               or (stage["blue"], stage["red"]) == (1, 2)
+               for stage in stages):
+            raise ValueError("Reduced curriculum allows at most 2v2, excluding 1v2")
+    elif final != (4, 4):
+        raise ValueError("Final gate must be 2v2 or historical 4v4")
     return stages
 
 

@@ -19,17 +19,9 @@ on:
         options:
           - 1v0
           - 2v0
-          - 3v0
-          - 4v0
           - 1v1
           - 2v1
-          - 3v1
-          - 4v1
           - 2v2
-          - 3v2
-          - 3v3
-          - 4v3
-          - 4v4
       success_percent:
         description: "Evaluated mission-success threshold (first gate, or ALL gates when switch is on)"
         required: true
