@@ -23,6 +23,7 @@ on:
           - 4v0
           - 1v1
           - 2v1
+          - 4v1
           - 2v2
           - 3v2
           - 3v3
@@ -167,7 +168,7 @@ jobs:
           source = json.loads(progress_path.read_text(encoding='utf-8'))
           # Check the source run's OWN immutable commit, rather than assuming
           # its gate schedule matches the new curriculum. The source may use a
-          # retired gate (e.g. 4v1 from run 62) but must be authentic.
+          # different historical schedule (such as run 62) but must be authentic.
           source_run_id = os.environ['SOURCE_RUN_ID']
           repository = os.environ['GITHUB_REPOSITORY']
           run_metadata = json.loads(subprocess.check_output(
@@ -197,8 +198,8 @@ jobs:
           # champion pair whenever the source run provides one. Legacy artifacts
           # without such a pair remain usable as an explicit unverified warm start,
           # never represented as a certified winning checkpoint.
-          # A retired source gate remains readable as a historical BEST pair,
-          # but is NEVER reintroduced into the active training gate schedule.
+          # A historical source gate remains readable as a BEST pair.
+          # Active training gates are defined exclusively by the new schedule.
           source_best = champion.read(source_gate)
           if source_run_id == '41865674608' and (
                   source_gate != '4v1' or source_best is None

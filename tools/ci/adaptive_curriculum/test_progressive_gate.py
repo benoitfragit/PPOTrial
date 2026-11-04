@@ -877,16 +877,25 @@ class ProgressiveGateTests(unittest.TestCase):
         document = json.loads((root / "tools/ci/adaptive_curriculum/gates.json"
                                ).read_text(encoding="utf-8"))
         expected = ["1v0", "2v0", "3v0", "4v0", "1v1", "2v1",
-                    "2v2", "3v2", "3v3", "4v3", "4v4"]
+                    "4v1", "2v2", "3v2", "3v3", "4v3", "4v4"]
         self.assertEqual([stage["id"] for stage in document["gates"]],
                          expected)
         self.assertEqual(document["rehearsalEveryBlocks"], 8)
+        self.assertEqual((document["gates"][6]["blue"],
+                          document["gates"][6]["red"]), (4, 1))
+        self.assertEqual(expected[7], "2v2")
         restart = (root / ".github/workflows/mappo-restart-progressive.yml"
                    ).read_text(encoding="utf-8")
         choices = restart.split("      start_gate:\n", 1)[1].split(
             "      success_percent:\n", 1)[0]
         self.assertEqual(re.findall(r"^          - (\dv\d+)$",
                                     choices, re.MULTILINE), expected)
+        training = (root / ".github/workflows/mappo-training-windows.yml"
+                    ).read_text(encoding="utf-8")
+        training_choices = training.split("      progressive_gate:\n", 1)[1].split(
+            "      success_percent:\n", 1)[0]
+        self.assertEqual(re.findall(r"^          - (\dv\d+)$",
+                                    training_choices, re.MULTILINE), expected)
 
     def test_twenty_evaluation_cases_use_distinct_holdout_seeds(self) -> None:
         root = Path(__file__).resolve().parents[3]
@@ -951,7 +960,11 @@ class ProgressiveGateTests(unittest.TestCase):
         retained = [stage_id for stage_id in names[:names.index(target)]
                     if stage_id in history]
         self.assertEqual(retained, ["1v0", "2v0", "3v0", "4v0",
-                                    "1v1", "2v1"])
+                                    "1v1", "2v1", "4v1"])
+        with patch.object(gate.champion, "read",
+                          return_value={"evaluatedForGate": True}):
+            self.assertEqual(gate.validated_rehearsal_history(
+                stages, target, history), retained)
         self.assertEqual(
             gate.select_training_stage(stages, names.index(target),
                                        7, 8, retained)["id"], "1v0")
