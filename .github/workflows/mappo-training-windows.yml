@@ -390,7 +390,7 @@ jobs:
   advance:
     name: Dispatch next progressive gate (no build)
     needs: train
-    if: ${{ needs.train.result == 'success' && inputs.auto_advance }}
+    if: ${{ needs.train.result == 'success' && github.run_attempt == 1 }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -402,6 +402,11 @@ jobs:
         with:
           name: blue-mappo-gate
           path: build/mappo-telemetry
+      - name: Retrieve checkpoint state and optimizer
+        uses: actions/download-artifact@v4
+        with:
+          name: blue-mappo-checkpoints
+          path: build/mappo-checkpoint
       - name: Validate gate and dispatch next independent workflow run
         env:
           GITHUB_TOKEN: ${{ github.token }}

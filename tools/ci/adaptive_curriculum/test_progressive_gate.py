@@ -459,5 +459,122 @@ class ProgressiveGateTests(unittest.TestCase):
             dispatcher.next_dispatch(result, config, "987654")
 
 
+    def test_run_51_fixed_threshold_pass_dispatches_run_52(self) -> None:
+        """85% over all gates must not depend on a workflow_run event."""
+        config = gate.GATES_FILE.read_bytes()
+        digest = hashlib.sha256(config).hexdigest()
+        state = {
+            "gateConfigSha256": digest, "gate": "1v0", "gateIndex": 0,
+            "passed": True, "lastCheckpointUpdates": 2560,
+            "validatedGates": ["1v0"],
+            "restartCycle": {
+                "schemaVersion": 1, "bootstrapRunId": 41798655431,
+                "sourceRunId": 41768154448, "sameThresholdAllGates": True,
+                "successPercent": 85.0, "autoAdvance": True,
+            },
+        }
+        result = {
+            "gateConfigSha256": digest, "gate": "1v0", "passed": True,
+            "optimizerUpdates": 2560, "autoAdvance": False,
+            "thresholdPercent": 85.0, "nextGate": "1v1",
+            "nextThresholdPercent": 80, "nextMaxSeconds": 12000,
+        }
+        inputs = dispatcher.next_dispatch_from_checkpoint(
+            result, state, config, "41798688051")
+        self.assertEqual(inputs, {
+            "resume_run_id": "41798688051", "progressive_gate": "1v1",
+            "success_percent": "85", "max_seconds": "12000",
+            "save_every_updates": "1", "auto_advance": "false",
+        })
+        # A failed gate remains resumable; it does not dispatch a new run.
+        state["passed"] = result["passed"] = False
+        state["validatedGates"] = []
+        self.assertIsNone(dispatcher.next_dispatch_from_checkpoint(
+            result, state, config, "41798688051"))
+        # Unchecked automatic continuation stays disabled.
+        state["restartCycle"]["autoAdvance"] = False
+        state["passed"] = result["passed"] = True
+        state["validatedGates"] = ["1v0"]
+        self.assertIsNone(dispatcher.next_dispatch_from_checkpoint(
+            result, state, config, "41798688051"))
+
+    def test_auto_dispatch_rejects_mixed_cycle_and_checkpoint(self) -> None:
+        config = gate.GATES_FILE.read_bytes()
+        digest = hashlib.sha256(config).hexdigest()
+        state = {
+            "gateConfigSha256": digest, "gate": "1v0", "gateIndex": 0,
+            "passed": True, "lastCheckpointUpdates": 60,
+            "validatedGates": ["1v0"],
+            "restartCycle": {
+                "schemaVersion": 1, "bootstrapRunId": 10,
+                "sourceRunId": 9, "sameThresholdAllGates": True,
+                "successPercent": 85.0, "autoAdvance": True,
+            },
+        }
+        result = {
+            "gateConfigSha256": digest, "gate": "1v0", "passed": True,
+            "optimizerUpdates": 60, "autoAdvance": False,
+            "thresholdPercent": 85.0, "nextGate": "1v1",
+            "nextThresholdPercent": 80, "nextMaxSeconds": 12000,
+        }
+        for field, value in (
+            ("optimizerUpdates", 61), ("thresholdPercent", 75.0),
+            ("autoAdvance", True), ("gate", "4v4")):
+            with self.subTest(field=field):
+                altered = dict(result, **{field: value})
+                with self.assertRaises(ValueError):
+                    dispatcher.next_dispatch_from_checkpoint(
+                        altered, state, config, "41798688051")
+        corrupted = dict(state, gateIndex=1)
+        with self.assertRaisesRegex(ValueError, "checkpoint"):
+            dispatcher.next_dispatch_from_checkpoint(
+                result, corrupted, config, "41798688051")
+        corrupted = dict(state, restartCycle={
+            **state["restartCycle"], "successPercent": 101})
+        with self.assertRaisesRegex(ValueError, "threshold"):
+            dispatcher.next_dispatch_from_checkpoint(
+                result, corrupted, config, "41798688051")
+
+    def test_standard_dispatch_still_uses_next_gate_threshold(self) -> None:
+        config = gate.GATES_FILE.read_bytes()
+        digest = hashlib.sha256(config).hexdigest()
+        state = {
+            "gateConfigSha256": digest, "gate": "1v0", "gateIndex": 0,
+            "passed": True, "lastCheckpointUpdates": 60,
+            "validatedGates": ["1v0"],
+        }
+        result = {
+            "gateConfigSha256": digest, "gate": "1v0", "passed": True,
+            "optimizerUpdates": 60, "autoAdvance": True,
+            "thresholdPercent": 75, "nextGate": "1v1",
+            "nextThresholdPercent": 80, "nextMaxSeconds": 12000,
+        }
+        inputs = dispatcher.next_dispatch_from_checkpoint(
+            result, state, config, "12345")
+        self.assertEqual(inputs["success_percent"], "80")
+        self.assertEqual(inputs["auto_advance"], "true")
+        state["restartCycle"] = {
+            "schemaVersion": 1, "bootstrapRunId": 10,
+            "sourceRunId": 9, "sameThresholdAllGates": False,
+            "successPercent": 75.0, "autoAdvance": True,
+        }
+        self.assertEqual(dispatcher.next_dispatch_from_checkpoint(
+            result, state, config, "12345"), inputs)
+
+    def test_only_training_workflow_owns_automatic_gate_dispatch(self) -> None:
+        root = Path(__file__).resolve().parents[3] / ".github/workflows"
+        training = (root / "mappo-training-windows.yml").read_text(
+            encoding="utf-8")
+        restart = (root / "mappo-restart-progressive.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("needs.train.result == 'success' && github.run_attempt == 1",
+                      training)
+        self.assertIn("name: blue-mappo-checkpoints\n          path: build/mappo-checkpoint",
+                      training)
+        self.assertNotIn("workflow_run:", restart)
+        self.assertNotIn("continue_same_threshold:", restart)
+        self.assertIn("same_threshold_all_gates:", restart)
+
+
 if __name__ == "__main__":
     unittest.main()
