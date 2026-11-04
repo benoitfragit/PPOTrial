@@ -39,6 +39,7 @@ class ProgressiveGateTests(unittest.TestCase):
         gate.existing.write_json(gate.GATES_FILE, sample_gates())
         gate.existing.write_json(gate.existing.TRAINING_FILE,
                                  {"training": {"maxUpdates": 300,
+                                               "checkpointEvery": 10,
                                                "saveEveryUpdates": 1}})
         gate.existing.write_json(gate.existing.SCENARIO_FILE,
                                  {"blueDefense": {
@@ -129,11 +130,83 @@ class ProgressiveGateTests(unittest.TestCase):
                 gate="1v1", threshold_percent=80, resume=True))
             self.assertTrue(second["passed"])
         self.assertEqual(runs, ["1v0", "1v1"])
-        self.assertEqual(gate.existing.read_updates(), 10)
+        self.assertEqual(gate.existing.read_updates(), 6)
         self.assertEqual(gate.existing.TRAINING_FILE.read_bytes(),
                          self.training_bytes)
         self.assertEqual(gate.existing.SCENARIO_FILE.read_bytes(),
                          self.scenario_bytes)
+
+    def test_resumed_new_gate_probes_at_one_update(self) -> None:
+        """Only one update is needed to test a restored checkpoint on a new gate."""
+        digest = hashlib.sha256(gate.GATES_FILE.read_bytes()).hexdigest()
+        self.checkpoint(2560)
+        gate.existing.write_json(gate.STATE_FILE, {
+            "formatVersion": 1, "gateConfigSha256": digest,
+            "gateIndex": 0, "gate": "1v0", "passed": True,
+            "elapsedSeconds": 50.0, "blockIndex": 10,
+            "lastCheckpointUpdates": 2560, "bestSuccessPercent": 87.5,
+            "lastSuccessPercent": 87.5, "validatedGates": ["1v0"],
+        })
+        checked = []
+
+        def simulate(binary: Path, stage: dict, seconds: int,
+                     log_path: Path) -> str:
+            self.assertEqual(gate.existing.read_updates(), 2560)
+            self.assertEqual(stage["id"], "1v1")
+            target = json.loads(
+                gate.existing.TRAINING_FILE.read_text()
+            )["training"]["maxUpdates"]
+            checked.append(target)
+            self.checkpoint(target)
+            log_path.write_text(
+                "Evaluation #1 P=1 N=1 score=74 success=0.875\n",
+                encoding="utf-8")
+            return "evaluation"
+
+        with patch.object(gate.existing, "run_stage", side_effect=simulate):
+            state = gate.run_gate(self.args(
+                gate="1v1", threshold_percent=85, resume=True,
+                block_updates=20))
+        self.assertTrue(state["passed"])
+        self.assertEqual(checked, [2561])
+        self.assertEqual(state["lastCheckpointUpdates"], 2561)
+        self.assertEqual(gate.existing.read_updates(), 2561)
+        self.assertEqual(state["validatedGates"], ["1v0", "1v1"])
+
+    def test_blocks_end_at_each_evaluation_checkpoint(self) -> None:
+        """Do not pass an old actor after later optimizer steps worsened it."""
+        updates = []
+
+        def simulate(binary: Path, stage: dict, seconds: int,
+                     log_path: Path) -> str:
+            current = gate.existing.read_updates()
+            target = json.loads(
+                gate.existing.TRAINING_FILE.read_text()
+            )["training"]["maxUpdates"]
+            updates.append((current, target))
+            self.checkpoint(target)
+            success = 0.875 if len(updates) == 3 else 0.25
+            log_path.write_text(
+                f"Evaluation #1 P=1 N=0 score=80 success={success}\n",
+                encoding="utf-8")
+            return "evaluation"
+
+        with patch.object(gate.existing, "run_stage", side_effect=simulate):
+            state = gate.run_gate(self.args(
+                threshold_percent=85, block_updates=20))
+        self.assertEqual(updates, [(0, 10), (10, 20), (20, 30)])
+        self.assertTrue(state["passed"])
+        self.assertEqual(gate.existing.read_updates(), 30)
+        self.assertEqual(state["lastSuccessPercent"], 87.5)
+
+    def test_checkpoint_evaluation_cadence_must_be_valid(self) -> None:
+        settings = json.loads(
+            gate.existing.TRAINING_FILE.read_text(encoding="utf-8"))
+        settings["training"]["checkpointEvery"] = 0
+        gate.existing.write_json(gate.existing.TRAINING_FILE, settings)
+        with self.assertRaisesRegex(ValueError, "checkpointEvery"):
+            gate.run_gate(self.args())
+        self.assertFalse(gate.STATE_FILE.is_file())
 
     def test_failure_continues_same_gate_with_fresh_run_budget(self) -> None:
         clock = [0.0]

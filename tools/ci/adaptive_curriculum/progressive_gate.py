@@ -243,6 +243,9 @@ def run_gate(args: argparse.Namespace) -> dict:
     original_scenario_bytes = existing.SCENARIO_FILE.read_bytes()
     original_training = json.loads(original_training_bytes)
     original_scenario = json.loads(original_scenario_bytes)
+    evaluation_interval = original_training["training"]["checkpointEvery"]
+    if type(evaluation_interval) is not int or evaluation_interval < 1:
+        raise ValueError("checkpointEvery must be a positive integer")
     existing.OUTPUT.mkdir(parents=True, exist_ok=True)
     stage_root = existing.OUTPUT / "adaptive-gates" / stage["id"]
     stage_root.mkdir(parents=True, exist_ok=True)
@@ -260,7 +263,16 @@ def run_gate(args: argparse.Namespace) -> dict:
     try:
         while time.monotonic() + 20 < deadline:
             updates = existing.read_updates()
-            target = updates + args.block_updates
+            # The actor is evaluated only after an optimizer update in C++.
+            # Probe a restored checkpoint on its new gate with one update.
+            # Thereafter stop at the *next* evaluation boundary: otherwise
+            # a successful earlier actor could be replaced by later weights
+            # before its checkpoint is handed to the next gate.
+            until_evaluation = evaluation_interval - updates % evaluation_interval
+            block_updates = min(args.block_updates, until_evaluation)
+            if args.resume and state["blockIndex"] == 0:
+                block_updates = 1
+            target = updates + block_updates
             selected = select_training_stage(
                 stages, state["gateIndex"], state["blockIndex"],
                 rehearsal_every, state["validatedGates"])
