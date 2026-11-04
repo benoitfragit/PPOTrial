@@ -101,6 +101,15 @@ def matching_success(log: Path, blue: int, red: int) -> float | None:
     return value
 
 
+def equivalent_gate_config_hashes(config_bytes: bytes) -> set[str]:
+    """Only accept byte-identical gate contracts modulo LF/CRLF checkout EOLs."""
+    normalized = config_bytes.replace(b"\r\n", b"\n")
+    return {
+        hashlib.sha256(normalized).hexdigest(),
+        hashlib.sha256(normalized.replace(b"\n", b"\r\n")).hexdigest(),
+    }
+
+
 def validate_source_gate_fingerprint(source_bytes: bytes,
                                      saved_digest: str | None,
                                      source_gate: str | None) -> list[dict]:
@@ -111,11 +120,7 @@ def validate_source_gate_fingerprint(source_bytes: bytes,
     match the downloaded source commit; no fake gate success is imported.
     """
     source_gates = validate_gates(json.loads(source_bytes))
-    normalized = source_bytes.replace(b"\r\n", b"\n")
-    allowed = {
-        hashlib.sha256(normalized).hexdigest(),
-        hashlib.sha256(normalized.replace(b"\n", b"\r\n")).hexdigest(),
-    }
+    allowed = equivalent_gate_config_hashes(source_bytes)
     if not isinstance(saved_digest, str) or saved_digest not in allowed:
         raise ValueError("Source gate configuration fingerprint mismatch")
     if source_gate not in [stage["id"] for stage in source_gates]:
@@ -156,12 +161,17 @@ def initialize_state(stages: list[dict], gate: str, resume: bool,
     if gate not in names:
         raise ValueError("Unknown gate")
     if resume:
+        # A Linux bootstrap records LF, while Git checkout on Windows can
+        # convert gates.json to CRLF. Authenticate the same contract, not EOLs.
+        valid_config_hashes = equivalent_gate_config_hashes(GATES_FILE.read_bytes())
+        if config_hash not in valid_config_hashes:
+            raise ValueError("Invalid current adaptive gate configuration hash")
         if not STATE_FILE.is_file() or not existing.LATEST.is_file():
             raise ValueError("Resume requires complete adaptive state and V7 checkpoint")
         state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
         last_success = state.get("lastSuccessPercent")
         if (state.get("formatVersion") != 1
-                or state.get("gateConfigSha256") != config_hash
+                or state.get("gateConfigSha256") not in valid_config_hashes
                 or type(state.get("gateIndex")) is not int
                 or not 0 <= state["gateIndex"] < len(stages)
                 or type(state.get("elapsedSeconds")) not in (int, float)
@@ -250,6 +260,9 @@ def initialize_state(stages: list[dict], gate: str, resume: bool,
                          elapsedSeconds=0.0, bestSuccessPercent=0.0,
                          lastSuccessPercent=None, blockIndex=0,
                          lastCheckpointUpdates=restored, championRequired=True)
+        # Keep the recorded fingerprint native to the current checkout for
+        # subsequent same-gate resumes; no policy or checkpoint bytes change.
+        state["gateConfigSha256"] = config_hash
         state["validatedGates"] = validated
         return state
     if gate != names[0]:
