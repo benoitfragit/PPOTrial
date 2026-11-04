@@ -561,6 +561,33 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertEqual(dispatcher.next_dispatch_from_checkpoint(
             result, state, config, "12345"), inputs)
 
+    def test_per_gate_threshold_changes_after_restart(self) -> None:
+        """The bootstrap target must not constrain later per-gate overrides."""
+        config = gate.GATES_FILE.read_bytes()
+        digest = hashlib.sha256(config).hexdigest()
+        state = {
+            "gateConfigSha256": digest, "gate": "1v1", "gateIndex": 1,
+            "passed": True, "lastCheckpointUpdates": 120,
+            "validatedGates": ["1v0", "1v1"],
+            "restartCycle": {
+                "schemaVersion": 1, "bootstrapRunId": 11,
+                "sourceRunId": 10, "sameThresholdAllGates": False,
+                "successPercent": 75, "autoAdvance": True,
+            },
+        }
+        result = {
+            "gateConfigSha256": digest, "gate": "1v1", "passed": True,
+            "optimizerUpdates": 120, "autoAdvance": True,
+            "thresholdPercent": 80, "nextGate": "4v4",
+            "nextThresholdPercent": 85, "nextMaxSeconds": 14400,
+        }
+        inputs = dispatcher.next_dispatch_from_checkpoint(
+            result, state, config, "123456")
+        self.assertEqual(inputs["progressive_gate"], "4v4")
+        self.assertEqual(inputs["success_percent"], "85")
+        self.assertEqual(inputs["resume_run_id"], "123456")
+
+
     def test_only_training_workflow_owns_automatic_gate_dispatch(self) -> None:
         root = Path(__file__).resolve().parents[3] / ".github/workflows"
         training = (root / "mappo-training-windows.yml").read_text(

@@ -75,7 +75,10 @@ jobs:
       - name: Verify workflow with actionlint
         shell: bash
         run: |
-          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -color .github/workflows/mappo-restart-progressive.yml
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -color .github/workflows/mappo-restart-progressive.yml .github/workflows/mappo-training-windows.yml
+
+      - name: Test MAPPO gate dispatch and restart regressions
+        run: python -m unittest discover -s tools/ci/adaptive_curriculum -p "test_*.py" -v
 
   bootstrap:
     # A rerun must not overwrite the original bootstrap artifact.

@@ -112,18 +112,21 @@ def next_dispatch_from_checkpoint(
             or type(cycle.get("successPercent")) not in (float, int)):
         raise ValueError("Invalid restart-cycle provenance")
     threshold = float(cycle["successPercent"])
-    current_threshold = result.get("thresholdPercent")
-    if (not 0 < threshold <= 100
-            or not isinstance(current_threshold, (int, float))
-            or isinstance(current_threshold, bool)
-            or float(current_threshold) != threshold):
-        raise ValueError("Restart-cycle success threshold mismatch")
+    if not 0 < threshold <= 100:
+        raise ValueError("Invalid restart-cycle success threshold")
 
     if not cycle["sameThresholdAllGates"]:
         if result.get("autoAdvance") is not cycle["autoAdvance"]:
             raise ValueError("Inconsistent auto-advance choice")
         return next_dispatch(result, config_bytes, run_id)
 
+    # Only fixed-threshold cycles must retain the bootstrap success target.
+    # In per-gate mode a later result legitimately uses a different threshold.
+    current_threshold = result.get("thresholdPercent")
+    if (not isinstance(current_threshold, (int, float))
+            or isinstance(current_threshold, bool)
+            or float(current_threshold) != threshold):
+        raise ValueError("Restart-cycle success threshold mismatch")
     # No second orchestrator: same-threshold runs explicitly disable the
     # ordinary dispatcher while retaining the user's opt-in in restartCycle.
     if result.get("autoAdvance") is not False:
