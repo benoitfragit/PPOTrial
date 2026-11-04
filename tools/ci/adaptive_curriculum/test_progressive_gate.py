@@ -767,7 +767,7 @@ class ProgressiveGateTests(unittest.TestCase):
                     dispatcher.next_dispatch_from_checkpoint(
                         {**result, **bad}, state, config, "34567")
 
-    def test_workflow_uniform_choice_defaults_to_true_and_85(self) -> None:
+    def test_workflow_uniform_choice_defaults_to_true_and_92(self) -> None:
         root = Path(__file__).resolve().parents[3] / ".github/workflows"
         train = (root / "mappo-training-windows.yml").read_text(encoding="utf-8")
         restart = (root / "mappo-restart-progressive.yml").read_text(encoding="utf-8")
@@ -777,7 +777,7 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertIn("default: true", choice)
         threshold = train.split("      success_percent:\n", 1)[1].split(
             "      same_threshold_all_gates:\n", 1)[0]
-        self.assertIn("default: 85", threshold)
+        self.assertIn("default: 92", threshold)
         self.assertIn("inputs[same_threshold_all_gates]", restart)
         self.assertIn("SAME_THRESHOLD_ALL_GATES", train)
 
@@ -871,6 +871,116 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertEqual(inputs["success_percent"], "85")
         self.assertEqual(inputs["resume_run_id"], "123456")
 
+
+    def test_production_gates_prune_unrealistic_combinations(self) -> None:
+        root = Path(__file__).resolve().parents[3]
+        document = json.loads((root / "tools/ci/adaptive_curriculum/gates.json"
+                               ).read_text(encoding="utf-8"))
+        expected = ["1v0", "2v0", "3v0", "4v0", "1v1", "2v1",
+                    "2v2", "3v2", "3v3", "4v3", "4v4"]
+        self.assertEqual([stage["id"] for stage in document["gates"]],
+                         expected)
+        self.assertEqual(document["rehearsalEveryBlocks"], 8)
+        restart = (root / ".github/workflows/mappo-restart-progressive.yml"
+                   ).read_text(encoding="utf-8")
+        choices = restart.split("      start_gate:\n", 1)[1].split(
+            "      success_percent:\n", 1)[0]
+        self.assertEqual(re.findall(r"^          - (\dv\d+)$",
+                                    choices, re.MULTILINE), expected)
+
+    def test_twenty_evaluation_cases_use_distinct_holdout_seeds(self) -> None:
+        root = Path(__file__).resolve().parents[3]
+        settings = json.loads((root / "resources/settings/Training/"
+                               "BluePatrol.json").read_text(encoding="utf-8"))
+        # Existing independent BlueDefense workflow must keep its defaults.
+        self.assertEqual(settings["evaluation"]["episodes"], 8)
+        workflow = (root / ".github/workflows/mappo-training-windows.yml"
+                    ).read_text(encoding="utf-8")
+        self.assertIn('-Name episodes -Value 20 -Force', workflow)
+        self.assertIn('-Name seed -Value 1004242 -Force', workflow)
+        eval_seeds = set(range(1004242, 1004242 + 20))
+        self.assertEqual(len(eval_seeds), 20)
+        self.assertNotIn(settings["training"]["seed"], eval_seeds)
+        self.assertTrue(eval_seeds.isdisjoint(set(range(4242, 4250))))
+        # 92% cannot be represented exactly by 20 cases: require 19/20 = 95%.
+        self.assertLess(18 / 20 * 100, 92)
+        self.assertGreaterEqual(19 / 20 * 100, 92)
+
+    def test_source_commit_fingerprint_permits_retired_best_gate_only(self) -> None:
+        legacy = sample_gates()
+        previous = {"id": "4v1", "blue": 4, "red": 1,
+                    "hostileZones": False, "thresholdPercent": 92,
+                    "maxSeconds": 14400, "autoAdvance": True}
+        legacy["gates"].insert(-1, previous)
+        source = json.dumps(legacy).encode("utf-8")
+        digest = hashlib.sha256(source).hexdigest()
+        parsed = gate.validate_source_gate_fingerprint(source, digest, "4v1")
+        self.assertIn("4v1", [stage["id"] for stage in parsed])
+        with self.assertRaisesRegex(ValueError, "fingerprint"):
+            gate.validate_source_gate_fingerprint(source, "bad", "4v1")
+        with self.assertRaisesRegex(ValueError, "absent"):
+            gate.validate_source_gate_fingerprint(source, digest, "2v2")
+        damaged = source.replace(b'"4v1"', b'"3v1"')
+        with self.assertRaisesRegex(ValueError, "fingerprint"):
+            gate.validate_source_gate_fingerprint(damaged, digest, "4v1")
+
+    def test_restart_bootstrap_uses_run_62_best_not_cancelled_run_63(self) -> None:
+        root = Path(__file__).resolve().parents[3]
+        restart = (root / ".github/workflows/mappo-restart-progressive.yml"
+                   ).read_text(encoding="utf-8")
+        self.assertIn('default: "41865674608"', restart)
+        self.assertIn('default: "2v2"', restart)
+        self.assertNotIn("41866496491", restart)
+        self.assertIn("champion.restore_latest(source_gate)", restart)
+        self.assertIn("champion.seed(start_gate, source_gate)", restart)
+        self.assertIn("validate_source_gate_fingerprint(", restart)
+        self.assertIn("gateConfigSha256=hashlib.sha256(gates_bytes).hexdigest()",
+                      restart)
+        self.assertIn("validatedGates=rehearsal_history", restart)
+        self.assertIn("evaluated 4v1 BEST pair", restart)
+
+
+    def test_rehearsal_preserves_previous_relevant_gates(self) -> None:
+        root = Path(__file__).resolve().parents[3]
+        stages = json.loads((root / "tools/ci/adaptive_curriculum/gates.json"
+                             ).read_text(encoding="utf-8"))["gates"]
+        target = "2v2"
+        names = [stage["id"] for stage in stages]
+        history = ["1v0", "2v0", "3v0", "4v0", "1v1", "2v1",
+                   "3v1", "4v1"]
+        retained = [stage_id for stage_id in names[:names.index(target)]
+                    if stage_id in history]
+        self.assertEqual(retained, ["1v0", "2v0", "3v0", "4v0",
+                                    "1v1", "2v1"])
+        self.assertEqual(
+            gate.select_training_stage(stages, names.index(target),
+                                       7, 8, retained)["id"], "1v0")
+        restart = (root / ".github/workflows/mappo-restart-progressive.yml"
+                   ).read_text(encoding="utf-8")
+        self.assertIn("rehearsal_history = validated_rehearsal_history(", restart)
+        self.assertIn("source_names.index(gate_id)", restart)
+        self.assertIn("validatedGates=rehearsal_history", restart)
+
+    def test_replay_history_requires_an_evaluated_best_for_each_gate(self) -> None:
+        stages = gate.validate_gates(sample_gates())
+        with patch.object(gate.champion, "read",
+                          return_value={"evaluatedForGate": True}) as read:
+            self.assertEqual(
+                gate.validated_rehearsal_history(
+                    stages, "4v4", ["1v0", "1v1", "4v1"]),
+                ["1v0", "1v1"])
+            self.assertEqual(read.call_count, 2)
+        with patch.object(gate.champion, "read", return_value=None):
+            with self.assertRaisesRegex(ValueError, "Missing evaluated BEST"):
+                gate.validated_rehearsal_history(stages, "4v4", ["1v0"])
+        with patch.object(gate.champion, "read",
+                          return_value={"evaluatedForGate": False}):
+            with self.assertRaisesRegex(ValueError, "Missing evaluated BEST"):
+                gate.validated_rehearsal_history(stages, "4v4", ["1v0"])
+        with self.assertRaisesRegex(ValueError, "validation list"):
+            gate.validated_rehearsal_history(stages, "4v4", ["1v0", "1v0"])
+        with self.assertRaisesRegex(ValueError, "Unknown resumed gate"):
+            gate.validated_rehearsal_history(stages, "unknown", [])
 
     def test_only_training_workflow_owns_automatic_gate_dispatch(self) -> None:
         root = Path(__file__).resolve().parents[3] / ".github/workflows"
