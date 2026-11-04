@@ -279,6 +279,7 @@ jobs:
             echo "[Open training runs](https://github.com/${GITHUB_REPOSITORY}/actions/workflows/mappo-training-windows.yml)"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Never dispatch twice from the same completed training run on reruns.
   continue_same_threshold:
     name: Continue restarted curriculum at the chosen success threshold
     if: >-
@@ -286,8 +287,6 @@ jobs:
       && github.event.workflow_run.conclusion == 'success'
       && github.event.workflow_run.event == 'workflow_dispatch'
       && github.event.workflow_run.head_branch == github.event.repository.default_branch
-      # Only the original training attempt and the first watcher attempt may
-      # dispatch a next gate; GitHub reruns must never create duplicate gates.
       && github.event.workflow_run.run_attempt == 1
       && github.run_attempt == 1
     runs-on: ubuntu-latest
