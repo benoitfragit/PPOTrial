@@ -161,8 +161,9 @@ def run(args: argparse.Namespace) -> int:
     binary = Path(args.binary).resolve()
     if not binary.is_file() or not actor.is_file():
         raise FileNotFoundError("Missing PPO.exe Release or promoted blue actor")
-    if not actor.open("rb").readline().startswith(
-            b"BLUE_TEAM_MAPPO_V10 10 10 "):
+    with actor.open("rb") as stream:
+        actor_header = stream.readline()
+    if not actor_header.startswith(b"BLUE_TEAM_MAPPO_V10 10 10 "):
         raise ValueError("Expected V10 unified blue actor")
     baseline = model_fingerprints(MODEL_ROOT)
     actor_hash = digest(actor)
