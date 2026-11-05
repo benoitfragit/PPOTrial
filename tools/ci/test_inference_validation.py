@@ -34,6 +34,17 @@ class InferenceValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validation.selected_gates("1v2")
 
+    def test_evaluation_profiles_select_only_requested_existing_gates(self):
+        self.assertEqual(
+            [gate[0] for gate in validation.selected_gates("patrol")],
+            ["1v0", "2v0"])
+        self.assertEqual(
+            [gate[0] for gate in validation.selected_gates("combat")],
+            ["1v1", "2v1", "2v2"])
+        self.assertEqual(
+            [gate[0] for gate in validation.selected_gates("2v2")],
+            ["2v2"])
+
     def test_complete_readonly_inference_evaluation(self):
         result = validation.evaluation_result(
             make_log(2, 2), ("2v2", 2, 2), 2004242, 2)
