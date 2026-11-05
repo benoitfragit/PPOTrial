@@ -29,6 +29,16 @@ on:
           - 1v1
           - 2v1
           - 2v2
+      rehearsal_profile:
+        description: "Training rehearsal profile (legacy preserves existing scheduling)"
+        required: false
+        type: choice
+        default: legacy
+        options:
+          - legacy
+          - balanced_v1
+          - patrol_focus_v1
+          - combat_focus_v1
       success_percent:
         description: "Minimum evaluated gate mission success percent [0,100]"
         required: true
@@ -188,6 +198,7 @@ jobs:
           RESUME_RUN_ID: ${{ inputs.resume_run_id }}
           AUTO_ADVANCE: ${{ inputs.auto_advance }}
           SAME_THRESHOLD_ALL_GATES: ${{ inputs.same_threshold_all_gates }}
+          REHEARSAL_PROFILE: ${{ inputs.rehearsal_profile }}
         run: |
           $pythonArgs = @(
             "-u", "tools/ci/adaptive_curriculum/progressive_gate.py",
@@ -196,6 +207,10 @@ jobs:
             "--max-seconds", $env:MAX_SECONDS,
             "--block-updates", "20"
           )
+          if (-not [string]::IsNullOrWhiteSpace($env:REHEARSAL_PROFILE) -and
+              $env:REHEARSAL_PROFILE -ne "legacy") {
+            $pythonArgs += @("--rehearsal-profile", $env:REHEARSAL_PROFILE)
+          }
           if (-not [string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) {
             $pythonArgs += "--resume"
           }

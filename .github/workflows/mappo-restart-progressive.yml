@@ -22,6 +22,16 @@ on:
           - 1v1
           - 2v1
           - 2v2
+      rehearsal_profile:
+        description: "Training replay profile for the new cycle (legacy = historical behavior)"
+        required: false
+        type: choice
+        default: legacy
+        options:
+          - legacy
+          - balanced_v1
+          - patrol_focus_v1
+          - combat_focus_v1
       success_percent:
         description: "Evaluated mission-success threshold (first gate, or ALL gates when switch is on)"
         required: true
@@ -118,6 +128,7 @@ jobs:
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           SUCCESS_PERCENT: ${{ inputs.success_percent }}
           SAME_THRESHOLD: ${{ inputs.same_threshold_all_gates }}
+          REHEARSAL_PROFILE: ${{ inputs.rehearsal_profile }}
           AUTO_ADVANCE: ${{ inputs.auto_advance }}
         shell: bash
         run: |
@@ -132,6 +143,7 @@ jobs:
               validate_gates, validate_source_gate_fingerprint,
               validated_rehearsal_history)
           from tools.ci.adaptive_curriculum import champion_checkpoints as champion
+          from tools.ci.adaptive_curriculum.rehearsal_profiles import PROFILES
           from tools.ci import mappo_curriculum
 
           root = Path('resources/model/BluePatrol')
@@ -155,6 +167,9 @@ jobs:
           stages = validate_gates(json.loads(gates_bytes))
           stage_names = [stage['id'] for stage in stages]
           start_gate = os.environ['START_GATE']
+          rehearsal_profile = os.environ['REHEARSAL_PROFILE'] or 'legacy'
+          if rehearsal_profile not in PROFILES:
+              raise RuntimeError('Unknown rehearsal profile')
           if start_gate not in stage_names:
               raise RuntimeError('Unknown target gate')
 
@@ -252,12 +267,14 @@ jobs:
               blockIndex=0,
               lastCheckpointUpdates=updates,
               validatedGates=rehearsal_history,
+              rehearsalProfile=rehearsal_profile,
               championRequired=source_best is not None,
               restartCycle=dict(
                   schemaVersion=1,
                   bootstrapRunId=int(os.environ["GITHUB_RUN_ID"]),
                   sourceRunId=int(os.environ["SOURCE_RUN_ID"]),
                   sameThresholdAllGates=same_threshold,
+                  rehearsalProfile=rehearsal_profile,
                   successPercent=threshold,
                   autoAdvance=auto_advance,
               ),
@@ -273,6 +290,7 @@ jobs:
                   f'- Source: {"BEST evaluated pair" if source_best else "LEGACY latest warm start"}\n'
                   f'- Earlier gates eligible for rehearsal: {rehearsal_history}\n'
                   f'- Same success threshold on every gate: {same_threshold}\n'
+                  f'- Training rehearsal profile: {rehearsal_profile}\n'
                   f'- Requested success threshold: {threshold:g}%\n'
                   '- No training, compilation, or production promotion in this bootstrap job\n'
               )
@@ -311,9 +329,11 @@ jobs:
           MAX_SECONDS: ${{ inputs.max_seconds }}
           AUTO_ADVANCE: ${{ inputs.auto_advance }}
           SAME_THRESHOLD: ${{ inputs.same_threshold_all_gates }}
+          REHEARSAL_PROFILE: ${{ inputs.rehearsal_profile }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         shell: bash
         run: |
+          REHEARSAL_PROFILE="${REHEARSAL_PROFILE:-legacy}"
           if [[ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
             echo 'Restart is permitted only from the repository default branch' >&2
             exit 1
@@ -339,6 +359,7 @@ jobs:
             -f "ref=${GITHUB_REF_NAME}" \
             -f "inputs[resume_run_id]=${GITHUB_RUN_ID}" \
             -f "inputs[progressive_gate]=${START_GATE}" \
+            -f "inputs[rehearsal_profile]=${REHEARSAL_PROFILE}" \
             -f "inputs[success_percent]=${SUCCESS_PERCENT}" \
             -f "inputs[same_threshold_all_gates]=${SAME_THRESHOLD}" \
             -f "inputs[max_seconds]=${MAX_SECONDS}" \
@@ -348,6 +369,7 @@ jobs:
             echo '### Training dispatched'
             echo "The existing Progressive Blue Defense workflow was dispatched from bootstrap run ${GITHUB_RUN_ID}."
             echo "Gate: ${START_GATE}; threshold: ${SUCCESS_PERCENT}%; budget: ${MAX_SECONDS}s."
+            echo "Training rehearsal profile: ${REHEARSAL_PROFILE}."
             echo "Same threshold for all gates: ${SAME_THRESHOLD}; automatic continuation requested: ${AUTO_ADVANCE}."
             echo 'The normal training workflow handles Release-cache validation, compile fallback, checkpoint updates, evaluation, and subsequent gate dispatch.'
             echo "[Open training runs](https://github.com/${GITHUB_REPOSITORY}/actions/workflows/mappo-training-windows.yml)"

@@ -51,6 +51,10 @@ def model_fingerprints(root: Path) -> dict[str, str]:
 def selected_gates(value: str) -> list[tuple[str, int, int]]:
     if value == "all":
         return list(GATES)
+    if value == "patrol":
+        return [gate for gate in GATES if gate[2] == 0]
+    if value == "combat":
+        return [gate for gate in GATES if gate[2] > 0]
     gates = [g for g in GATES if g[0] == value]
     if not gates:
         raise ValueError(f"Unsupported gate: {value}")
@@ -236,7 +240,7 @@ def main() -> int:
     parser.add_argument("--binary", default="build/release/Main/Release/PPO.exe")
     parser.add_argument("--output", default="build/inference-validation")
     parser.add_argument("--source-run-id", type=int, required=True)
-    parser.add_argument("--gate", choices=("all",) + tuple(g[0] for g in GATES),
+    parser.add_argument("--gate", choices=("all", "patrol", "combat") + tuple(g[0] for g in GATES),
                         default="all")
     parser.add_argument("--episodes", type=int, default=20)
     parser.add_argument("--seed-base", type=int, default=2004242)
