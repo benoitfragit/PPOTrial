@@ -18,7 +18,8 @@ ExampleCatalog CreateExampleCatalog()
     // Keep Airspace first so the existing no-argument startup is unchanged.
     return ExampleCatalog{ppo::examples::airspace::Definition(),
                           ppo::examples::bluedefense::Definition(),
-                          ppo::examples::bluedefense::InferenceDefinition()};
+                          ppo::examples::bluedefense::InferenceDefinition(),
+                          ppo::examples::bluedefense::EvaluationDefinition()};
 }
 
 } // namespace ppo::app
