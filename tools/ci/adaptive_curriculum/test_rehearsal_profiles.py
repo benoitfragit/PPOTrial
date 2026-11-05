@@ -1,0 +1,152 @@
+"""Regression tests for opt-in MAPPO rehearsal profiles and CI wiring."""
+from __future__ import annotations
+
+from collections import Counter
+import hashlib
+import json
+from pathlib import Path
+import unittest
+
+import dispatch_next_gate as dispatcher
+import progressive_gate as gate
+import rehearsal_profiles as profiles
+
+
+def reduced_gates() -> list[dict]:
+    return [
+        dict(id=name, blue=blue, red=red, hostileZones=False,
+             thresholdPercent=75, maxSeconds=14400, autoAdvance=True)
+        for name, blue, red in (
+            ("1v0", 1, 0), ("2v0", 2, 0), ("1v1", 1, 1),
+            ("2v1", 2, 1), ("2v2", 2, 2))
+    ]
+
+
+class RehearsalProfileTests(unittest.TestCase):
+    def test_all_named_profiles_have_exact_twenty_block_shares(self):
+        stages = reduced_gates()
+        history = [stage["id"] for stage in stages[:-1]]
+        for name, weights in profiles.WEIGHTS.items():
+            with self.subTest(profile=name):
+                selected = [
+                    profiles.select_weighted_stage(
+                        stages, 4, block, history, name)["id"]
+                    for block in range(20)
+                ]
+                self.assertEqual(Counter(selected), weights)
+                self.assertEqual(
+                    selected, [
+                        profiles.select_weighted_stage(
+                            stages, 4, block + 20, history, name)["id"]
+                        for block in range(20)
+                    ])
+                # Rehearsals are interleaved instead of grouped by scenario.
+                self.assertLess(max(
+                    len(list(group)) for _, group in __import__(
+                        "itertools").groupby(selected)), 8)
+
+    def test_skipped_and_future_gates_are_never_trained(self):
+        stages = reduced_gates()
+        for block in range(100):
+            selected = profiles.select_weighted_stage(
+                stages, 4, block, ["1v0", "1v1"], "balanced_v1")
+            self.assertIn(selected["id"], {"1v0", "1v1", "2v2"})
+            selected = profiles.select_weighted_stage(
+                stages, 2, block, ["1v0"], "patrol_focus_v1")
+            self.assertIn(selected["id"], {"1v0", "1v1"})
+
+    def test_reject_invalid_position_or_unknown_stage(self):
+        stages = reduced_gates()
+        with self.assertRaises(ValueError):
+            profiles.select_weighted_stage(
+                stages, 4, -1, [], "balanced_v1")
+        with self.assertRaises(ValueError):
+            profiles.select_weighted_stage(
+                stages, 4, 0, [], "not_a_profile")
+        with self.assertRaisesRegex(ValueError, "incompatible"):
+            profiles.select_weighted_stage(
+                [dict(id="4v4")], 0, 0, [], "balanced_v1")
+
+    def test_legacy_schedule_is_unchanged(self):
+        stages = reduced_gates()
+        for block in range(80):
+            current = gate.select_training_stage(
+                stages, 4, block, 8, ["1v0", "2v0", "1v1", "2v1"])
+            self.assertEqual(current["id"], (
+                gate.select_training_stage(
+                    stages, 4, block, 8,
+                    ["1v0", "2v0", "1v1", "2v1"])["id"]))
+
+    def test_dispatch_propagates_profile_and_rejects_mismatch(self):
+        stages = reduced_gates()
+        config = json.dumps(dict(
+            formatVersion=1, rehearsalEveryBlocks=8,
+            gates=stages)).encode()
+        digest = hashlib.sha256(config).hexdigest()
+        state = dict(
+            gateConfigSha256=digest, gate="2v1", gateIndex=3,
+            passed=True, validatedGates=["1v0", "2v0", "1v1", "2v1"],
+            lastCheckpointUpdates=1240, rehearsalProfile="balanced_v1",
+            sameThresholdAllGates=False)
+        result = dict(
+            gateConfigSha256=digest, gate="2v1", passed=True,
+            optimizerUpdates=1240, rehearsalProfile="balanced_v1",
+            nextGate="2v2", nextThresholdPercent=75,
+            nextMaxSeconds=14400, autoAdvance=True,
+            sameThresholdAllGates=False)
+        self.assertEqual(
+            dispatcher.next_dispatch_from_checkpoint(
+                result, state, config, "41948019589")["rehearsal_profile"],
+            "balanced_v1")
+        with self.assertRaisesRegex(ValueError, "profiles differ"):
+            dispatcher.next_dispatch_from_checkpoint(
+                dict(result, rehearsalProfile="legacy"),
+                state, config, "41948019589")
+
+    def test_fixed_threshold_restart_keeps_profile_and_single_dispatch(self):
+        stages = reduced_gates()
+        config = json.dumps(dict(
+            formatVersion=1, rehearsalEveryBlocks=8,
+            gates=stages)).encode()
+        digest = hashlib.sha256(config).hexdigest()
+        cycle = dict(schemaVersion=1, bootstrapRunId=123456,
+                     sourceRunId=41948019589, sameThresholdAllGates=True,
+                     autoAdvance=True, successPercent=95.0,
+                     rehearsalProfile="patrol_focus_v1")
+        state = dict(
+            gateConfigSha256=digest, gate="2v1", gateIndex=3,
+            passed=True, validatedGates=["1v0", "2v0", "1v1", "2v1"],
+            lastCheckpointUpdates=1240, rehearsalProfile="patrol_focus_v1",
+            restartCycle=cycle)
+        result = dict(
+            gateConfigSha256=digest, gate="2v1", passed=True,
+            optimizerUpdates=1240, rehearsalProfile="patrol_focus_v1",
+            nextGate="2v2", nextThresholdPercent=75,
+            nextMaxSeconds=14400, autoAdvance=False,
+            thresholdPercent=95, sameThresholdAllGates=True,
+            uniformThresholdPercent=95.0)
+        inputs = dispatcher.next_dispatch_from_checkpoint(
+            result, state, config, "41948019589")
+        self.assertEqual(inputs["rehearsal_profile"], "patrol_focus_v1")
+        self.assertEqual(inputs["auto_advance"], "false")
+        self.assertEqual(inputs["success_percent"], "95")
+
+    def test_workflow_choices_are_opt_in_and_legacy_defaults(self):
+        root = Path(__file__).resolve().parents[3]
+        progressive = (root / ".github/workflows/mappo-training-windows.yml"
+                       ).read_text(encoding="utf-8")
+        restart = (root / ".github/workflows/mappo-restart-progressive.yml"
+                   ).read_text(encoding="utf-8")
+        for workflow in (progressive, restart):
+            self.assertIn("      rehearsal_profile:", workflow)
+            self.assertIn("        default: legacy", workflow)
+            for profile in profiles.PROFILES:
+                self.assertIn("          - " + profile, workflow)
+        self.assertIn(
+            '"--rehearsal-profile", $env:REHEARSAL_PROFILE', progressive)
+        self.assertIn(
+            'inputs[rehearsal_profile]=${REHEARSAL_PROFILE}', restart)
+
+
+if __name__ == "__main__":
+    unittest.main()
