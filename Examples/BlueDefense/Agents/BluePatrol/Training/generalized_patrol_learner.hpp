@@ -153,8 +153,8 @@ private:
  * Storage and neural-network workspaces are allocated by
  * the constructor, never by the per-team-step success path.
  *
- * The historical two-agent PatrolLearner remains unchanged. This class owns a
- * distinct v8 actor, agent-conditioned centralized critic and v6 training state.
+ * The historical two-agent PatrolLearner remains unchanged. This class owns the
+ * v10 actor, agent-conditioned centralized critic and V7 training state.
  */
 class GeneralizedPatrolLearner final
 {
@@ -478,7 +478,7 @@ public:
     }
 
     /**
-     * @brief Invokes a consumer once with the sole shared v8 actor instance.
+     * @brief Invokes a consumer once with the sole shared v10 actor instance.
      * @tparam Consumer Callable accepting a const actor reference.
      * @param consumer Actor consumer.
      */
@@ -488,13 +488,13 @@ public:
         std::forward<Consumer>(consumer)(actor_);
     }
 
-    /** @brief Saves the inference-only v8 actor atomically. */
+    /** @brief Saves the inference-only v10 actor atomically. */
     void SaveActor(std::filesystem::path const& checkpoint) const
     {
         SaveGeneralizedPolicy(checkpoint, actor_, Metadata());
     }
 
-    /** @brief Loads a strict v8 actor and resets its Adam moments. */
+    /** @brief Loads a strict v10 actor and resets its Adam moments. */
     void LoadActor(std::filesystem::path const& checkpoint)
     {
         RequireUpdateBoundary("load a generalized actor");
@@ -509,7 +509,7 @@ public:
     }
 
     /**
-     * @brief Migrates a historical v7 inference actor into the v8 actor.
+     * @brief Migrates a historical v7 parameter layout into the generalized actor.
      * @param checkpoint Strict historical v7 actor checkpoint.
      */
     void LoadV7Actor(std::filesystem::path const& checkpoint)
@@ -612,7 +612,7 @@ public:
     }
 
     /**
-     * @brief Migrates only the shared v8 actor from a historical v5 trainer.
+     * @brief Migrates only the shared actor from a historical v5 trainer.
      *        The incompatible old critic/Adam state is deliberately reset.
      */
     void MigrateV5TrainingActor(std::filesystem::path const& checkpoint)
@@ -659,7 +659,7 @@ public:
         diagnostics_ = {};
     }
 
-    /** @brief Saves the complete update-boundary v6 training state. */
+    /** @brief Saves the complete update-boundary V7 training state. */
     void SaveTrainingState(std::filesystem::path const& checkpoint) const
     {
         RequireUpdateBoundary("save generalized training state");
@@ -668,7 +668,7 @@ public:
             rng_, completedUpdates_, Metadata());
     }
 
-    /** @brief Restores a v6 update-boundary model across valid P/N counts. */
+    /** @brief Restores a V7 update-boundary model across valid P/N counts. */
     void LoadTrainingState(std::filesystem::path const& checkpoint)
     {
         RequireUpdateBoundary("load generalized training state");

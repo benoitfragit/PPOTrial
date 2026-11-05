@@ -1,4 +1,4 @@
-# Blue MAPPO V10 — patrouille séquencée sur dix waypoints
+# Séquenceur de patrouille Blue — dix waypoints
 
 Date : 2026-11-02
 Périmètre : `GeneralizedPatrolMappoAgent`, scénarios N=0 uniquement.

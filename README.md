@@ -156,12 +156,15 @@ des rewards avec guidage figé.
 
 ## Documentation
 
+- [Index de la documentation](docs/README.md)
+- [Schéma d'architecture des réseaux Blue](docs/architecture/blue-network-architecture.md)
+- [Guide pratique pour adapter l'agent Blue](docs/adapter-agent-blue.md)
 - [Guide des modes BlueDefense](docs/blue-defense-example.md)
 - [Architecture MAPPO à effectifs variables](docs/mappo-variable-teams.md)
 - [Configuration JSON et paramètres](docs/configuration-guide.md)
 - [Instructions pour les contributions](AGENTS.md)
 - [Entraînement distant MAPPO Windows Release / GitHub Actions](docs/remote-mappo-training.md)
-- [Architecture du séquenceur de dix waypoints](docs/2026-11-02_Blue_V10_Ten_Waypoint_Patrol_Architecture.md)
+- [Architecture du séquenceur de dix waypoints](docs/architecture/blue-patrol-waypoint-sequencer.md)
 - [Téléchargement, diagnostic et comparaison des runs Blue](tools/blue_training_diagnostics/README.md)
 
 Le curriculum **V3 depuis zéro** et le contrat d’observation v10 sont décrits dans [docs/blue-mappo-v3.md](docs/blue-mappo-v3.md).

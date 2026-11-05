@@ -1,6 +1,6 @@
 /**
  * @file Examples/BlueDefense/Agents/BluePatrol/Training/patrol_rltools.hpp
- * @brief Implémentation des calculs et contrats d'entraînement patrol rltools.
+ * @brief Configuration RLtools de l'acteur partagé et des hyperparamètres PPO Blue.
  * @details Référence de l'unité, de ses types et de ses fonctions C++.
  * Les implémentations sont accessibles via le navigateur de sources Doxygen.
  */

@@ -1,6 +1,6 @@
 /**
  * @file Examples/BlueDefense/Agents/BluePatrol/Core/generalized_observation.hpp
- * @brief Contrat versionné des observations décentralisées v8, dimensions, offsets et masques.
+ * @brief Contrat versionné des observations décentralisées v10, dimensions, offsets et masques.
  * @details Référence de l'unité, de ses types et de ses fonctions C++.
  * Les implémentations sont accessibles via le navigateur de sources Doxygen.
  */

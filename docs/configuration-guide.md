@@ -207,7 +207,7 @@ Le MAPPO actuel utilise des canaux séparés pour la progression sur
 l'hippodrome (leader), le maintien du wedge (équipiers), la poursuite des
 Rouges, les pertes Bleues/Rouges, la protection de l'objectif, le coût de
 commande et l'issue de mission. Les sept poids nommés du JSON sont
-convertis explicitement en dix canaux de reward dans l'exécution.
+convertis explicitement en quinze canaux de reward dans l'exécution.
 Une formation correctement tenue ne génère pas un bonus positif
 permanent : l'écart hors tolérance est pénalisé. Les 61 rayons LiDAR
 restent disponibles, y compris pour la prévention Bleu/Bleu.
@@ -313,12 +313,14 @@ Bleus n'est instancié ; les Rouges conservent leur RLMission d'origine.
 L'acteur commun lit les pistes masquées de 0 à 10 Rouges, les équipiers
 et les 61 rayons LiDAR ; les P actions sont exécutées de manière
 synchrone et les P transitions sont agrégées par le critic individualisé.
-Le snapshot de l'IHM expose **10 canaux de récompense**.
+Le snapshot de l'IHM expose **15 canaux de récompense**. Le mapping exact des
+sept clés JSON vers ces quinze canaux est décrit dans le
+[guide d'adaptation de l'agent Blue](adapter-agent-blue.md#mapping-du-json-vers-les-15-poids).
 
-Les checkpoints v8 de l'acteur et V6 d'entraînement généralisés restent
-dans `resources/model/BluePatrol/latest`. Les fichiers historiques V4/V7
-ne servent plus qu'aux migrations compatibles ; ils ne définissent pas
-un second chemin d'exécution.
+Les checkpoints courants sont l'acteur V10 et l'état d'entraînement V7 dans
+`resources/model/BluePatrol/latest`. Les fichiers historiques archivés ne
+définissent pas un second chemin d'exécution et ne sont pas acceptés lorsque
+leur contrat d'observation est incompatible.
 
 Voir [BlueDefense — MAPPO P/N](blue-defense-example.md) pour le
 démarrage, les tests IHM et les commandes de compilation.

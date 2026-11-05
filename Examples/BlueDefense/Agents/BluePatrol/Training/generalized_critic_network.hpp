@@ -1,6 +1,6 @@
 /**
  * @file Examples/BlueDefense/Agents/BluePatrol/Training/generalized_critic_network.hpp
- * @brief Implémentation des calculs et contrats d'entraînement generalized critic network.
+ * @brief Réseau de valeur centralisé 470-vers-1 utilisé par le MAPPO Blue.
  * @details Référence de l'unité, de ses types et de ses fonctions C++.
  * Les implémentations sont accessibles via le navigateur de sources Doxygen.
  */
@@ -15,8 +15,8 @@ namespace ppo::examples::bluedefense::defenders {
 
 /**
  * @brief Dedicated 256-wide value network for generalized P/N training.
- *        Historical 128-wide v7 actor/critic remain unmodified. The generalized
- *        actor also remains 128-wide so saved v8 actor weights can be migrated.
+ *        The generalized actor remains 128-wide; checkpoint readers still
+ *        enforce their own observation and guidance semantic versions.
  */
 struct GeneralizedCriticConfig final
 {

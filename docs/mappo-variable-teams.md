@@ -33,7 +33,7 @@ targets correspond to the same selected blue. Dead and absent rows cannot
 contribute to either aggregate or optimization. If no blue is alive, the
 aggregates and critic row inputs are zero.
 
-The **network input dimensions never change** with P/N. A V6 full training
+The **network input dimensions never change** with P/N. A V7 full training
 state may now be resumed with different valid team counts because rollout
 buffers are constructed for the new episode and the shared weights and
 optimizer state retain their shape. A checkpoint records its source P/N,
@@ -119,17 +119,21 @@ engineering choices, not a claim of an optimal published architecture.
 
 ## Role-specific reward corrections (2026-10-29)
 
-The generalized runtime (independent of red RLMission) uses ten explainable
-channels: Patrol tracking, Formation keeping, Pursuit progress, Control effort,
-Blue survival, Red neutralization, Threat containment, Objective survival,
-Mission outcome, Timeout. The old seven-key JSON remains accepted, with
+The generalized runtime (independent of red RLMission) now uses fifteen
+explainable channels: Patrol tracking, Formation keeping, Pursuit progress,
+Control effort, Blue survival, Red neutralization, Threat containment,
+Objective survival, Mission outcome, Timeout, Blue separation,
+Restricted zone clearance, Boundary clearance, Low speed risk and Own loss.
+The old seven-key JSON remains accepted, with
 independent mappings: `Patrol tracking` controls only leader tracking;
 `Formation safety` controls formation error; `Mission outcome` controls
 single-blue loss; `Interception` controls both pursuit progress and sparse
 neutralization. The original 2026-10-29 GUI published ten names and values.
-Since 2026-10-30, three more blue-only safety channels are appended:
-Blue separation, Restricted zone clearance and Boundary clearance,
-for thirteen total. The original ten indices stay unchanged.
+Blue separation, Restricted zone clearance and Boundary clearance were
+appended next, followed by Low speed risk and Own loss, for fifteen total. The
+original ten indices stay unchanged. See the
+[current Blue adaptation guide](adapter-agent-blue.md#rewards--contrat-des-15-canaux)
+for the authoritative order and JSON mapping.
 
 Leader tracking includes progress, cross-track error and heading error, using
 existing `patrolProgressWeight`, `patrolCrossTrackWeight` and
@@ -149,8 +153,8 @@ at the beginning of the step, and uses objective risk as a weighting. Red-only
 movement cannot generate pursuit reward. It is a shared team coverage signal,
 not proof of optimal multi-target assignment.
 
-These reward semantics change the optimization objective even though the v8
-actor and v6 critic/checkpoint dimensions are unchanged. Continue training
+These reward semantics change the optimization objective even when the actor
+and critic/checkpoint dimensions are unchanged. Continue training
 only with deliberate reward migration; a fresh training run and multi-seed
 evaluation are recommended. Unit tests cover good/off-track tracking,
 leader-heading wedge consistency, blue-motion pursuit and proximity blending.
