@@ -92,7 +92,7 @@ class InferenceValidationTests(unittest.TestCase):
         # '[BLUE PATROL] Episode ...' inside the case-5 stdout row.
         stdout = make_log(2, 0, episodes=20, success=0.0)
         stderr = ("[BLUE PATROL] Episode 7 racetrack length=40156m "
-                  "direction=counter-clockwise leader=blue_1\\n")
+                  "direction=counter-clockwise leader=blue_1\n")
         corrupted = stdout.replace(
             "objective_alive=1 terminal=reds_cleared",
             "objective_a" + stderr + "live=1 terminal=reds_cleared", 1)
@@ -107,7 +107,7 @@ class InferenceValidationTests(unittest.TestCase):
             actor_root = root / "models"
             actor = actor_root / "prod/blue_patrol_generalized_v10.txt"
             actor.parent.mkdir(parents=True)
-            actor.write_text("BLUE_TEAM_MAPPO_V10 10 10 test\\n", encoding="utf-8")
+            actor.write_text("BLUE_TEAM_MAPPO_V10 10 10 test\n", encoding="utf-8")
             training_file = root / "training.json"
             scenario_file = root / "scenario.json"
             training_file.write_text(json.dumps({
@@ -141,7 +141,7 @@ class InferenceValidationTests(unittest.TestCase):
                 (output / "results.json").read_text())["results"][0]["cases"]), 20)
             self.assertEqual(training_file.read_bytes(), training_original)
             self.assertEqual(scenario_file.read_bytes(), scenario_original)
-            self.assertEqual(actor.read_text(), "BLUE_TEAM_MAPPO_V10 10 10 test\\n")
+            self.assertEqual(actor.read_text(), "BLUE_TEAM_MAPPO_V10 10 10 test\n")
 
     def test_model_grade_does_not_claim_ci_failure(self):
         cases = [validation.evaluation_result(
