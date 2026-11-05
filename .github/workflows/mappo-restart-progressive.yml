@@ -24,7 +24,7 @@ on:
           - 2v2
       rehearsal_profile:
         description: "Training replay profile for the new cycle (legacy = historical behavior)"
-        required: true
+        required: false
         type: choice
         default: legacy
         options:
@@ -167,7 +167,7 @@ jobs:
           stages = validate_gates(json.loads(gates_bytes))
           stage_names = [stage['id'] for stage in stages]
           start_gate = os.environ['START_GATE']
-          rehearsal_profile = os.environ['REHEARSAL_PROFILE']
+          rehearsal_profile = os.environ['REHEARSAL_PROFILE'] or 'legacy'
           if rehearsal_profile not in PROFILES:
               raise RuntimeError('Unknown rehearsal profile')
           if start_gate not in stage_names:
@@ -333,6 +333,7 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         shell: bash
         run: |
+          REHEARSAL_PROFILE="${REHEARSAL_PROFILE:-legacy}"
           if [[ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
             echo 'Restart is permitted only from the repository default branch' >&2
             exit 1
