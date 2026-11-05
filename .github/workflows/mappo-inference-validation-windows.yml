@@ -26,12 +26,14 @@ on:
           - 2v1
           - 2v2
       evaluate_gate:
-        description: "Evaluate all five gates or a single gate"
+        description: "Inference profile: all, patrol (Pvs0), combat (PvsN), or one gate"
         required: true
         type: choice
         default: "all"
         options:
           - all
+          - patrol
+          - combat
           - 1v0
           - 2v0
           - 1v1
@@ -99,7 +101,7 @@ jobs:
           if ($env:MODEL_GATE -notin @('1v0','2v0','1v1','2v1','2v2')) {
             throw "Unsupported model gate"
           }
-          if ($env:EVALUATE_GATE -notin @('all','1v0','2v0','1v1','2v1','2v2')) {
+          if ($env:EVALUATE_GATE -notin @('all','patrol','combat','1v0','2v0','1v1','2v1','2v2')) {
             throw "Unsupported evaluation gate"
           }
           $cases = 0
