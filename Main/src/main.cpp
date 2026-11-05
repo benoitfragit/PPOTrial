@@ -90,12 +90,14 @@ int main(int argc, char** argv)
         }
     }
 
+    bool const inferenceEvaluation =
+        noGui && requested == "blue-defense-evaluation";
     if ((durationSpecified && !noGui)
         || (noGui && (checkExample || !explicitExample
-            || requested != "blue-defense")))
+            || (requested != "blue-defense" && !inferenceEvaluation))))
     {
-        std::cerr << "--no-gui requires --example blue-defense; "
-                     "--max-seconds requires --no-gui\n";
+        std::cerr << "--no-gui requires blue-defense or "
+                     "blue-defense-evaluation; --max-seconds requires --no-gui\n";
         return 2;
     }
 
@@ -214,7 +216,10 @@ int main(int argc, char** argv)
                     snapshot.view<ppo::model::sAgentStateSnaphot>().each(
                         [&](ppo::model::sAgentStateSnaphot const& state)
                         {
-                            if (state.m_name == "Blue generalized shared MAPPO")
+                            if (state.m_name == "Blue generalized shared MAPPO"
+                                || (inferenceEvaluation
+                                    && state.m_name
+                                        == "Blue generalized MAPPO inference evaluation"))
                                 stateCopy = state.m_common;
                         });
                 });
@@ -222,7 +227,14 @@ int main(int argc, char** argv)
                 {
                     observedController = true;
                     auto const& common = *stateCopy;
-                    if (!common.m_training && !common.m_evaluationinprogress)
+                    if (inferenceEvaluation)
+                    {
+                        // Read-only evaluation finishes after its entire campaign.
+                        completed = common.m_completedEvaluations > 0U
+                            && !common.m_evaluationinprogress;
+                    }
+                    else if (!common.m_training
+                        && !common.m_evaluationinprogress)
                         completed = true;
                     auto const updates =
                         static_cast<std::uint64_t>(common.m_version);
@@ -286,6 +298,16 @@ int main(int argc, char** argv)
         {
             std::cerr << "[HEADLESS] Missing MAPPO controller snapshot\n";
             return 4;
+        }
+        if (inferenceEvaluation)
+        {
+            if (!completed)
+            {
+                std::cerr << "[HEADLESS] Inference evaluation did not complete\n";
+                return 6;
+            }
+            std::cout << "[HEADLESS] Inference-only evaluation completed\n";
+            return 0;
         }
         auto const latest = resourcePath.parent_path() / "model"
             / "BluePatrol" / "latest"

@@ -319,13 +319,23 @@ GeneralizedPatrolMappoAgent::GeneralizedPatrolMappoAgent(
     }
 
     rewardWeights_ = MapGeneralizedRewardWeights(training_);
-    if (executionMode_ == GeneralizedPatrolExecutionMode::ProductionInference)
+    if (executionMode_ != GeneralizedPatrolExecutionMode::Training)
     {
         productionPolicy_ =
             std::make_unique<GeneralizedPatrolProductionPolicy>(
                 counts_, productionCheckpoint_);
         std::cout << "[BLUE MAPPO V10] Loaded promoted production actor for "
                      "deterministic inference.\n";
+        if (executionMode_ == GeneralizedPatrolExecutionMode::ProductionEvaluation)
+        {
+            // The initial ECS reset uses this first deterministic case.
+            // No learner or optimizer is constructed, and no actor is written.
+            evaluation_.Start();
+            PrepareEvaluationCase();
+            std::cout << "[BLUE MAPPO V10] Starting inference-only P="
+                      << counts_.blueMobiles << " N=" << counts_.redMobiles
+                      << " (" << evaluation_.TestCount() << " cases)\n";
+        }
     }
     else
     {
@@ -721,6 +731,8 @@ void GeneralizedPatrolMappoAgent::ChooseAction()
         executionMode_ == GeneralizedPatrolExecutionMode::Training;
     if (episodeDone_
         || (trainingMode && finished_ && !evaluation_.InProgress())
+        || (executionMode_ == GeneralizedPatrolExecutionMode::ProductionEvaluation
+            && finished_)
         || registry_ == nullptr)
         return;
     try
@@ -930,7 +942,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                 auto const test = evaluation_.CurrentCase();
 
                 std::cout << "[MAPPO_EVAL_LOSS] update="
-                          << learner_->StepCount()
+                          << (learner_ ? learner_->StepCount() : 0U)
                           << " campaign=" << evaluation_.CompletedCampaigns() + 1U
                           << " case=" << evaluation_.TestsFinished() + 1U
                           << " seed=" << test.seed
@@ -973,7 +985,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                     : patrolCompleted ? "patrol_complete"
                     : truncated ? "timeout" : "unknown";
                 std::cout << "[MAPPO_EVAL_EPISODE] update="
-                          << learner_->StepCount()
+                          << (learner_ ? learner_->StepCount() : 0U)
                           << " campaign=" << evaluation_.CompletedCampaigns() + 1U
                           << " case=" << evaluation_.TestsFinished() + 1U
                           << " seed=" << test.seed
@@ -1004,8 +1016,12 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                 else
                 {
                     RestoreTrainingInitializer();
-                    if (evaluation_.Improved())
+                    if (executionMode_ == GeneralizedPatrolExecutionMode::Training
+                        && evaluation_.Improved())
                         PromoteEvaluatedActor();
+                    if (executionMode_
+                        == GeneralizedPatrolExecutionMode::ProductionEvaluation)
+                        finished_ = true;
                     GeneralizedEvaluationMetrics const metrics =
                         evaluation_.Metrics();
                     std::cout << "[BLUE MAPPO V10] Evaluation #"
@@ -1430,7 +1446,9 @@ GeneralizedPatrolMappoAgent::GetSnapshot() const noexcept
         executionMode_ == GeneralizedPatrolExecutionMode::Training;
     snapshot.m_name = trainingMode
         ? "Blue generalized shared MAPPO"
-        : "Blue generalized MAPPO production inference";
+        : (executionMode_ == GeneralizedPatrolExecutionMode::ProductionEvaluation
+            ? "Blue generalized MAPPO inference evaluation"
+            : "Blue generalized MAPPO production inference");
     snapshot.m_common.m_step = static_cast<long long>(episodeStep_);
     snapshot.m_common.m_maxStep = static_cast<long long>(
         trainingMode ? training_.rolloutSteps : parameters_.episodeSteps);
@@ -1452,7 +1470,8 @@ GeneralizedPatrolMappoAgent::GetSnapshot() const noexcept
         snapshot.m_common.m_step = static_cast<long long>(
             learner_->CollectedTeamSteps());
     }
-    if (trainingMode)
+    if (trainingMode
+        || executionMode_ == GeneralizedPatrolExecutionMode::ProductionEvaluation)
     {
         GeneralizedEvaluationMetrics const metrics = evaluation_.Metrics();
         snapshot.m_common.m_notation = evaluation_.BestScore();

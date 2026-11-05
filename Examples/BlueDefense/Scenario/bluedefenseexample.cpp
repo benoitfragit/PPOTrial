@@ -396,6 +396,26 @@ bool LoadScenario(
                   << error.what() << '\n';
         return false;
     }
+    if (executionMode
+        == defenders::GeneralizedPatrolExecutionMode::ProductionEvaluation)
+    {
+        // The scenario's initial ECS bootstrap preceded the evaluation
+        // controller constructor. That constructor now prepared case #1:
+        // reinitialize every entity under its deterministic seed, side and
+        // racetrack phase before the first simulated step.
+        for (auto const& [name, entity] : entities)
+        {
+            (void)name;
+            entity->Init();
+        }
+        if (context.patrolGeometrySamplingFailed
+            || context.episodeLayoutGenerationFailed
+            || !context.patrolGeometryReady)
+        {
+            return false;
+        }
+    }
+
     for (auto const& agent : agents)
         agent->Init();
 
@@ -430,6 +450,15 @@ bool LoadInferenceScenario(std::filesystem::path const& path,
         defenders::GeneralizedPatrolExecutionMode::ProductionInference);
 }
 
+/** @brief Read-only deterministic campaign using the promoted actor. */
+bool LoadEvaluationScenario(std::filesystem::path const& path,
+                            ppo::model::Environment& environment)
+{
+    return LoadScenario(
+        path, environment,
+        defenders::GeneralizedPatrolExecutionMode::ProductionEvaluation);
+}
+
 } // namespace
 
 /**
@@ -461,6 +490,19 @@ ppo::app::ExampleDefinition InferenceDefinition()
         &ppo::examples::airspace::RegisterAirspaceMeta,
         &LoadInferenceScenario,
         "Run the promoted blue production model without training or evaluation."
+    };
+}
+
+/** @brief Separate headless inference evaluation; no training or model writes. */
+ppo::app::ExampleDefinition EvaluationDefinition()
+{
+    return {
+        "blue-defense-evaluation",
+        "BLUE DEFENSE - INFERENCE VALIDATION",
+        std::filesystem::path("Scenarios") / "BlueDefense.json",
+        &ppo::examples::airspace::RegisterAirspaceMeta,
+        &LoadEvaluationScenario,
+        "Deterministic evaluation of the unchanged blue production actor."
     };
 }
 

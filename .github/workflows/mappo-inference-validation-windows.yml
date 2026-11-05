@@ -1,0 +1,274 @@
+name: Blue Defense - Inference Validation (Windows Release)
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/mappo-inference-validation-windows.yml'
+      - 'tools/ci/inference_validation.py'
+      - 'tools/ci/test_inference_validation.py'
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Source Progressive Blue Defense run ID (default run 73)"
+        required: true
+        type: string
+        default: "41948019589"
+      model_gate:
+        description: "Read-only BEST actor to load from source run"
+        required: true
+        type: choice
+        default: "2v2"
+        options:
+          - 1v0
+          - 2v0
+          - 1v1
+          - 2v1
+          - 2v2
+      evaluate_gate:
+        description: "Evaluate all five gates or a single gate"
+        required: true
+        type: choice
+        default: "all"
+        options:
+          - all
+          - 1v0
+          - 2v0
+          - 1v1
+          - 2v1
+          - 2v2
+      evaluation_episodes:
+        description: "Independent evaluation cases per gate (1-100)"
+        required: true
+        type: number
+        default: 20
+      evaluation_seed:
+        description: "First holdout seed, distinct from the training seeds"
+        required: true
+        type: number
+        default: 2004242
+      success_percent:
+        description: "Minimum model success per gate for the final grade"
+        required: true
+        type: number
+        default: 90
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mappo-inference-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate read-only inference scripts
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run isolated deterministic regression tests
+        run: python -m unittest discover -s tools/ci -p "test_inference_validation.py" -v
+
+  infer:
+    if: github.event_name == 'workflow_dispatch'
+    name: Immutable BEST actor - five-gate evaluation
+    runs-on: windows-2022
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout evaluation sources
+        uses: actions/checkout@v4
+
+      - name: Validate input run ID and evaluation parameters
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          MODEL_GATE: ${{ inputs.model_gate }}
+          EVALUATE_GATE: ${{ inputs.evaluate_gate }}
+          CASES: ${{ inputs.evaluation_episodes }}
+          SEED: ${{ inputs.evaluation_seed }}
+          THRESHOLD: ${{ inputs.success_percent }}
+        run: |
+          $id = 0L
+          if (-not [long]::TryParse($env:SOURCE_RUN_ID, [ref]$id) -or $id -le 0) {
+            throw "source_run_id must be a positive GitHub workflow run ID"
+          }
+          if ($env:MODEL_GATE -notin @('1v0','2v0','1v1','2v1','2v2')) {
+            throw "Unsupported model gate"
+          }
+          if ($env:EVALUATE_GATE -notin @('all','1v0','2v0','1v1','2v1','2v2')) {
+            throw "Unsupported evaluation gate"
+          }
+          $cases = 0
+          $seed = 0L
+          $threshold = 0.0
+          if (-not [int]::TryParse($env:CASES, [ref]$cases) -or
+              $cases -lt 1 -or $cases -gt 100) {
+            throw "evaluation_episodes must be in [1,100]"
+          }
+          if (-not [long]::TryParse($env:SEED, [ref]$seed) -or
+              $seed -lt 1 -or $seed -gt (4294967295 - $cases)) {
+            throw "evaluation_seed must fit within uint32 limits"
+          }
+          if (-not [double]::TryParse($env:THRESHOLD,
+              [System.Globalization.NumberStyles]::Float,
+              [System.Globalization.CultureInfo]::InvariantCulture,
+              [ref]$threshold) -or $threshold -lt 0 -or $threshold -gt 100) {
+            throw "success_percent must be in [0,100]"
+          }
+
+      - name: Download source run checkpoints (read-only source)
+        uses: actions/download-artifact@v4
+        with:
+          name: blue-mappo-checkpoints
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: resources/model/BluePatrol
+
+      - name: Verify BEST champion provenance, then stage actor locally
+        env:
+          MODEL_GATE: ${{ inputs.model_gate }}
+        run: |
+          $root = "resources/model/BluePatrol"
+          $best = Join-Path $root "best/$env:MODEL_GATE"
+          $metadataFile = Join-Path $best "champion.json"
+          $actor = Join-Path $best "blue_patrol_generalized_v10.txt"
+          $training = Join-Path $best "blue_patrol_generalized_training_v7.txt"
+          foreach ($file in @($metadataFile, $actor, $training)) {
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+              throw "Missing verified BEST checkpoint component: $file"
+            }
+          }
+          $manifest = Get-Content -LiteralPath $metadataFile -Raw | ConvertFrom-Json
+          if ($manifest.version -ne 1 -or $manifest.gate -ne $env:MODEL_GATE -or
+              $manifest.evaluatedForGate -ne $true -or
+              $manifest.updates -lt 1) {
+            throw "Source run's selected BEST checkpoint is not evaluated/compatible"
+          }
+          foreach ($file in @($actor, $training)) {
+            $fileName = [IO.Path]::GetFileName($file)
+            $expected = $manifest.sha256.PSObject.Properties[$fileName].Value
+            $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ([string]::IsNullOrWhiteSpace($expected) -or $actual -ne $expected) {
+              throw "Invalid BEST checkpoint checksum: $file"
+            }
+          }
+          $actorHeader = Get-Content -LiteralPath $actor -TotalCount 1
+          $trainingHeader = Get-Content -LiteralPath $training -TotalCount 1
+          if (-not $actorHeader.StartsWith("BLUE_TEAM_MAPPO_V10 10 10 ") -or
+              -not $trainingHeader.StartsWith("BLUE_TEAM_TRAINING_V7 7 10 ") -or
+              -not $actorHeader.Contains("UNIFIED_PHYSICAL_GUIDANCE_V1") -or
+              -not $trainingHeader.Contains("UNIFIED_PHYSICAL_GUIDANCE_V1")) {
+            throw "BEST checkpoint schema is not the expected unified V10 policy"
+          }
+          # CI-local copy: no change to source run, repository or uploaded model.
+          $destination = Join-Path $root "prod/blue_patrol_generalized_v10.txt"
+          New-Item -ItemType Directory -Path (Split-Path $destination) -Force | Out-Null
+          Copy-Item -LiteralPath $actor -Destination $destination -Force
+          if ((Get-FileHash $destination -Algorithm SHA256).Hash -ne
+              (Get-FileHash $actor -Algorithm SHA256).Hash) {
+            throw "Staged inference actor does not match the certified BEST"
+          }
+          New-Item -ItemType Directory "build/inference-validation" -Force | Out-Null
+          $manifest | ConvertTo-Json -Depth 10 |
+            Set-Content "build/inference-validation/selected-best.json" -Encoding utf8
+          Write-Host "Verified actor for gate $env:MODEL_GATE, update $($manifest.updates)"
+          Write-Host "Original BEST success $($manifest.successPercent)%"
+
+      - name: Verify unchanged red production model
+        run: |
+          if (-not (Test-Path "resources/model/RLMission/prod/model.pt" -PathType Leaf)) {
+            throw "Missing unchanged RLMission production model"
+          }
+
+      - name: Restore matching Windows x64 Release runtime cache
+        id: runtime_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: build/release/Main/Release
+          key: mappo-runtime-${{ runner.os }}-x64-msvc2022-Release-libtorch291cpu-${{ github.sha }}
+
+      - name: Validate runtime cache
+        id: runtime_probe
+        run: |
+          $root = "build/release/Main/Release"
+          $usable = $false
+          if ("${{ steps.runtime_cache.outputs.cache-hit }}" -eq "true" -and
+              (Test-Path "$root/PPO.exe" -PathType Leaf) -and
+              (Test-Path "$root/torch_cpu.dll" -PathType Leaf) -and
+              (Test-Path "$root/c10.dll" -PathType Leaf)) {
+            try {
+              & "$root/PPO.exe" --example blue-defense-evaluation --check-example
+              $usable = $LASTEXITCODE -eq 0
+            } catch {
+              Write-Warning "Cached binary is unusable: $_"
+            }
+          }
+          "usable=$($usable.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
+      - name: Configure x64 Release using existing build directory
+        if: steps.runtime_probe.outputs.usable != 'true'
+        run: |
+          cmake -S . -B build/release -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_CONFIGURATION_TYPES=Release `
+            -DPPO_LIBTORCH_VARIANT=Release `
+            -DPPO_BUILD_DESKTOP=ON `
+            -DPPO_BUILD_CORE_TESTS=OFF `
+            -DPPO_BUILD_CHECKPOINT_TESTS=OFF
+          if ($LASTEXITCODE -ne 0) { throw "Release configure failed" }
+
+      - name: Compile evaluation-enabled PPO.exe Release
+        if: steps.runtime_probe.outputs.usable != 'true'
+        run: |
+          cmake --build build/release --config Release --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw "Release build failed" }
+
+      - name: Verify headless evaluation example bootstraps
+        run: |
+          & "build/release/Main/Release/PPO.exe" --example blue-defense-evaluation --check-example
+          if ($LASTEXITCODE -ne 0) { throw "Inference evaluation scenario failed to initialize" }
+
+      - name: Cache validated Release binary and LibTorch DLLs
+        if: steps.runtime_probe.outputs.usable != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/release/Main/Release
+          key: mappo-runtime-${{ runner.os }}-x64-msvc2022-Release-libtorch291cpu-${{ github.sha }}
+
+      - name: Unit-test inference validation and reporting
+        run: |
+          python -m unittest discover -s tools/ci -p "test_inference_validation.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "Inference validation unit tests failed" }
+
+      - name: Evaluate immutable actor on selected gates
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          EVALUATE_GATE: ${{ inputs.evaluate_gate }}
+          CASES: ${{ inputs.evaluation_episodes }}
+          SEED: ${{ inputs.evaluation_seed }}
+          THRESHOLD: ${{ inputs.success_percent }}
+        run: |
+          python -u tools/ci/inference_validation.py `
+            --source-run-id $env:SOURCE_RUN_ID `
+            --gate $env:EVALUATE_GATE `
+            --episodes $env:CASES `
+            --seed-base $env:SEED `
+            --threshold $env:THRESHOLD `
+            --timeout-seconds 1200
+          if ($LASTEXITCODE -ne 0) { throw "Read-only inference validation failed" }
+
+      - name: Publish inference reports only (no model artifacts)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blue-mappo-inference-report
+          path: |
+            build/inference-validation/*.json
+            build/inference-validation/*.csv
+            build/inference-validation/*.md
+            build/inference-validation/*.log
+          if-no-files-found: warn
+          retention-days: 30
