@@ -1016,7 +1016,8 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                 else
                 {
                     RestoreTrainingInitializer();
-                    if (trainingMode && evaluation_.Improved())
+                    if (executionMode_ == GeneralizedPatrolExecutionMode::Training
+                        && evaluation_.Improved())
                         PromoteEvaluatedActor();
                     if (executionMode_
                         == GeneralizedPatrolExecutionMode::ProductionEvaluation)
