@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mappo_curriculum as existing  # noqa: E402
 import champion_checkpoints as champion  # noqa: E402
+import rehearsal_profiles as profiles  # noqa: E402
 
 
 GATES_FILE = Path("tools/ci/adaptive_curriculum/gates.json")
@@ -304,6 +305,7 @@ def record_result(state: dict, stages: list[dict], threshold: float,
                   nextMaxSeconds=(stages[index + 1]["maxSeconds"]
                      if next_gate else None),
                   sameThresholdAllGates=state.get("sameThresholdAllGates", False),
+                  rehearsalProfile=state.get("rehearsalProfile", "legacy"),
                   uniformThresholdPercent=state.get("uniformThresholdPercent"),
                   gateConfigSha256=state["gateConfigSha256"],
                   finished=passed and not next_gate)
@@ -347,6 +349,16 @@ def run_gate(args: argparse.Namespace) -> dict:
     state = initialize_state(stages, args.gate, args.resume, config_hash)
     stage = stages[state["gateIndex"]]
     cycle = state.get("restartCycle")
+    rehearsal_profile = getattr(args, "rehearsal_profile", "legacy")
+    if rehearsal_profile not in profiles.PROFILES:
+        raise ValueError("Unknown rehearsal profile")
+    saved_profile = state.get("rehearsalProfile", "legacy")
+    if args.resume and saved_profile != rehearsal_profile:
+        raise ValueError("Rehearsal profile mismatch with restored checkpoint")
+    if (isinstance(cycle, dict)
+            and cycle.get("rehearsalProfile", saved_profile) != rehearsal_profile):
+        raise ValueError("Rehearsal profile mismatch with restart cycle")
+    state["rehearsalProfile"] = rehearsal_profile
     if cycle is not None:
         # Preserve the separate restart action's previously agreed policy.
         uniform = cycle["sameThresholdAllGates"]
@@ -417,9 +429,14 @@ def run_gate(args: argparse.Namespace) -> dict:
             # worse PPO update can overwrite the checkpoint of an earlier win.
             until_evaluation = cadence - (updates % cadence)
             target = updates + min(args.block_updates, until_evaluation)
-            selected = select_training_stage(
-                stages, state["gateIndex"], state["blockIndex"],
-                rehearsal_every, state["validatedGates"])
+            if rehearsal_profile == "legacy":
+                selected = select_training_stage(
+                    stages, state["gateIndex"], state["blockIndex"],
+                    rehearsal_every, state["validatedGates"])
+            else:
+                selected = profiles.select_weighted_stage(
+                    stages, state["gateIndex"], state["blockIndex"],
+                    state["validatedGates"], rehearsal_profile)
             block_dir = stage_root / (
                 f"block-{state['blockIndex']:06d}-{selected['id']}"
                 f"-updates-{updates:06d}-{target:06d}")
@@ -506,6 +523,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", default="build/release/Main/Release/PPO.exe")
     parser.add_argument("--gate", default="1v0")
+    parser.add_argument("--rehearsal-profile", choices=profiles.PROFILES,
+                        default="legacy")
     parser.add_argument("--threshold-percent", type=float, default=75.0)
     parser.add_argument("--max-seconds", type=int, default=14400)
     parser.add_argument("--block-updates", type=int, default=20)
