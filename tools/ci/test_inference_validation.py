@@ -1,8 +1,10 @@
 """Deterministic contract tests for the read-only validation runner."""
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -84,6 +86,62 @@ class InferenceValidationTests(unittest.TestCase):
                 self.assertFalse(configured["restrictedZones"]["enabled"])
                 self.assertEqual(
                     configured["restrictedZoneSpawn"]["enabledProbability"], 0.0)
+
+    def test_patrol_stderr_cannot_split_evaluation_telemetry(self):
+        # Run 41979503675 completed 20 2v0 cases, but merged pipes put
+        # '[BLUE PATROL] Episode ...' inside the case-5 stdout row.
+        stdout = make_log(2, 0, episodes=20, success=0.0)
+        stderr = ("[BLUE PATROL] Episode 7 racetrack length=40156m "
+                  "direction=counter-clockwise leader=blue_1\\n")
+        corrupted = stdout.replace(
+            "objective_alive=1 terminal=reds_cleared",
+            "objective_a" + stderr + "live=1 terminal=reds_cleared", 1)
+        with self.assertRaisesRegex(ValueError, "got 19"):
+            validation.evaluation_result(
+                corrupted, ("2v0", 2, 0), 2004242, 20)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "PPO.exe"
+            binary.write_bytes(b"not executed - subprocess is mocked")
+            actor_root = root / "models"
+            actor = actor_root / "prod/blue_patrol_generalized_v10.txt"
+            actor.parent.mkdir(parents=True)
+            actor.write_text("BLUE_TEAM_MAPPO_V10 10 10 test\\n", encoding="utf-8")
+            training_file = root / "training.json"
+            scenario_file = root / "scenario.json"
+            training_file.write_text(json.dumps({
+                "evaluation": {"episodes": 8, "seed": 42}}))
+            scenario_file.write_text(json.dumps({
+                "blueDefense": {
+                    "blueTeam": {"activeCount": 4},
+                    "redTeam": {"activeCount": 4},
+                    "restrictedZones": {"enabled": True},
+                    "restrictedZoneSpawn": {"enabledProbability": 0.75}}}))
+            training_original = training_file.read_bytes()
+            scenario_original = scenario_file.read_bytes()
+            output = root / "results"
+            args = argparse.Namespace(
+                binary=str(binary), output=str(output),
+                source_run_id=41948019589, gate="2v0", episodes=20,
+                seed_base=2004242, threshold=90.0, timeout_seconds=1200)
+            result = subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=stdout, stderr=stderr)
+            with (patch.object(validation, "MODEL_ROOT", actor_root),
+                  patch.object(validation, "TRAINING_CONFIG", training_file),
+                  patch.object(validation, "SCENARIO_CONFIG", scenario_file),
+                  patch.object(validation.subprocess, "run",
+                               return_value=result) as launched):
+                self.assertEqual(validation.run(args), 0)
+            self.assertIs(launched.call_args.kwargs["stdout"], subprocess.PIPE)
+            self.assertIs(launched.call_args.kwargs["stderr"], subprocess.PIPE)
+            self.assertEqual((output / "2v0.log").read_text(), stdout)
+            self.assertEqual((output / "2v0.stderr.log").read_text(), stderr)
+            self.assertEqual(len(json.loads(
+                (output / "results.json").read_text())["results"][0]["cases"]), 20)
+            self.assertEqual(training_file.read_bytes(), training_original)
+            self.assertEqual(scenario_file.read_bytes(), scenario_original)
+            self.assertEqual(actor.read_text(), "BLUE_TEAM_MAPPO_V10 10 10 test\\n")
 
     def test_model_grade_does_not_claim_ci_failure(self):
         cases = [validation.evaluation_result(
