@@ -33,7 +33,8 @@ class GeneralizedPatrolProductionPolicy;
 enum class GeneralizedPatrolExecutionMode : std::uint8_t
 {
     Training,
-    ProductionInference
+    ProductionInference,
+    ProductionEvaluation  // Immutable actor; deterministic evaluation without PPO.
 };
 
 /**
