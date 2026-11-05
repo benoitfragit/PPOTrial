@@ -31,7 +31,7 @@ on:
           - 2v2
       rehearsal_profile:
         description: "Training rehearsal profile (legacy preserves existing scheduling)"
-        required: true
+        required: false
         type: choice
         default: legacy
         options:
