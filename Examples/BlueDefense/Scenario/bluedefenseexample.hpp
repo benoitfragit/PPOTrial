@@ -15,4 +15,6 @@ ppo::app::ExampleDefinition Definition();
  * @brief Définit le scénario BlueDefense exécuté avec la politique de production.
  */
 ppo::app::ExampleDefinition InferenceDefinition();
+/** @brief Runs a complete deterministic, read-only production actor evaluation. */
+ppo::app::ExampleDefinition EvaluationDefinition();
 }
