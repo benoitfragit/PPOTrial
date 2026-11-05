@@ -1,6 +1,12 @@
 name: Blue Defense - Inference Validation (Windows Release)
 
 on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/mappo-inference-validation-windows.yml'
+      - 'tools/ci/inference_validation.py'
+      - 'tools/ci/test_inference_validation.py'
   workflow_dispatch:
     inputs:
       source_run_id:
@@ -56,7 +62,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate:
+    name: Validate read-only inference scripts
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run isolated deterministic regression tests
+        run: python -m unittest discover -s tools/ci -p "test_inference_validation.py" -v
+
   infer:
+    if: github.event_name == 'workflow_dispatch'
     name: Immutable BEST actor - five-gate evaluation
     runs-on: windows-2022
     timeout-minutes: 150
@@ -133,7 +149,8 @@ jobs:
             throw "Source run's selected BEST checkpoint is not evaluated/compatible"
           }
           foreach ($file in @($actor, $training)) {
-            $expected = $manifest.sha256.([IO.Path]::GetFileName($file))
+            $fileName = [IO.Path]::GetFileName($file)
+            $expected = $manifest.sha256.PSObject.Properties[$fileName].Value
             $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
             if ([string]::IsNullOrWhiteSpace($expected) -or $actual -ne $expected) {
               throw "Invalid BEST checkpoint checksum: $file"
