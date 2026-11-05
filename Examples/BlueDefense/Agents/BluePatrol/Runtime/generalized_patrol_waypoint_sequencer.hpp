@@ -1,6 +1,6 @@
 /**
  * @file generalized_patrol_waypoint_sequencer.hpp
- * @brief Allocation-free RALLY/FOLLOW sequencer for one ten-waypoint patrol lap.
+ * @brief Allocation-free RALLY/FOLLOW sequencer for one 26-waypoint patrol lap.
  */
 #pragma once
 
@@ -45,7 +45,7 @@ struct GeneralizedPatrolWaypoint final
 };
 
 /**
- * @brief Owns the leader's ten immutable no-threat patrol waypoints.
+ * @brief Owns the leader's 26 immutable no-threat patrol waypoints.
  *
  * Track measurement always comes from the instantaneous analytical projection;
  * only observation guidance is fixed to the active waypoint. The active index
@@ -55,7 +55,7 @@ class GeneralizedPatrolWaypointSequencer final
 {
 public:
     /** @brief Exact number of passage zones spanning one complete lap. */
-    static constexpr std::size_t WaypointCount = 10U;
+    static constexpr std::size_t WaypointCount = 26U;
 
     /** @brief Clears all episode state and returns to RALLY. */
     void Reset() noexcept { *this = {}; }
@@ -69,13 +69,13 @@ public:
         return mode_ == GeneralizedPatrolMode::Follow;
     }
 
-    /** @brief Returns true once WPT10 has been physically validated. */
+    /** @brief Returns true once the final waypoint has been validated. */
     bool Completed() const noexcept { return completed_; }
 
     /** @brief Returns true while no shortcut/reverse invalidated this lap. */
     bool CircuitValid() const noexcept { return circuitValid_; }
 
-    /** @brief Zero-based active waypoint; ten means the sequence is complete. */
+    /** @brief Zero-based active waypoint; WaypointCount means completion. */
     std::size_t ActiveWaypointIndex() const noexcept
     {
         return activeWaypointIndex_;
@@ -216,10 +216,11 @@ public:
             return GeneralizedWaypointUpdate::None;
         GeneralizedPatrolWaypoint const& active =
             waypoints_[activeWaypointIndex_];
-        float const spacing = CircuitLength(parameters.geometry)
-            / static_cast<float>(WaypointCount);
+        // Preserve the original passage tolerance: denser waypoints must not
+        // silently change the waypoint acceptance radius.
+        float const originalSpacing = CircuitLength(parameters.geometry) / 10.F;
         float const acceptanceRadius = std::min(
-            0.25F * spacing,
+            0.25F * originalSpacing,
             std::max(0.4F * settings.positionToleranceMeters,
                 2.F * currentLeader.speed * parameters.dt));
         bool const finalWaypoint =
@@ -286,15 +287,81 @@ private:
             rallyCorridorLatched_ = true;
     }
 
-    /** @brief Generates ten equal-arclength waypoints for one complete lap. */
+    static constexpr std::size_t StraightWaypointCount = 3U;
+    static constexpr std::size_t BendWaypointCount = 10U;
+
+    /**
+     * @brief Maps directed circuit arclength to a 26-unit waypoint phase.
+     * Each straight occupies three units and each semicircle ten units.
+     */
+    static float WaypointPhase(PatrolGeometry const& geometry,
+                               float const arclength) noexcept
+    {
+        float const circuit = CircuitLength(geometry);
+        float remaining = std::fmod(arclength, circuit);
+        if (remaining < 0.F)
+            remaining += circuit;
+        float phase = 0.F;
+        for (std::size_t section = 0U; section < 4U; ++section)
+        {
+            bool const bend = section % 2U
+                == (geometry.direction > 0 ? 1U : 0U);
+            float const length = bend
+                ? 0.5F * kPatrolPi * geometry.width
+                : geometry.length - geometry.width;
+            float const count = static_cast<float>(bend
+                ? BendWaypointCount : StraightWaypointCount);
+            if (remaining < length)
+                return phase + count * remaining / length;
+            remaining -= length;
+            phase += count;
+        }
+        return 0.F;
+    }
+
+    /** @brief Inverse waypoint phase to directed circuit arclength. */
+    static float WaypointArclength(PatrolGeometry const& geometry,
+                                  float const waypointPhase) noexcept
+    {
+        float remaining = std::fmod(
+            waypointPhase, static_cast<float>(WaypointCount));
+        if (remaining < 0.F)
+            remaining += static_cast<float>(WaypointCount);
+        float arclength = 0.F;
+        for (std::size_t section = 0U; section < 4U; ++section)
+        {
+            bool const bend = section % 2U
+                == (geometry.direction > 0 ? 1U : 0U);
+            float const length = bend
+                ? 0.5F * kPatrolPi * geometry.width
+                : geometry.length - geometry.width;
+            float const count = static_cast<float>(bend
+                ? BendWaypointCount : StraightWaypointCount);
+            if (remaining < count)
+                return arclength + length * remaining / count;
+            remaining -= count;
+            arclength += length;
+        }
+        return 0.F;
+    }
+
+    /** @brief Generates three waypoints per straight, ten per semicircle. */
     void Generate(Parameters const& parameters,
                   PatrolCurvePose const& start) noexcept
     {
         float const circuit = CircuitLength(parameters.geometry);
-        float const spacing = circuit / static_cast<float>(WaypointCount);
+        float const firstPhase = WaypointPhase(
+            parameters.geometry, start.arclength);
         for (std::size_t index = 0U; index < WaypointCount; ++index)
         {
-            float const distance = spacing * static_cast<float>(index + 1U);
+            bool const last = index + 1U == WaypointCount;
+            float const absoluteArclength = last
+                ? start.arclength + circuit
+                : WaypointArclength(parameters.geometry,
+                    firstPhase + static_cast<float>(index + 1U));
+            float const distance = last ? circuit
+                : std::fmod(absoluteArclength - start.arclength
+                    + circuit, circuit);
             waypoints_[index] = {
                 EvaluatePatrolCurve(
                     parameters.geometry, start.arclength + distance),

@@ -4,6 +4,7 @@
  */
 #include "generalized_patrol_waypoint_sequencer.hpp"
 
+#include <array>
 #include <cmath>
 #include <iostream>
 
@@ -130,34 +131,86 @@ bool RallyAndGeneration()
     }
 
     float const circuit = blue::CircuitLength(parameters.geometry);
-    float const spacing = circuit
-        / static_cast<float>(blue::GeneralizedPatrolWaypointSequencer::WaypointCount);
+    float previousDistance = 0.F;
     for (std::size_t index = 0U;
          index < blue::GeneralizedPatrolWaypointSequencer::WaypointCount; ++index)
     {
         auto const& waypoint = sequencer.Waypoints()[index];
         auto const expected = blue::EvaluatePatrolCurve(
-            parameters.geometry,
-            1700.F + spacing * static_cast<float>(index + 1U));
-        if (!Near(waypoint.pose.north, expected.north)
+            parameters.geometry, 1700.F + waypoint.requiredDistanceMeters);
+        if (waypoint.requiredDistanceMeters <= previousDistance
+            || waypoint.requiredDistanceMeters > circuit + 0.05F
+            || !Near(waypoint.pose.north, expected.north)
             || !Near(waypoint.pose.east, expected.east)
             || !Near(std::remainder(
                     waypoint.pose.heading - expected.heading,
                     blue::kPatrolTwoPi), 0.F)
-            || !Near(waypoint.speed, parameters.cruiseSpeed)
-            || !Near(waypoint.requiredDistanceMeters,
-                spacing * static_cast<float>(index + 1U)))
+            || !Near(waypoint.speed, parameters.cruiseSpeed))
         {
             return false;
         }
+        previousDistance = waypoint.requiredDistanceMeters;
     }
+    if (!Near(previousDistance, circuit))
+        return false;
     // Once confirmed, FOLLOW and its frozen waypoints cannot be reset by
     // leaving the outer corridor.
     return sequencer.Observe(parameters, far, far, roles, settings)
             == blue::GeneralizedWaypointUpdate::None
         && sequencer.Following()
         && sequencer.ActiveWaypointIndex() == 0U
-        && Near(sequencer.Waypoints()[0].pose.arclength, 1700.F + spacing);
+        && Near(sequencer.Waypoints()[0].pose.arclength,
+            1700.F + sequencer.Waypoints()[0].requiredDistanceMeters);
+}
+
+
+/** @brief Locks the 3/10/3/10 distribution for both driving directions. */
+bool WaypointDensity()
+{
+    for (int const direction : {-1, 1})
+    {
+        blue::Parameters const parameters = TestParameters(direction);
+        auto const roles = *blue::BlueTeamRoles::Create(1U, 0U);
+        blue::PatrolNoThreatSettings const settings{};
+        float const straight = parameters.geometry.length
+            - parameters.geometry.width;
+        float const bend = 0.5F * blue::kPatrolPi
+            * parameters.geometry.width;
+        float const circuit = blue::CircuitLength(parameters.geometry);
+        for (float const start : {1700.F, straight + 0.37F * bend,
+                 straight + bend + 1700.F,
+                 2.F * straight + 1.37F * bend})
+        {
+            blue::GeneralizedPatrolWaypointSequencer sequencer{};
+            auto const initial = StateAt(parameters, roles, start);
+            if (!EnterFollow(sequencer, parameters, initial, roles, settings))
+                return false;
+            std::array<std::size_t, 4U> counts{};
+            float previousDistance = 0.F;
+            for (auto const& waypoint : sequencer.Waypoints())
+            {
+                float const distance = waypoint.requiredDistanceMeters;
+                auto const expected = blue::EvaluatePatrolCurve(
+                    parameters.geometry, start + distance);
+                if (distance <= previousDistance || distance > circuit + 0.05F
+                    || !Near(waypoint.pose.north, expected.north, 0.5F)
+                    || !Near(waypoint.pose.east, expected.east, 0.5F))
+                    return false;
+                previousDistance = distance;
+                float canonical = waypoint.pose.arclength;
+                if (direction < 0)
+                    canonical = std::fmod(circuit - canonical, circuit);
+                std::size_t const sector = canonical < straight ? 0U
+                    : canonical < straight + bend ? 1U
+                    : canonical < 2.F * straight + bend ? 2U : 3U;
+                ++counts[sector];
+            }
+            if (counts != std::array<std::size_t, 4U>{3U, 10U, 3U, 10U}
+                || !Near(previousDistance, circuit))
+                return false;
+        }
+    }
+    return true;
 }
 
 bool CompleteSequence(int const direction, std::size_t const blueCount,
@@ -197,8 +250,10 @@ bool CompleteSequence(int const direction, std::size_t const blueCount,
         previousCount = count;
     }
     return sequencer.Completed() && sequencer.CircuitValid()
-        && sequencer.ValidatedWaypointCount() == 10U
-        && sequencer.ActiveWaypointIndex() == 10U;
+        && sequencer.ValidatedWaypointCount()
+            == blue::GeneralizedPatrolWaypointSequencer::WaypointCount
+        && sequencer.ActiveWaypointIndex()
+            == blue::GeneralizedPatrolWaypointSequencer::WaypointCount;
 }
 
 bool NoPrematureAdvanceOrShortcut()
@@ -245,14 +300,13 @@ bool OrbitCannotAdvanceSequence()
     if (!EnterFollow(sequencer, parameters, previous, roles, settings))
         return false;
 
-    float const spacing = blue::CircuitLength(parameters.geometry)
-        / static_cast<float>(
-            blue::GeneralizedPatrolWaypointSequencer::WaypointCount);
+    float const firstWaypointDistance =
+        sequencer.Waypoints()[0].requiredDistanceMeters;
     constexpr std::size_t approachSteps = 400U;
     for (std::size_t step = 1U; step <= approachSteps; ++step)
     {
         auto const current = StateAt(parameters, roles,
-            spacing * static_cast<float>(step)
+            firstWaypointDistance * static_cast<float>(step)
                 / static_cast<float>(approachSteps));
         sequencer.Observe(parameters, previous, current, roles, settings);
         previous = current;
@@ -354,6 +408,7 @@ bool TimeoutConversion()
 int main()
 {
     if (!RallyAndGeneration()) { std::cerr << "rally/generation\n"; return 1; }
+    if (!WaypointDensity()) { std::cerr << "waypoint density\n"; return 8; }
     for (int direction : {-1, 1})
         for (std::size_t count : {1U, 2U, 3U, 4U, 9U})
             if (!CompleteSequence(direction, count))

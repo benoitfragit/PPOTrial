@@ -1146,7 +1146,7 @@ void DrawPatrolReferences3D(
 
 /**
  * @brief Draws the complete frozen waypoint sequence and its tangent headings.
- * @param overlay Generated ten-waypoint render view.
+ * @param overlay Generated 26-waypoint render view.
  * @param scale World-to-render scale.
  * @param reducedDetail True to use cheaper primitives in multi-camera views.
  */
