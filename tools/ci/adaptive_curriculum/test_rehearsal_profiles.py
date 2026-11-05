@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from itertools import groupby
 import hashlib
 import json
 from pathlib import Path
@@ -42,8 +43,7 @@ class RehearsalProfileTests(unittest.TestCase):
                     ])
                 # Rehearsals are interleaved instead of grouped by scenario.
                 self.assertLess(max(
-                    len(list(group)) for _, group in __import__(
-                        "itertools").groupby(selected)), 8)
+                    len(list(group)) for _, group in groupby(selected)), 8)
 
     def test_skipped_and_future_gates_are_never_trained(self):
         stages = reduced_gates()
@@ -70,12 +70,11 @@ class RehearsalProfileTests(unittest.TestCase):
     def test_legacy_schedule_is_unchanged(self):
         stages = reduced_gates()
         for block in range(80):
-            current = gate.select_training_stage(
+            selected = gate.select_training_stage(
                 stages, 4, block, 8, ["1v0", "2v0", "1v1", "2v1"])
-            self.assertEqual(current["id"], (
-                gate.select_training_stage(
-                    stages, 4, block, 8,
-                    ["1v0", "2v0", "1v1", "2v1"])["id"]))
+            expected = ("1v0", "2v0", "1v1", "2v1")[
+                (block // 8) % 4] if (block + 1) % 8 == 0 else "2v2"
+            self.assertEqual(selected["id"], expected)
 
     def test_dispatch_propagates_profile_and_rejects_mismatch(self):
         stages = reduced_gates()
