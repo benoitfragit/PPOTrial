@@ -17,6 +17,7 @@ from pathlib import Path
 
 from progressive_gate import validate_gates, GATES_FILE, RESULT_FILE
 import champion_checkpoints as champion
+import rehearsal_profiles as profiles
 
 
 def matching_gate_fingerprint(recorded: object, config_bytes: bytes) -> bool:
@@ -52,6 +53,9 @@ def next_dispatch(result: dict, config_bytes: bytes, run_id: str) -> dict | None
         return None
     if index + 1 >= len(stages):
         return None
+    profile = result.get("rehearsalProfile", "legacy")
+    if profile not in profiles.PROFILES:
+        raise ValueError("Unknown rehearsal profile in gate result")
     next_gate = stages[index + 1]
     if (result.get("nextGate") != next_gate["id"]
             or result.get("nextThresholdPercent") != next_gate["thresholdPercent"]
@@ -65,6 +69,7 @@ def next_dispatch(result: dict, config_bytes: bytes, run_id: str) -> dict | None
         "progressive_gate": next_gate["id"],
         "success_percent": str(next_gate["thresholdPercent"]),
         "auto_advance": "true",
+        "rehearsal_profile": profile,
     }
 
 
@@ -99,7 +104,14 @@ def next_dispatch_from_checkpoint(
             or (state["gate"] in state["validatedGates"]) is not state["passed"]):
         raise ValueError("Inconsistent verified gate history")
 
+    profile = state.get("rehearsalProfile", "legacy")
+    if (profile not in profiles.PROFILES
+            or result.get("rehearsalProfile", "legacy") != profile):
+        raise ValueError("Gate result and checkpoint rehearsal profiles differ")
     cycle = state.get("restartCycle")
+    if (isinstance(cycle, dict)
+            and cycle.get("rehearsalProfile", profile) != profile):
+        raise ValueError("Restart-cycle rehearsal profile mismatch")
     if cycle is None:
         inputs = next_dispatch(result, config_bytes, run_id)
         if inputs is None:
