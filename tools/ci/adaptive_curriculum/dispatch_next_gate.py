@@ -62,15 +62,18 @@ def next_dispatch(result: dict, config_bytes: bytes, run_id: str) -> dict | None
             or result.get("nextMaxSeconds") != next_gate["maxSeconds"]
             or not isinstance(run_id, str) or not run_id.isdigit()):
         raise ValueError("Invalid next gate handoff")
-    return {
+    inputs = {
         "max_seconds": str(next_gate["maxSeconds"]),
         "save_every_updates": "1",
         "resume_run_id": run_id,
         "progressive_gate": next_gate["id"],
         "success_percent": str(next_gate["thresholdPercent"]),
         "auto_advance": "true",
-        "rehearsal_profile": profile,
     }
+    # Existing legacy dispatches must keep their exact historical inputs.
+    if profile != "legacy":
+        inputs["rehearsal_profile"] = profile
+    return inputs
 
 
 CHECKPOINT_STATE_FILE = Path("build/mappo-checkpoint/adaptive-curriculum-progress.json")
