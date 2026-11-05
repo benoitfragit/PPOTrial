@@ -182,17 +182,24 @@ def run(args: argparse.Namespace) -> int:
                     [str(binary), "--no-gui", "--example",
                      "blue-defense-evaluation", "--max-seconds",
                      str(args.timeout_seconds)],
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    # Keep stdout telemetry isolated from concurrent std::clog
+                    # reset messages on stderr. Merging OS pipes can splice a
+                    # patrol reset into the middle of MAPPO_EVAL_EPISODE.
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     encoding="utf-8", errors="replace", timeout=args.timeout_seconds + 90,
                     check=False)
             except subprocess.TimeoutExpired as exc:
                 raise RuntimeError(f"{name}: inference timed out") from exc
-            log = completed.stdout
-            (output / f"{name}.log").write_text(log, encoding="utf-8")
-            if completed.returncode != 0 or "[MAPPO_ERROR]" in log or "[MAPPO_FATAL]" in log:
+            telemetry = completed.stdout
+            diagnostics = completed.stderr
+            (output / f"{name}.log").write_text(telemetry, encoding="utf-8")
+            (output / f"{name}.stderr.log").write_text(diagnostics, encoding="utf-8")
+            if (completed.returncode != 0
+                    or any(marker in text for text in (telemetry, diagnostics)
+                           for marker in ("[MAPPO_ERROR]", "[MAPPO_FATAL]"))):
                 raise RuntimeError(
-                    f"{name}: inference failed (exit {completed.returncode}); see log")
-            metric = evaluation_result(log, gate, args.seed_base, args.episodes)
+                    f"{name}: inference failed (exit {completed.returncode}); see logs")
+            metric = evaluation_result(telemetry, gate, args.seed_base, args.episodes)
             results.append(metric)
             print(f"[INFERENCE] {name} success={metric['success_percent']:.1f}% "
                   f"score={metric['score']:.2f}", flush=True)
