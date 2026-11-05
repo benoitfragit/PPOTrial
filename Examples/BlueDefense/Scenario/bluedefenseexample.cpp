@@ -430,6 +430,15 @@ bool LoadInferenceScenario(std::filesystem::path const& path,
         defenders::GeneralizedPatrolExecutionMode::ProductionInference);
 }
 
+/** @brief Read-only deterministic campaign using the promoted actor. */
+bool LoadEvaluationScenario(std::filesystem::path const& path,
+                            ppo::model::Environment& environment)
+{
+    return LoadScenario(
+        path, environment,
+        defenders::GeneralizedPatrolExecutionMode::ProductionEvaluation);
+}
+
 } // namespace
 
 /**
@@ -461,6 +470,19 @@ ppo::app::ExampleDefinition InferenceDefinition()
         &ppo::examples::airspace::RegisterAirspaceMeta,
         &LoadInferenceScenario,
         "Run the promoted blue production model without training or evaluation."
+    };
+}
+
+/** @brief Separate headless inference evaluation; no training or model writes. */
+ppo::app::ExampleDefinition EvaluationDefinition()
+{
+    return {
+        "blue-defense-evaluation",
+        "BLUE DEFENSE - INFERENCE VALIDATION",
+        std::filesystem::path("Scenarios") / "BlueDefense.json",
+        &ppo::examples::airspace::RegisterAirspaceMeta,
+        &LoadEvaluationScenario,
+        "Deterministic evaluation of the unchanged blue production actor."
     };
 }
 
