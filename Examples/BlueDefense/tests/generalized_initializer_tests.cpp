@@ -134,6 +134,72 @@ bool BlueTeamFitsWorld(std::size_t const blueCount)
     return true;
 }
 
+/**
+ * @brief Ensures the first holdout case is reinitialized from its own seed,
+ *        independently of the earlier scenario bootstrap.
+ */
+bool InitialHoldoutResetIsDeterministic()
+{
+    using namespace ppo::model;
+    namespace bluedefense = ppo::examples::bluedefense;
+
+    struct Pose
+    {
+        float north{};
+        float east{};
+        float heading{};
+        float arclength{};
+    };
+    Pose reference{};
+    for (int pass = 0; pass < 2; ++pass)
+    {
+        entt::registry registry;
+        auto& world = registry.ctx().emplace<sEnvironmentState>();
+        world.m_maxNorth = 44658.75F;
+        world.m_maxEast = 71454.F;
+        auto& context = registry.ctx().emplace<bluedefense::InitializerContext>();
+        context.count = 1U;
+        context.spawnSettings.blueTeam = bluedefense::BlueTeamSpawnSettings{};
+        context.spawnSettings.blueTeam->activeCount = 1U;
+        context.spawnSettings.redTeam = bluedefense::RedTeamSpawnSettings{};
+        context.spawnSettings.redTeam->activeCount = 0U;
+        Entity blue{&registry, eEntitySide::Friend, eEntityType::Mobile};
+        blue.add<sEntityMetadata>(sEntityMetadata{"blue_1", "defender_car"});
+        blue.add<sPseudoLidarState>();
+
+        // The first pass reproduces the loader's pre-agent bootstrap.
+        if (pass == 0)
+        {
+            context.rng.seed(42U);
+            bluedefense::InitializeEntity(blue);
+        }
+
+        context.evaluationOverride = true;
+        context.evaluationSide = -1;
+        context.evaluationPhaseFraction = 0.25F;
+        context.rng.seed(2004242U);
+        context.next = 0U;
+        bluedefense::InitializeEntity(blue);
+        if (!context.patrolGeometryReady
+            || context.patrolGeometrySamplingFailed
+            || context.episodeLayoutGenerationFailed
+            || context.next != 0U || context.side != -1)
+            return false;
+
+        auto const [state] = blue.get<sEntityState>();
+        Pose const actual{
+            state.m_x, state.m_y, state.m_rotation, context.arclength};
+        if (pass == 0)
+            reference = actual;
+        else if (std::abs(actual.north - reference.north) > 0.01F
+            || std::abs(actual.east - reference.east) > 0.01F
+            || std::abs(actual.heading - reference.heading) > 0.001F
+            || std::abs(actual.arclength - reference.arclength) > 0.01F)
+            return false;
+    }
+    return true;
+}
+
 } // namespace
 
 /**
@@ -147,6 +213,8 @@ int main()
         return 3;
     if (!BlueTeamFitsWorld(3U))
         return 4;
+    if (!InitialHoldoutResetIsDeterministic())
+        return 5;
 
     // A failed evaluation reset must not poison the following training reset.
     ppo::examples::bluedefense::InitializerContext recovered{};
