@@ -396,6 +396,26 @@ bool LoadScenario(
                   << error.what() << '\n';
         return false;
     }
+    if (executionMode
+        == defenders::GeneralizedPatrolExecutionMode::ProductionEvaluation)
+    {
+        // The scenario's initial ECS bootstrap preceded the evaluation
+        // controller constructor. That constructor now prepared case #1:
+        // reinitialize every entity under its deterministic seed, side and
+        // racetrack phase before the first simulated step.
+        for (auto const& [name, entity] : entities)
+        {
+            (void)name;
+            entity->Init();
+        }
+        if (context.patrolGeometrySamplingFailed
+            || context.episodeLayoutGenerationFailed
+            || !context.patrolGeometryReady)
+        {
+            return false;
+        }
+    }
+
     for (auto const& agent : agents)
         agent->Init();
 
