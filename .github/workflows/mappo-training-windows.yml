@@ -205,9 +205,12 @@ jobs:
             "--gate", $env:GATE,
             "--threshold-percent", $env:SUCCESS_PERCENT,
             "--max-seconds", $env:MAX_SECONDS,
-            "--block-updates", "20",
-            "--rehearsal-profile", $env:REHEARSAL_PROFILE
+            "--block-updates", "20"
           )
+          if (-not [string]::IsNullOrWhiteSpace($env:REHEARSAL_PROFILE) -and
+              $env:REHEARSAL_PROFILE -ne "legacy") {
+            $pythonArgs += @("--rehearsal-profile", $env:REHEARSAL_PROFILE)
+          }
           if (-not [string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) {
             $pythonArgs += "--resume"
           }
