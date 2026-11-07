@@ -216,6 +216,10 @@ bool TestCooperationWithDispersedReds()
         parameters, partiallyEngaged);
     float const halfExpected = std::pow(1.F - 0.75F * halfEngagement,
                                        1.F + 0.5F * halfEngagement);
+    float const inactiveDispersion = patrol::GeneralizedRedDispersion(
+        parameters, inactiveThird);
+    float const inactiveExpected = std::pow(
+        0.25F, 1.F + inactiveDispersion);
     return Close(patrol::GeneralizedCooperationWeight(
             parameters, oneRed), 0.25F)
         && Close(patrol::GeneralizedCooperationWeight(
@@ -226,8 +230,9 @@ bool TestCooperationWithDispersedReds()
             parameters, threeDispersed), 0.125F)
         && Close(patrol::GeneralizedCooperationWeight(
             parameters, threeWidelyDispersed), 0.0625F)
+        && Close(inactiveDispersion, 0.25F)
         && Close(patrol::GeneralizedCooperationWeight(
-            parameters, inactiveThird), std::pow(0.25F, 1.25F))
+            parameters, inactiveThird), inactiveExpected)
         && Close(patrol::GeneralizedCooperationWeight(
             parameters, noEngagement), 1.F)
         && Close(halfEngagement, 0.5F)
