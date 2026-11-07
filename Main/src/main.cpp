@@ -22,6 +22,51 @@
 #include <system_error>
 #include <thread>
 
+namespace {
+
+/**
+ * @brief Copies the public Blue MAPPO controller state from one ECS snapshot.
+ * @param environment Environment owning the immutable public snapshot.
+ * @param inferenceEvaluation True when the inference-evaluation controller is expected.
+ * @return Controller state when the requested Blue controller is present.
+ */
+std::optional<ppo::model::sCommonAgentState> ReadBlueControllerState(
+    ppo::model::Environment const& environment,
+    bool const inferenceEvaluation)
+{
+    std::optional<ppo::model::sCommonAgentState> stateCopy;
+    environment.ReadSnapshot([&](entt::registry const& snapshot)
+    {
+        snapshot.view<ppo::model::sAgentStateSnaphot>().each(
+            [&](ppo::model::sAgentStateSnaphot const& state)
+            {
+                if (state.m_name == "Blue generalized shared MAPPO"
+                    || (inferenceEvaluation
+                        && state.m_name
+                            == "Blue generalized MAPPO inference evaluation"))
+                    stateCopy = state.m_common;
+            });
+    });
+    return stateCopy;
+}
+
+/**
+ * @brief Tests whether an automatic Blue MAPPO process reached its terminal state.
+ * @param state Latest public controller state.
+ * @param inferenceEvaluation True for a read-only deterministic campaign.
+ * @return True after training or the requested evaluation has completed.
+ */
+bool AutomaticRunCompleted(ppo::model::sCommonAgentState const& state,
+                           bool const inferenceEvaluation) noexcept
+{
+    if (inferenceEvaluation)
+        return state.m_completedEvaluations > 0U
+            && !state.m_evaluationinprogress;
+    return !state.m_training && !state.m_evaluationinprogress;
+}
+
+} // namespace
+
 /**
  * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
  */
@@ -33,6 +78,7 @@ int main(int argc, char** argv)
     bool checkExample = false;
     bool explicitExample = false;
     bool noGui = false;
+    bool autoRun = false;
     bool durationSpecified = false;
     unsigned int maxSeconds = 14400U;
     std::string requested{examples.Default().id};
@@ -43,6 +89,11 @@ int main(int argc, char** argv)
         if (option == "--no-gui")
         {
             noGui = true;
+            continue;
+        }
+        if (option == "--auto-run")
+        {
+            autoRun = true;
             continue;
         }
         if (option == "--max-seconds")
@@ -90,14 +141,19 @@ int main(int argc, char** argv)
         }
     }
 
-    bool const inferenceEvaluation =
-        noGui && requested == "blue-defense-evaluation";
-    if ((durationSpecified && !noGui)
+    bool const automaticExecution = noGui || autoRun;
+    bool const inferenceEvaluation = automaticExecution
+        && requested == "blue-defense-evaluation";
+    if ((durationSpecified && !automaticExecution)
+        || (autoRun && noGui)
+        || (autoRun && (checkExample || !explicitExample
+            || (requested != "blue-defense" && !inferenceEvaluation)))
         || (noGui && (checkExample || !explicitExample
             || (requested != "blue-defense" && !inferenceEvaluation))))
     {
-        std::cerr << "--no-gui requires blue-defense or "
-                     "blue-defense-evaluation; --max-seconds requires --no-gui\n";
+        std::cerr << "--no-gui and --auto-run are exclusive and require an "
+                     "explicit blue-defense or blue-defense-evaluation example; "
+                     "--max-seconds requires one of these automatic modes\n";
         return 2;
     }
 
@@ -134,7 +190,7 @@ int main(int argc, char** argv)
     bool const scenarioLoaded = selected->loadScenario(
         resourcePath / selected->defaultScenario, environment);
 
-    if (noGui && !scenarioLoaded)
+    if (automaticExecution && !scenarioLoaded)
     {
         std::cerr << "Failed to load training scenario: " << requested << '\n';
         return 3;
@@ -210,32 +266,14 @@ int main(int argc, char** argv)
                 bool const heartbeat = sampledAt >= nextHeartbeat;
                 // Hold the ECS snapshot mutex only long enough to copy
                 // scalars; disk I/O and console output happen after unlock.
-                std::optional<ppo::model::sCommonAgentState> stateCopy;
-                environment.ReadSnapshot([&](entt::registry const& snapshot)
-                {
-                    snapshot.view<ppo::model::sAgentStateSnaphot>().each(
-                        [&](ppo::model::sAgentStateSnaphot const& state)
-                        {
-                            if (state.m_name == "Blue generalized shared MAPPO"
-                                || (inferenceEvaluation
-                                    && state.m_name
-                                        == "Blue generalized MAPPO inference evaluation"))
-                                stateCopy = state.m_common;
-                        });
-                });
+                auto const stateCopy = ReadBlueControllerState(
+                    environment, inferenceEvaluation);
                 if (stateCopy)
                 {
                     observedController = true;
                     auto const& common = *stateCopy;
-                    if (inferenceEvaluation)
-                    {
-                        // Read-only evaluation finishes after its entire campaign.
-                        completed = common.m_completedEvaluations > 0U
-                            && !common.m_evaluationinprogress;
-                    }
-                    else if (!common.m_training
-                        && !common.m_evaluationinprogress)
-                        completed = true;
+                    completed = AutomaticRunCompleted(
+                        common, inferenceEvaluation);
                     auto const updates =
                         static_cast<std::uint64_t>(common.m_version);
                     if (telemetry)
@@ -323,8 +361,45 @@ int main(int argc, char** argv)
     }
 
     renderer->SetEnvironment(environment);
-    while (renderer->Run())
+    if (autoRun)
     {
+        using Clock = std::chrono::steady_clock;
+        auto const deadline = Clock::now() + std::chrono::seconds(maxSeconds);
+        bool observedController = false;
+        bool controllerWasActive = false;
+        bool completed = false;
+        std::cout << "[GUI_AUTORUN] Running " << requested
+                  << " (budget " << maxSeconds << " seconds)\n";
+        environment.Play();
+        while (renderer->Run())
+        {
+            auto const state = ReadBlueControllerState(
+                environment, inferenceEvaluation);
+            if (state)
+            {
+                observedController = true;
+                controllerWasActive = controllerWasActive
+                    || state->m_training || state->m_evaluationinprogress;
+                completed = controllerWasActive
+                    && AutomaticRunCompleted(*state, inferenceEvaluation);
+            }
+            if (completed || Clock::now() >= deadline)
+                break;
+        }
+        environment.Stop();
+        if (!observedController)
+            std::cerr << "[GUI_AUTORUN] Blue MAPPO controller was not observed\n";
+        else if (completed)
+            std::cout << "[GUI_AUTORUN] Automatic block completed\n";
+        else
+            std::cout << "[GUI_AUTORUN] Window closed or time budget reached; "
+                         "latest checkpoint remains resumable\n";
+    }
+    else
+    {
+        while (renderer->Run())
+        {
+        }
     }
     serializer.Save();
     return 0;

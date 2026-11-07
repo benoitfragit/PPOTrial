@@ -80,6 +80,22 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
                 --max-seconds 1)
     set_tests_properties(TrainingBudgetRequiresNoGui PROPERTIES WILL_FAIL TRUE)
 
+    add_test(NAME GuiAutoRunRequiresExplicitBlueDefense
+        COMMAND $<TARGET_FILE:${PROJECT_NAME}> --auto-run)
+    set_tests_properties(GuiAutoRunRequiresExplicitBlueDefense PROPERTIES
+        WILL_FAIL TRUE)
+
+    add_test(NAME GuiAutoRunRejectsAirspace
+        COMMAND $<TARGET_FILE:${PROJECT_NAME}> --auto-run --example airspace
+                --max-seconds 1)
+    set_tests_properties(GuiAutoRunRejectsAirspace PROPERTIES WILL_FAIL TRUE)
+
+    add_test(NAME GuiAutoRunRejectsHeadlessCombination
+        COMMAND $<TARGET_FILE:${PROJECT_NAME}> --auto-run --no-gui
+                --example blue-defense --max-seconds 1)
+    set_tests_properties(GuiAutoRunRejectsHeadlessCombination PROPERTIES
+        WILL_FAIL TRUE)
+
     add_test(NAME NoGuiRejectsZeroBudget
         COMMAND $<TARGET_FILE:${PROJECT_NAME}> --no-gui --example blue-defense
                 --max-seconds 0)

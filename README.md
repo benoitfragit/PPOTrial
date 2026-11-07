@@ -124,6 +124,24 @@ de tour correctement suivi vaut `100 × distance qualifiée / longueur du circui
 et reste distinct du nombre de waypoints validés. Les événements sont émis aux
 changements de mode ou de waypoint, sans journalisation à chaque pas.
 
+### Curriculum 2v2 local avec IHM
+
+Le lanceur Windows [Lancer_MAPPO_2v2_Balanced_GUI.bat](Lancer_MAPPO_2v2_Balanced_GUI.bat)
+construit `build/release`, valide le checkpoint complet du run 84 à l'update
+1790 puis exécute automatiquement le même profil `balanced_v1` que la CI avec
+la fenêtre tactique visible. Un cycle de 20 blocs contient 3 rappels `1v0`, 4
+`2v0`, 2 `1v1`, 3 `2v1` et 8 blocs principaux `2v2`. Chaque fenêtre se ferme
+automatiquement après la campagne d'évaluation du bloc, puis le bloc suivant
+s'ouvre avec la composition correspondante.
+
+Le checkpoint source est sauvegardé avec ses SHA-256 sous
+`build/local-mappo-gui/session-*/source-run84`. Les JSON d'entraînement et de
+scénario, l'acteur `prod`, `Renderer.json` et `imgui.ini` sont restaurés octet
+pour octet à l'arrêt ; seul `latest` progresse. Fermer la fenêtre interrompt
+proprement le curriculum, et relancer le BAT reprend le même bloc. Python 3.12
+est requis. Les commandes de prévol et options d'exploitation sont documentées
+dans [Entraînement MAPPO distant et local](docs/remote-mappo-training.md).
+
 ## Validation
 
 Pour exécuter les tests de base sans interface :

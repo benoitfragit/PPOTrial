@@ -30,6 +30,54 @@ headless learner monitor. Training stops at its time limit or when
 `maxUpdates` is reached, and returns an error when no resumable training-state
 checkpoint exists.
 
+## Visual local run-84 2v2 rehearsal
+
+For the run-84 investigation on Windows, double-click the repository-root
+launcher:
+
+```text
+Lancer_MAPPO_2v2_Balanced_GUI.bat
+```
+
+The launcher incrementally builds only the fixed x64 Release tree, validates
+the V10 actor and complete V7 optimizer checkpoint at update 1790, and opens
+the normal Raylib/ImGui Blue Defense view. It presses Play automatically and
+closes/reopens the window only at process-block boundaries, so every block uses
+the same scenario restart semantics as the progressive CI runner.
+
+The schedule directly calls the production `balanced_v1` selector. Each
+20-block cycle contains `1v0=3`, `2v0=4`, `1v1=2`, `2v1=3`, and `2v2=8`.
+Blocks stop at the next `checkpointEvery` evaluation boundary, exactly like
+the CI gate runner. The default wall-clock budget is 7200 seconds.
+
+Before the first update, the launcher copies the source actor, full optimizer
+and production actor into `build/local-mappo-gui/session-*/source-run84` and
+records SHA-256 digests. Stable progress is stored in
+`build/local-mappo-gui/state.json`. Closing the GUI stops the automatic loop;
+running the BAT again resumes the same incomplete rehearsal block. During any
+exit, `BluePatrol.json`, `BlueDefense.json`, the production actor, its score,
+`Renderer.json` and `imgui.ini` are restored byte-for-byte. `latest`
+intentionally remains at the newest completed PPO update.
+
+Python 3.12 is required. A non-mutating preflight prints the next exact cycle
+and update boundary:
+
+```powershell
+py -3.12 tools/local_mappo_gui_curriculum.py --dry-run
+```
+
+For a short visual inspection, bypass the BAT after building and stop after a
+single completed block:
+
+```powershell
+py -3.12 tools/local_mappo_gui_curriculum.py --max-blocks 1 --max-seconds 1800
+```
+
+The C++ `--auto-run` option is restricted to an explicitly selected Blue
+Defense automatic mode. Unlike `--no-gui`, it keeps rendering and the normal
+desktop 2 ms simulation throttle; it is an investigation tool, not a throughput
+benchmark.
+
 ## Checkpoints
 
 `resources/settings/Training/BluePatrol.json` supports:
