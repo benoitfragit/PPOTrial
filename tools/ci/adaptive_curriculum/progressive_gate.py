@@ -349,6 +349,11 @@ def run_gate(args: argparse.Namespace) -> dict:
     state = initialize_state(stages, args.gate, args.resume, config_hash)
     stage = stages[state["gateIndex"]]
     cycle = state.get("restartCycle")
+    # An explicit restart of a previously certified gate must actually train.
+    # Keep all normal resume/fast-pass behavior unchanged when not requested.
+    retrain_selected_gate = (isinstance(cycle, dict)
+                             and cycle.get("retrainSelectedGate") is True
+                             and cycle.get("startGate") == stage["id"])
     rehearsal_profile = getattr(args, "rehearsal_profile", "legacy")
     if rehearsal_profile not in profiles.PROFILES:
         raise ValueError("Unknown rehearsal profile")
@@ -384,7 +389,8 @@ def run_gate(args: argparse.Namespace) -> dict:
     existing_best = champion.read(stage["id"])
     if (args.resume and existing_best is not None
             and existing_best["evaluatedForGate"]
-            and existing_best["successPercent"] >= args.threshold_percent):
+            and existing_best["successPercent"] >= args.threshold_percent
+            and not retrain_selected_gate):
         state["bestSuccessPercent"] = existing_best["successPercent"]
         state["lastSuccessPercent"] = (
             state["lastSuccessPercent"]
@@ -429,6 +435,8 @@ def run_gate(args: argparse.Namespace) -> dict:
             # worse PPO update can overwrite the checkpoint of an earlier win.
             until_evaluation = cadence - (updates % cadence)
             target = updates + min(args.block_updates, until_evaluation)
+            # Full-budget retraining must preserve the configured rehearsal
+            # schedule; only the early-exit behavior is overridden.
             if rehearsal_profile == "legacy":
                 selected = select_training_stage(
                     stages, state["gateIndex"], state["blockIndex"],
@@ -494,9 +502,10 @@ def run_gate(args: argparse.Namespace) -> dict:
                         passed = best["successPercent"] >= args.threshold_percent
             state["elapsedSeconds"] += max(0.0, time.monotonic() - started)
             started = time.monotonic()
-            state["passed"] = passed
+            # Until the new training budget ends, retain a resumable state.
+            state["passed"] = passed and not retrain_selected_gate
             existing.write_json(STATE_FILE, state)
-            if passed or observed == updates:
+            if (passed and not retrain_selected_gate) or observed == updates:
                 break
     finally:
         existing.TRAINING_FILE.write_bytes(original_training_bytes)
