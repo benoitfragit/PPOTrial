@@ -208,6 +208,9 @@ bool TestCooperationWithDispersedReds()
     auto partiallyEngaged = MakeState(2U, 2U);
     partiallyEngaged.reds[0].north = 45000.F;
     partiallyEngaged.reds[1].north = 60000.F;
+    // Heading away from the objective isolates the exact E=0.5 range case.
+    partiallyEngaged.reds[0].heading = 0.F;
+    partiallyEngaged.reds[1].heading = 0.F;
 
     float const halfEngagement = patrol::GeneralizedEngagementWeight(
         parameters, partiallyEngaged);
