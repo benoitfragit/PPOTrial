@@ -22,6 +22,11 @@ on:
           - 1v1
           - 2v1
           - 2v2
+      retrain_selected_gate:
+        description: "Train only the selected gate for the full budget, even when the restored BEST already passed"
+        required: true
+        type: boolean
+        default: false
       rehearsal_profile:
         description: "Training replay profile for the new cycle (legacy = historical behavior)"
         required: false
@@ -130,6 +135,7 @@ jobs:
           SAME_THRESHOLD: ${{ inputs.same_threshold_all_gates }}
           REHEARSAL_PROFILE: ${{ inputs.rehearsal_profile }}
           AUTO_ADVANCE: ${{ inputs.auto_advance }}
+          RETRAIN_SELECTED_GATE: ${{ inputs.retrain_selected_gate }}
         shell: bash
         run: |
           python - <<'PY'
@@ -277,6 +283,8 @@ jobs:
                   rehearsalProfile=rehearsal_profile,
                   successPercent=threshold,
                   autoAdvance=auto_advance,
+                  startGate=start_gate,
+                  retrainSelectedGate=os.environ["RETRAIN_SELECTED_GATE"].lower() == "true",
               ),
           )
           progress_path.write_text(json.dumps(fresh, indent=2) + '\n', encoding='utf-8')
@@ -330,12 +338,11 @@ jobs:
           AUTO_ADVANCE: ${{ inputs.auto_advance }}
           SAME_THRESHOLD: ${{ inputs.same_threshold_all_gates }}
           REHEARSAL_PROFILE: ${{ inputs.rehearsal_profile }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         shell: bash
         run: |
           REHEARSAL_PROFILE="${REHEARSAL_PROFILE:-legacy}"
-          if [[ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
-            echo 'Restart is permitted only from the repository default branch' >&2
+          if [[ "$GITHUB_REF" != refs/heads/* ]]; then
+            echo 'Restart requires a branch ref' >&2
             exit 1
           fi
           python - <<'PY'
