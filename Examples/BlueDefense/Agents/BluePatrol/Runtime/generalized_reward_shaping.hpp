@@ -754,11 +754,44 @@ private:
     bool completed_{};
 };
 
-/** @brief Retain patrol outside engagement and relax it under pressure. */
+/**
+ * @brief Maximum dispersion among available Red tracks, normalized by
+ * the existing defensive threat range. Inactive Reds never contribute.
+ */
+inline float GeneralizedRedDispersion(
+    Parameters const& parameters, GeneralizedRuntimeState const& state) noexcept
+{
+    float maximumDistance = 0.F;
+    for (std::size_t first = 0U; first < state.counts.redMobiles; ++first)
+    {
+        if (!state.reds[first].available)
+            continue;
+        for (std::size_t second = first + 1U;
+             second < state.counts.redMobiles; ++second)
+        {
+            if (!state.reds[second].available)
+                continue;
+            maximumDistance = std::max(maximumDistance, std::hypot(
+                state.reds[first].north - state.reds[second].north,
+                state.reds[first].east - state.reds[second].east));
+        }
+    }
+    float const range = parameters.defense.teammateThreatDistanceMeters;
+    return range > 0.F
+        ? Clamp(maximumDistance / range, 0.F, 1.F) : 0.F;
+}
+
+/**
+ * @brief Relax wingman formation during engagement only when Reds disperse.
+ * Single-Red engagement and no-Red patrol keep their original weighting.
+ */
 inline float GeneralizedCooperationWeight(
     Parameters const& parameters, GeneralizedRuntimeState const& state) noexcept
 {
-    return 1.F - 0.75F * GeneralizedEngagementWeight(parameters, state);
+    float const engagement = GeneralizedEngagementWeight(parameters, state);
+    float const dispersion = GeneralizedRedDispersion(parameters, state);
+    return std::pow(1.F - 0.75F * engagement,
+                    1.F + engagement * dispersion);
 }
 
 } // namespace ppo::examples::bluedefense::defenders

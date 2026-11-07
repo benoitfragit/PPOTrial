@@ -574,6 +574,162 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertEqual(json.loads(gate.RESULT_FILE.read_text())["nextGate"],
                          "1v1")
 
+    def test_retrain_evaluated_2v2_best_for_full_budget(self) -> None:
+        """Run 84 BEST at 100% must not prevent additional 2v2 PPO updates."""
+        production = (Path(__file__).resolve().parents[3] /
+                      "tools/ci/adaptive_curriculum/gates.json")
+        contract = json.loads(production.read_text(encoding="utf-8"))
+        gate.existing.write_json(gate.GATES_FILE, contract)
+        stages = gate.validate_gates(contract)
+        names = [stage["id"] for stage in stages]
+        target = names.index("2v2")
+        self.checkpoint(100)
+        gate.champion.promote(
+            "2v2", {"successPercent": 100.0, "score": 90.0}, 100)
+        original_best = gate.champion.read("2v2")
+        original_actor = (gate.champion.ROOT / "2v2" /
+                          gate.champion.ACTOR_NAME).read_bytes()
+        original_optimizer = (gate.champion.ROOT / "2v2" /
+                              gate.champion.TRAINING_NAME).read_bytes()
+        config_hash = hashlib.sha256(gate.GATES_FILE.read_bytes()).hexdigest()
+        gate.existing.write_json(gate.STATE_FILE, {
+            "formatVersion": 1, "gateConfigSha256": config_hash,
+            "gateIndex": target, "gate": "2v2", "passed": False,
+            "elapsedSeconds": 0.0, "blockIndex": 0,
+            "lastCheckpointUpdates": 100, "bestSuccessPercent": 0.0,
+            "lastSuccessPercent": None, "validatedGates": [],
+            "championRequired": True,
+            "restartCycle": {
+                "schemaVersion": 1, "bootstrapRunId": 999999,
+                "sourceRunId": 42100716170, "sameThresholdAllGates": True,
+                "successPercent": 92.0, "autoAdvance": False,
+                "startGate": "2v2", "retrainSelectedGate": True,
+            },
+        })
+        clock = [0.0]
+        trained = []
+        intermediate_states = []
+
+        def simulate(binary: Path, stage: dict, seconds: int,
+                     log_path: Path) -> str:
+            self.assertEqual(stage["id"], "2v2")
+            self.assertEqual(stage["blue"], 2)
+            self.assertEqual(stage["red"], 2)
+            target_updates = json.loads(
+                gate.existing.TRAINING_FILE.read_text(encoding="utf-8")
+            )["training"]["maxUpdates"]
+            self.checkpoint(target_updates)
+            trained.append(target_updates)
+            intermediate_states.append(json.loads(
+                gate.STATE_FILE.read_text(encoding="utf-8")))
+            # New candidates are worse; the evaluated source BEST must survive.
+            log_path.write_text(self.evaluation(stage, 0.75, score=25.0),
+                                encoding="utf-8")
+            clock[0] += 15.0
+            return "evaluation"
+
+        with patch.object(gate.time, "monotonic", side_effect=lambda: clock[0]):
+            with patch.object(gate.existing, "run_stage",
+                              side_effect=simulate):
+                state = gate.run_gate(self.args(
+                    gate="2v2", threshold_percent=92, resume=True,
+                    max_seconds=70, block_updates=5,
+                    auto_advance=False))
+        self.assertEqual(trained, [105, 110, 115, 120])
+        self.assertTrue(all(not entry["passed"]
+                            for entry in intermediate_states))
+        self.assertTrue(state["passed"])
+        self.assertEqual(state["bestSuccessPercent"], 100.0)
+        self.assertEqual(gate.champion.read("2v2"), original_best)
+        self.assertEqual((gate.champion.ROOT / "2v2" /
+                          gate.champion.ACTOR_NAME).read_bytes(), original_actor)
+        self.assertEqual((gate.champion.ROOT / "2v2" /
+                          gate.champion.TRAINING_NAME).read_bytes(),
+                         original_optimizer)
+        self.assertEqual(gate.existing.read_updates(), 120)
+        self.assertEqual(gate.existing.TRAINING_FILE.read_bytes(),
+                         self.training_bytes)
+        self.assertEqual(gate.existing.SCENARIO_FILE.read_bytes(),
+                         self.scenario_bytes)
+
+
+    def test_retrain_passed_2v2_best_honors_balanced_rehearsal(self) -> None:
+        """Full-budget retraining must still replay validated earlier gates."""
+        production = (Path(__file__).resolve().parents[3] /
+                      "tools/ci/adaptive_curriculum/gates.json")
+        contract = json.loads(production.read_text(encoding="utf-8"))
+        gate.existing.write_json(gate.GATES_FILE, contract)
+        stages = gate.validate_gates(contract)
+        names = [stage["id"] for stage in stages]
+        target = names.index("2v2")
+        history = names[:target]
+
+        self.checkpoint(100)
+        for name in names:
+            gate.champion.promote(
+                name, {"successPercent": 100.0, "score": 90.0}, 100)
+        original_best = {name: gate.champion.read(name) for name in names}
+        config_hash = hashlib.sha256(gate.GATES_FILE.read_bytes()).hexdigest()
+        gate.existing.write_json(gate.STATE_FILE, {
+            "formatVersion": 1, "gateConfigSha256": config_hash,
+            "gateIndex": target, "gate": "2v2", "passed": False,
+            "elapsedSeconds": 0.0, "blockIndex": 0,
+            "lastCheckpointUpdates": 100, "bestSuccessPercent": 0.0,
+            "lastSuccessPercent": None, "validatedGates": history,
+            "championRequired": True, "rehearsalProfile": "balanced_v1",
+            "restartCycle": {
+                "schemaVersion": 1, "bootstrapRunId": 999999,
+                "sourceRunId": 42100716170, "sameThresholdAllGates": True,
+                "successPercent": 92.0, "autoAdvance": False,
+                "startGate": "2v2", "retrainSelectedGate": True,
+                "rehearsalProfile": "balanced_v1",
+            },
+        })
+
+        clock = [0.0]
+        replayed = []
+        intermediate_states = []
+
+        def simulate(binary: Path, stage: dict, seconds: int,
+                     log_path: Path) -> str:
+            target_updates = json.loads(
+                gate.existing.TRAINING_FILE.read_text(encoding="utf-8")
+            )["training"]["maxUpdates"]
+            self.checkpoint(target_updates)
+            replayed.append(stage["id"])
+            intermediate_states.append(json.loads(
+                gate.STATE_FILE.read_text(encoding="utf-8")))
+            # No candidate beats the original, evaluated 100% BEST.
+            log_path.write_text(self.evaluation(stage, 0.75, score=25.0),
+                                encoding="utf-8")
+            clock[0] += 15.0
+            return "evaluation"
+
+        with patch.object(gate.time, "monotonic", side_effect=lambda: clock[0]):
+            with patch.object(gate.existing, "run_stage", side_effect=simulate):
+                state = gate.run_gate(self.args(
+                    gate="2v2", threshold_percent=92, resume=True,
+                    max_seconds=320, block_updates=5, auto_advance=False,
+                    rehearsal_profile="balanced_v1"))
+
+        expected = [gate.profiles.select_weighted_stage(
+            stages, target, block, history, "balanced_v1")["id"]
+            for block in range(20)]
+        self.assertEqual(replayed, expected)
+        self.assertEqual(
+            {name: replayed.count(name) for name in names},
+            gate.profiles.WEIGHTS["balanced_v1"])
+        self.assertTrue(all(not item["passed"] for item in intermediate_states))
+        self.assertTrue(state["passed"])
+        self.assertEqual(state["bestSuccessPercent"], 100.0)
+        self.assertEqual(gate.existing.read_updates(), 200)
+        self.assertEqual(
+            {name: gate.champion.read(name) for name in names}, original_best)
+        self.assertEqual(gate.existing.TRAINING_FILE.read_bytes(),
+                         self.training_bytes)
+        self.assertEqual(gate.existing.SCENARIO_FILE.read_bytes(),
+                         self.scenario_bytes)
+
     def test_both_workflows_publish_and_restart_from_best_pairs(self) -> None:
         root = Path(__file__).resolve().parents[3] / ".github/workflows"
         train = (root / "mappo-training-windows.yml").read_text(encoding="utf-8")

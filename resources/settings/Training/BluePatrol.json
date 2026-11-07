@@ -28,8 +28,8 @@
     },
     "formation": {
       "separationDistanceMeters": {
-        "min": 2700,
-        "max": 3200
+        "min": 3000,
+        "max": 3500
       },
       "separationAngleDegrees": {
         "min": 30,
