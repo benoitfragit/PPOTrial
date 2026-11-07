@@ -531,7 +531,7 @@ int main()
     if (!TestWedgeReference()) return 2;
     if (!TestPursuit()) return 3;
     if (!TestCooperation()) return 4;
-    if (!TestCooperationWithDispersedReds()) return 9;
+    if (!TestCooperationWithDispersedReds()) return 10;
     if (!TestControlEffortPenalty()) return 5;
     if (!TestSafetyRisks()) return 6;
     if (!TestFormationAndLowSpeed()) return 7;
