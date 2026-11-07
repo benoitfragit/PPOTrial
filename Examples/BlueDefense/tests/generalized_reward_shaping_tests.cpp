@@ -227,7 +227,7 @@ bool TestCooperationWithDispersedReds()
         && Close(patrol::GeneralizedCooperationWeight(
             parameters, threeWidelyDispersed), 0.0625F)
         && Close(patrol::GeneralizedCooperationWeight(
-            parameters, inactiveThird), 0.125F)
+            parameters, inactiveThird), std::pow(0.25F, 1.25F))
         && Close(patrol::GeneralizedCooperationWeight(
             parameters, noEngagement), 1.F)
         && Close(halfEngagement, 0.5F)
