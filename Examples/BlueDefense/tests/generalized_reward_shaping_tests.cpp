@@ -181,6 +181,60 @@ bool TestCooperation()
         && patrol::GeneralizedEngagementWeight(parameters, objectiveThreat) > 0.F;
 }
 /**
+ * @brief Check multi-Red geometry without changing single-Red engagement.
+ */
+bool TestCooperationWithDispersedReds()
+{
+    patrol::Parameters parameters{};
+    auto oneRed = MakeState(2U, 1U);
+    oneRed.reds[0].north = 10000.F;
+    auto twoGrouped = MakeState(2U, 2U);
+    twoGrouped.reds[0].north = 10000.F;
+    twoGrouped.reds[1].north = 10000.F;
+    auto twoDispersed = twoGrouped;
+    twoDispersed.reds[1].north = 25000.F;
+    auto threeDispersed = MakeState(2U, 3U);
+    threeDispersed.reds[0].north = 10000.F;
+    threeDispersed.reds[1].north = 17500.F;
+    threeDispersed.reds[2].north = 25000.F;
+    auto threeWidelyDispersed = threeDispersed;
+    threeWidelyDispersed.reds[2].north = 40000.F;
+    auto inactiveThird = threeDispersed;
+    inactiveThird.reds[2].north = 900000.F;
+    inactiveThird.reds[2].available = false;
+    auto noEngagement = MakeState(2U, 2U);
+    noEngagement.reds[0].north = 250000.F;
+    noEngagement.reds[1].north = 320000.F;
+    auto partiallyEngaged = MakeState(2U, 2U);
+    partiallyEngaged.reds[0].north = 45000.F;
+    partiallyEngaged.reds[1].north = 60000.F;
+
+    float const halfEngagement = patrol::GeneralizedEngagementWeight(
+        parameters, partiallyEngaged);
+    float const halfExpected = std::pow(1.F - 0.75F * halfEngagement,
+                                       1.F + 0.5F * halfEngagement);
+    return Close(patrol::GeneralizedCooperationWeight(
+            parameters, oneRed), 0.25F)
+        && Close(patrol::GeneralizedCooperationWeight(
+            parameters, twoGrouped), 0.25F)
+        && Close(patrol::GeneralizedCooperationWeight(
+            parameters, twoDispersed), 0.125F)
+        && Close(patrol::GeneralizedCooperationWeight(
+            parameters, threeDispersed), 0.125F)
+        && Close(patrol::GeneralizedCooperationWeight(
+            parameters, threeWidelyDispersed), 0.0625F)
+        && Close(patrol::GeneralizedCooperationWeight(
+            parameters, inactiveThird), 0.125F)
+        && Close(patrol::GeneralizedCooperationWeight(
+            parameters, noEngagement), 1.F)
+        && Close(halfEngagement, 0.5F)
+        && Close(patrol::GeneralizedCooperationWeight(
+            parameters, partiallyEngaged), halfExpected)
+        && Close(patrol::GeneralizedRedDispersion(
+            parameters, MakeState(2U, 0U)), 0.F);
+}
+
+/**
  * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
  */
 bool TestFormationAndLowSpeed()
@@ -477,6 +531,7 @@ int main()
     if (!TestWedgeReference()) return 2;
     if (!TestPursuit()) return 3;
     if (!TestCooperation()) return 4;
+    if (!TestCooperationWithDispersedReds()) return 9;
     if (!TestControlEffortPenalty()) return 5;
     if (!TestSafetyRisks()) return 6;
     if (!TestFormationAndLowSpeed()) return 7;
