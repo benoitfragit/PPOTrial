@@ -435,9 +435,9 @@ def run_gate(args: argparse.Namespace) -> dict:
             # worse PPO update can overwrite the checkpoint of an earlier win.
             until_evaluation = cadence - (updates % cadence)
             target = updates + min(args.block_updates, until_evaluation)
-            if retrain_selected_gate:
-                selected = stage
-            elif rehearsal_profile == "legacy":
+            # Full-budget retraining must preserve the configured rehearsal
+            # schedule; only the early-exit behavior is overridden.
+            if rehearsal_profile == "legacy":
                 selected = select_training_stage(
                     stages, state["gateIndex"], state["blockIndex"],
                     rehearsal_every, state["validatedGates"])

@@ -23,7 +23,7 @@ on:
           - 2v1
           - 2v2
       retrain_selected_gate:
-        description: "Train only the selected gate for the full budget, even when the restored BEST already passed"
+        description: "Train for the full budget after BEST passes, preserving the chosen gate-rehearsal profile"
         required: true
         type: boolean
         default: false
