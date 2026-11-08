@@ -105,8 +105,10 @@ def run(command: list[str], stage_id: str, budget_seconds: float,
     stop_reason: str | None = None
     heartbeat_count = 0
     last_update: int | None = None
+    last_checkpoint_update: int | None = None
     try:
-        last_update = updates()
+        last_checkpoint_update = updates()
+        last_update = last_checkpoint_update
     except (OSError, ValueError):
         pass
 
@@ -149,6 +151,7 @@ def run(command: list[str], stage_id: str, budget_seconds: float,
                 "alive": process.poll() is None,
                 "phase": phase,
                 "lastUpdate": last_update,
+                "lastCheckpointUpdate": last_checkpoint_update,
                 "lastEvaluation": last_eval,
                 "lastLogAgeSeconds": round(now - last_log, 3),
                 "elapsedSeconds": round(now - start, 3),
@@ -188,6 +191,15 @@ def run(command: list[str], stage_id: str, budget_seconds: float,
                         phase = "checkpoint"
                     elif "update=" in item or "PPO update" in item:
                         phase = "training"
+                    # Optimizer completion is observable before the next
+                    # disk checkpoint; both are valid liveness evidence.
+                    completed = re.search(
+                        r"^\[MAPPO_UPDATE\] update=(\d+)(?:\s|$)", item)
+                    if completed:
+                        observed = int(completed.group(1))
+                        if last_update is None or observed > last_update:
+                            last_update = observed
+                            last_update_at = time.monotonic()
                     found = evaluation.search(item)
                     if found:
                         last_eval = found.group(0)
@@ -197,9 +209,10 @@ def run(command: list[str], stage_id: str, budget_seconds: float,
                 if now >= next_heartbeat:
                     heartbeat_count += 1
                     try:
-                        observed = updates()
-                        if last_update is None or observed > last_update:
-                            last_update = observed
+                        last_checkpoint_update = updates()
+                        if (last_update is None
+                                or last_checkpoint_update > last_update):
+                            last_update = last_checkpoint_update
                             last_update_at = now
                     except (OSError, ValueError):
                         pass  # Checkpoints can be temporarily in the middle of a save.
