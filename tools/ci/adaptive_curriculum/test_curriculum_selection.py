@@ -97,7 +97,8 @@ class CurriculumSelectionTests(unittest.TestCase):
                     nextMaxSeconds=following["maxSeconds"],
                     hostileZones=enabled, maxTeamSize=size)
                 inputs = dispatcher.next_dispatch(result, data, "420001")
-                self.assertEqual(inputs.get("hostile_zones"), "true" if enabled else None)
+                self.assertEqual(inputs.get("scenario_variant"),
+                                 "fixed_zones" if enabled else None)
         with patch.object(champion, "ROOT", Path("best")):
             with champion.variant_namespace(True):
                 self.assertEqual(champion.ROOT, Path("best/zones-on"))
@@ -126,10 +127,9 @@ class CurriculumSelectionTests(unittest.TestCase):
                     nextMaxSeconds=following["maxSeconds"],
                     objectiveLayout=objective, hostileZones=zones, maxTeamSize=4)
                 result = dispatcher.next_dispatch(record, data, "420001")
-                self.assertEqual(result.get("objective_layout"),
-                                 None if objective == "fixed" else objective)
-                self.assertEqual(result.get("hostile_zones"),
-                                 "true" if zones else None)
+                self.assertEqual(result.get("scenario_variant"),
+                                 objective + ("_zones" if zones else "_no_zones")
+                                 if objective != "fixed" or zones else None)
         with self.assertRaises(ValueError):
             champion.variant_root(True, "unknown")
         with self.assertRaises(ValueError):
@@ -142,8 +142,10 @@ class CurriculumSelectionTests(unittest.TestCase):
             content = (ROOT / ".github/workflows" / workflow).read_text(
                 encoding="utf-8")
             self.assertEqual(content.count("      max_team_size:"), 1)
-            self.assertEqual(content.count("      hostile_zones:"), 1)
-            self.assertEqual(content.count("      objective_layout:"), 1)
+            self.assertEqual(content.count("      scenario_variant:"), 1)
+            for selection in ("fixed_no_zones", "fixed_zones",
+                              "randomized_no_zones", "randomized_zones"):
+                self.assertIn("          - " + selection, content)
             for label in ('        default: "2"',
                           '          - "2"', '          - "3"', '          - "4"'):
                 self.assertIn(label, content)

@@ -12,19 +12,16 @@ on:
           - "2"
           - "3"
           - "4"
-      hostile_zones:
-        description: "Enable hostile zones across every gate and replay"
-        required: true
-        type: boolean
-        default: false
-      objective_layout:
-        description: "Defended objective: historical fixed or per-episode randomized"
+      scenario_variant:
+        description: "Objective layout and zones: 4 combinations, all gates/replays"
         required: true
         type: choice
-        default: fixed
+        default: fixed_no_zones
         options:
-          - fixed
-          - randomized
+          - fixed_no_zones
+          - fixed_zones
+          - randomized_no_zones
+          - randomized_zones
       max_seconds:
         description: "Training time budget in seconds (leave headroom for build/artifacts)"
         required: true
@@ -225,8 +222,7 @@ jobs:
         env:
           GATE: ${{ inputs.progressive_gate }}
           MAX_TEAM_SIZE: ${{ inputs.max_team_size }}
-          HOSTILE_ZONES: ${{ inputs.hostile_zones }}
-          OBJECTIVE_LAYOUT: ${{ inputs.objective_layout }}
+          SCENARIO_VARIANT: ${{ inputs.scenario_variant }}
           SUCCESS_PERCENT: ${{ inputs.success_percent }}
           MAX_SECONDS: ${{ inputs.max_seconds }}
           RESUME_RUN_ID: ${{ inputs.resume_run_id }}
@@ -242,11 +238,16 @@ jobs:
             "--max-seconds", $env:MAX_SECONDS,
             "--block-updates", "20"
           )
-          if ($env:HOSTILE_ZONES -eq "true") {
-            $pythonArgs += "--hostile-zones"
-          }
-          if ($env:OBJECTIVE_LAYOUT -eq "randomized") {
-            $pythonArgs += @("--objective-layout", "randomized")
+          switch ($env:SCENARIO_VARIANT) {
+            "fixed_no_zones" {}
+            "fixed_zones" { $pythonArgs += "--hostile-zones" }
+            "randomized_no_zones" {
+              $pythonArgs += @("--objective-layout", "randomized")
+            }
+            "randomized_zones" {
+              $pythonArgs += @("--objective-layout", "randomized", "--hostile-zones")
+            }
+            default { throw "Unknown scenario variant" }
           }
           if (-not [string]::IsNullOrWhiteSpace($env:REHEARSAL_PROFILE) -and
               $env:REHEARSAL_PROFILE -ne "legacy") {

@@ -80,10 +80,11 @@ def next_dispatch(result: dict, config_bytes: bytes, run_id: str) -> dict | None
         inputs["rehearsal_profile"] = profile
     if contract_size != 2:
         inputs["max_team_size"] = str(contract_size)
-    if result.get("hostileZones", False):
-        inputs["hostile_zones"] = "true"
-    if result.get("objectiveLayout", "fixed") != "fixed":
-        inputs["objective_layout"] = result["objectiveLayout"]
+    objective = result.get("objectiveLayout", "fixed")
+    zones = result.get("hostileZones", False)
+    if objective != "fixed" or zones:
+        inputs["scenario_variant"] = (
+            objective + ("_zones" if zones else "_no_zones"))
     return inputs
 
 
