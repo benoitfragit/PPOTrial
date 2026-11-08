@@ -232,6 +232,39 @@ bool RejectInvalidSettings()
     return true;
 }
 
+bool CheckFixedObjectiveDoesNotChangeLegacyRandomSequence()
+{
+    auto legacy = ValidScenario();
+    auto explicitFixed = legacy;
+    explicitFixed["objectiveSpawn"] = {{"mode", "fixed"}};
+    auto const previous = defense::ParseSpawnSettings(legacy);
+    auto const current = defense::ParseSpawnSettings(explicitFixed);
+    if (!previous || !current)
+        return false;
+    defense::WorldBounds const bounds{22329.375F, 35727.F};
+    for (std::size_t reds = 0U; reds <= 4U; ++reds)
+    {
+        previous->redTeam->activeCount = reds;
+        current->redTeam->activeCount = reds;
+        for (int side : {-1, 1})
+            for (unsigned seed = 0U; seed < 64U; ++seed)
+            {
+                std::mt19937 original{seed};
+                std::mt19937 selected{seed};
+                auto const before = defense::GenerateEpisodeSpawnLayout(
+                    side, *previous, bounds, original);
+                auto const after = defense::GenerateEpisodeSpawnLayout(
+                    side, *current, bounds, selected);
+                if (!before || !after || !Same(*before, *after))
+                    return false;
+                // An extra draw would also perturb the following episode.
+                if (original() != selected())
+                    return false;
+            }
+    }
+    return true;
+}
+
 bool CheckTriangularScenario(std::size_t blues)
 {
     auto const fail = [](int line) {
@@ -394,5 +427,9 @@ int main()
     if (!CheckRandomizedObjective()) return 6;
     if (!CheckTriangularScenario(3U)) return 7;
     if (!CheckTriangularScenario(4U)) return 8;
+    if (!CheckFixedObjectiveDoesNotChangeLegacyRandomSequence()) {
+        std::cerr << "[SPAWN_TEST_ERROR] fixed mode RNG compatibility\n";
+        return 9;
+    }
     return 0;
 }
