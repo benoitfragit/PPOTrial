@@ -63,6 +63,30 @@ class WatchdogTests(unittest.TestCase):
             self.assertGreater(snapshot["heartbeatCount"], 0)
             self.assertGreater(snapshot["lastLogAgeSeconds"], 0.1)
 
+    def test_console_updates_prevent_false_stall_between_checkpoints(self):
+        import mappo_process_watchdog as watchdog
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            # A long save cadence must not be mistaken for a hung optimizer:
+            # only the training log advances, the durable checkpoint stays at 5.
+            command = [sys.executable, "-u", "-c",
+                       "import time\n"
+                       "for update in range(6, 12):\n"
+                       "    time.sleep(0.2)\n"
+                       "    print(f'[MAPPO_UPDATE] update={update} "
+                       "policy_loss=0.1', flush=True)\n"]
+            watchdog.run(
+                command, "2v2", 3.0, root / "training.log",
+                root / "combined.log", re.compile("Evaluation"),
+                lambda: 5, watchdog.WatchdogLimits(
+                    heartbeat_seconds=0.05, quiet_warning_seconds=0.35,
+                    stalled_update_seconds=0.55, budget_grace_seconds=0.5,
+                    shutdown_seconds=1.0))
+            status = json.loads((root / "watchdog.json").read_text())
+            self.assertEqual(status["status"], "completed")
+            self.assertEqual(status["lastUpdate"], 11)
+            self.assertEqual(status["lastCheckpointUpdate"], 5)
+
     def test_fragmented_stdout_and_scenario_metadata(self):
         import mappo_process_watchdog as watchdog
         with tempfile.TemporaryDirectory() as folder:
