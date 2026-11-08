@@ -7,6 +7,7 @@ overrun or a genuine absence of optimizer-update progress.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 import math
 import os
@@ -50,18 +51,23 @@ class WatchdogLimits:
 
 
 def _stop_tree(process: subprocess.Popen[str], grace: float) -> None:
-    """Terminate the headless process and its children with a bounded grace."""
+    """Stop the whole process group, then escalate within a fixed bound."""
     if os.name == "nt":
+        # The Windows process tree must be collected before its parent exits.
         if process.poll() is None:
-            process.terminate()
-        try:
-            process.wait(timeout=grace)
-        except subprocess.TimeoutExpired:
+            try:
+                process.send_signal(signal.CTRL_BREAK_EVENT)
+                process.wait(timeout=grace / 2.0)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        if process.poll() is None:
             subprocess.run(
                 ["taskkill", "/PID", str(process.pid), "/T", "/F"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 timeout=grace, check=False)
-            process.wait(timeout=grace)
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=grace)
     else:
         try:
             os.killpg(process.pid, signal.SIGTERM)
@@ -79,8 +85,8 @@ def _stop_tree(process: subprocess.Popen[str], grace: float) -> None:
 
 def run(command: list[str], stage_id: str, budget_seconds: float,
         log_path: Path, combined_path: Path, evaluation: Pattern[str],
-        updates: Callable[[], int], limits: WatchdogLimits | None = None
-        ) -> str | None:
+        updates: Callable[[], int], limits: WatchdogLimits | None = None,
+        metadata: dict | None = None) -> str | None:
     """Stream output without blocking heartbeat, preserve failure provenance."""
     config = limits or WatchdogLimits.from_env()
     if not math.isfinite(budget_seconds) or budget_seconds <= 0:
@@ -131,8 +137,14 @@ def run(command: list[str], stage_id: str, budget_seconds: float,
 
         def record(reason: str | None = None) -> dict:
             now = time.monotonic()
+            details = metadata or {}
             item = {
+                "timestampUtc": datetime.now(timezone.utc).isoformat(),
                 "stage": stage_id,
+                "primaryGate": details.get("primaryGate", stage_id),
+                "blockIndex": details.get("blockIndex"),
+                "targetUpdate": details.get("targetUpdate"),
+                "scenarioVariant": details.get("scenarioVariant", "fixed_no_zones"),
                 "pid": process.pid,
                 "alive": process.poll() is None,
                 "phase": phase,
@@ -144,7 +156,9 @@ def run(command: list[str], stage_id: str, budget_seconds: float,
                     max(0.0, budget_seconds + config.budget_grace_seconds
                         - (now - start)), 3),
                 "heartbeatCount": heartbeat_count,
-                "status": ("incomplete" if reason is not None
+                "status": (("failure" if reason in
+                           ("process_error", "mappo_error", "monitor_error")
+                           else "incomplete") if reason is not None
                            else "running" if process.poll() is None else "completed"),
                 "stopReason": reason,
             }
