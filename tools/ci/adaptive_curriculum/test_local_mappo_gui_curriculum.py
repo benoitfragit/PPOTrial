@@ -47,6 +47,24 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
             local.profiles.select_weighted_stage(
                 stages, target_index, 36, validated, "balanced_v1")["id"])
 
+    def test_shared_balanced_cycle_length_for_three_and_four_teams(self) -> None:
+        for size in (3, 4):
+            document = __import__("json").loads(local.adaptive.GATES_FILE.read_bytes())
+            stages = local.adaptive.select_curriculum(document, size)
+            index = len(stages) - 1
+            for validated in ([], [s["id"] for s in stages[:index]]):
+                length = local.profiles.weighted_cycle_length(
+                    stages, index, validated, "balanced_v1")
+                self.assertGreater(length, 0)
+                selected = [local.profiles.select_weighted_stage(
+                    stages, index, block, validated, "balanced_v1")
+                    for block in range(length)]
+                self.assertEqual(len(selected), length)
+                self.assertTrue(all(s["id"] == stages[index]["id"]
+                                    or s["id"] in validated for s in selected))
+                self.assertGreater(sum(s["id"] == stages[index]["id"]
+                                       for s in selected), length // 2)
+
     def test_update_target_stops_at_next_evaluation(self) -> None:
         self.assertEqual(local.next_update_target(1790, 10, 10), 1800)
         self.assertEqual(local.next_update_target(1793, 10, 10), 1800)

@@ -114,10 +114,8 @@ def balanced_schedule(stages: list[dict], target_index: int,
     """Return one exact weighted cycle beginning at ``start_block``."""
     if profile not in profiles.WEIGHTS:
         raise ValueError("The GUI curriculum requires a weighted profile")
-    cycle_length = sum(
-        profiles.WEIGHTS[profile][stage["id"]]
-        for stage in stages[:target_index + 1]
-        if stage["id"] in validated_gates or stage["id"] == TARGET_GATE)
+    cycle_length = profiles.weighted_cycle_length(
+        stages, target_index, validated_gates, profile)
     return [profiles.select_weighted_stage(
         stages, target_index, start_block + offset,
         validated_gates, profile)
