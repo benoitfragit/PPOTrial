@@ -88,7 +88,21 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
                     if variant != "fixed_no_zones" or size != 2:
                         self.assertEqual(
                             local.session_state_root(opts),
-                            opts.state_root / f"{size}v{size}" / variant)
+                            (opts.state_root / f"{size}v{size}"
+                             / variant / f"{size}v{size}"))
+
+    def test_distinct_gates_and_histories_do_not_share_resume_state(self) -> None:
+        first = local.parse_args([
+            "--max-team-size", "4", "--start-gate", "4v0",
+            "--validated-gates", "1v0,2v0"])
+        second = local.parse_args([
+            "--max-team-size", "4", "--start-gate", "4v4",
+            "--validated-gates", "1v0,2v0"])
+        self.assertNotEqual(local.session_state_root(first),
+                            local.session_state_root(second))
+        self.assertEqual(first.validated_gates, second.validated_gates)
+        self.assertEqual(local.session_state_root(first).name, "4v0")
+        self.assertEqual(local.session_state_root(second).name, "4v4")
 
     def test_update_target_stops_at_next_evaluation(self) -> None:
         self.assertEqual(local.next_update_target(1790, 10, 10), 1800)
