@@ -75,7 +75,7 @@ class WatchdogTests(unittest.TestCase):
                 [sys.executable, "-u", "-c", output],
                 "3v3", 1.0, root / "training.log",
                 root / "combined.log",
-                re.compile(r"Evaluation #\\d+ P=\\d+ N=\\d+ score=[0-9.]+"),
+                re.compile(r"Evaluation #\d+ P=\d+ N=\d+ score=[0-9.]+"),
                 lambda: 12, watchdog.WatchdogLimits(
                     heartbeat_seconds=0.05, quiet_warning_seconds=0.1,
                     stalled_update_seconds=3.0, budget_grace_seconds=0.3,
