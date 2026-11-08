@@ -138,6 +138,75 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
         self.assertEqual(modern.source_actor.name, "best-actor.txt")
         self.assertEqual(modern.source_training.name, "best-training.txt")
 
+    def test_session_checkpoint_restores_the_correct_campaign(self) -> None:
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            live_actor = root / "latest" / local.LATEST_ACTOR.name
+            live_training = root / "latest" / local.curriculum.LATEST.name
+            live_actor.parent.mkdir(parents=True)
+            def make_pair(label: str, updates: int) -> None:
+                live_actor.write_text(
+                    "BLUE_TEAM_MAPPO_V10 10 10 "
+                    f"UNIFIED_PHYSICAL_GUIDANCE_V1 {label}\\n".replace(
+                        "\\\\n", "\\n"), encoding="utf-8")
+                live_training.write_text(
+                    "BLUE_TEAM_TRAINING_V7 7 10 "
+                    f"UNIFIED_PHYSICAL_GUIDANCE_V1 {label}\\n"
+                    f"UPDATES {updates}\\n".replace(
+                        "\\\\n", "\\n"), encoding="utf-8")
+            with patch.object(local, "LATEST_ACTOR", live_actor), (
+                    patch.object(local.curriculum, "LATEST", live_training)):
+                first = root / "first"
+                second = root / "second"
+                first.mkdir()
+                second.mkdir()
+                make_pair("first", 101)
+                local._capture_session_checkpoint(first, 101)
+                make_pair("second", 202)
+                local._capture_session_checkpoint(second, 202)
+                local._activate_session_checkpoint(first, 101)
+                self.assertIn("first", live_actor.read_text())
+                self.assertEqual(local.curriculum.read_updates(), 101)
+                local._activate_session_checkpoint(second, 202)
+                self.assertIn("second", live_actor.read_text())
+                self.assertEqual(local.curriculum.read_updates(), 202)
+                with self.assertRaisesRegex(ValueError, "mismatch"):
+                    local._activate_session_checkpoint(first, 202)
+
+    def test_corrupted_session_checkpoint_does_not_touch_latest(self) -> None:
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            live_actor = root / "latest" / local.LATEST_ACTOR.name
+            live_training = root / "latest" / local.curriculum.LATEST.name
+            live_actor.parent.mkdir(parents=True)
+            live_actor.write_text(
+                "BLUE_TEAM_MAPPO_V10 10 10 UNIFIED_PHYSICAL_GUIDANCE_V1\\n",
+                encoding="utf-8")
+            live_training.write_text(
+                "BLUE_TEAM_TRAINING_V7 7 10 UNIFIED_PHYSICAL_GUIDANCE_V1\\n"
+                "UPDATES 4\\n", encoding="utf-8")
+            session = root / "session"
+            session.mkdir()
+            with patch.object(local, "LATEST_ACTOR", live_actor), (
+                    patch.object(local.curriculum, "LATEST", live_training)):
+                local._capture_session_checkpoint(session, 4)
+                stored = session / local.SESSION_CHECKPOINT / live_actor.name
+                stored.write_text(stored.read_text() + "CORRUPTED")
+                before = live_actor.read_bytes()
+                with self.assertRaisesRegex(ValueError, "checksum"):
+                    local._activate_session_checkpoint(session, 4)
+                self.assertEqual(live_actor.read_bytes(), before)
+
+    def test_legacy_mode_rejects_explicit_source(self) -> None:
+        configured = local.parse_args([
+            "--max-team-size", "2", "--source-actor", "best.txt",
+            "--source-training", "best-v7.txt"])
+        self.assertFalse(local.legacy_shortcut(configured))
+        self.assertIn("fixed_no_zones",
+                      local.session_state_root(configured).parts)
+
     def test_gui_files_are_restored_after_a_visual_run(self) -> None:
         self.assertIn(local.GUI_LAYOUT, local.PRESERVED_RUNTIME_FILES)
         self.assertIn(local.RENDERER_SETTINGS,
