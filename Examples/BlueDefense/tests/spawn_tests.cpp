@@ -298,6 +298,7 @@ bool CheckRandomizedObjective()
         return false;
     };
     auto document = ValidScenario();
+    document["blueTeam"]["activeCount"] = 2U;
     document["redTeam"]["activeCount"] = 2U;
     document["objectiveSpawn"] = {
         {"mode", "randomized"},
