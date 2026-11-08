@@ -25,13 +25,8 @@ on:
           - fixed_zones
           - randomized_no_zones
           - randomized_zones
-      use_branch_checkpoints:
-        description: "Use this branch's LATEST V10/V7 and PROD V10 as warm start (ignores source_run_id)"
-        required: true
-        type: boolean
-        default: false
       source_run_id:
-        description: "Completed source run with V7 optimizer (ignored when branch switch is true)"
+        description: "Source selector: enter branch for committed LATEST V7 + PROD V10, or a completed run ID"
         required: false
         type: string
         default: "41865674608"
@@ -127,7 +122,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate source run provenance and completion
-        if: ${{ inputs.use_branch_checkpoints != true }}
+        if: ${{ inputs.source_run_id != 'branch' }}
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
@@ -146,14 +141,14 @@ jobs:
               ' >/dev/null || { echo 'Source run must be a successful progressive training run in this repository' >&2; exit 1; }
 
       - name: Clear only transient workspace Blue checkpoints
-        if: ${{ inputs.use_branch_checkpoints != true }}
+        if: ${{ inputs.source_run_id != 'branch' }}
         shell: bash
         run: |
           rm -rf resources/model/BluePatrol/latest resources/model/BluePatrol/prod
           rm -f resources/model/BluePatrol/adaptive-curriculum-progress.json
 
       - name: Restore source actor, critic, Adam and RNG
-        if: ${{ inputs.use_branch_checkpoints != true }}
+        if: ${{ inputs.source_run_id != 'branch' }}
         uses: actions/download-artifact@v4
         with:
           name: blue-mappo-checkpoints
@@ -174,7 +169,6 @@ jobs:
           REHEARSAL_PROFILE: ${{ inputs.rehearsal_profile }}
           AUTO_ADVANCE: ${{ inputs.auto_advance }}
           RETRAIN_SELECTED_GATE: ${{ inputs.retrain_selected_gate }}
-          USE_BRANCH_CHECKPOINTS: ${{ inputs.use_branch_checkpoints }}
         shell: bash
         run: |
           python - <<'PY'
@@ -196,7 +190,7 @@ jobs:
           actor = root / 'latest/blue_patrol_generalized_v10.txt'
           training = root / 'latest/blue_patrol_generalized_training_v7.txt'
           progress_path = root / 'adaptive-curriculum-progress.json'
-          use_branch = os.environ.get('USE_BRANCH_CHECKPOINTS') == 'true'
+          use_branch = os.environ.get('SOURCE_RUN_ID', '').strip().lower() == 'branch'
           required_paths = ((actor, training) if use_branch
                             else (actor, training, progress_path))
           for path in required_paths:

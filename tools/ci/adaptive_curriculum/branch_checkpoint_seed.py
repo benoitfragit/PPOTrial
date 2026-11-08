@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import hashlib
 import re
+import sys
 from pathlib import Path
 
-from tools.ci import mappo_curriculum
+# Match the import contract used by progressive_gate.py when tests run via
+# unittest discover -s tools/ci/adaptive_curriculum.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import mappo_curriculum
 
 
 ACTOR_NAME = "blue_patrol_generalized_v10.txt"

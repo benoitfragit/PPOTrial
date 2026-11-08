@@ -123,15 +123,22 @@ class BranchCheckpointSeedTests(unittest.TestCase):
             dispatcher.next_dispatch_from_checkpoint(
                 result, invalid, gates_bytes, "9999")
 
-    def test_existing_restart_workflow_switch_is_opt_in(self) -> None:
+    def test_existing_restart_source_selector_preserves_ten_inputs(self) -> None:
         restart = (ROOT / ".github/workflows/mappo-restart-progressive.yml"
                    ).read_text(encoding="utf-8")
         training = (ROOT / ".github/workflows/mappo-training-windows.yml"
                     ).read_text(encoding="utf-8")
-        self.assertEqual(restart.count("      use_branch_checkpoints:"), 1)
-        self.assertIn('        default: false', restart)
-        self.assertIn("inputs.use_branch_checkpoints != true", restart)
-        self.assertIn("USE_BRANCH_CHECKPOINTS: ${{ inputs.use_branch_checkpoints }}", restart)
+        self.assertEqual(restart.count("      source_run_id:"), 1)
+        self.assertEqual(restart.count("      use_branch_checkpoints:"), 0)
+        self.assertIn("inputs.source_run_id != 'branch'", restart)
+        self.assertIn("get('SOURCE_RUN_ID', '').strip().lower() == 'branch'",
+                      restart)
+        self.assertIn('default: "41865674608"', restart)
+        # GitHub workflow_dispatch permits at most ten independent inputs.
+        selection = restart.split("    inputs:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertEqual(sum(line.startswith("      ") and line.rstrip().endswith(":")
+                             and not line.startswith("        ")
+                             for line in selection.splitlines()), 10)
         self.assertIn("branch_checkpoint_seed", restart)
         self.assertIn("inputs[resume_run_id]=${GITHUB_RUN_ID}", restart)
         self.assertNotIn("      use_branch_checkpoints:", training)
