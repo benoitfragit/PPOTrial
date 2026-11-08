@@ -206,9 +206,8 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
             import os
             previous = Path.cwd()
             try:
-                with patch.object(local, "ROOT", Path(folder)):
-                    with self.assertRaisesRegex(ValueError, "evaluated BEST"):
-                        local._run_unlocked(configured)
+                with self.assertRaisesRegex(ValueError, "evaluated BEST"):
+                    local._run_unlocked(configured)
             finally:
                 os.chdir(previous)
 
