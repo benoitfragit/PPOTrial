@@ -181,6 +181,37 @@ blocks/processes; earlier tasks are replayed throughout later phases.
 See [blue-mappo-v3.md](blue-mappo-v3.md) for targets, rewards, physical lap
 criteria, feasibility checks and diagnostics. No name V4 is used for this work.
 
+## Restart from committed branch checkpoints (PR #75)
+
+The existing **Restart Progressive Blue Defense (checkpoint)** action has a
+`use_branch_checkpoints` switch (default **false**). If enabled, the action
+ignores `source_run_id` and starts a fresh curriculum from the exact selected
+branch commit:
+
+- `resources/model/BluePatrol/latest/blue_patrol_generalized_v10.txt`:
+  the LATEST actor corresponding to the full V7 optimizer.
+- `resources/model/BluePatrol/latest/blue_patrol_generalized_training_v7.txt`:
+  critic, Adam, RNG and PPO update counter; this is the actual training seed.
+- `resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt`:
+  separate production inference incumbent, preserved without treating its
+  score as a curriculum-gate certification.
+
+All three files must be committed to the selected branch. The bootstrap checks
+semantic V10/V7 headers, actor architecture compatibility, positive optimizer
+updates and SHA-256 provenance. Its checkpoint artifact records the commit and
+three file hashes, and carries an *unverified warm start* into the existing
+`Progressive Blue Defense (Windows Release)` action. Existing BEST checkpoints
+from the branch are ignored; no prior gates are automatically declared passed.
+New training evaluations (20 independent cases per gate) determine promotion.
+
+To begin at 2v2, 3v3 or 4v4, select `max_team_size` accordingly,
+`start_gate` for the desired stage, `rehearsal_profile=balanced_v1`,
+your objective/zone variant and `use_branch_checkpoints=true`.
+This mode **does not upload files directly from a local PC**: push the matching
+V10/V7 and PROD files to the selected branch first. When the switch is false,
+the pre-existing run-ID restart behavior is unchanged. No new workflow/action
+is created and RLMission, physics, actions and rewards are not changed.
+
 ## Limitations and acceptance checks
 
 1. This is a Windows x64 headless **runtime**, not a graphics-free compile:

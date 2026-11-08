@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import os
 import sys
 import urllib.request
@@ -89,6 +90,28 @@ def next_dispatch(result: dict, config_bytes: bytes, run_id: str) -> dict | None
 
 
 CHECKPOINT_STATE_FILE = Path("build/mappo-checkpoint/adaptive-curriculum-progress.json")
+
+
+def valid_restart_source(cycle: dict) -> bool:
+    """Authenticate either a historical run or an explicit branch warm start."""
+    if cycle.get("sourceMode") == "branch":
+        hashes = cycle.get("sourceCheckpointSha256")
+        sha = cycle.get("sourceBranchSha")
+        return (
+            cycle.get("sourceRunId") is None
+            and isinstance(sha, str)
+            and re.fullmatch(r"[0-9a-f]{40}", sha) is not None
+            and isinstance(hashes, dict)
+            and set(hashes) == {"latestActor", "latestTraining", "prodActor"}
+            and all(isinstance(digest, str)
+                    and re.fullmatch(r"[0-9a-f]{64}", digest) is not None
+                    for digest in hashes.values())
+        )
+    return (cycle.get("sourceMode") is None
+            and "sourceBranchSha" not in cycle
+            and "sourceCheckpointSha256" not in cycle
+            and type(cycle.get("sourceRunId")) is int
+            and cycle["sourceRunId"] > 0)
 
 
 def next_dispatch_from_checkpoint(
@@ -172,8 +195,7 @@ def next_dispatch_from_checkpoint(
             or cycle["schemaVersion"] != 1
             or type(cycle.get("bootstrapRunId")) is not int
             or cycle["bootstrapRunId"] <= 0
-            or type(cycle.get("sourceRunId")) is not int
-            or cycle["sourceRunId"] <= 0
+            or not valid_restart_source(cycle)
             or type(cycle.get("sameThresholdAllGates")) is not bool
             or type(cycle.get("autoAdvance")) is not bool
             or type(cycle.get("successPercent")) not in (float, int)):

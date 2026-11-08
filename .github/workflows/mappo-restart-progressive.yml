@@ -25,9 +25,14 @@ on:
           - fixed_zones
           - randomized_no_zones
           - randomized_zones
-      source_run_id:
-        description: "Completed progressive run containing full V7 optimizer checkpoint"
+      use_branch_checkpoints:
+        description: "Use this branch's LATEST V10/V7 and PROD V10 as warm start (ignores source_run_id)"
         required: true
+        type: boolean
+        default: false
+      source_run_id:
+        description: "Completed source run with V7 optimizer (ignored when branch switch is true)"
+        required: false
         type: string
         default: "41865674608"
       start_gate:
@@ -122,6 +127,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate source run provenance and completion
+        if: ${{ inputs.use_branch_checkpoints != true }}
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
@@ -140,12 +146,14 @@ jobs:
               ' >/dev/null || { echo 'Source run must be a successful progressive training run in this repository' >&2; exit 1; }
 
       - name: Clear only transient workspace Blue checkpoints
+        if: ${{ inputs.use_branch_checkpoints != true }}
         shell: bash
         run: |
           rm -rf resources/model/BluePatrol/latest resources/model/BluePatrol/prod
           rm -f resources/model/BluePatrol/adaptive-curriculum-progress.json
 
       - name: Restore source actor, critic, Adam and RNG
+        if: ${{ inputs.use_branch_checkpoints != true }}
         uses: actions/download-artifact@v4
         with:
           name: blue-mappo-checkpoints
@@ -166,6 +174,7 @@ jobs:
           REHEARSAL_PROFILE: ${{ inputs.rehearsal_profile }}
           AUTO_ADVANCE: ${{ inputs.auto_advance }}
           RETRAIN_SELECTED_GATE: ${{ inputs.retrain_selected_gate }}
+          USE_BRANCH_CHECKPOINTS: ${{ inputs.use_branch_checkpoints }}
         shell: bash
         run: |
           python - <<'PY'
@@ -179,6 +188,7 @@ jobs:
               validate_gates, select_curriculum, validate_source_gate_fingerprint,
               validated_rehearsal_history)
           from tools.ci.adaptive_curriculum import champion_checkpoints as champion
+          from tools.ci.adaptive_curriculum import branch_checkpoint_seed as branch_seed
           from tools.ci.adaptive_curriculum.rehearsal_profiles import PROFILES
           from tools.ci import mappo_curriculum
 
@@ -186,7 +196,10 @@ jobs:
           actor = root / 'latest/blue_patrol_generalized_v10.txt'
           training = root / 'latest/blue_patrol_generalized_training_v7.txt'
           progress_path = root / 'adaptive-curriculum-progress.json'
-          for path in (actor, training, progress_path):
+          use_branch = os.environ.get('USE_BRANCH_CHECKPOINTS') == 'true'
+          required_paths = ((actor, training) if use_branch
+                            else (actor, training, progress_path))
+          for path in required_paths:
               if not path.is_file() or path.stat().st_size == 0:
                   raise RuntimeError(f'Missing or empty source artifact: {path}')
 
@@ -210,7 +223,8 @@ jobs:
           if start_gate not in stage_names:
               raise RuntimeError('Unknown target gate')
 
-          source = json.loads(progress_path.read_text(encoding='utf-8'))
+          source = (None if use_branch else
+                    json.loads(progress_path.read_text(encoding='utf-8')))
           variants = {
               'fixed_no_zones': ('fixed', False),
               'fixed_zones': ('fixed', True),
@@ -221,87 +235,110 @@ jobs:
           if selection not in variants:
               raise RuntimeError('Invalid scenario variant')
           objective_layout, hostile_zones = variants[selection]
-          if (type(source.get('hostileZones', False)) is not bool
+          if (not use_branch and (
+                  type(source.get('hostileZones', False)) is not bool
                   or source.get('hostileZones', False) is not hostile_zones
-                  or source.get('objectiveLayout', 'fixed') != objective_layout):
+                  or source.get('objectiveLayout', 'fixed') != objective_layout)):
               raise RuntimeError('Cannot restart across scenario variants')
           champion.ROOT = champion.variant_root(hostile_zones, objective_layout)
-          # Check the source run's OWN immutable commit, rather than assuming
-          # its gate schedule matches the new curriculum. The source may use a
-          # different historical schedule (such as run 62) but must be authentic.
-          source_run_id = os.environ['SOURCE_RUN_ID']
-          repository = os.environ['GITHUB_REPOSITORY']
-          run_metadata = json.loads(subprocess.check_output(
-              ['gh', 'api', f'repos/{repository}/actions/runs/{source_run_id}'],
-              text=True))
-          source_sha = run_metadata.get('head_sha')
-          if not isinstance(source_sha, str) or len(source_sha) != 40:
-              raise RuntimeError('Source run has no valid commit SHA')
-          source_config_payload = json.loads(subprocess.check_output(
-              ['gh', 'api', f'repos/{repository}/contents/'
-               f'tools/ci/adaptive_curriculum/gates.json?ref={source_sha}'],
-              text=True))
-          if source_config_payload.get('encoding') != 'base64':
-              raise RuntimeError('Source gate configuration cannot be decoded')
-          source_gates_bytes = base64.b64decode(source_config_payload['content'])
-          if source.get('formatVersion') != 1:
-              raise RuntimeError('Invalid source curriculum state')
-          source_gate = source.get('gate')
-          source_stages = validate_source_gate_fingerprint(
-              source_gates_bytes, source.get('gateConfigSha256'), source_gate)
-          updates = mappo_curriculum.read_updates(training)
-          saved_updates = source.get('lastCheckpointUpdates')
-          if (type(saved_updates) is not int or updates < saved_updates or updates <= 0):
-              raise RuntimeError('Source optimizer checkpoint/update counter is invalid')
-
-          # A new curriculum cycle starts from the matching evaluated FULL
-          # champion pair whenever the source run provides one. Legacy artifacts
-          # without such a pair remain usable as an explicit unverified warm start,
-          # never represented as a certified winning checkpoint.
-          # A historical source gate remains readable as a BEST pair.
-          # Active training gates are defined exclusively by the new schedule.
-          source_best = champion.read(source_gate)
-          if source_run_id == '41865674608' and (
-                  source_gate != '4v1' or source_best is None
-                  or not source_best['evaluatedForGate']):
-              raise RuntimeError('Run 62 requires its evaluated 4v1 BEST pair')
-          if source.get('championRequired', False) and source_best is None:
-              raise RuntimeError('Mandatory source champion pair is missing')
-          if source_best is not None:
-              updates = champion.restore_latest(source_gate)
-              if start_gate != source_gate:
-                  destination = champion.ROOT / start_gate
-                  if destination.exists():
-                      import shutil
-                      history = (champion.ROOT / 'history' /
-                                 os.environ['GITHUB_RUN_ID'] / start_gate)
-                      history.parent.mkdir(parents=True, exist_ok=True)
-                      shutil.copytree(destination, history)
-                  champion.seed(start_gate, source_gate)
-              print(f'[RESTART] restored BEST V7 pair from {source_gate}'
-                    f' at update={updates}')
-          else:
-              print('[RESTART] LEGACY source: no evaluated BEST pair in '
-                    'artifact. Continuing from LATEST V7; a new evaluation '
-                    'must establish the first champion.')
-
           threshold = float(os.environ["SUCCESS_PERCENT"])
           if not 0 < threshold <= 100:
               raise RuntimeError("success_percent must be in (0, 100]")
           same_threshold = os.environ["SAME_THRESHOLD"].lower() == "true"
           auto_advance = os.environ["AUTO_ADVANCE"].lower() == "true"
+          if use_branch:
+              # Only committed branch files are used. A PROD actor may be
+              # older than LATEST; the V7 optimizer always seeds from LATEST.
+              checked = branch_seed.validate_branch_checkpoints(root)
+              updates = checked['updates']
+              source_best = None
+              source_validated = []
+              source_provenance = branch_seed.branch_source_provenance(
+                  int(os.environ['GITHUB_RUN_ID']), os.environ['GITHUB_SHA'],
+                  checked['sha256'])
+              # Ignore any tracked historical BEST files; no gate is certified
+              # by a branch actor or by a PROD .score without a new evaluation.
+              import shutil
+              shutil.rmtree(root / 'best', ignore_errors=True)
+              print('[RESTART] Branch V10/V7 warm start at update='
+                    f'{updates}; no certified gates; '
+                    f'latest/prod equal='
+                    f'{checked["sha256"]["latestActor"] == checked["sha256"]["prodActor"]}')
+          else:
+              # Check the source run's OWN immutable commit, rather than assuming
+              # its gate schedule matches the new curriculum. The source may use a
+              # different historical schedule (such as run 62) but must be authentic.
+              source_run_id = os.environ['SOURCE_RUN_ID']
+              repository = os.environ['GITHUB_REPOSITORY']
+              run_metadata = json.loads(subprocess.check_output(
+                  ['gh', 'api', f'repos/{repository}/actions/runs/{source_run_id}'],
+                  text=True))
+              source_sha = run_metadata.get('head_sha')
+              if not isinstance(source_sha, str) or len(source_sha) != 40:
+                  raise RuntimeError('Source run has no valid commit SHA')
+              source_config_payload = json.loads(subprocess.check_output(
+                  ['gh', 'api', f'repos/{repository}/contents/'
+                   f'tools/ci/adaptive_curriculum/gates.json?ref={source_sha}'],
+                  text=True))
+              if source_config_payload.get('encoding') != 'base64':
+                  raise RuntimeError('Source gate configuration cannot be decoded')
+              source_gates_bytes = base64.b64decode(source_config_payload['content'])
+              if source.get('formatVersion') != 1:
+                  raise RuntimeError('Invalid source curriculum state')
+              source_gate = source.get('gate')
+              source_stages = validate_source_gate_fingerprint(
+                  source_gates_bytes, source.get('gateConfigSha256'), source_gate)
+              updates = mappo_curriculum.read_updates(training)
+              saved_updates = source.get('lastCheckpointUpdates')
+              if (type(saved_updates) is not int or updates < saved_updates or updates <= 0):
+                  raise RuntimeError('Source optimizer checkpoint/update counter is invalid')
 
-          # Preserve the historical previously validated gates for rehearsal.
-          # Eight-case legacy certifications are NOT new 20-case gate proofs.
-          source_validated = source.get('validatedGates', [])
-          source_names = [stage['id'] for stage in source_stages]
-          if (not isinstance(source_validated, list)
-                  or any(type(gate_id) is not str
-                         or gate_id not in source_names
-                         or source_names.index(gate_id) > source_names.index(source_gate)
-                         for gate_id in source_validated)
-                  or (source_gate in source_validated) != source.get('passed')):
-              raise RuntimeError('Inconsistent source gate validation history')
+              # A new curriculum cycle starts from the matching evaluated FULL
+              # champion pair whenever the source run provides one. Legacy artifacts
+              # without such a pair remain usable as an explicit unverified warm start,
+              # never represented as a certified winning checkpoint.
+              # A historical source gate remains readable as a BEST pair.
+              # Active training gates are defined exclusively by the new schedule.
+              source_best = champion.read(source_gate)
+              if source_run_id == '41865674608' and (
+                      source_gate != '4v1' or source_best is None
+                      or not source_best['evaluatedForGate']):
+                  raise RuntimeError('Run 62 requires its evaluated 4v1 BEST pair')
+              if source.get('championRequired', False) and source_best is None:
+                  raise RuntimeError('Mandatory source champion pair is missing')
+              if source_best is not None:
+                  updates = champion.restore_latest(source_gate)
+                  if start_gate != source_gate:
+                      destination = champion.ROOT / start_gate
+                      if destination.exists():
+                          import shutil
+                          history = (champion.ROOT / 'history' /
+                                     os.environ['GITHUB_RUN_ID'] / start_gate)
+                          history.parent.mkdir(parents=True, exist_ok=True)
+                          shutil.copytree(destination, history)
+                      champion.seed(start_gate, source_gate)
+                  print(f'[RESTART] restored BEST V7 pair from {source_gate}'
+                        f' at update={updates}')
+              else:
+                  print('[RESTART] LEGACY source: no evaluated BEST pair in '
+                        'artifact. Continuing from LATEST V7; a new evaluation '
+                        'must establish the first champion.')
+
+              # Preserve the historical previously validated gates for rehearsal.
+              # Eight-case legacy certifications are NOT new 20-case gate proofs.
+              source_validated = source.get('validatedGates', [])
+              source_names = [stage['id'] for stage in source_stages]
+              if (not isinstance(source_validated, list)
+                      or any(type(gate_id) is not str
+                             or gate_id not in source_names
+                             or source_names.index(gate_id) > source_names.index(source_gate)
+                             for gate_id in source_validated)
+                      or (source_gate in source_validated) != source.get('passed')):
+                  raise RuntimeError('Inconsistent source gate validation history')
+              source_provenance = {
+                  'sourceRunId': int(os.environ['SOURCE_RUN_ID'])
+              }
+
           rehearsal_history = validated_rehearsal_history(
               stages, start_gate, source_validated)
 
@@ -324,7 +361,7 @@ jobs:
               restartCycle=dict(
                   schemaVersion=1,
                   bootstrapRunId=int(os.environ["GITHUB_RUN_ID"]),
-                  sourceRunId=int(os.environ["SOURCE_RUN_ID"]),
+                  **source_provenance,
                   sameThresholdAllGates=same_threshold,
                   rehearsalProfile=rehearsal_profile,
                   successPercent=threshold,
@@ -342,21 +379,27 @@ jobs:
               fresh['objectiveLayout'] = objective_layout
               fresh['restartCycle']['objectiveLayout'] = objective_layout
           progress_path.write_text(json.dumps(fresh, indent=2) + '\n', encoding='utf-8')
+          source_label = ('branch ' + os.environ['GITHUB_SHA'] if use_branch
+                          else 'run ' + os.environ['SOURCE_RUN_ID'])
+          seed_description = ('branch LATEST V7 + PROD V10; unverified gates'
+                              if use_branch else
+                              'BEST evaluated pair' if source_best else
+                              'LEGACY latest warm start')
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
               summary.write(
                   f'### New progressive Blue Defense cycle\n'
-                  f'- Source run: {os.environ["SOURCE_RUN_ID"]}\n'
+                  f'- Seed source: {source_label}\n'
                   f'- Retained PPO updates: {updates}\n'
                   f'- New first gate: {start_gate}\n'
-                  '- Actor, critic, Adam, and RNG: matched V7 epoch retained\n'
-                  f'- Source: {"BEST evaluated pair" if source_best else "LEGACY latest warm start"}\n'
+                  '- LATEST actor and full V7 optimizer preserved; PROD remains separate\n'
+                  f'- Source: {seed_description}\n'
                   f'- Earlier gates eligible for rehearsal: {rehearsal_history}\n'
                   f'- Same success threshold on every gate: {same_threshold}\n'
                   f'- Training rehearsal profile: {rehearsal_profile}\n'
                   f'- Requested success threshold: {threshold:g}%\n'
                   '- No training, compilation, or production promotion in this bootstrap job\n'
               )
-          print(f'[RESTART] Source run {os.environ["SOURCE_RUN_ID"]}; update={updates}; gate={start_gate}')
+          print(f'[RESTART] Source {source_label}; update={updates}; gate={start_gate}')
           PY
 
       - name: Publish bootstrapped checkpoint for the EXISTING training workflow
