@@ -67,6 +67,73 @@ class RehearsalProfileTests(unittest.TestCase):
             profiles.select_weighted_stage(
                 [dict(id="4v4")], 0, 0, [], "balanced_v1")
 
+    def test_adaptive_balanced_three_four_and_resume(self):
+        document = json.loads(gate.GATES_FILE.read_bytes())
+        for max_team_size in (3, 4):
+            with self.subTest(size=max_team_size):
+                stages = gate.select_curriculum(document, max_team_size)
+                index = len(stages) - 1
+                history = [s["id"] for s in stages[:index]]
+                weights = profiles._adaptive_balanced_weights(
+                    stages, index, stages)
+                total = sum(weights.values())
+                self.assertGreater(weights[stages[index]["id"]], total / 2)
+                sequence = [
+                    profiles.select_weighted_stage(
+                        stages, index, block, history, "balanced_v1")["id"]
+                    for block in range(total)
+                ]
+                self.assertEqual(Counter(sequence), weights)
+                self.assertEqual(sequence, [
+                    profiles.select_weighted_stage(
+                        stages, index, block + total, history, "balanced_v1")["id"]
+                    for block in range(total)
+                ])
+                self.assertIn("2v0", sequence)
+                self.assertIn("2v2", sequence)
+                self.assertIn(f"{max_team_size}v0", sequence)
+
+    def test_adaptive_balanced_rehearses_only_validated_gates(self):
+        document = json.loads(gate.GATES_FILE.read_bytes())
+        stages = gate.select_curriculum(document, 4)
+        last = len(stages) - 1
+        history = ["1v0", "2v2", "3v0", "3v3", "4v0"]
+        observed = [
+            profiles.select_weighted_stage(
+                stages, last, block, history, "balanced_v1")["id"]
+            for block in range(200)
+        ]
+        self.assertTrue(set(observed).issubset(set(history) | {"4v4"}))
+        self.assertGreater(observed.count("4v4"), 100)
+        self.assertTrue(all(name in observed for name in history))
+        self.assertEqual(
+            observed, [profiles.select_weighted_stage(
+                stages, last, block, history, "balanced_v1")["id"]
+                for block in range(200)])
+
+    def test_adaptive_balanced_without_prior_validation(self):
+        stages = gate.select_curriculum(
+            json.loads(gate.GATES_FILE.read_bytes()), 3)
+        for block in range(50):
+            self.assertEqual(profiles.select_weighted_stage(
+                stages, len(stages)-1, block, [], "balanced_v1")["id"], "3v3")
+        with self.assertRaisesRegex(ValueError, "incompatible"):
+            profiles.select_weighted_stage(
+                stages, len(stages)-1, 0, [], "combat_focus_v1")
+
+    def test_adaptive_balanced_independent_of_zone_option(self):
+        stages = gate.select_curriculum(
+            json.loads(gate.GATES_FILE.read_bytes()), 4)
+        index = len(stages)-1
+        history = [stage["id"] for stage in stages[:-1]]
+        with_zones = [dict(s, hostileZones=True) for s in stages]
+        for block in range(100):
+            self.assertEqual(
+                profiles.select_weighted_stage(stages, index, block,
+                                               history, "balanced_v1")["id"],
+                profiles.select_weighted_stage(with_zones, index, block,
+                                               history, "balanced_v1")["id"])
+
     def test_legacy_schedule_is_unchanged(self):
         stages = reduced_gates()
         for block in range(80):

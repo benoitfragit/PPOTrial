@@ -22,6 +22,38 @@ WEIGHTS = {
 }
 
 
+
+def _adaptive_balanced_weights(
+        stages: list[dict], index: int, eligible: list[dict]) -> dict[str, int]:
+    """Derive non-uniform 3vX/4vX shares from the current validated gate set.
+
+    A strict majority of every complete deterministic cycle belongs to the
+    current gate. Earlier validated patrol and combat gates remain eligible;
+    no skipped or future gate can receive weight.
+    """
+    legacy = ("1v0", "2v0", "1v1", "2v1", "2v2")
+    if (len(stages) not in (9, 14)
+            or tuple(stage["id"] for stage in stages[:5]) != legacy
+            or index < 5 or index >= len(stages)
+            or any(stage["id"] != f"{stage['blue']}v{stage['red']}"
+                   or not 0 <= stage["red"] <= stage["blue"] <= 4
+                   for stage in stages)):
+        raise ValueError("Rehearsal profile is incompatible with these gates")
+    current = stages[index]
+    weights: dict[str, int] = {}
+    for previous in eligible:
+        if previous["id"] == current["id"]:
+            continue
+        blue, red = previous["blue"], previous["red"]
+        # Keep a patrol and a combat anchor for each validated team size;
+        # prioritize the current and immediately preceding team sizes.
+        weight = 1 + int(red == 0 or red == blue)
+        weight += int(blue in (current["blue"], current["blue"] - 1))
+        weights[previous["id"]] = weight
+    weights[current["id"]] = max(8, sum(weights.values()) + 1)
+    return weights
+
+
 def select_weighted_stage(stages: list[dict], index: int, block: int,
                           validated_gates: list[str],
                           profile: str) -> dict:
@@ -40,7 +72,10 @@ def select_weighted_stage(stages: list[dict], index: int, block: int,
     eligible = [stage for stage_index, stage in enumerate(stages)
                 if stage_index == index
                 or (stage_index < index and stage["id"] in validated_gates)]
-    weights = WEIGHTS[profile]
+    if profile == "balanced_v1" and index >= 5:
+        weights = _adaptive_balanced_weights(stages, index, eligible)
+    else:
+        weights = WEIGHTS[profile]
     if any(stage["id"] not in weights for stage in eligible):
         raise ValueError("Rehearsal profile is incompatible with these gates")
     total = sum(weights[stage["id"]] for stage in eligible)
