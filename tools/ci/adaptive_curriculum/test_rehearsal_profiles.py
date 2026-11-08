@@ -24,6 +24,20 @@ def reduced_gates() -> list[dict]:
 
 
 class RehearsalProfileTests(unittest.TestCase):
+    def test_legacy_is_automatically_balanced_for_three_and_four(self):
+        for size in (3, 4):
+            self.assertEqual(profiles.effective_profile("legacy", size),
+                             "balanced_v1")
+            self.assertEqual(profiles.effective_profile("balanced_v1", size),
+                             "balanced_v1")
+            with self.assertRaisesRegex(ValueError, "require balanced_v1"):
+                profiles.effective_profile("combat_focus_v1", size)
+        self.assertEqual(profiles.effective_profile("legacy", 2), "legacy")
+        self.assertEqual(profiles.effective_profile("patrol_focus_v1", 2),
+                         "patrol_focus_v1")
+        with self.assertRaises(ValueError):
+            profiles.effective_profile("balanced_v1", 5)
+
     def test_all_named_profiles_have_exact_twenty_block_shares(self):
         stages = reduced_gates()
         history = [stage["id"] for stage in stages[:-1]]

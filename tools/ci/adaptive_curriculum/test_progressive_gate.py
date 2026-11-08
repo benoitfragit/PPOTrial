@@ -574,6 +574,94 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertEqual(json.loads(gate.RESULT_FILE.read_text())["nextGate"],
                          "1v1")
 
+    def test_three_four_require_actual_rehearsals_before_early_pass(self) -> None:
+        """The passing 3v3/4v4 BEST cannot skip one full replay cycle."""
+        production = (Path(__file__).resolve().parents[3] /
+                      "tools/ci/adaptive_curriculum/gates.json")
+        config = json.loads(production.read_text(encoding="utf-8"))
+        for size in (3, 4):
+            with self.subTest(max_team_size=size):
+                stages = gate.select_curriculum(config, size)
+                index = len(stages) - 1
+                current = stages[index]["id"]
+                gate.existing.write_json(gate.GATES_FILE, config)
+                self.checkpoint(2590)
+                # Even a previously certified BEST is not proof of replay.
+                gate.champion.promote(
+                    current, {"successPercent": 95.0, "score": 80.0}, 2590)
+                digest = hashlib.sha256(gate.GATES_FILE.read_bytes()).hexdigest()
+                gate.existing.write_json(gate.STATE_FILE, {
+                    "formatVersion": 1, "gateConfigSha256": digest,
+                    "gateIndex": index, "gate": current, "passed": False,
+                    "elapsedSeconds": 0.0, "blockIndex": 0,
+                    "lastCheckpointUpdates": 2590,
+                    "bestSuccessPercent": 0.0, "lastSuccessPercent": None,
+                    "validatedGates": [], "rehearsalProfile": "balanced_v1",
+                    "maxTeamSize": size, "championRequired": True,
+                    "restartCycle": {
+                        "schemaVersion": 1, "bootstrapRunId": 999,
+                        "sourceRunId": 888, "sameThresholdAllGates": True,
+                        "successPercent": 92.0, "autoAdvance": False,
+                        "rehearsalProfile": "balanced_v1",
+                    },
+                })
+                cycle_length = gate.profiles.weighted_cycle_length(
+                    stages, index, [], "balanced_v1")
+                expected = [gate.profiles.select_weighted_stage(
+                    stages, index, block, [], "balanced_v1")["id"]
+                    for block in range(cycle_length)]
+                replayed = []
+                intermediate = []
+                clock = [0.0]
+
+                def simulate(binary: Path, stage: dict, seconds: int,
+                             log_path: Path) -> str:
+                    upper = json.loads(
+                        gate.existing.TRAINING_FILE.read_text(encoding="utf-8")
+                    )["training"]["maxUpdates"]
+                    self.checkpoint(upper)
+                    replayed.append(stage["id"])
+                    intermediate.append(json.loads(
+                        gate.STATE_FILE.read_text(encoding="utf-8")))
+                    log_path.write_text(
+                        self.evaluation(stage, 1.0), encoding="utf-8")
+                    clock[0] += 1.0
+                    return "evaluation"
+
+                with patch.object(gate.time, "monotonic",
+                                  side_effect=lambda: clock[0]):
+                    with patch.object(gate.existing, "run_stage",
+                                      side_effect=simulate):
+                        state = gate.run_gate(self.args(
+                            gate=current, max_team_size=size, resume=True,
+                            threshold_percent=92.0,
+                            rehearsal_profile="balanced_v1",
+                            max_seconds=cycle_length + 40, block_updates=10,
+                            auto_advance=False))
+                self.assertGreaterEqual(len(replayed), cycle_length)
+                self.assertEqual(replayed[:cycle_length], expected)
+                self.assertEqual(set(replayed[:cycle_length]),
+                                 {stage["id"] for stage in stages})
+                self.assertTrue(all(not entry["passed"]
+                                    for entry in intermediate))
+                self.assertTrue(state["passed"])
+                self.assertGreaterEqual(state["blockIndex"], cycle_length)
+                self.assertEqual(state["validatedGates"], [current])
+                self.assertGreater(gate.existing.read_updates(), 2590)
+                self.assertEqual(
+                    gate.champion.read(current)["successPercent"], 100.0)
+                gate.STATE_FILE.unlink(missing_ok=True)
+                gate.RESULT_FILE.unlink(missing_ok=True)
+                shutil.rmtree(gate.champion.ROOT, ignore_errors=True)
+
+    def test_third_team_legacy_selection_uses_balanced_replay(self) -> None:
+        self.assertEqual(gate.profiles.effective_profile("legacy", 3),
+                         "balanced_v1")
+        self.assertEqual(gate.profiles.effective_profile("legacy", 4),
+                         "balanced_v1")
+        self.assertEqual(gate.profiles.effective_profile("legacy", 2),
+                         "legacy")
+
     def test_retrain_evaluated_2v2_best_for_full_budget(self) -> None:
         """Run 84 BEST at 100% must not prevent additional 2v2 PPO updates."""
         production = (Path(__file__).resolve().parents[3] /
