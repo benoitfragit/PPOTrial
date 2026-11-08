@@ -237,8 +237,8 @@ bool CheckFixedObjectiveDoesNotChangeLegacyRandomSequence()
     auto legacy = ValidScenario();
     auto explicitFixed = legacy;
     explicitFixed["objectiveSpawn"] = {{"mode", "fixed"}};
-    auto const previous = defense::ParseSpawnSettings(legacy);
-    auto const current = defense::ParseSpawnSettings(explicitFixed);
+    auto previous = defense::ParseSpawnSettings(legacy);
+    auto current = defense::ParseSpawnSettings(explicitFixed);
     if (!previous || !current)
         return false;
     defense::WorldBounds const bounds{22329.375F, 35727.F};
