@@ -54,6 +54,22 @@ def _adaptive_balanced_weights(
     return weights
 
 
+def weighted_cycle_length(stages: list[dict], index: int,
+                          validated_gates: list[str], profile: str) -> int:
+    """Return full cycle length using the CI profile and validated history."""
+    if profile not in WEIGHTS or not 0 <= index < len(stages):
+        raise ValueError("Invalid weighted rehearsal cycle")
+    eligible = [stage for position, stage in enumerate(stages)
+                if position == index or
+                (position < index and stage["id"] in validated_gates)]
+    weights = (_adaptive_balanced_weights(stages, index, eligible)
+               if profile == "balanced_v1" and index >= 5
+               else WEIGHTS[profile])
+    if any(stage["id"] not in weights for stage in eligible):
+        raise ValueError("Rehearsal profile is incompatible with these gates")
+    return sum(weights[stage["id"]] for stage in eligible)
+
+
 def select_weighted_stage(stages: list[dict], index: int, block: int,
                           validated_gates: list[str],
                           profile: str) -> dict:
