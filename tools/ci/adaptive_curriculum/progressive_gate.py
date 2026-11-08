@@ -34,8 +34,13 @@ SUCCESS_LINE = re.compile(
 
 
 def validate_gates(document: dict) -> list[dict]:
-    if document.get("formatVersion") != 1:
+    version = document.get("formatVersion")
+    if type(version) is not int or version not in (1, 2):
         raise ValueError("Unexpected adaptive gate schema")
+    if version == 2 and (
+            document.get("contractId") != "triangular-v1"
+            or document.get("maxTeamSize") != 4):
+        raise ValueError("Unknown triangular curriculum contract")
     period = document.get("rehearsalEveryBlocks")
     if type(period) is not int or not 2 <= period <= 100:
         raise ValueError("rehearsalEveryBlocks must be in [2,100]")
@@ -65,6 +70,16 @@ def validate_gates(document: dict) -> list[dict]:
             raise ValueError("Invalid gate dimensions")
     if (stages[0]["blue"], stages[0]["red"]) != (1, 0):
         raise ValueError("First gate must be 1v0")
+    if version == 2:
+        expected = ["1v0", "2v0", "1v1", "2v1", "2v2"]
+        for blue in (3, 4):
+            expected.extend(f"{blue}v{red}" for red in range(blue + 1))
+        if ([stage["id"] for stage in stages] != expected
+                or any(stage["red"] > stage["blue"]
+                       or stage["id"] != f"{stage['blue']}v{stage['red']}"
+                       for stage in stages)):
+            raise ValueError("Invalid triangular gate sequence or dimensions")
+        return stages
     final = (stages[-1]["blue"], stages[-1]["red"])
     if final == (2, 2):
         # Enforce the reduced live curriculum while keeping historical 4v4
@@ -76,6 +91,23 @@ def validate_gates(document: dict) -> list[dict]:
     elif final != (4, 4):
         raise ValueError("Final gate must be 2v2 or historical 4v4")
     return stages
+
+
+def select_curriculum(document: dict, max_team_size: int) -> list[dict]:
+    """Select the 2v2, 3v3 or 4v4 prefix from the single canonical schedule.
+
+    Historical formatVersion=1 inputs remain readable as provenance during
+    imports; they never create a second contract or training file.
+    """
+    if type(max_team_size) is not int or max_team_size not in (2, 3, 4):
+        raise ValueError("max_team_size must be 2, 3 or 4")
+    stages = validate_gates(document)
+    if document["formatVersion"] == 1:
+        if max_team_size != 2:
+            raise ValueError("Historical gate configuration has no 3v3/4v4 selection")
+        return stages
+    counts = {2: 5, 3: 9, 4: 14}
+    return stages[:counts[max_team_size]]
 
 
 def select_training_stage(stages: list[dict], index: int, block: int,
@@ -309,6 +341,8 @@ def record_result(state: dict, stages: list[dict], threshold: float,
                   uniformThresholdPercent=state.get("uniformThresholdPercent"),
                   gateConfigSha256=state["gateConfigSha256"],
                   finished=passed and not next_gate)
+    if "maxTeamSize" in state:
+        result["maxTeamSize"] = state["maxTeamSize"]
     existing.write_json(STATE_FILE, state)
     existing.write_json(RESULT_FILE, result)
     output = os.environ.get("GITHUB_OUTPUT")
@@ -341,12 +375,17 @@ def run_gate(args: argparse.Namespace) -> dict:
     binary = Path(args.binary)
     if not binary.is_file():
         raise FileNotFoundError(f"Missing Release PPO executable: {binary}")
+    max_team_size = getattr(args, "max_team_size", 2)
     config_bytes = GATES_FILE.read_bytes()
     config_hash = hashlib.sha256(config_bytes).hexdigest()
     configuration = json.loads(config_bytes)
-    stages = validate_gates(configuration)
+    stages = select_curriculum(configuration, max_team_size)
     rehearsal_every = configuration["rehearsalEveryBlocks"]
     state = initialize_state(stages, args.gate, args.resume, config_hash)
+    if state.get("maxTeamSize", 2) != max_team_size:
+        raise ValueError("Checkpoint team size differs from selected curriculum")
+    if max_team_size != 2:
+        state["maxTeamSize"] = max_team_size
     stage = stages[state["gateIndex"]]
     cycle = state.get("restartCycle")
     # An explicit restart of a previously certified gate must actually train.
@@ -532,6 +571,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", default="build/release/Main/Release/PPO.exe")
     parser.add_argument("--gate", default="1v0")
+    parser.add_argument("--max-team-size", type=int, choices=(2, 3, 4), default=2)
     parser.add_argument("--rehearsal-profile", choices=profiles.PROFILES,
                         default="legacy")
     parser.add_argument("--threshold-percent", type=float, default=75.0)

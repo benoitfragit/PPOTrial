@@ -3,6 +3,15 @@ name: Progressive Blue Defense (Windows Release)
 on:
   workflow_dispatch:
     inputs:
+      max_team_size:
+        description: "Maximum team size: 2, 3 or 4 (2v2 legacy by default)"
+        required: true
+        type: choice
+        default: "2"
+        options:
+          - "2"
+          - "3"
+          - "4"
       max_seconds:
         description: "Training time budget in seconds (leave headroom for build/artifacts)"
         required: true
@@ -19,7 +28,7 @@ on:
         type: string
         default: ""
       progressive_gate:
-        description: "Gate to train (selecting a later gate skips intermediate gates)"
+        description: "Gate to train (limited by max_team_size)"
         required: true
         type: choice
         default: "1v0"
@@ -29,6 +38,15 @@ on:
           - 1v1
           - 2v1
           - 2v2
+          - 3v0
+          - 3v1
+          - 3v2
+          - 3v3
+          - 4v0
+          - 4v1
+          - 4v2
+          - 4v3
+          - 4v4
       rehearsal_profile:
         description: "Training rehearsal profile (legacy preserves existing scheduling)"
         required: false
@@ -193,6 +211,7 @@ jobs:
       - name: Train one progressive MAPPO gate (time- and success-bounded)
         env:
           GATE: ${{ inputs.progressive_gate }}
+          MAX_TEAM_SIZE: ${{ inputs.max_team_size }}
           SUCCESS_PERCENT: ${{ inputs.success_percent }}
           MAX_SECONDS: ${{ inputs.max_seconds }}
           RESUME_RUN_ID: ${{ inputs.resume_run_id }}
@@ -203,6 +222,7 @@ jobs:
           $pythonArgs = @(
             "-u", "tools/ci/adaptive_curriculum/progressive_gate.py",
             "--gate", $env:GATE,
+            "--max-team-size", $env:MAX_TEAM_SIZE,
             "--threshold-percent", $env:SUCCESS_PERCENT,
             "--max-seconds", $env:MAX_SECONDS,
             "--block-updates", "20"
