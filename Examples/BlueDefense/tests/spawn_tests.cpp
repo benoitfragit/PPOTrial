@@ -13,6 +13,8 @@
 #include <cmath>
 #include <cstddef>
 #include <random>
+#include <set>
+#include <utility>
 #include <string>
 
 namespace defense = ppo::examples::bluedefense;
@@ -72,7 +74,9 @@ bool Same(defense::Spawn const& left, defense::Spawn const& right)
 bool Same(defense::EpisodeSpawnLayout const& left,
           defense::EpisodeSpawnLayout const& right)
 {
-    if (left.side != right.side || left.red.size() != right.red.size()
+    if (left.side != right.side
+        || !Same(left.objective, right.objective)
+        || left.red.size() != right.red.size()
         || left.redActivationSteps != right.redActivationSteps
         || !Same(left.friendlyRestrictedZone, right.friendlyRestrictedZone)
         || left.restrictedZones.size() != right.restrictedZones.size())
@@ -226,6 +230,89 @@ bool RejectInvalidSettings()
     return true;
 }
 
+bool CheckRandomizedObjective()
+{
+    auto document = ValidScenario();
+    document["redTeam"]["activeCount"] = 2U;
+    document["objectiveSpawn"] = {
+        {"mode", "randomized"},
+        {"northFraction", {{"minimum", -0.65F}, {"maximum", 0.65F}}},
+        {"eastFraction", {{"minimum", 0.55F}, {"maximum", 0.85F}}},
+        {"zoneSafetyMarginMeters", 2000.F},
+        {"minimumBlueSeparationMeters", 2500.F}
+    };
+    document["restrictedZones"]["items"].push_back({
+        {"id", "random_zone"}, {"type", "RestrictedZone"},
+        {"platform", "restrictedzone"}, {"side", "Hostile"},
+        {"enabled", true}, {"enabledProbability", 1.F},
+        {"randomPosition", {
+            {"north", {{"minimum", -12000.F}, {"maximum", 12000.F}}},
+            {"east", {{"minimum", 18000.F}, {"maximum", 29000.F}}}
+        }}
+    });
+    auto parsed = defense::ParseSpawnSettings(document);
+    if (!parsed)
+        return false;
+    for (auto& zone : parsed->restrictedZones.items)
+        zone.lethalRadiusMeters = 7000.F;
+    defense::WorldBounds const world{22329.375F, 35727.F};
+    std::vector<defense::Spawn> const blueSpawns{
+        {0.F, 0.F, 0.F, 0.F, false}, {1000.F, 1000.F, 0.F, 0.F, false}};
+    std::set<std::pair<float, float>> samples;
+    for (int side : {-1, 1})
+        for (unsigned seed = 0U; seed < 128U; ++seed)
+        {
+            std::mt19937 rng{seed};
+            std::mt19937 replay{seed};
+            std::string diagnostic;
+            auto const layout = defense::GenerateEpisodeSpawnLayout(
+                side, *parsed, world, rng, &diagnostic, &blueSpawns);
+            auto const repeated = defense::GenerateEpisodeSpawnLayout(
+                side, *parsed, world, replay, nullptr, &blueSpawns);
+            if (!layout || !repeated || !Same(*layout, *repeated)
+                || !diagnostic.empty() || layout->objective.destroyed)
+                return false;
+            samples.emplace(layout->objective.north, layout->objective.east);
+            auto const objective = defense::MakeSpawn(
+                "blue_objective", *layout, world, rng);
+            if (!objective || !Same(*objective, layout->objective)
+                || objective->east * static_cast<float>(side) <= 0.F
+                || std::fabs(objective->north) >= world.halfNorth - 1000.F
+                || std::fabs(objective->east) >= world.halfEast - 1000.F)
+                return false;
+            for (auto const& zone : layout->restrictedZones)
+                if (std::hypot(objective->north - zone.spawn.north,
+                               objective->east - zone.spawn.east) <= 9000.F)
+                    return false;
+            for (auto const& red : layout->red)
+            {
+                float const desired = std::atan2(
+                    objective->east - red.east, objective->north - red.north);
+                if (std::fabs(std::remainder(red.heading - desired,
+                                            6.283185307179586F)) > 0.1201F)
+                    return false;
+            }
+        }
+    if (samples.size() < 16U)
+        return false;
+
+    // Deterministic impossible geometry must fail without unsafe fallback.
+    parsed->objective.northFraction = {0.F, 0.F};
+    parsed->objective.eastFraction = {0.6F, 0.6F};
+    parsed->objective.maximumPlacementAttempts = 3U;
+    parsed->restrictedZones.items[0].fixedPosition = {
+        0.F, 0.6F * world.halfEast};
+    parsed->restrictedZones.items[1].enabled = false;
+    std::mt19937 impossible{17U};
+    std::string diagnostic;
+    if (defense::GenerateEpisodeSpawnLayout(
+            1, *parsed, world, impossible, &diagnostic, &blueSpawns)
+        || diagnostic.find("cannot place objective") == std::string::npos)
+        return false;
+    document["objectiveSpawn"]["mode"] = "unknown";
+    return !defense::ParseSpawnSettings(document);
+}
+
 } // namespace
 
 /**
@@ -238,5 +325,6 @@ int main()
     if (!CheckTeam(4U, 4U)) return 3;
     if (!CheckTeam(9U, 10U)) return 4;
     if (!RejectInvalidSettings()) return 5;
+    if (!CheckRandomizedObjective()) return 6;
     return 0;
 }

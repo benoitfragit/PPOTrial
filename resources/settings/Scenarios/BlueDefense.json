@@ -45,6 +45,9 @@
       "minimumActivationDelaySteps": 256,
       "maximumActivationDelaySteps": 768
     },
+    "objectiveSpawn": {
+      "mode": "fixed"
+    },
     "redSpawn": {
       "minimumWorldScale": 1.15,
       "maximumWorldScale": 1.45,

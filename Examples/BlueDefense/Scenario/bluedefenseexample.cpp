@@ -161,7 +161,8 @@ bool LoadScenario(
         return false;
     std::mt19937 validationRng{0U};
     WorldBounds const worldBounds{0.5F * worldNorth, 0.5F * worldEast};
-    if (!GenerateEpisodeSpawnLayout(
+    if (spawnSettings->objective.mode == ObjectiveSpawnMode::Fixed
+        && !GenerateEpisodeSpawnLayout(
             1, *spawnSettings, worldBounds, validationRng))
         return false;
 
@@ -333,6 +334,26 @@ bool LoadScenario(
     context.rng.seed(patrolTraining.seed);
     context.count = entities.size();
     context.spawnSettings = *spawnSettings;
+    if (context.spawnSettings.objective.mode == ObjectiveSpawnMode::Randomized)
+    {
+        for (auto& zone : context.spawnSettings.restrictedZones.items)
+        {
+            auto const& entity = entities.at(zone.id);
+            if (!entity->has<ppo::model::sSNAState>())
+                return false;
+            auto const [sna] = entity->get<ppo::model::sSNAState>();
+            zone.lethalRadiusMeters = sna.m_maxNoescapeZone;
+            if (context.spawnSettings.restrictedZones.enabled
+                && zone.enabled && zone.enabledProbability > 0.F
+                && (!std::isfinite(zone.lethalRadiusMeters)
+                    || zone.lethalRadiusMeters <= 0.F))
+            {
+                std::cerr << "[BLUE_DEFENSE] Invalid physical radius for "
+                          << zone.id << '\n';
+                return false;
+            }
+        }
+    }
     context.patrolOnly = patrolOnly;
     context.patrolCruiseSpeed = patrolParameters.cruiseSpeed;
     context.patrolMaximumRotationRate = patrolParameters.maxRotationRate;
