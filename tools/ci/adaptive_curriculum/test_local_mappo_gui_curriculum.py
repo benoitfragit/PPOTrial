@@ -111,6 +111,34 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             local.next_update_target(1790, 0, 10)
 
+    def test_explicit_checkpoint_pair_uses_v7_updates(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            actor = Path(directory) / "source-v10.txt"
+            training = Path(directory) / "source-v7.txt"
+            actor.write_text(
+                "BLUE_TEAM_MAPPO_V10 10 10 UNIFIED_PHYSICAL_GUIDANCE_V1\\n"
+                .replace("\\\\n", "\\n"), encoding="utf-8")
+            training.write_text(
+                "BLUE_TEAM_TRAINING_V7 7 10 UNIFIED_PHYSICAL_GUIDANCE_V1\\n"
+                "UPDATES 2590\\n".replace("\\\\n", "\\n"),
+                encoding="utf-8")
+            self.assertEqual(local._validate_checkpoint_pair(
+                2590, actor, training, require_prod_match=False), 2590)
+            with self.assertRaisesRegex(ValueError, "Expected source update"):
+                local._validate_checkpoint_pair(
+                    1790, actor, training, require_prod_match=False)
+
+    def test_explicit_source_cli_is_opt_in(self) -> None:
+        historical = local.parse_args([])
+        self.assertEqual(historical.expected_source_updates, 1790)
+        self.assertIsNone(historical.source_actor)
+        modern = local.parse_args([
+            "--max-team-size", "3", "--source-actor", "best-actor.txt",
+            "--source-training", "best-training.txt"])
+        self.assertIsNone(modern.expected_source_updates)
+        self.assertEqual(modern.source_actor.name, "best-actor.txt")
+        self.assertEqual(modern.source_training.name, "best-training.txt")
+
     def test_gui_files_are_restored_after_a_visual_run(self) -> None:
         self.assertIn(local.GUI_LAYOUT, local.PRESERVED_RUNTIME_FILES)
         self.assertIn(local.RENDERER_SETTINGS,
