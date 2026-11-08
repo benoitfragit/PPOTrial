@@ -50,6 +50,85 @@ class WatchdogLimits:
         return cls(**values)
 
 
+def _assign_windows_job(process: subprocess.Popen[str]) -> object | None:
+    """Own all Windows descendants, even if PPO exits before its children.
+
+    A kill-on-close Job Object is available on Windows 2022 runners. It is
+    deliberately confined to the external watchdog, not the C++ runtime.
+    """
+    if os.name != "nt":
+        return None
+    import ctypes
+
+    class BasicLimit(ctypes.Structure):
+        _fields_ = [
+            ("per_process_time", ctypes.c_longlong),
+            ("per_job_time", ctypes.c_longlong),
+            ("flags", ctypes.c_uint32),
+            ("min_working_set", ctypes.c_size_t),
+            ("max_working_set", ctypes.c_size_t),
+            ("active_process_limit", ctypes.c_uint32),
+            ("affinity", ctypes.c_size_t),
+            ("priority_class", ctypes.c_uint32),
+            ("scheduling_class", ctypes.c_uint32),
+        ]
+
+    class IoCounters(ctypes.Structure):
+        _fields_ = [(name, ctypes.c_ulonglong) for name in (
+            "read_operations", "write_operations", "other_operations",
+            "read_bytes", "write_bytes", "other_bytes")]
+
+    class ExtendedLimit(ctypes.Structure):
+        _fields_ = [("basic", BasicLimit), ("io", IoCounters),
+                    ("process_memory", ctypes.c_size_t),
+                    ("job_memory", ctypes.c_size_t),
+                    ("peak_process_memory", ctypes.c_size_t),
+                    ("peak_job_memory", ctypes.c_size_t)]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+    kernel.CreateJobObjectW.restype = ctypes.c_void_p
+    kernel.SetInformationJobObject.argtypes = [
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+    kernel.SetInformationJobObject.restype = ctypes.c_int
+    kernel.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    kernel.AssignProcessToJobObject.restype = ctypes.c_int
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel.CloseHandle.restype = ctypes.c_int
+    handle = kernel.CreateJobObjectW(None, None)
+    if not handle:
+        raise OSError(ctypes.get_last_error(), "CreateJobObjectW failed")
+    try:
+        limits = ExtendedLimit()
+        limits.basic.flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not kernel.SetInformationJobObject(
+                handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+            raise OSError(ctypes.get_last_error(), "SetInformationJobObject failed")
+        # Popen retains the real process handle on Windows; assignment
+        # cannot depend on a PID that may have been recycled.
+        if not kernel.AssignProcessToJobObject(handle, int(process._handle)):
+            if process.poll() is not None:
+                # A very short-lived leaf finished before assignment.
+                kernel.CloseHandle(handle)
+                return None
+            raise OSError(ctypes.get_last_error(), "AssignProcessToJobObject failed")
+        return handle
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
+
+
+def _close_windows_job(handle: object | None) -> None:
+    """Reap descendants on normal exit, timeout, error and cancellation."""
+    if handle is None:
+        return
+    import ctypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel.CloseHandle.restype = ctypes.c_int
+    kernel.CloseHandle(handle)
+
+
 def _stop_tree(process: subprocess.Popen[str], grace: float) -> None:
     """Stop the whole process group, then escalate within a fixed bound."""
     if os.name == "nt":
@@ -124,6 +203,12 @@ def run(command: list[str], stage_id: str, budget_seconds: float,
         combined_path.open("a", encoding="utf-8")
     ) as combined:
         process = subprocess.Popen(command, **popen_args)
+        try:
+            job = _assign_windows_job(process)
+        except BaseException:
+            if process.poll() is None:
+                _stop_tree(process, config.shutdown_seconds)
+            raise
         assert process.stdout is not None
 
         def read_lines() -> None:
@@ -248,6 +333,9 @@ def run(command: list[str], stage_id: str, budget_seconds: float,
             record(stop_reason or "monitor_error")
             raise
         finally:
+            # Close first: descendants inheriting stdout must not hold the
+            # reader open after their PPO parent has exited.
+            _close_windows_job(job)
             log.flush()
             combined.flush()
             process.stdout.close()
