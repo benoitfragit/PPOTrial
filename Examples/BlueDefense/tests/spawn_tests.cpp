@@ -236,7 +236,7 @@ bool CheckTriangularScenario(std::size_t blues)
 {
     auto const fail = [](int line) {
         std::cerr << "[SPAWN_TEST_ERROR] CheckTriangularScenario line "
-                  << line << '\\n';
+                  << line << std::endl;
         return false;
     };
     auto document = ValidScenario();
@@ -294,7 +294,7 @@ bool CheckRandomizedObjective()
 {
     auto const fail = [](int line) {
         std::cerr << "[SPAWN_TEST_ERROR] CheckRandomizedObjective line "
-                  << line << '\\n';
+                  << line << std::endl;
         return false;
     };
     auto document = ValidScenario();
