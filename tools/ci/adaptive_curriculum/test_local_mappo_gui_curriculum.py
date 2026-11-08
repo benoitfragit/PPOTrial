@@ -242,6 +242,44 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "mismatch"):
                     local._activate_session_checkpoint(first, 202)
 
+    def test_explicit_source_transaction_rolls_back_late_failure(self) -> None:
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            live = root / "latest"
+            live.mkdir()
+            actor = live / local.LATEST_ACTOR.name
+            training = live / local.curriculum.LATEST.name
+            actor.write_bytes(b"previous actor")
+            training.write_bytes(b"previous training")
+            source = root / "source"
+            source.mkdir()
+            new_actor = source / actor.name
+            new_training = source / training.name
+            new_actor.write_bytes(b"verified source actor")
+            new_training.write_bytes(b"verified source training")
+            session = root / "session"
+            session.mkdir()
+            with patch.object(local, "LATEST_ACTOR", actor), (
+                    patch.object(local.curriculum, "LATEST", training)):
+                with self.assertRaisesRegex(RuntimeError, "state write"):
+                    with local.install_explicit_source_transaction(
+                            session, new_actor, new_training):
+                        self.assertEqual(actor.read_bytes(),
+                                         b"verified source actor")
+                        self.assertEqual(training.read_bytes(),
+                                         b"verified source training")
+                        raise RuntimeError("state write failed")
+                self.assertEqual(actor.read_bytes(), b"previous actor")
+                self.assertEqual(training.read_bytes(), b"previous training")
+                self.assertFalse((session / "latest-before-install").exists())
+                with local.install_explicit_source_transaction(
+                        session, new_actor, new_training):
+                    pass
+                self.assertEqual(actor.read_bytes(), b"verified source actor")
+                self.assertEqual(training.read_bytes(),
+                                 b"verified source training")
+
     def test_corrupted_session_checkpoint_does_not_touch_latest(self) -> None:
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as directory:
