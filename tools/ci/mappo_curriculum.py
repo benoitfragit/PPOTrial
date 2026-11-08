@@ -142,7 +142,8 @@ def run_stage(binary: Path, stage: dict, seconds: int, log_path: Path) -> str | 
                "blue-defense", "--max-seconds", str(seconds)]
     return mappo_process_watchdog.run(
         command, stage["id"], seconds, log_path,
-        OUTPUT / "mappo-training.log", EVAL_PATTERN, read_updates)
+        OUTPUT / "mappo-training.log", EVAL_PATTERN, read_updates,
+        metadata=stage)
 
 
 def save_candidate_and_restore(baseline: dict[Path, bytes | None],

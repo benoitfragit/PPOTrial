@@ -63,6 +63,33 @@ class WatchdogTests(unittest.TestCase):
             self.assertGreater(snapshot["heartbeatCount"], 0)
             self.assertGreater(snapshot["lastLogAgeSeconds"], 0.1)
 
+    def test_fragmented_stdout_and_scenario_metadata(self):
+        import mappo_process_watchdog as watchdog
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            output = ("import sys,time; "
+                      "sys.stdout.write('Evaluation #2 '); sys.stdout.flush(); "
+                      "time.sleep(0.12); "
+                      "sys.stdout.write('P=3 N=3 score=82\\n'); sys.stdout.flush()")
+            result = watchdog.run(
+                [sys.executable, "-u", "-c", output],
+                "3v3", 1.0, root / "training.log",
+                root / "combined.log",
+                re.compile(r"Evaluation #\\d+ P=\\d+ N=\\d+ score=[0-9.]+"),
+                lambda: 12, watchdog.WatchdogLimits(
+                    heartbeat_seconds=0.05, quiet_warning_seconds=0.1,
+                    stalled_update_seconds=3.0, budget_grace_seconds=0.3,
+                    shutdown_seconds=1.0),
+                metadata={"primaryGate": "3v3", "blockIndex": 7,
+                          "targetUpdate": 1000,
+                          "scenarioVariant": "randomized_zones"})
+            self.assertEqual(result, "Evaluation #2 P=3 N=3 score=82")
+            item = json.loads((root / "watchdog.json").read_text())
+            self.assertEqual(item["blockIndex"], 7)
+            self.assertEqual(item["targetUpdate"], 1000)
+            self.assertEqual(item["scenarioVariant"], "randomized_zones")
+            self.assertTrue(item["timestampUtc"])
+
     def test_timeout_is_bounded_and_cannot_be_certified(self):
         import mappo_process_watchdog as watchdog
         with tempfile.TemporaryDirectory() as folder:

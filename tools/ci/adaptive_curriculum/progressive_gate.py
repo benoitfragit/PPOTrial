@@ -534,8 +534,14 @@ def _run_gate(args: argparse.Namespace) -> dict:
             champion.install_production_for_stage(selected)
             print(f"[ADAPTIVE_GATE] gate={stage['id']} replay={selected['id']} "
                   f"updates={updates}->{target}", flush=True)
+            execution_stage = dict(
+                selected, primaryGate=stage["id"],
+                blockIndex=state["blockIndex"], targetUpdate=target,
+                scenarioVariant=(
+                    objective_layout + ("_zones" if hostile_zones
+                                        else "_no_zones")))
             try:
-                existing.run_stage(binary, selected, remaining, stage_log)
+                existing.run_stage(binary, execution_stage, remaining, stage_log)
             finally:
                 # The runtime PROD is temporary during any stage/rehearsal.
                 # The external 4v4 production actor must never be overwritten
