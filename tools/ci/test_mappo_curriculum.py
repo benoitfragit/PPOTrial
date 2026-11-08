@@ -131,6 +131,35 @@ class WatchdogTests(unittest.TestCase):
             self.assertEqual(state["status"], "incomplete")
             self.assertEqual(state["stopReason"], "budget_timeout")
 
+    def test_persistent_child_inheriting_stdout_is_bounded(self):
+        import mappo_process_watchdog as watchdog
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            # PPO's direct process exits; an inherited stdout writer remains.
+            # The watchdog must terminate that descendant, including on Windows.
+            parent = (
+                "import subprocess,sys\n"
+                "subprocess.Popen([sys.executable, '-u', '-c', "
+                "'import time; time.sleep(20)'], "
+                "stdout=sys.stdout, stderr=sys.stderr)\n"
+                "print('PARENT_EXITED', flush=True)\n"
+            )
+            started = __import__("time").monotonic()
+            with self.assertRaisesRegex(RuntimeError, "budget_timeout"):
+                watchdog.run(
+                    [sys.executable, "-u", "-c", parent],
+                    "4v4", 0.25, root / "training.log",
+                    root / "combined.log", re.compile("Evaluation"),
+                    lambda: 3, watchdog.WatchdogLimits(
+                        heartbeat_seconds=0.05, quiet_warning_seconds=0.10,
+                        stalled_update_seconds=10.0, budget_grace_seconds=0.10,
+                        shutdown_seconds=1.0))
+            self.assertLess(__import__("time").monotonic() - started, 5.0)
+            status = json.loads((root / "watchdog.json").read_text())
+            self.assertEqual(status["status"], "incomplete")
+            self.assertEqual(status["stopReason"], "budget_timeout")
+            self.assertIn("PARENT_EXITED", (root / "training.log").read_text())
+
     def test_stalled_optimizer_updates_fail_without_promotion(self):
         import mappo_process_watchdog as watchdog
         with tempfile.TemporaryDirectory() as folder:
