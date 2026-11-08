@@ -84,8 +84,10 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
                     stages, index, block, validated, "balanced_v1")
                     for block in range(length)]
                 self.assertEqual(len(selected), length)
-                self.assertTrue(all(s["id"] == stages[index]["id"]
-                                    or s["id"] in validated for s in selected))
+                # Balanced rehearsals are general and independent of
+                # branch/run source and the certified gate history.
+                self.assertEqual({s["id"] for s in selected},
+                                 {s["id"] for s in stages[:index + 1]})
                 self.assertGreater(sum(s["id"] == stages[index]["id"]
                                        for s in selected), length // 2)
 
