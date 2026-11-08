@@ -16,6 +16,8 @@ import sys
 import time
 from pathlib import Path
 
+import mappo_process_watchdog
+
 
 TRAINING_FILE = Path("resources/settings/Training/BluePatrol.json")
 SCENARIO_FILE = Path("resources/settings/Scenarios/BlueDefense.json")
@@ -135,35 +137,12 @@ def apply_stage(stage: dict, target_updates: int,
 
 
 def run_stage(binary: Path, stage: dict, seconds: int, log_path: Path) -> str | None:
-    """Stream exact child output to CI and disk; reject swallowed MAPPO errors."""
+    """Supervise a full block outside the hot path with bounded lifecycle."""
     command = [str(binary.resolve()), "--no-gui", "--example",
                "blue-defense", "--max-seconds", str(seconds)]
-    last_eval: str | None = None
-    failed = False
-    with log_path.open("w", encoding="utf-8") as log, (
-        (OUTPUT / "mappo-training.log").open("a", encoding="utf-8")
-    ) as combined:
-        with subprocess.Popen(
-            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="replace", bufsize=1,
-        ) as process:
-            assert process.stdout is not None
-            for line in process.stdout:
-                sys.stdout.write(line)
-                log.write(line)
-                combined.write(line)
-                match = EVAL_PATTERN.search(line)
-                if match:
-                    last_eval = match.group(0)
-                if "[MAPPO_ERROR]" in line or "[MAPPO_EVAL_ERROR]" in line:
-                    failed = True
-            return_code = process.wait()
-    if return_code != 0 or failed:
-        raise RuntimeError(
-            f"Curriculum stage {stage['id']} failed: "
-            f"exit={return_code}, MAPPO_ERROR={failed}; see {log_path}"
-        )
-    return last_eval
+    return mappo_process_watchdog.run(
+        command, stage["id"], seconds, log_path,
+        OUTPUT / "mappo-training.log", EVAL_PATTERN, read_updates)
 
 
 def save_candidate_and_restore(baseline: dict[Path, bytes | None],

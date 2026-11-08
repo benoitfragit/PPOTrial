@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import re
+import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,6 +24,78 @@ def test_stages(first_updates: int = 3) -> dict:
              "hostileZones": True, "updates": 2},
         ],
     }
+
+
+class WatchdogTests(unittest.TestCase):
+    def test_chatty_process_and_matching_evaluation_are_preserved(self):
+        import mappo_process_watchdog as watchdog
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            command = [sys.executable, "-u", "-c",
+                "print('Evaluation #1 P=2 N=2 score=85'); print('ready')"]
+            result = watchdog.run(
+                command, "2v2", 2.0, root / "training.log",
+                root / "combined.log",
+                re.compile(r"Evaluation #\\d+ P=\\d+ N=\\d+ score=[0-9.]+"),
+                lambda: 15, watchdog.WatchdogLimits(
+                    heartbeat_seconds=0.05, quiet_warning_seconds=0.1,
+                    stalled_update_seconds=5.0, budget_grace_seconds=0.3,
+                    shutdown_seconds=1.0))
+            self.assertEqual(result, "Evaluation #1 P=2 N=2 score=85")
+            self.assertIn("ready", (root / "training.log").read_text())
+            self.assertEqual(json.loads((root / "watchdog.json").read_text())[
+                "status"], "completed")
+
+    def test_silent_but_living_process_is_not_killed(self):
+        import mappo_process_watchdog as watchdog
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            watchdog.run(
+                [sys.executable, "-u", "-c", "import time; time.sleep(0.35)"],
+                "2v0", 0.7, root / "training.log",
+                root / "combined.log", re.compile("Evaluation"),
+                lambda: 20, watchdog.WatchdogLimits(
+                    heartbeat_seconds=0.05, quiet_warning_seconds=0.1,
+                    stalled_update_seconds=3.0, budget_grace_seconds=0.3,
+                    shutdown_seconds=1.0))
+            snapshot = json.loads((root / "watchdog.json").read_text())
+            self.assertEqual(snapshot["status"], "completed")
+            self.assertGreater(snapshot["heartbeatCount"], 0)
+            self.assertGreater(snapshot["lastLogAgeSeconds"], 0.1)
+
+    def test_timeout_is_bounded_and_cannot_be_certified(self):
+        import mappo_process_watchdog as watchdog
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with self.assertRaisesRegex(RuntimeError, "budget_timeout"):
+                watchdog.run(
+                    [sys.executable, "-u", "-c", "import time; time.sleep(10)"],
+                    "4v4", 0.15, root / "training.log",
+                    root / "combined.log", re.compile("Evaluation"),
+                    lambda: 50, watchdog.WatchdogLimits(
+                        heartbeat_seconds=0.05, quiet_warning_seconds=0.1,
+                        stalled_update_seconds=8.0, budget_grace_seconds=0.1,
+                        shutdown_seconds=1.0))
+            state = json.loads((root / "watchdog.json").read_text())
+            self.assertEqual(state["status"], "incomplete")
+            self.assertEqual(state["stopReason"], "budget_timeout")
+
+    def test_explicit_mappo_error_is_never_swallowed(self):
+        import mappo_process_watchdog as watchdog
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with self.assertRaisesRegex(RuntimeError, "mappo_error"):
+                watchdog.run(
+                    [sys.executable, "-u", "-c",
+                     "print('[MAPPO_ERROR] invalid training buffer')"],
+                    "1v0", 1.0, root / "training.log",
+                    root / "combined.log", re.compile("Evaluation"),
+                    lambda: 2, watchdog.WatchdogLimits(
+                        heartbeat_seconds=0.05, quiet_warning_seconds=0.2,
+                        stalled_update_seconds=3.0, budget_grace_seconds=0.2,
+                        shutdown_seconds=1.0))
+            self.assertIn("[MAPPO_ERROR]",
+                          (root / "training.log").read_text())
 
 
 class CurriculumTests(unittest.TestCase):
