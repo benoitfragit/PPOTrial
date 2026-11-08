@@ -376,6 +376,42 @@ def _activate_session_checkpoint(session_root: Path,
         shutil.rmtree(previous)
 
 
+@contextmanager
+def install_explicit_source_transaction(
+        session_root: Path, actor: Path, training: Path) -> Iterable[None]:
+    """Roll back BOTH global latest files if any session initialization fails."""
+    previous = session_root / "latest-before-install"
+    previous.mkdir(exist_ok=False)
+    targets = (LATEST_ACTOR, curriculum.LATEST)
+    staged: list[tuple[Path, Path]] = []
+    try:
+        for target in targets:
+            if target.is_file():
+                shutil.copy2(target, previous / target.name)
+        for source, target in zip((actor, training), targets):
+            temporary = target.with_suffix(target.suffix + ".gui-staged")
+            if temporary.exists():
+                raise FileExistsError(f"Unresolved staged checkpoint: {temporary}")
+            temporary.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, temporary)
+            staged.append((temporary, target))
+        for temporary, target in staged:
+            temporary.replace(target)
+        yield
+    except BaseException:
+        for target in targets:
+            backup = previous / target.name
+            if backup.is_file():
+                shutil.copy2(backup, target)
+            else:
+                target.unlink(missing_ok=True)
+        raise
+    finally:
+        for temporary, _ in staged:
+            temporary.unlink(missing_ok=True)
+        shutil.rmtree(previous)
+
+
 def _write_state(path: Path, state: dict) -> None:
     """Atomically persist local progress."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -484,33 +520,6 @@ def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
     session_root = session_state_root(options) / f"session-{timestamp}"
     session_root.mkdir(parents=True, exist_ok=False)
     _create_source_backup(session_root, source_updates, actor, training)
-    if external_source:
-        # Keep recovery copies before installing an explicitly selected BEST.
-        previous = session_root / "latest-before-install"
-        previous.mkdir()
-        for target in (LATEST_ACTOR, curriculum.LATEST):
-            if target.is_file():
-                shutil.copy2(target, previous / target.name)
-        staged = []
-        try:
-            for source_path, target in ((actor, LATEST_ACTOR),
-                                        (training, curriculum.LATEST)):
-                temporary = target.with_suffix(target.suffix + ".gui-staged")
-                temporary.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source_path, temporary)
-                staged.append((temporary, target))
-            for temporary, target in staged:
-                temporary.replace(target)
-        except OSError:
-            for temporary, _ in staged:
-                temporary.unlink(missing_ok=True)
-            for target in (LATEST_ACTOR, curriculum.LATEST):
-                original = previous / target.name
-                if original.is_file():
-                    shutil.copy2(original, target)
-                else:
-                    target.unlink(missing_ok=True)
-            raise
     state = {
         "formatVersion": SESSION_FORMAT_VERSION,
         "profile": options.profile,
@@ -527,9 +536,16 @@ def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
         "lastCheckpointUpdates": source_updates,
         "sessionDirectory": str(session_root),
     }
-    if not legacy_shortcut(options):
-        _capture_session_checkpoint(session_root, source_updates)
-    _write_state(state_path, state)
+    if external_source:
+        # The activation and all subsequent state/checkpoint writes are atomic
+        # with respect to the pre-existing global latest pair.
+        with install_explicit_source_transaction(session_root, actor, training):
+            _capture_session_checkpoint(session_root, source_updates)
+            _write_state(state_path, state)
+    else:
+        if not legacy_shortcut(options):
+            _capture_session_checkpoint(session_root, source_updates)
+        _write_state(state_path, state)
     return state, session_root
 
 
