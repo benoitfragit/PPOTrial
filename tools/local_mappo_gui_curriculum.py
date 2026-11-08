@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
 import json
@@ -136,6 +137,8 @@ def legacy_shortcut(options: LauncherOptions) -> bool:
     return (options.max_team_size == 2
             and options.target_gate in (None, "2v2")
             and options.validated_gates is None
+            and options.source_actor is None
+            and options.source_training is None
             and scenario_variant(options) == "fixed_no_zones")
 
 
@@ -198,6 +201,148 @@ def _validate_checkpoint_pair(
         raise ValueError(
             "The initial latest/prod actors differ; run-84 source is ambiguous")
     return updates
+
+
+
+@contextmanager
+def _exclusive_training_lock() -> Iterable[None]:
+    """Serialize all local GUI writers to the shared latest checkpoint pair."""
+    path = ROOT / DEFAULT_STATE_ROOT / ".active-gui.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as stream:
+        stream.seek(0, os.SEEK_END)
+        if stream.tell() == 0:
+            stream.write(b"0")
+            stream.flush()
+        stream.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            try:
+                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError as error:
+                raise RuntimeError("Another local MAPPO GUI session is active") from error
+        else:
+            import fcntl
+            try:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as error:
+                raise RuntimeError("Another local MAPPO GUI session is active") from error
+        try:
+            yield
+        finally:
+            stream.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+SESSION_CHECKPOINT = "session-latest"
+SESSION_MANIFEST = "checkpoint.json"
+
+
+def _verified_session_checkpoint(directory: Path) -> int:
+    """Reject incomplete, mismatched or corrupted per-session checkpoints."""
+    manifest = json.loads((directory / SESSION_MANIFEST).read_text(
+        encoding="utf-8"))
+    actor = directory / LATEST_ACTOR.name
+    training = directory / curriculum.LATEST.name
+    if (not isinstance(manifest, dict)
+            or manifest.get("version") != 1
+            or type(manifest.get("updates")) is not int
+            or manifest["updates"] < 0
+            or not isinstance(manifest.get("sha256"), dict)):
+        raise ValueError("Invalid per-session checkpoint manifest")
+    updates = _validate_checkpoint_pair(
+        manifest["updates"], actor, training, require_prod_match=False)
+    if (manifest["sha256"].get("actor") != _sha256(actor)
+            or manifest["sha256"].get("training") != _sha256(training)):
+        raise ValueError("Session checkpoint checksum mismatch")
+    return updates
+
+
+def _capture_session_checkpoint(session_root: Path, expected_updates: int) -> None:
+    """Keep a complete verified V10/V7 pair independent of global latest."""
+    directory = session_root / SESSION_CHECKPOINT
+    incoming = session_root / (SESSION_CHECKPOINT + ".incoming")
+    backup = session_root / (SESSION_CHECKPOINT + ".backup")
+    if incoming.exists() or backup.exists():
+        raise ValueError("Unresolved previous session checkpoint transaction")
+    incoming.mkdir()
+    try:
+        actor = incoming / LATEST_ACTOR.name
+        training = incoming / curriculum.LATEST.name
+        shutil.copy2(LATEST_ACTOR, actor)
+        shutil.copy2(curriculum.LATEST, training)
+        actual = _validate_checkpoint_pair(
+            expected_updates, actor, training, require_prod_match=False)
+        _write_state(incoming / SESSION_MANIFEST, {
+            "version": 1,
+            "updates": actual,
+            "sha256": {"actor": _sha256(actor),
+                       "training": _sha256(training)},
+        })
+        _verified_session_checkpoint(incoming)
+        if directory.exists():
+            directory.rename(backup)
+        try:
+            incoming.rename(directory)
+        except OSError:
+            if backup.exists():
+                backup.rename(directory)
+            raise
+        if backup.exists():
+            shutil.rmtree(backup)
+    finally:
+        if incoming.exists():
+            shutil.rmtree(incoming)
+
+
+def _activate_session_checkpoint(session_root: Path,
+                                 recorded_updates: int) -> None:
+    """Restore only a verified session pair, with rollback of global latest."""
+    directory = session_root / SESSION_CHECKPOINT
+    if not directory.is_dir() or (
+            _verified_session_checkpoint(directory) != recorded_updates):
+        raise ValueError("Session checkpoint missing or update count mismatch")
+    previous = session_root / "latest-before-activation"
+    if previous.exists():
+        raise ValueError("Unresolved previous latest activation")
+    previous.mkdir()
+    installed = False
+    staged: list[tuple[Path, Path]] = []
+    try:
+        for target in (LATEST_ACTOR, curriculum.LATEST):
+            if target.is_file():
+                shutil.copy2(target, previous / target.name)
+        for target in (LATEST_ACTOR, curriculum.LATEST):
+            source = directory / target.name
+            temporary = target.with_suffix(target.suffix + ".session-staged")
+            temporary.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, temporary)
+            staged.append((temporary, target))
+        for temporary, target in staged:
+            temporary.replace(target)
+        if (_validate_checkpoint_pair(
+                recorded_updates, LATEST_ACTOR, curriculum.LATEST,
+                require_prod_match=False) != recorded_updates
+                or _sha256(LATEST_ACTOR) !=
+                   _sha256(directory / LATEST_ACTOR.name)
+                or _sha256(curriculum.LATEST) !=
+                   _sha256(directory / curriculum.LATEST.name)):
+            raise ValueError("Session checkpoint failed after activation")
+        installed = True
+    finally:
+        for temporary, _ in staged:
+            temporary.unlink(missing_ok=True)
+        if not installed:
+            for target in (LATEST_ACTOR, curriculum.LATEST):
+                old = previous / target.name
+                if old.is_file():
+                    shutil.copy2(old, target)
+                else:
+                    target.unlink(missing_ok=True)
+        shutil.rmtree(previous)
 
 
 def _write_state(path: Path, state: dict) -> None:
@@ -276,6 +421,14 @@ def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
                     or _sha256(options.source_training) !=
                        state.get("sourceTrainingSha256")):
                 raise ValueError("Resumed V10/V7 source hashes differ")
+        session_root = Path(state["sessionDirectory"])
+        resolved_session = session_root.resolve()
+        if (not resolved_session.is_relative_to(session_state_root(options).resolve())
+                or not resolved_session.is_dir()):
+            raise ValueError("Local GUI session directory is missing")
+        if not legacy_shortcut(options):
+            _activate_session_checkpoint(
+                resolved_session, state["lastCheckpointUpdates"])
         current_updates = curriculum.read_updates()
         if current_updates < state["lastCheckpointUpdates"]:
             raise ValueError("Latest checkpoint predates local GUI progress")
@@ -284,11 +437,6 @@ def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
                   f"{current_updates}", flush=True)
             state["lastCheckpointUpdates"] = current_updates
             _write_state(state_path, state)
-        session_root = Path(state["sessionDirectory"])
-        resolved_session = session_root.resolve()
-        if (not resolved_session.is_relative_to(session_state_root(options).resolve())
-                or not resolved_session.is_dir()):
-            raise ValueError("Local GUI session directory is missing")
         return state, resolved_session
 
     actor = options.source_actor or LATEST_ACTOR
@@ -344,6 +492,8 @@ def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
         "lastCheckpointUpdates": source_updates,
         "sessionDirectory": str(session_root),
     }
+    if not legacy_shortcut(options):
+        _capture_session_checkpoint(session_root, source_updates)
     _write_state(state_path, state)
     return state, session_root
 
@@ -400,8 +550,8 @@ def _print_schedule(stages: list[dict], target_index: int,
                       for name in [stage["id"] for stage in stages]))
 
 
-def run(options: LauncherOptions) -> int:
-    """Execute the resumable local balanced curriculum."""
+def _run_unlocked(options: LauncherOptions) -> int:
+    """Execute the resumable local balanced curriculum under the GUI lock."""
     os.chdir(ROOT)
     if not options.dry_run and not options.binary.is_file():
         raise FileNotFoundError(
@@ -500,6 +650,8 @@ def run(options: LauncherOptions) -> int:
             if not updates <= observed <= target:
                 raise RuntimeError(
                     "Checkpoint update counter escaped the requested block")
+            if not legacy_shortcut(options):
+                _capture_session_checkpoint(session_root, observed)
             if observed > updates:
                 state["lastCheckpointUpdates"] = observed
             if completed:
@@ -514,11 +666,30 @@ def run(options: LauncherOptions) -> int:
                       "the same rehearsal will resume next time.", flush=True)
                 break
     finally:
-        preserved.restore()
+        try:
+            if not legacy_shortcut(options):
+                observed = curriculum.read_updates()
+                if observed >= state["lastCheckpointUpdates"]:
+                    # A user interruption may still leave a complete V10/V7 pair.
+                    _capture_session_checkpoint(session_root, observed)
+                    if observed > state["lastCheckpointUpdates"]:
+                        state["lastCheckpointUpdates"] = observed
+                        _write_state(session_state_root(options) / STATE_NAME,
+                                     state)
+        finally:
+            preserved.restore()
 
     print(f"[LOCAL_GUI] stopped at update={curriculum.read_updates()} "
           f"block={state['blockIndex']}; source backup={session_root / 'source-run84'}")
     return 0
+
+
+def run(options: LauncherOptions) -> int:
+    """Prevent simultaneous GUI writers from corrupting a shared latest pair."""
+    if options.dry_run:
+        return _run_unlocked(options)
+    with _exclusive_training_lock():
+        return _run_unlocked(options)
 
 
 def parse_args(argv: list[str] | None = None) -> LauncherOptions:
