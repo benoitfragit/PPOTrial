@@ -1,6 +1,8 @@
 {
-  "formatVersion": 1,
-  "description": "Each gate is threshold- and wall-clock-driven; no fixed episode or PPO update quota. One independent GitHub run per gate or retry; full optimizer checkpoint continued.",
+  "formatVersion": 2,
+  "contractId": "triangular-v1",
+  "maxTeamSize": 4,
+  "description": "Single canonical triangular 1v0..4v4 gate schedule; CI max_team_size selects its 2v2, 3v3 or 4v4 prefix.",
   "gates": [
     {
       "id": "1v0",
@@ -42,6 +44,87 @@
       "id": "2v2",
       "blue": 2,
       "red": 2,
+      "hostileZones": false,
+      "thresholdPercent": 75,
+      "maxSeconds": 14400,
+      "autoAdvance": true
+    },
+    {
+      "id": "3v0",
+      "blue": 3,
+      "red": 0,
+      "hostileZones": false,
+      "thresholdPercent": 75,
+      "maxSeconds": 14400,
+      "autoAdvance": true
+    },
+    {
+      "id": "3v1",
+      "blue": 3,
+      "red": 1,
+      "hostileZones": false,
+      "thresholdPercent": 75,
+      "maxSeconds": 14400,
+      "autoAdvance": true
+    },
+    {
+      "id": "3v2",
+      "blue": 3,
+      "red": 2,
+      "hostileZones": false,
+      "thresholdPercent": 75,
+      "maxSeconds": 14400,
+      "autoAdvance": true
+    },
+    {
+      "id": "3v3",
+      "blue": 3,
+      "red": 3,
+      "hostileZones": false,
+      "thresholdPercent": 75,
+      "maxSeconds": 14400,
+      "autoAdvance": true
+    },
+    {
+      "id": "4v0",
+      "blue": 4,
+      "red": 0,
+      "hostileZones": false,
+      "thresholdPercent": 75,
+      "maxSeconds": 14400,
+      "autoAdvance": true
+    },
+    {
+      "id": "4v1",
+      "blue": 4,
+      "red": 1,
+      "hostileZones": false,
+      "thresholdPercent": 75,
+      "maxSeconds": 14400,
+      "autoAdvance": true
+    },
+    {
+      "id": "4v2",
+      "blue": 4,
+      "red": 2,
+      "hostileZones": false,
+      "thresholdPercent": 75,
+      "maxSeconds": 14400,
+      "autoAdvance": true
+    },
+    {
+      "id": "4v3",
+      "blue": 4,
+      "red": 3,
+      "hostileZones": false,
+      "thresholdPercent": 75,
+      "maxSeconds": 14400,
+      "autoAdvance": true
+    },
+    {
+      "id": "4v4",
+      "blue": 4,
+      "red": 4,
       "hostileZones": false,
       "thresholdPercent": 75,
       "maxSeconds": 14400,

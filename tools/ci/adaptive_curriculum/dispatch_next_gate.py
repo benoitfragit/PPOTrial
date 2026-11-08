@@ -15,7 +15,7 @@ import sys
 import urllib.request
 from pathlib import Path
 
-from progressive_gate import validate_gates, GATES_FILE, RESULT_FILE
+from progressive_gate import validate_gates, select_curriculum, GATES_FILE, RESULT_FILE
 import champion_checkpoints as champion
 import rehearsal_profiles as profiles
 
@@ -39,7 +39,8 @@ def matching_gate_fingerprint(recorded: object, config_bytes: bytes) -> bool:
 
 def next_dispatch(result: dict, config_bytes: bytes, run_id: str) -> dict | None:
     document = json.loads(config_bytes)
-    stages = validate_gates(document)
+    contract_size = result.get("maxTeamSize", 2) if isinstance(result, dict) else None
+    stages = select_curriculum(document, contract_size)
     if (not isinstance(result, dict)
             or not matching_gate_fingerprint(
                 result.get("gateConfigSha256"), config_bytes)):
@@ -73,6 +74,8 @@ def next_dispatch(result: dict, config_bytes: bytes, run_id: str) -> dict | None
     # Existing legacy dispatches must keep their exact historical inputs.
     if profile != "legacy":
         inputs["rehearsal_profile"] = profile
+    if contract_size != 2:
+        inputs["max_team_size"] = str(contract_size)
     return inputs
 
 
@@ -87,10 +90,13 @@ def next_dispatch_from_checkpoint(
     to training. This job owns the only continuation; no workflow_run listener
     is required (GitHub-token-dispatched runs may not wake that listener).
     """
-    stages = validate_gates(json.loads(config_bytes))
+    contract_size = state.get("maxTeamSize", 2) if isinstance(state, dict) else None
+    stages = select_curriculum(json.loads(config_bytes), contract_size)
     ids = [stage["id"] for stage in stages]
     if (not isinstance(state, dict)
             or not isinstance(result, dict)
+            or state.get("maxTeamSize", 2) != contract_size
+            or result.get("maxTeamSize", 2) != contract_size
             or not matching_gate_fingerprint(
                 state.get("gateConfigSha256"), config_bytes)
             or state.get("gateConfigSha256") != result.get("gateConfigSha256")

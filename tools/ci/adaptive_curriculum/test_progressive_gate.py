@@ -580,7 +580,7 @@ class ProgressiveGateTests(unittest.TestCase):
                       "tools/ci/adaptive_curriculum/gates.json")
         contract = json.loads(production.read_text(encoding="utf-8"))
         gate.existing.write_json(gate.GATES_FILE, contract)
-        stages = gate.validate_gates(contract)
+        stages = gate.select_curriculum(contract, 2)
         names = [stage["id"] for stage in stages]
         target = names.index("2v2")
         self.checkpoint(100)
@@ -659,7 +659,7 @@ class ProgressiveGateTests(unittest.TestCase):
                       "tools/ci/adaptive_curriculum/gates.json")
         contract = json.loads(production.read_text(encoding="utf-8"))
         gate.existing.write_json(gate.GATES_FILE, contract)
-        stages = gate.validate_gates(contract)
+        stages = gate.select_curriculum(contract, 2)
         names = [stage["id"] for stage in stages]
         target = names.index("2v2")
         history = names[:target]
@@ -770,7 +770,7 @@ class ProgressiveGateTests(unittest.TestCase):
                               uniform=same_threshold):
                 environment = os.environ.copy()
                 environment.update({
-                    "GATE": "1v0", "SUCCESS_PERCENT": "75",
+                    "GATE": "1v0", "MAX_TEAM_SIZE": "2", "SUCCESS_PERCENT": "75",
                     "MAX_SECONDS": "3600", "RESUME_RUN_ID": resume_id,
                     "AUTO_ADVANCE": auto_advance,
                     "SAME_THRESHOLD_ALL_GATES": same_threshold,
@@ -790,8 +790,9 @@ class ProgressiveGateTests(unittest.TestCase):
                 output = completed.stdout.rsplit("ARGV=", 1)[1].strip()
                 self.assertEqual(json.loads(output), [
                     "-u", "tools/ci/adaptive_curriculum/progressive_gate.py",
-                    "--gate", "1v0", "--threshold-percent", "75",
-                    "--max-seconds", "3600", "--block-updates", "20", *flags])
+                    "--gate", "1v0", "--max-team-size", "2",
+                    "--threshold-percent", "75", "--max-seconds", "3600",
+                    "--block-updates", "20", *flags])
 
     def test_gate_dispatch_accepts_windows_and_linux_line_endings(self) -> None:
         """Run 33: identical gates must dispatch despite checkout CRLF/LF."""
@@ -1102,8 +1103,12 @@ class ProgressiveGateTests(unittest.TestCase):
         document = json.loads((root / "tools/ci/adaptive_curriculum/gates.json"
                                ).read_text(encoding="utf-8"))
         expected = ["1v0", "2v0", "1v1", "2v1", "2v2"]
-        stages = gate.validate_gates(document)
+        stages = gate.select_curriculum(document, 2)
         self.assertEqual([stage["id"] for stage in stages], expected)
+        full = gate.validate_gates(document)
+        full_ids = [stage["id"] for stage in full]
+        self.assertEqual(len(full_ids), 14)
+        self.assertEqual(full_ids[:5], expected)
         self.assertEqual(document["rehearsalEveryBlocks"], 8)
         self.assertEqual((stages[-1]["blue"], stages[-1]["red"]), (2, 2))
         self.assertTrue(all(stage["blue"] <= 2 and stage["red"] <= 2
@@ -1114,15 +1119,15 @@ class ProgressiveGateTests(unittest.TestCase):
         choices = restart.split("      start_gate:\n", 1)[1].split(
             "      success_percent:\n", 1)[0]
         self.assertEqual(re.findall(r"^          - (\dv\d+)$",
-                                    choices, re.MULTILINE), expected)
+                                    choices, re.MULTILINE), full_ids)
         training = (root / ".github/workflows/mappo-training-windows.yml"
                     ).read_text(encoding="utf-8")
         training_choices = training.split("      progressive_gate:\n", 1)[1].split(
             "      success_percent:\n", 1)[0]
         self.assertEqual(re.findall(r"^          - (\dv\d+)$",
-                                    training_choices, re.MULTILINE), expected)
+                                    training_choices, re.MULTILINE), full_ids)
 
-    def test_reduced_curriculum_rejects_forbidden_gate_counts(self) -> None:
+    def test_canonical_curriculum_rejects_mutated_gate_dimensions(self) -> None:
         root = Path(__file__).resolve().parents[3]
         original = json.loads((root / "tools/ci/adaptive_curriculum/gates.json"
                                ).read_text(encoding="utf-8"))
@@ -1131,7 +1136,7 @@ class ProgressiveGateTests(unittest.TestCase):
                 bad = json.loads(json.dumps(original))
                 bad["gates"][2]["blue"] = blue
                 bad["gates"][2]["red"] = red
-                with self.assertRaisesRegex(ValueError, "Reduced curriculum"):
+                with self.assertRaisesRegex(ValueError, "triangular"):
                     gate.validate_gates(bad)
         # Legacy 4v4 schemas remain readable for verified source-run provenance.
         self.assertEqual(gate.validate_gates(sample_gates())[-1]["id"], "4v4")

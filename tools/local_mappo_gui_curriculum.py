@@ -97,8 +97,8 @@ def _sha256(path: Path) -> str:
 
 def load_production_stages() -> tuple[list[dict], int, list[str]]:
     """Load the repository gate contract and locate the final 2v2 gate."""
-    document = json.loads(adaptive.GATES_FILE.read_text(encoding="utf-8"))
-    stages = adaptive.validate_gates(document)
+    document = json.loads(adaptive.GATES_FILE.read_bytes())
+    stages = adaptive.select_curriculum(document, 2)
     names = [stage["id"] for stage in stages]
     if TARGET_GATE not in names:
         raise ValueError("The adaptive curriculum has no 2v2 target gate")

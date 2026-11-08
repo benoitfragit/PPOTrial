@@ -6,13 +6,22 @@ on:
       - .github/workflows/mappo-restart-progressive.yml
   workflow_dispatch:
     inputs:
+      max_team_size:
+        description: "Maximum team size: 2, 3 or 4 (2v2 legacy by default)"
+        required: true
+        type: choice
+        default: "2"
+        options:
+          - "2"
+          - "3"
+          - "4"
       source_run_id:
         description: "Completed progressive run containing full V7 optimizer checkpoint"
         required: true
         type: string
         default: "41865674608"
       start_gate:
-        description: "First gate of the NEW cycle (previous gate progress is reset)"
+        description: "First gate of the new cycle (limited by max_team_size)"
         required: true
         type: choice
         default: "2v2"
@@ -22,6 +31,15 @@ on:
           - 1v1
           - 2v1
           - 2v2
+          - 3v0
+          - 3v1
+          - 3v2
+          - 3v3
+          - 4v0
+          - 4v1
+          - 4v2
+          - 4v3
+          - 4v4
       retrain_selected_gate:
         description: "Train for the full budget after BEST passes, preserving the chosen gate-rehearsal profile"
         required: true
@@ -130,6 +148,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           START_GATE: ${{ inputs.start_gate }}
+          MAX_TEAM_SIZE: ${{ inputs.max_team_size }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           SUCCESS_PERCENT: ${{ inputs.success_percent }}
           SAME_THRESHOLD: ${{ inputs.same_threshold_all_gates }}
@@ -146,7 +165,7 @@ jobs:
           import subprocess
           from pathlib import Path
           from tools.ci.adaptive_curriculum.progressive_gate import (
-              validate_gates, validate_source_gate_fingerprint,
+              validate_gates, select_curriculum, validate_source_gate_fingerprint,
               validated_rehearsal_history)
           from tools.ci.adaptive_curriculum import champion_checkpoints as champion
           from tools.ci.adaptive_curriculum.rehearsal_profiles import PROFILES
@@ -170,7 +189,7 @@ jobs:
               raise RuntimeError('Incompatible V10 actor or full V7 optimizer semantic contract')
 
           gates_bytes = Path('tools/ci/adaptive_curriculum/gates.json').read_bytes()
-          stages = validate_gates(json.loads(gates_bytes))
+          stages = select_curriculum(json.loads(gates_bytes), int(os.environ['MAX_TEAM_SIZE']))
           stage_names = [stage['id'] for stage in stages]
           start_gate = os.environ['START_GATE']
           rehearsal_profile = os.environ['REHEARSAL_PROFILE'] or 'legacy'
@@ -287,6 +306,8 @@ jobs:
                   retrainSelectedGate=os.environ["RETRAIN_SELECTED_GATE"].lower() == "true",
               ),
           )
+          if int(os.environ['MAX_TEAM_SIZE']) != 2:
+              fresh['maxTeamSize'] = int(os.environ['MAX_TEAM_SIZE'])
           progress_path.write_text(json.dumps(fresh, indent=2) + '\n', encoding='utf-8')
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
               summary.write(
@@ -333,6 +354,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           START_GATE: ${{ inputs.start_gate }}
+          MAX_TEAM_SIZE: ${{ inputs.max_team_size }}
           SUCCESS_PERCENT: ${{ inputs.success_percent }}
           MAX_SECONDS: ${{ inputs.max_seconds }}
           AUTO_ADVANCE: ${{ inputs.auto_advance }}
@@ -366,6 +388,7 @@ jobs:
             -f "ref=${GITHUB_REF_NAME}" \
             -f "inputs[resume_run_id]=${GITHUB_RUN_ID}" \
             -f "inputs[progressive_gate]=${START_GATE}" \
+            -f "inputs[max_team_size]=${MAX_TEAM_SIZE}" \
             -f "inputs[rehearsal_profile]=${REHEARSAL_PROFILE}" \
             -f "inputs[success_percent]=${SUCCESS_PERCENT}" \
             -f "inputs[same_threshold_all_gates]=${SAME_THRESHOLD}" \
