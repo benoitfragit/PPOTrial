@@ -15,19 +15,16 @@ on:
           - "2"
           - "3"
           - "4"
-      hostile_zones:
-        description: "Enable hostile zones across every gate and replay"
-        required: true
-        type: boolean
-        default: false
-      objective_layout:
-        description: "Defended objective: fixed or randomized per episode"
+      scenario_variant:
+        description: "Objective layout and zones: 4 combinations, all gates/replays"
         required: true
         type: choice
-        default: fixed
+        default: fixed_no_zones
         options:
-          - fixed
-          - randomized
+          - fixed_no_zones
+          - fixed_zones
+          - randomized_no_zones
+          - randomized_zones
       source_run_id:
         description: "Completed progressive run containing full V7 optimizer checkpoint"
         required: true
@@ -162,8 +159,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           START_GATE: ${{ inputs.start_gate }}
           MAX_TEAM_SIZE: ${{ inputs.max_team_size }}
-          HOSTILE_ZONES: ${{ inputs.hostile_zones }}
-          OBJECTIVE_LAYOUT: ${{ inputs.objective_layout }}
+          SCENARIO_VARIANT: ${{ inputs.scenario_variant }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           SUCCESS_PERCENT: ${{ inputs.success_percent }}
           SAME_THRESHOLD: ${{ inputs.same_threshold_all_gates }}
@@ -214,8 +210,16 @@ jobs:
               raise RuntimeError('Unknown target gate')
 
           source = json.loads(progress_path.read_text(encoding='utf-8'))
-          hostile_zones = os.environ['HOSTILE_ZONES'].lower() == 'true'
-          objective_layout = os.environ['OBJECTIVE_LAYOUT']
+          variants = {
+              'fixed_no_zones': ('fixed', False),
+              'fixed_zones': ('fixed', True),
+              'randomized_no_zones': ('randomized', False),
+              'randomized_zones': ('randomized', True),
+          }
+          selection = os.environ['SCENARIO_VARIANT']
+          if selection not in variants:
+              raise RuntimeError('Invalid scenario variant')
+          objective_layout, hostile_zones = variants[selection]
           if (type(source.get('hostileZones', False)) is not bool
                   or source.get('hostileZones', False) is not hostile_zones
                   or source.get('objectiveLayout', 'fixed') != objective_layout):
@@ -383,8 +387,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           START_GATE: ${{ inputs.start_gate }}
           MAX_TEAM_SIZE: ${{ inputs.max_team_size }}
-          HOSTILE_ZONES: ${{ inputs.hostile_zones }}
-          OBJECTIVE_LAYOUT: ${{ inputs.objective_layout }}
+          SCENARIO_VARIANT: ${{ inputs.scenario_variant }}
           SUCCESS_PERCENT: ${{ inputs.success_percent }}
           MAX_SECONDS: ${{ inputs.max_seconds }}
           AUTO_ADVANCE: ${{ inputs.auto_advance }}
@@ -419,8 +422,7 @@ jobs:
             -f "inputs[resume_run_id]=${GITHUB_RUN_ID}" \
             -f "inputs[progressive_gate]=${START_GATE}" \
             -f "inputs[max_team_size]=${MAX_TEAM_SIZE}" \
-            -f "inputs[hostile_zones]=${HOSTILE_ZONES}" \
-            -f "inputs[objective_layout]=${OBJECTIVE_LAYOUT}" \
+            -f "inputs[scenario_variant]=${SCENARIO_VARIANT}" \
             -f "inputs[rehearsal_profile]=${REHEARSAL_PROFILE}" \
             -f "inputs[success_percent]=${SUCCESS_PERCENT}" \
             -f "inputs[same_threshold_all_gates]=${SAME_THRESHOLD}" \
