@@ -12,6 +12,11 @@ on:
           - "2"
           - "3"
           - "4"
+      hostile_zones:
+        description: "Enable hostile zones across every gate and replay"
+        required: true
+        type: boolean
+        default: false
       max_seconds:
         description: "Training time budget in seconds (leave headroom for build/artifacts)"
         required: true
@@ -212,6 +217,7 @@ jobs:
         env:
           GATE: ${{ inputs.progressive_gate }}
           MAX_TEAM_SIZE: ${{ inputs.max_team_size }}
+          HOSTILE_ZONES: ${{ inputs.hostile_zones }}
           SUCCESS_PERCENT: ${{ inputs.success_percent }}
           MAX_SECONDS: ${{ inputs.max_seconds }}
           RESUME_RUN_ID: ${{ inputs.resume_run_id }}
@@ -227,6 +233,9 @@ jobs:
             "--max-seconds", $env:MAX_SECONDS,
             "--block-updates", "20"
           )
+          if ($env:HOSTILE_ZONES -eq "true") {
+            $pythonArgs += "--hostile-zones"
+          }
           if (-not [string]::IsNullOrWhiteSpace($env:REHEARSAL_PROFILE) -and
               $env:REHEARSAL_PROFILE -ne "legacy") {
             $pythonArgs += @("--rehearsal-profile", $env:REHEARSAL_PROFILE)

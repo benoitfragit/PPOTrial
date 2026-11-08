@@ -343,6 +343,8 @@ def record_result(state: dict, stages: list[dict], threshold: float,
                   finished=passed and not next_gate)
     if "maxTeamSize" in state:
         result["maxTeamSize"] = state["maxTeamSize"]
+    if state.get("hostileZones", False):
+        result["hostileZones"] = True
     existing.write_json(STATE_FILE, state)
     existing.write_json(RESULT_FILE, result)
     output = os.environ.get("GITHUB_OUTPUT")
@@ -366,6 +368,11 @@ def record_result(state: dict, stages: list[dict], threshold: float,
 
 
 def run_gate(args: argparse.Namespace) -> dict:
+    with champion.variant_namespace(getattr(args, "hostile_zones", False)):
+        return _run_gate(args)
+
+
+def _run_gate(args: argparse.Namespace) -> dict:
     if not 0 < args.threshold_percent <= 100:
         raise ValueError("threshold-percent must be in (0,100]")
     if not 1 <= args.max_seconds <= 18000:
@@ -382,6 +389,12 @@ def run_gate(args: argparse.Namespace) -> dict:
     stages = select_curriculum(configuration, max_team_size)
     rehearsal_every = configuration["rehearsalEveryBlocks"]
     state = initialize_state(stages, args.gate, args.resume, config_hash)
+    hostile_zones = getattr(args, "hostile_zones", False)
+    if (type(state.get("hostileZones", False)) is not bool
+            or state.get("hostileZones", False) is not hostile_zones):
+        raise ValueError("Checkpoint hostile-zone variant mismatch")
+    if hostile_zones:
+        state["hostileZones"] = True
     if state.get("maxTeamSize", 2) != max_team_size:
         raise ValueError("Checkpoint team size differs from selected curriculum")
     if max_team_size != 2:
@@ -402,6 +415,9 @@ def run_gate(args: argparse.Namespace) -> dict:
     if (isinstance(cycle, dict)
             and cycle.get("rehearsalProfile", saved_profile) != rehearsal_profile):
         raise ValueError("Rehearsal profile mismatch with restart cycle")
+    if (isinstance(cycle, dict)
+            and cycle.get("hostileZones", False) is not hostile_zones):
+        raise ValueError("Restart-cycle hostile-zone variant mismatch")
     state["rehearsalProfile"] = rehearsal_profile
     if cycle is not None:
         # Preserve the separate restart action's previously agreed policy.
@@ -484,6 +500,9 @@ def run_gate(args: argparse.Namespace) -> dict:
                 selected = profiles.select_weighted_stage(
                     stages, state["gateIndex"], state["blockIndex"],
                     state["validatedGates"], rehearsal_profile)
+            # Same scenario variant applies to primary and rehearsal blocks.
+            if hostile_zones:
+                selected = dict(selected, hostileZones=True)
             block_dir = stage_root / (
                 f"block-{state['blockIndex']:06d}-{selected['id']}"
                 f"-updates-{updates:06d}-{target:06d}")
@@ -572,6 +591,8 @@ def main() -> int:
     parser.add_argument("--binary", default="build/release/Main/Release/PPO.exe")
     parser.add_argument("--gate", default="1v0")
     parser.add_argument("--max-team-size", type=int, choices=(2, 3, 4), default=2)
+    parser.add_argument("--hostile-zones", action="store_true",
+                        help="Enable existing hostile zones on all gates and replays")
     parser.add_argument("--rehearsal-profile", choices=profiles.PROFILES,
                         default="legacy")
     parser.add_argument("--threshold-percent", type=float, default=75.0)

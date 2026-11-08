@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
+import champion_checkpoints as champion
 
 import progressive_gate as gate
 import dispatch_next_gate as dispatcher
@@ -79,12 +81,37 @@ class CurriculumSelectionTests(unittest.TestCase):
                     dispatcher.next_dispatch(dict(result, maxTeamSize=2),
                                              config, "420001")
 
+    def test_zone_option_all_gates_and_variant_namespace(self):
+        data = GATES.read_bytes()
+        stages = json.loads(data)
+        for size in (2, 3, 4):
+            candidates = gate.select_curriculum(stages, size)
+            for enabled in (True, False):
+                effective = [dict(s, hostileZones=enabled) for s in candidates]
+                self.assertTrue(all(s["hostileZones"] is enabled for s in effective))
+                current, following = candidates[-2:]
+                result = dict(gate=current["id"], passed=True,
+                    autoAdvance=True, gateConfigSha256=hashlib.sha256(data).hexdigest(),
+                    nextGate=following["id"],
+                    nextThresholdPercent=following["thresholdPercent"],
+                    nextMaxSeconds=following["maxSeconds"],
+                    hostileZones=enabled, maxTeamSize=size)
+                inputs = dispatcher.next_dispatch(result, data, "420001")
+                self.assertEqual(inputs.get("hostile_zones"), "true" if enabled else None)
+        with patch.object(champion, "ROOT", Path("best")):
+            with champion.variant_namespace(True):
+                self.assertEqual(champion.ROOT, Path("best/zones-on"))
+            self.assertEqual(champion.ROOT, Path("best"))
+        with self.assertRaises(ValueError):
+            dispatcher.next_dispatch(dict(result, hostileZones="true"), data, "420001")
+
     def test_ci_workflows_offer_one_size_control(self):
         for workflow in ("mappo-training-windows.yml",
                          "mappo-restart-progressive.yml"):
             content = (ROOT / ".github/workflows" / workflow).read_text(
                 encoding="utf-8")
             self.assertEqual(content.count("      max_team_size:"), 1)
+            self.assertEqual(content.count("      hostile_zones:"), 1)
             for label in ('        default: "2"',
                           '          - "2"', '          - "3"', '          - "4"'):
                 self.assertIn(label, content)

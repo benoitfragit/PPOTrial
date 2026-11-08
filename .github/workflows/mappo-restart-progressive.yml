@@ -15,6 +15,11 @@ on:
           - "2"
           - "3"
           - "4"
+      hostile_zones:
+        description: "Enable hostile zones across every gate and replay"
+        required: true
+        type: boolean
+        default: false
       source_run_id:
         description: "Completed progressive run containing full V7 optimizer checkpoint"
         required: true
@@ -149,6 +154,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           START_GATE: ${{ inputs.start_gate }}
           MAX_TEAM_SIZE: ${{ inputs.max_team_size }}
+          HOSTILE_ZONES: ${{ inputs.hostile_zones }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           SUCCESS_PERCENT: ${{ inputs.success_percent }}
           SAME_THRESHOLD: ${{ inputs.same_threshold_all_gates }}
@@ -199,6 +205,12 @@ jobs:
               raise RuntimeError('Unknown target gate')
 
           source = json.loads(progress_path.read_text(encoding='utf-8'))
+          hostile_zones = os.environ['HOSTILE_ZONES'].lower() == 'true'
+          if (type(source.get('hostileZones', False)) is not bool
+                  or source.get('hostileZones', False) is not hostile_zones):
+              raise RuntimeError('Cannot restart across hostile-zone variants')
+          if hostile_zones:
+              champion.ROOT = champion.ROOT / 'zones-on'
           # Check the source run's OWN immutable commit, rather than assuming
           # its gate schedule matches the new curriculum. The source may use a
           # different historical schedule (such as run 62) but must be authentic.
@@ -308,6 +320,9 @@ jobs:
           )
           if int(os.environ['MAX_TEAM_SIZE']) != 2:
               fresh['maxTeamSize'] = int(os.environ['MAX_TEAM_SIZE'])
+          if hostile_zones:
+              fresh['hostileZones'] = True
+              fresh['restartCycle']['hostileZones'] = True
           progress_path.write_text(json.dumps(fresh, indent=2) + '\n', encoding='utf-8')
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
               summary.write(
@@ -355,6 +370,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           START_GATE: ${{ inputs.start_gate }}
           MAX_TEAM_SIZE: ${{ inputs.max_team_size }}
+          HOSTILE_ZONES: ${{ inputs.hostile_zones }}
           SUCCESS_PERCENT: ${{ inputs.success_percent }}
           MAX_SECONDS: ${{ inputs.max_seconds }}
           AUTO_ADVANCE: ${{ inputs.auto_advance }}
@@ -389,6 +405,7 @@ jobs:
             -f "inputs[resume_run_id]=${GITHUB_RUN_ID}" \
             -f "inputs[progressive_gate]=${START_GATE}" \
             -f "inputs[max_team_size]=${MAX_TEAM_SIZE}" \
+            -f "inputs[hostile_zones]=${HOSTILE_ZONES}" \
             -f "inputs[rehearsal_profile]=${REHEARSAL_PROFILE}" \
             -f "inputs[success_percent]=${SUCCESS_PERCENT}" \
             -f "inputs[same_threshold_all_gates]=${SAME_THRESHOLD}" \
