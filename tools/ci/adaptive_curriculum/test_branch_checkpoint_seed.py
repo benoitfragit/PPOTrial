@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -122,6 +126,79 @@ class BranchCheckpointSeedTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "provenance"):
             dispatcher.next_dispatch_from_checkpoint(
                 result, invalid, gates_bytes, "9999")
+
+    def test_workflow_branch_bootstrap_3v3_uses_checkout_without_run(self) -> None:
+        """Execute the exact embedded bootstrap against an isolated branch tree."""
+        restart = (ROOT / ".github/workflows/mappo-restart-progressive.yml"
+                   ).read_text(encoding="utf-8").splitlines()
+        start = restart.index("          python - <<'PY'") + 1
+        end = restart.index("          PY", start)
+        script = "\n".join(
+            line[10:] if line.startswith("          ") else line
+            for line in restart[start:end])
+        compile(script, "<branch-bootstrap>", "exec")
+        with tempfile.TemporaryDirectory() as folder:
+            sandbox = Path(folder)
+            model = sandbox / "resources/model/BluePatrol"
+            (model / "latest").mkdir(parents=True)
+            (model / "prod").mkdir()
+            actor = model / "latest" / branch.ACTOR_NAME
+            training = model / "latest" / branch.TRAINING_NAME
+            prod = model / "prod" / branch.ACTOR_NAME
+            actor.write_text(ACTOR + "actor weights\n", encoding="utf-8")
+            training.write_text(TRAINING + "UPDATES 1791\noptimizer\n",
+                                encoding="utf-8")
+            prod.write_text(ACTOR + "production weights\n", encoding="utf-8")
+            source_bytes = actor.read_bytes()
+            production_bytes = prod.read_bytes()
+            gates = sandbox / "tools/ci/adaptive_curriculum/gates.json"
+            gates.parent.mkdir(parents=True)
+            shutil.copyfile(ROOT / "tools/ci/adaptive_curriculum/gates.json", gates)
+            summary = sandbox / "summary.md"
+            env = dict(os.environ, **{
+                "PYTHONPATH": str(ROOT) + os.pathsep + os.environ.get("PYTHONPATH", ""),
+                "SOURCE_RUN_ID": "branch",
+                "GITHUB_SHA": "a" * 40,
+                "GITHUB_RUN_ID": "123456",
+                "GITHUB_REPOSITORY": "benoitfragit/PPOTrial",
+                "GITHUB_STEP_SUMMARY": str(summary),
+                "START_GATE": "3v3",
+                "MAX_TEAM_SIZE": "4",
+                "SCENARIO_VARIANT": "randomized_zones",
+                "SUCCESS_PERCENT": "85",
+                "SAME_THRESHOLD": "true",
+                "REHEARSAL_PROFILE": "balanced_v1",
+                "AUTO_ADVANCE": "true",
+                "RETRAIN_SELECTED_GATE": "false",
+            })
+            completed = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=sandbox, env=env, capture_output=True, text=True,
+                timeout=20, check=False)
+            self.assertEqual(completed.returncode, 0,
+                             completed.stdout + completed.stderr)
+            checkpoint = json.loads((model / "adaptive-curriculum-progress.json"
+                                     ).read_text(encoding="utf-8"))
+            self.assertEqual(checkpoint["gate"], "3v3")
+            self.assertEqual(checkpoint["maxTeamSize"], 4)
+            self.assertEqual(checkpoint["lastCheckpointUpdates"], 1791)
+            self.assertFalse(checkpoint["passed"])
+            self.assertEqual(checkpoint["validatedGates"], [])
+            self.assertFalse(checkpoint["championRequired"])
+            self.assertEqual(checkpoint["rehearsalProfile"], "balanced_v1")
+            self.assertTrue(checkpoint["hostileZones"])
+            self.assertEqual(checkpoint["objectiveLayout"], "randomized")
+            cycle = checkpoint["restartCycle"]
+            self.assertEqual(cycle["sourceMode"], "branch")
+            self.assertIsNone(cycle["sourceRunId"])
+            self.assertEqual(cycle["sourceBranchSha"], "a" * 40)
+            self.assertEqual(cycle["sourceCheckpointSha256"]["latestActor"],
+                             hashlib.sha256(source_bytes).hexdigest())
+            self.assertEqual(cycle["sourceCheckpointSha256"]["prodActor"],
+                             hashlib.sha256(production_bytes).hexdigest())
+            self.assertEqual(actor.read_bytes(), source_bytes)
+            self.assertEqual(prod.read_bytes(), production_bytes)
+            self.assertIn("branch LATEST V7 + PROD V10", summary.read_text())
 
     def test_existing_restart_source_selector_preserves_ten_inputs(self) -> None:
         restart = (ROOT / ".github/workflows/mappo-restart-progressive.yml"
