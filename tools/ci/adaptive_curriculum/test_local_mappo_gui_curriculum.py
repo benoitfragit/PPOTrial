@@ -65,6 +65,31 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
                 self.assertGreater(sum(s["id"] == stages[index]["id"]
                                        for s in selected), length // 2)
 
+    def test_ci_gate_prefixes_and_scenario_isolation(self) -> None:
+        for size in (3, 4):
+            stages, index, history = local.load_production_stages(size)
+            self.assertEqual(stages[index]["id"], f"{size}v{size}")
+            self.assertEqual(history, [])
+            self.assertEqual(len(stages), 9 if size == 3 else 14)
+            with self.assertRaises(ValueError):
+                local.load_production_stages(size, "1v0", ["1v1"])
+        default = local.parse_args([])
+        self.assertTrue(local.legacy_shortcut(default))
+        self.assertEqual(local.session_state_root(default), default.state_root)
+        for size in (2, 3, 4):
+            for zones in (False, True):
+                for objective in ("fixed", "randomized"):
+                    opts = local.parse_args([
+                        "--max-team-size", str(size),
+                        "--objective-layout", objective,
+                        *(["--hostile-zones"] if zones else [])])
+                    variant = objective + ("_zones" if zones else "_no_zones")
+                    self.assertEqual(local.scenario_variant(opts), variant)
+                    if variant != "fixed_no_zones" or size != 2:
+                        self.assertEqual(
+                            local.session_state_root(opts),
+                            opts.state_root / f"{size}v{size}" / variant)
+
     def test_update_target_stops_at_next_evaluation(self) -> None:
         self.assertEqual(local.next_update_target(1790, 10, 10), 1800)
         self.assertEqual(local.next_update_target(1793, 10, 10), 1800)
