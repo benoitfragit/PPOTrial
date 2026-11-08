@@ -629,15 +629,29 @@ def _run_unlocked(options: LauncherOptions) -> int:
           f" sha256={hashlib.sha256(adaptive.GATES_FILE.read_bytes()).hexdigest()}"
           f" validated={','.join(validated_gates) or '-'}", flush=True)
     if options.dry_run:
-        updates = curriculum.read_updates()
-        if legacy_shortcut(options) and not (
-                session_state_root(options) / STATE_NAME).is_file():
-            _validate_checkpoint_pair(options.expected_source_updates)
-        start_block = 0
         state_path = session_state_root(options) / STATE_NAME
+        start_block = 0
         if state_path.is_file():
             state = json.loads(state_path.read_text(encoding="utf-8"))
             start_block = int(state["blockIndex"])
+            updates = state["lastCheckpointUpdates"]
+            if not legacy_shortcut(options):
+                session = Path(state["sessionDirectory"])
+                if _verified_session_checkpoint(
+                        session / SESSION_CHECKPOINT) != updates:
+                    raise ValueError("Dry-run checkpoint and GUI state mismatch")
+        elif options.source_actor is not None:
+            updates = _validate_checkpoint_pair(
+                options.expected_source_updates, options.source_actor,
+                options.source_training, require_prod_match=False)
+            if validate_evaluated_best_source(
+                    options.source_actor, options.source_training)["updates"] != updates:
+                raise ValueError("BEST source update mismatch")
+        elif legacy_shortcut(options):
+            updates = _validate_checkpoint_pair(options.expected_source_updates)
+        else:
+            raise ValueError(
+                "Nonlegacy dry-run requires an explicit evaluated BEST pair")
         _print_schedule(stages, target_index, validated_gates,
                         options.profile, start_block)
         cadence = json.loads(curriculum.TRAINING_FILE.read_text(

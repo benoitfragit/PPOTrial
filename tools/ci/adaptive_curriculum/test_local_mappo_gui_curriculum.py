@@ -196,6 +196,17 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "evaluated BEST"):
                 local.validate_evaluated_best_source(actor, training)
 
+    def test_modern_dry_run_requires_a_source_or_saved_session(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            from unittest.mock import patch
+            configured = local.parse_args([
+                "--max-team-size", "3", "--dry-run",
+                "--state-root", folder])
+            # No globally existing latest checkpoint can be accidentally used.
+            with patch.object(local, "ROOT", Path(folder)):
+                with self.assertRaisesRegex(ValueError, "evaluated BEST"):
+                    local._run_unlocked(configured)
+
     def test_explicit_source_cli_is_opt_in(self) -> None:
         historical = local.parse_args([])
         self.assertEqual(historical.expected_source_updates, 1790)
