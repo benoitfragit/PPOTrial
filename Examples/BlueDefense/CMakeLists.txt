@@ -9,6 +9,8 @@ target_compile_features(PPOBlueDefenseSpawn PUBLIC cxx_std_17)
 target_include_directories(PPOBlueDefenseSpawn PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/Scenario"
     "${CMAKE_CURRENT_SOURCE_DIR}/Agents/BluePatrol/Core")
+target_include_directories(PPOBlueDefenseSpawn PRIVATE
+    "${PROJECT_SOURCE_DIR}/Framework/Simulation/World2D/data")
 target_link_libraries(PPOBlueDefenseSpawn PUBLIC nlohmann_json::nlohmann_json)
 
 add_library(PPOBlueDefenseExample STATIC
