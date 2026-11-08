@@ -148,13 +148,12 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
             def make_pair(label: str, updates: int) -> None:
                 live_actor.write_text(
                     "BLUE_TEAM_MAPPO_V10 10 10 "
-                    f"UNIFIED_PHYSICAL_GUIDANCE_V1 {label}\\n".replace(
-                        "\\\\n", "\\n"), encoding="utf-8")
+                    f"UNIFIED_PHYSICAL_GUIDANCE_V1 {label}\n",
+                    encoding="utf-8")
                 live_training.write_text(
                     "BLUE_TEAM_TRAINING_V7 7 10 "
-                    f"UNIFIED_PHYSICAL_GUIDANCE_V1 {label}\\n"
-                    f"UPDATES {updates}\\n".replace(
-                        "\\\\n", "\\n"), encoding="utf-8")
+                    f"UNIFIED_PHYSICAL_GUIDANCE_V1 {label}\n"
+                    f"UPDATES {updates}\n", encoding="utf-8")
             with patch.object(local, "LATEST_ACTOR", live_actor), (
                     patch.object(local.curriculum, "LATEST", live_training)):
                 first = root / "first"
@@ -182,11 +181,11 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
             live_training = root / "latest" / local.curriculum.LATEST.name
             live_actor.parent.mkdir(parents=True)
             live_actor.write_text(
-                "BLUE_TEAM_MAPPO_V10 10 10 UNIFIED_PHYSICAL_GUIDANCE_V1\\n",
+                "BLUE_TEAM_MAPPO_V10 10 10 UNIFIED_PHYSICAL_GUIDANCE_V1\n",
                 encoding="utf-8")
             live_training.write_text(
-                "BLUE_TEAM_TRAINING_V7 7 10 UNIFIED_PHYSICAL_GUIDANCE_V1\\n"
-                "UPDATES 4\\n", encoding="utf-8")
+                "BLUE_TEAM_TRAINING_V7 7 10 UNIFIED_PHYSICAL_GUIDANCE_V1\n"
+                "UPDATES 4\n", encoding="utf-8")
             session = root / "session"
             session.mkdir()
             with patch.object(local, "LATEST_ACTOR", live_actor), (
