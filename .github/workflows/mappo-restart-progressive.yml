@@ -20,6 +20,14 @@ on:
         required: true
         type: boolean
         default: false
+      objective_layout:
+        description: "Defended objective: fixed or randomized per episode"
+        required: true
+        type: choice
+        default: fixed
+        options:
+          - fixed
+          - randomized
       source_run_id:
         description: "Completed progressive run containing full V7 optimizer checkpoint"
         required: true
@@ -155,6 +163,7 @@ jobs:
           START_GATE: ${{ inputs.start_gate }}
           MAX_TEAM_SIZE: ${{ inputs.max_team_size }}
           HOSTILE_ZONES: ${{ inputs.hostile_zones }}
+          OBJECTIVE_LAYOUT: ${{ inputs.objective_layout }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           SUCCESS_PERCENT: ${{ inputs.success_percent }}
           SAME_THRESHOLD: ${{ inputs.same_threshold_all_gates }}
@@ -206,11 +215,12 @@ jobs:
 
           source = json.loads(progress_path.read_text(encoding='utf-8'))
           hostile_zones = os.environ['HOSTILE_ZONES'].lower() == 'true'
+          objective_layout = os.environ['OBJECTIVE_LAYOUT']
           if (type(source.get('hostileZones', False)) is not bool
-                  or source.get('hostileZones', False) is not hostile_zones):
-              raise RuntimeError('Cannot restart across hostile-zone variants')
-          if hostile_zones:
-              champion.ROOT = champion.ROOT / 'zones-on'
+                  or source.get('hostileZones', False) is not hostile_zones
+                  or source.get('objectiveLayout', 'fixed') != objective_layout):
+              raise RuntimeError('Cannot restart across scenario variants')
+          champion.ROOT = champion.variant_root(hostile_zones, objective_layout)
           # Check the source run's OWN immutable commit, rather than assuming
           # its gate schedule matches the new curriculum. The source may use a
           # different historical schedule (such as run 62) but must be authentic.
@@ -323,6 +333,9 @@ jobs:
           if hostile_zones:
               fresh['hostileZones'] = True
               fresh['restartCycle']['hostileZones'] = True
+          if objective_layout != 'fixed':
+              fresh['objectiveLayout'] = objective_layout
+              fresh['restartCycle']['objectiveLayout'] = objective_layout
           progress_path.write_text(json.dumps(fresh, indent=2) + '\n', encoding='utf-8')
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
               summary.write(
@@ -371,6 +384,7 @@ jobs:
           START_GATE: ${{ inputs.start_gate }}
           MAX_TEAM_SIZE: ${{ inputs.max_team_size }}
           HOSTILE_ZONES: ${{ inputs.hostile_zones }}
+          OBJECTIVE_LAYOUT: ${{ inputs.objective_layout }}
           SUCCESS_PERCENT: ${{ inputs.success_percent }}
           MAX_SECONDS: ${{ inputs.max_seconds }}
           AUTO_ADVANCE: ${{ inputs.auto_advance }}
@@ -406,6 +420,7 @@ jobs:
             -f "inputs[progressive_gate]=${START_GATE}" \
             -f "inputs[max_team_size]=${MAX_TEAM_SIZE}" \
             -f "inputs[hostile_zones]=${HOSTILE_ZONES}" \
+            -f "inputs[objective_layout]=${OBJECTIVE_LAYOUT}" \
             -f "inputs[rehearsal_profile]=${REHEARSAL_PROFILE}" \
             -f "inputs[success_percent]=${SUCCESS_PERCENT}" \
             -f "inputs[same_threshold_all_gates]=${SAME_THRESHOLD}" \
