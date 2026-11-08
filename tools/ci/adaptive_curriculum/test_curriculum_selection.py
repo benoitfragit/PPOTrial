@@ -194,6 +194,31 @@ class CurriculumSelectionTests(unittest.TestCase):
                                     json.loads(train.read_text())["training"]["maxUpdates"],
                                     123)
 
+    def test_selected_fixed_layout_overrides_randomized_source(self):
+        # Regression #67/#73: a reused scenario must not leak its prior variant.
+        original_training = {"training": {"maxUpdates": 1}}
+        original_scenario = {"blueDefense": {
+            "blueTeam": {"activeCount": 2},
+            "redTeam": {"activeCount": 2},
+            "restrictedZones": {"enabled": True},
+            "restrictedZoneSpawn": {"enabledProbability": 1.0},
+            "objectiveSpawn": {"mode": "randomized"}}}
+        stages = gate.select_curriculum(json.loads(GATES.read_bytes()), 2)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with patch.object(gate.existing, "TRAINING_FILE", root / "training.json"), (
+                    patch.object(gate.existing, "SCENARIO_FILE", root / "scenario.json")):
+                for mode in ("fixed", "randomized", "fixed"):
+                    selected = dict(stages[4], objectiveLayout=mode)
+                    gate.existing.apply_stage(
+                        selected, 123, original_training, original_scenario)
+                    actual = json.loads(
+                        (root / "scenario.json").read_text(encoding="utf-8"))
+                    self.assertEqual(
+                        actual["blueDefense"]["objectiveSpawn"]["mode"], mode)
+                self.assertEqual(original_scenario["blueDefense"][
+                    "objectiveSpawn"]["mode"], "randomized")
+
     def test_three_blue_gates_and_runtime_scenario_variants(self):
         self.assert_scenario_contract(3)
 
