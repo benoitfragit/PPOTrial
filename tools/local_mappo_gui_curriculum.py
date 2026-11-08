@@ -62,7 +62,7 @@ class LauncherOptions:
     profile: str
     max_seconds: int
     block_updates: int
-    expected_source_updates: int
+    expected_source_updates: int | None
     state_root: Path
     max_blocks: int
     dry_run: bool
@@ -71,6 +71,8 @@ class LauncherOptions:
     objective_layout: str = "fixed"
     hostile_zones: bool = False
     validated_gates: tuple[str, ...] | None = None
+    source_actor: Path | None = None
+    source_training: Path | None = None
 
 
 class FileSnapshot:
@@ -169,15 +171,18 @@ def next_update_target(updates: int, cadence: int,
     return updates + min(block_updates, until_evaluation)
 
 
-def _validate_checkpoint_pair(expected_updates: int) -> int:
-    """Validate the local run-84 actor, optimizer and production actor."""
-    paths = (LATEST_ACTOR, curriculum.LATEST, curriculum.PROD)
+def _validate_checkpoint_pair(
+        expected_updates: int | None, actor: Path = LATEST_ACTOR,
+        training: Path = curriculum.LATEST,
+        require_prod_match: bool = True) -> int:
+    """Validate an explicit V10/V7 source before updating latest."""
+    paths = (actor, training) + ((curriculum.PROD,) if require_prod_match else ())
     for path in paths:
         if not path.is_file() or path.stat().st_size == 0:
-            raise FileNotFoundError(f"Missing local run-84 checkpoint: {path}")
-    with LATEST_ACTOR.open(encoding="utf-8") as stream:
+            raise FileNotFoundError(f"Missing local V10/V7 checkpoint: {path}")
+    with actor.open(encoding="utf-8") as stream:
         actor_header = stream.readline().split()
-    with curriculum.LATEST.open(encoding="utf-8") as stream:
+    with training.open(encoding="utf-8") as stream:
         training_header = stream.readline().split()
     semantic = "UNIFIED_PHYSICAL_GUIDANCE_V1"
     if (actor_header[:3] != ["BLUE_TEAM_MAPPO_V10", "10", "10"]
@@ -185,12 +190,11 @@ def _validate_checkpoint_pair(expected_updates: int) -> int:
                 != ["BLUE_TEAM_TRAINING_V7", "7", "10"]
             or semantic not in actor_header or semantic not in training_header):
         raise ValueError("Local checkpoint is not a compatible V10/V7 pair")
-    updates = curriculum.read_updates()
-    if updates != expected_updates:
+    updates = curriculum.read_updates(training)
+    if expected_updates is not None and updates != expected_updates:
         raise ValueError(
-            f"Expected run-84 update {expected_updates}, found {updates}. "
-            "Use the original latest checkpoint or resume the existing session.")
-    if _sha256(LATEST_ACTOR) != _sha256(curriculum.PROD):
+            f"Expected source update {expected_updates}, found {updates}.")
+    if require_prod_match and _sha256(actor) != _sha256(curriculum.PROD):
         raise ValueError(
             "The initial latest/prod actors differ; run-84 source is ambiguous")
     return updates
@@ -205,14 +209,17 @@ def _write_state(path: Path, state: dict) -> None:
     temporary.replace(path)
 
 
-def _create_source_backup(session_root: Path, source_updates: int) -> None:
-    """Copy the immutable local source checkpoint and record its digests."""
+def _create_source_backup(session_root: Path, source_updates: int,
+                          actor: Path = LATEST_ACTOR,
+                          training: Path = curriculum.LATEST) -> None:
+    """Copy the selected source pair and record immutable digests."""
     source_root = session_root / "source-run84"
     source_root.mkdir(parents=True, exist_ok=False)
     source_files = {
-        "latestActor": LATEST_ACTOR,
-        "latestTraining": curriculum.LATEST,
-        "productionActor": curriculum.PROD,
+        "latestActor": actor,
+        "latestTraining": training,
+        **({"productionActor": curriculum.PROD}
+           if curriculum.PROD.is_file() else {}),
     }
     manifest = {
         "formatVersion": SESSION_FORMAT_VERSION,
@@ -247,7 +254,8 @@ def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
         if (not isinstance(state, dict) or not required.issubset(state)
                 or state["formatVersion"] != SESSION_FORMAT_VERSION
                 or state["profile"] != options.profile
-                or state["sourceUpdates"] != options.expected_source_updates
+                or (options.expected_source_updates is not None
+                    and state["sourceUpdates"] != options.expected_source_updates)
                 or state.get("maxTeamSize", 2) != options.max_team_size
                 or state.get("validatedGates", expected_history
                              if legacy_shortcut(options) else None)
@@ -263,6 +271,11 @@ def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
                 or state["blockIndex"] < 0
                 or type(state["lastCheckpointUpdates"]) is not int):
             raise ValueError("Incompatible local GUI curriculum state")
+        if options.source_actor is not None:
+            if (_sha256(options.source_actor) != state.get("sourceActorSha256")
+                    or _sha256(options.source_training) !=
+                       state.get("sourceTrainingSha256")):
+                raise ValueError("Resumed V10/V7 source hashes differ")
         current_updates = curriculum.read_updates()
         if current_updates < state["lastCheckpointUpdates"]:
             raise ValueError("Latest checkpoint predates local GUI progress")
@@ -278,12 +291,43 @@ def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
             raise ValueError("Local GUI session directory is missing")
         return state, resolved_session
 
+    actor = options.source_actor or LATEST_ACTOR
+    training = options.source_training or curriculum.LATEST
+    external_source = options.source_actor is not None
     source_updates = _validate_checkpoint_pair(
-        options.expected_source_updates)
+        options.expected_source_updates, actor, training,
+        require_prod_match=not external_source)
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     session_root = session_state_root(options) / f"session-{timestamp}"
     session_root.mkdir(parents=True, exist_ok=False)
-    _create_source_backup(session_root, source_updates)
+    _create_source_backup(session_root, source_updates, actor, training)
+    if external_source:
+        # Keep recovery copies before installing an explicitly selected BEST.
+        previous = session_root / "latest-before-install"
+        previous.mkdir()
+        for target in (LATEST_ACTOR, curriculum.LATEST):
+            if target.is_file():
+                shutil.copy2(target, previous / target.name)
+        staged = []
+        try:
+            for source_path, target in ((actor, LATEST_ACTOR),
+                                        (training, curriculum.LATEST)):
+                temporary = target.with_suffix(target.suffix + ".gui-staged")
+                temporary.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_path, temporary)
+                staged.append((temporary, target))
+            for temporary, target in staged:
+                temporary.replace(target)
+        except OSError:
+            for temporary, _ in staged:
+                temporary.unlink(missing_ok=True)
+            for target in (LATEST_ACTOR, curriculum.LATEST):
+                original = previous / target.name
+                if original.is_file():
+                    shutil.copy2(original, target)
+                else:
+                    target.unlink(missing_ok=True)
+            raise
     state = {
         "formatVersion": SESSION_FORMAT_VERSION,
         "profile": options.profile,
@@ -294,6 +338,8 @@ def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
         "validatedGates": expected_history,
         "gateConfigSha256": hashlib.sha256(adaptive.GATES_FILE.read_bytes()).hexdigest(),
         "sourceUpdates": source_updates,
+        "sourceActorSha256": _sha256(actor),
+        "sourceTrainingSha256": _sha256(training),
         "blockIndex": 0,
         "lastCheckpointUpdates": source_updates,
         "sessionDirectory": str(session_root),
@@ -367,6 +413,8 @@ def run(options: LauncherOptions) -> int:
     if options.max_blocks < 0:
         raise ValueError("max-blocks must be nonnegative")
 
+    if (options.source_actor is None) != (options.source_training is None):
+        raise ValueError("The source V10 actor and V7 training must be paired")
     history = (list(options.validated_gates)
                if options.validated_gates is not None else
                None if legacy_shortcut(options) else [])
@@ -398,6 +446,10 @@ def run(options: LauncherOptions) -> int:
         return 0
 
     if not legacy_shortcut(options):
+        if (not (session_state_root(options) / STATE_NAME).is_file()
+                and options.source_actor is None):
+            raise ValueError(
+                "Nonlegacy training requires --source-actor and --source-training")
         with champion.variant_namespace(
                 options.hostile_zones, options.objective_layout):
             for prior_gate in validated_gates:
@@ -479,7 +531,12 @@ def parse_args(argv: list[str] | None = None) -> LauncherOptions:
         "--profile", choices=tuple(profiles.WEIGHTS), default="balanced_v1")
     parser.add_argument("--max-seconds", type=int, default=7200)
     parser.add_argument("--block-updates", type=int, default=10)
-    parser.add_argument("--expected-source-updates", type=int, default=1790)
+    parser.add_argument("--expected-source-updates", type=int,
+                        help="Expected V7 source update; historical default 1790")
+    parser.add_argument("--source-actor", type=Path,
+                        help="Explicit V10 BEST actor path for new campaigns")
+    parser.add_argument("--source-training", type=Path,
+                        help="Matching V7 source training checkpoint path")
     parser.add_argument("--max-team-size", type=int, choices=(2, 3, 4), default=2)
     parser.add_argument("--start-gate", default=None)
     parser.add_argument("--objective-layout", choices=("fixed", "randomized"),
@@ -501,13 +558,26 @@ def parse_args(argv: list[str] | None = None) -> LauncherOptions:
     return LauncherOptions(
         binary=binary, profile=args.profile, max_seconds=args.max_seconds,
         block_updates=args.block_updates,
-        expected_source_updates=args.expected_source_updates,
+        expected_source_updates=(args.expected_source_updates
+                                 if args.expected_source_updates is not None
+                                 else 1790 if args.max_team_size == 2
+                                      and args.start_gate in (None, "2v2")
+                                      and args.objective_layout == "fixed"
+                                      and not args.hostile_zones
+                                      and args.source_actor is None
+                                 else None),
         state_root=state_root, max_blocks=args.max_blocks,
         dry_run=args.dry_run, max_team_size=args.max_team_size,
         target_gate=args.start_gate,
         objective_layout=args.objective_layout, hostile_zones=args.hostile_zones,
         validated_gates=(tuple(filter(None, args.validated_gates.split(",")))
-                         if args.validated_gates is not None else None))
+                         if args.validated_gates is not None else None),
+        source_actor=(None if args.source_actor is None else
+                      args.source_actor if args.source_actor.is_absolute()
+                      else ROOT / args.source_actor),
+        source_training=(None if args.source_training is None else
+                         args.source_training if args.source_training.is_absolute()
+                         else ROOT / args.source_training))
 
 
 def main(argv: list[str] | None = None) -> int:
