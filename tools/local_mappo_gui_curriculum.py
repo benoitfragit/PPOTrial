@@ -140,9 +140,10 @@ def legacy_shortcut(options: LauncherOptions) -> bool:
 def session_state_root(options: LauncherOptions) -> Path:
     if legacy_shortcut(options):
         return options.state_root
+    gate = options.target_gate or f"{options.max_team_size}v{options.max_team_size}"
     return (options.state_root
             / f"{options.max_team_size}v{options.max_team_size}"
-            / scenario_variant(options))
+            / scenario_variant(options) / gate)
 
 
 def balanced_schedule(stages: list[dict], target_index: int,
@@ -233,6 +234,10 @@ def _create_source_backup(session_root: Path, source_updates: int) -> None:
 def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
     """Open a resumable local session or create one from the run-84 pair."""
     state_path = session_state_root(options) / STATE_NAME
+    expected_history = (list(options.validated_gates)
+                        if options.validated_gates is not None else
+                        ["1v0", "2v0", "1v1", "2v1"]
+                        if legacy_shortcut(options) else [])
     if state_path.is_file():
         state = json.loads(state_path.read_text(encoding="utf-8"))
         required = {
@@ -244,6 +249,9 @@ def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
                 or state["profile"] != options.profile
                 or state["sourceUpdates"] != options.expected_source_updates
                 or state.get("maxTeamSize", 2) != options.max_team_size
+                or state.get("validatedGates", expected_history
+                             if legacy_shortcut(options) else None)
+                    != expected_history
                 or state.get("targetGate", "2v2") !=
                     (options.target_gate or f"{options.max_team_size}v{options.max_team_size}")
                 or state.get("objectiveLayout", "fixed") != options.objective_layout
@@ -283,6 +291,7 @@ def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
         "targetGate": options.target_gate or f"{options.max_team_size}v{options.max_team_size}",
         "objectiveLayout": options.objective_layout,
         "hostileZones": options.hostile_zones,
+        "validatedGates": expected_history,
         "gateConfigSha256": hashlib.sha256(adaptive.GATES_FILE.read_bytes()).hexdigest(),
         "sourceUpdates": source_updates,
         "blockIndex": 0,
@@ -348,7 +357,7 @@ def _print_schedule(stages: list[dict], target_index: int,
 def run(options: LauncherOptions) -> int:
     """Execute the resumable local balanced curriculum."""
     os.chdir(ROOT)
-    if not options.binary.is_file():
+    if not options.dry_run and not options.binary.is_file():
         raise FileNotFoundError(
             f"Missing Release GUI executable: {options.binary}")
     if not 1 <= options.max_seconds <= 86400:
