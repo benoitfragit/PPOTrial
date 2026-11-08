@@ -189,6 +189,22 @@ def next_update_target(updates: int, cadence: int,
     return updates + min(block_updates, until_evaluation)
 
 
+def validate_evaluated_best_source(actor: Path, training: Path) -> dict:
+    """Authenticate both source files against the same evaluated BEST manifest."""
+    if (actor.name != champion.ACTOR_NAME
+            or training.name != champion.TRAINING_NAME
+            or actor.parent.resolve() != training.parent.resolve()):
+        raise ValueError(
+            "Explicit V10/V7 sources must share one BEST gate directory "
+            "and use the canonical actor/training filenames")
+    record = champion.read(actor.parent.name, actor.parent.parent)
+    if record is None or not record["evaluatedForGate"]:
+        raise ValueError("Explicit source must be an evaluated BEST checkpoint")
+    # champion.read validates V10/V7 semantic headers, epoch and BOTH SHA-256
+    # hashes against one manifest; never accept an arbitrary pair by filename.
+    return record
+
+
 def _validate_checkpoint_pair(
         expected_updates: int | None, actor: Path = LATEST_ACTOR,
         training: Path = curriculum.LATEST,
@@ -460,6 +476,10 @@ def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
     source_updates = _validate_checkpoint_pair(
         options.expected_source_updates, actor, training,
         require_prod_match=not external_source)
+    if external_source:
+        proven = validate_evaluated_best_source(actor, training)
+        if proven["updates"] != source_updates:
+            raise ValueError("BEST manifest and V7 optimizer epochs differ")
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     session_root = session_state_root(options) / f"session-{timestamp}"
     session_root.mkdir(parents=True, exist_ok=False)

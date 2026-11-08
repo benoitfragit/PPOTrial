@@ -151,6 +151,51 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
                 local._validate_checkpoint_pair(
                     1790, actor, training, require_prod_match=False)
 
+    def test_explicit_source_needs_an_evaluated_matching_best_manifest(self) -> None:
+        import hashlib
+        import json
+        with tempfile.TemporaryDirectory() as directory:
+            gate = Path(directory) / "best" / "2v2"
+            gate.mkdir(parents=True)
+            actor = gate / local.champion.ACTOR_NAME
+            training = gate / local.champion.TRAINING_NAME
+            actor.write_text(
+                "BLUE_TEAM_MAPPO_V10 10 10 UNIFIED_PHYSICAL_GUIDANCE_V1\\n",
+                encoding="utf-8")
+            training.write_text(
+                "BLUE_TEAM_TRAINING_V7 7 10 UNIFIED_PHYSICAL_GUIDANCE_V1\\n"
+                "UPDATES 2590\\n", encoding="utf-8")
+            with self.assertRaises((ValueError, FileNotFoundError)):
+                local.validate_evaluated_best_source(actor, training)
+            manifest = {
+                "version": 1, "gate": "2v2", "originGate": "2v1",
+                "evaluatedForGate": True, "updates": 2590,
+                "successPercent": 95.0, "score": 60.0,
+                "sha256": {
+                    actor.name: hashlib.sha256(actor.read_bytes()).hexdigest(),
+                    training.name: hashlib.sha256(training.read_bytes()).hexdigest(),
+                }}
+            (gate / "champion.json").write_text(json.dumps(manifest),
+                                                encoding="utf-8")
+            self.assertEqual(
+                local.validate_evaluated_best_source(actor, training)["updates"],
+                2590)
+            with self.assertRaisesRegex(ValueError, "one BEST gate directory"):
+                local.validate_evaluated_best_source(actor, gate.parent / training.name)
+            training.write_text(training.read_text() + "MIXED EPOCH\\n")
+            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+                local.validate_evaluated_best_source(actor, training)
+            training.write_text(
+                "BLUE_TEAM_TRAINING_V7 7 10 UNIFIED_PHYSICAL_GUIDANCE_V1\\n"
+                "UPDATES 2590\\n", encoding="utf-8")
+            manifest["evaluatedForGate"] = False
+            manifest["successPercent"] = None
+            manifest["score"] = None
+            (gate / "champion.json").write_text(json.dumps(manifest),
+                                                encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "evaluated BEST"):
+                local.validate_evaluated_best_source(actor, training)
+
     def test_explicit_source_cli_is_opt_in(self) -> None:
         historical = local.parse_args([])
         self.assertEqual(historical.expected_source_updates, 1790)
