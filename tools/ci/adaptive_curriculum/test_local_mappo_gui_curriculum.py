@@ -160,11 +160,11 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
             actor = gate / local.champion.ACTOR_NAME
             training = gate / local.champion.TRAINING_NAME
             actor.write_text(
-                "BLUE_TEAM_MAPPO_V10 10 10 UNIFIED_PHYSICAL_GUIDANCE_V1\\n",
+                "BLUE_TEAM_MAPPO_V10 10 10 UNIFIED_PHYSICAL_GUIDANCE_V1\n",
                 encoding="utf-8")
             training.write_text(
-                "BLUE_TEAM_TRAINING_V7 7 10 UNIFIED_PHYSICAL_GUIDANCE_V1\\n"
-                "UPDATES 2590\\n", encoding="utf-8")
+                "BLUE_TEAM_TRAINING_V7 7 10 UNIFIED_PHYSICAL_GUIDANCE_V1\n"
+                "UPDATES 2590\n", encoding="utf-8")
             with self.assertRaises((ValueError, FileNotFoundError)):
                 local.validate_evaluated_best_source(actor, training)
             manifest = {
@@ -182,12 +182,12 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
                 2590)
             with self.assertRaisesRegex(ValueError, "one BEST gate directory"):
                 local.validate_evaluated_best_source(actor, gate.parent / training.name)
-            training.write_text(training.read_text() + "MIXED EPOCH\\n")
+            training.write_text(training.read_text() + "MIXED EPOCH\n")
             with self.assertRaisesRegex(ValueError, "checksum mismatch"):
                 local.validate_evaluated_best_source(actor, training)
             training.write_text(
-                "BLUE_TEAM_TRAINING_V7 7 10 UNIFIED_PHYSICAL_GUIDANCE_V1\\n"
-                "UPDATES 2590\\n", encoding="utf-8")
+                "BLUE_TEAM_TRAINING_V7 7 10 UNIFIED_PHYSICAL_GUIDANCE_V1\n"
+                "UPDATES 2590\n", encoding="utf-8")
             manifest["evaluatedForGate"] = False
             manifest["successPercent"] = None
             manifest["score"] = None
