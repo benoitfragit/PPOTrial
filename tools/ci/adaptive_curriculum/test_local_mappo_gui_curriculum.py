@@ -116,12 +116,11 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
             actor = Path(directory) / "source-v10.txt"
             training = Path(directory) / "source-v7.txt"
             actor.write_text(
-                "BLUE_TEAM_MAPPO_V10 10 10 UNIFIED_PHYSICAL_GUIDANCE_V1\\n"
-                .replace("\\\\n", "\\n"), encoding="utf-8")
-            training.write_text(
-                "BLUE_TEAM_TRAINING_V7 7 10 UNIFIED_PHYSICAL_GUIDANCE_V1\\n"
-                "UPDATES 2590\\n".replace("\\\\n", "\\n"),
+                "BLUE_TEAM_MAPPO_V10 10 10 UNIFIED_PHYSICAL_GUIDANCE_V1\n",
                 encoding="utf-8")
+            training.write_text(
+                "BLUE_TEAM_TRAINING_V7 7 10 UNIFIED_PHYSICAL_GUIDANCE_V1\n"
+                "UPDATES 2590\n", encoding="utf-8")
             self.assertEqual(local._validate_checkpoint_pair(
                 2590, actor, training, require_prod_match=False), 2590)
             with self.assertRaisesRegex(ValueError, "Expected source update"):
