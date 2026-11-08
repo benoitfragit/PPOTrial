@@ -17,6 +17,14 @@ on:
         required: true
         type: boolean
         default: false
+      objective_layout:
+        description: "Defended objective: historical fixed or per-episode randomized"
+        required: true
+        type: choice
+        default: fixed
+        options:
+          - fixed
+          - randomized
       max_seconds:
         description: "Training time budget in seconds (leave headroom for build/artifacts)"
         required: true
@@ -218,6 +226,7 @@ jobs:
           GATE: ${{ inputs.progressive_gate }}
           MAX_TEAM_SIZE: ${{ inputs.max_team_size }}
           HOSTILE_ZONES: ${{ inputs.hostile_zones }}
+          OBJECTIVE_LAYOUT: ${{ inputs.objective_layout }}
           SUCCESS_PERCENT: ${{ inputs.success_percent }}
           MAX_SECONDS: ${{ inputs.max_seconds }}
           RESUME_RUN_ID: ${{ inputs.resume_run_id }}
@@ -235,6 +244,9 @@ jobs:
           )
           if ($env:HOSTILE_ZONES -eq "true") {
             $pythonArgs += "--hostile-zones"
+          }
+          if ($env:OBJECTIVE_LAYOUT -eq "randomized") {
+            $pythonArgs += @("--objective-layout", "randomized")
           }
           if (-not [string]::IsNullOrWhiteSpace($env:REHEARSAL_PROFILE) -and
               $env:REHEARSAL_PROFILE -ne "legacy") {

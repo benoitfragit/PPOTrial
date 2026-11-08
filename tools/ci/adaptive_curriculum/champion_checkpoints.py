@@ -20,15 +20,27 @@ import mappo_curriculum as existing
 ROOT = existing.MODEL_ROOT / "best"
 
 
-@contextmanager
-def variant_namespace(hostile_zones: bool):
-    """Isolate zone-on BEST while retaining legacy paths and checkpoints."""
+def variant_root(hostile_zones: bool, objective_layout: str = "fixed",
+                 root: Path | None = None) -> Path:
+    """Unique BEST namespace per scenario, preserving historical fixed paths."""
     if type(hostile_zones) is not bool:
         raise ValueError("hostile_zones must be a boolean")
+    if objective_layout not in ("fixed", "randomized"):
+        raise ValueError("objective_layout must be fixed or randomized")
+    result = ROOT if root is None else root
+    if objective_layout == "randomized":
+        result /= "objective-randomized"
+    if hostile_zones:
+        result /= "zones-on"
+    return result
+
+
+@contextmanager
+def variant_namespace(hostile_zones: bool, objective_layout: str = "fixed"):
+    """Use the same namespace for reads, promotions, rehearsals and restores."""
     global ROOT
     previous = ROOT
-    if hostile_zones:
-        ROOT = previous / "zones-on"
+    ROOT = variant_root(hostile_zones, objective_layout)
     try:
         yield
     finally:

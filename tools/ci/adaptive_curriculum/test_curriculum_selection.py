@@ -105,6 +105,37 @@ class CurriculumSelectionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             dispatcher.next_dispatch(dict(result, hostileZones="true"), data, "420001")
 
+    def test_objective_layout_namespaces_and_dispatch(self):
+        data = GATES.read_bytes()
+        stages = gate.select_curriculum(json.loads(data), 4)
+        current, following = stages[-2:]
+        for objective in ("fixed", "randomized"):
+            for zones in (False, True):
+                expected = Path("best")
+                if objective == "randomized":
+                    expected /= "objective-randomized"
+                if zones:
+                    expected /= "zones-on"
+                actual = champion.variant_root(zones, objective, Path("best"))
+                self.assertEqual(actual, expected)
+                record = dict(
+                    gate=current["id"], passed=True,
+                    autoAdvance=True, gateConfigSha256=hashlib.sha256(data).hexdigest(),
+                    nextGate=following["id"],
+                    nextThresholdPercent=following["thresholdPercent"],
+                    nextMaxSeconds=following["maxSeconds"],
+                    objectiveLayout=objective, hostileZones=zones, maxTeamSize=4)
+                result = dispatcher.next_dispatch(record, data, "420001")
+                self.assertEqual(result.get("objective_layout"),
+                                 None if objective == "fixed" else objective)
+                self.assertEqual(result.get("hostile_zones"),
+                                 "true" if zones else None)
+        with self.assertRaises(ValueError):
+            champion.variant_root(True, "unknown")
+        with self.assertRaises(ValueError):
+            dispatcher.next_dispatch(
+                dict(record, objectiveLayout="invalid"), data, "420001")
+
     def test_ci_workflows_offer_one_size_control(self):
         for workflow in ("mappo-training-windows.yml",
                          "mappo-restart-progressive.yml"):
@@ -112,6 +143,7 @@ class CurriculumSelectionTests(unittest.TestCase):
                 encoding="utf-8")
             self.assertEqual(content.count("      max_team_size:"), 1)
             self.assertEqual(content.count("      hostile_zones:"), 1)
+            self.assertEqual(content.count("      objective_layout:"), 1)
             for label in ('        default: "2"',
                           '          - "2"', '          - "3"', '          - "4"'):
                 self.assertIn(label, content)

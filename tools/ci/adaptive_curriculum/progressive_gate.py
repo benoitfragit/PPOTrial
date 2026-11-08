@@ -345,6 +345,8 @@ def record_result(state: dict, stages: list[dict], threshold: float,
         result["maxTeamSize"] = state["maxTeamSize"]
     if state.get("hostileZones", False):
         result["hostileZones"] = True
+    if state.get("objectiveLayout", "fixed") != "fixed":
+        result["objectiveLayout"] = state["objectiveLayout"]
     existing.write_json(STATE_FILE, state)
     existing.write_json(RESULT_FILE, result)
     output = os.environ.get("GITHUB_OUTPUT")
@@ -368,7 +370,8 @@ def record_result(state: dict, stages: list[dict], threshold: float,
 
 
 def run_gate(args: argparse.Namespace) -> dict:
-    with champion.variant_namespace(getattr(args, "hostile_zones", False)):
+    with champion.variant_namespace(getattr(args, "hostile_zones", False),
+                                    getattr(args, "objective_layout", "fixed")):
         return _run_gate(args)
 
 
@@ -395,6 +398,12 @@ def _run_gate(args: argparse.Namespace) -> dict:
         raise ValueError("Checkpoint hostile-zone variant mismatch")
     if hostile_zones:
         state["hostileZones"] = True
+    objective_layout = getattr(args, "objective_layout", "fixed")
+    if (objective_layout not in ("fixed", "randomized")
+            or state.get("objectiveLayout", "fixed") != objective_layout):
+        raise ValueError("Checkpoint objective-layout variant mismatch")
+    if objective_layout != "fixed":
+        state["objectiveLayout"] = objective_layout
     if state.get("maxTeamSize", 2) != max_team_size:
         raise ValueError("Checkpoint team size differs from selected curriculum")
     if max_team_size != 2:
@@ -418,6 +427,9 @@ def _run_gate(args: argparse.Namespace) -> dict:
     if (isinstance(cycle, dict)
             and cycle.get("hostileZones", False) is not hostile_zones):
         raise ValueError("Restart-cycle hostile-zone variant mismatch")
+    if (isinstance(cycle, dict)
+            and cycle.get("objectiveLayout", "fixed") != objective_layout):
+        raise ValueError("Restart-cycle objective-layout variant mismatch")
     state["rehearsalProfile"] = rehearsal_profile
     if cycle is not None:
         # Preserve the separate restart action's previously agreed policy.
@@ -501,8 +513,9 @@ def _run_gate(args: argparse.Namespace) -> dict:
                     stages, state["gateIndex"], state["blockIndex"],
                     state["validatedGates"], rehearsal_profile)
             # Same scenario variant applies to primary and rehearsal blocks.
-            if hostile_zones:
-                selected = dict(selected, hostileZones=True)
+            if hostile_zones or objective_layout != "fixed":
+                selected = dict(selected, hostileZones=hostile_zones,
+                                objectiveLayout=objective_layout)
             block_dir = stage_root / (
                 f"block-{state['blockIndex']:06d}-{selected['id']}"
                 f"-updates-{updates:06d}-{target:06d}")
@@ -593,6 +606,8 @@ def main() -> int:
     parser.add_argument("--max-team-size", type=int, choices=(2, 3, 4), default=2)
     parser.add_argument("--hostile-zones", action="store_true",
                         help="Enable existing hostile zones on all gates and replays")
+    parser.add_argument("--objective-layout", choices=("fixed", "randomized"),
+                        default="fixed")
     parser.add_argument("--rehearsal-profile", choices=profiles.PROFILES,
                         default="legacy")
     parser.add_argument("--threshold-percent", type=float, default=75.0)

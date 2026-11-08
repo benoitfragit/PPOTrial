@@ -123,6 +123,11 @@ def apply_stage(stage: dict, target_updates: int,
     settings["blueTeam"]["activeCount"] = stage["blue"]
     settings["redTeam"]["activeCount"] = stage["red"]
     settings["restrictedZones"]["enabled"] = stage["hostileZones"]
+    objective_layout = stage.get("objectiveLayout", "fixed")
+    if objective_layout not in ("fixed", "randomized"):
+        raise ValueError("Unknown objective layout")
+    if objective_layout == "randomized":
+        settings.setdefault("objectiveSpawn", {})["mode"] = objective_layout
     if not stage["hostileZones"]:
         settings["restrictedZoneSpawn"]["enabledProbability"] = 0.0
     write_json(TRAINING_FILE, training)

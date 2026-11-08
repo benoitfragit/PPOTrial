@@ -39,8 +39,9 @@ def matching_gate_fingerprint(recorded: object, config_bytes: bytes) -> bool:
 
 def next_dispatch(result: dict, config_bytes: bytes, run_id: str) -> dict | None:
     if (not isinstance(result, dict)
-            or type(result.get("hostileZones", False)) is not bool):
-        raise ValueError("Invalid hostile-zone variant in result")
+            or type(result.get("hostileZones", False)) is not bool
+            or result.get("objectiveLayout", "fixed") not in ("fixed", "randomized")):
+        raise ValueError("Invalid scenario variant in result")
     document = json.loads(config_bytes)
     contract_size = result.get("maxTeamSize", 2)
     stages = select_curriculum(document, contract_size)
@@ -81,6 +82,8 @@ def next_dispatch(result: dict, config_bytes: bytes, run_id: str) -> dict | None
         inputs["max_team_size"] = str(contract_size)
     if result.get("hostileZones", False):
         inputs["hostile_zones"] = "true"
+    if result.get("objectiveLayout", "fixed") != "fixed":
+        inputs["objective_layout"] = result["objectiveLayout"]
     return inputs
 
 
@@ -105,6 +108,9 @@ def next_dispatch_from_checkpoint(
             or type(state.get("hostileZones", False)) is not bool
             or type(result.get("hostileZones", False)) is not bool
             or state.get("hostileZones", False) is not result.get("hostileZones", False)
+            or state.get("objectiveLayout", "fixed") not in ("fixed", "randomized")
+            or state.get("objectiveLayout", "fixed") !=
+                result.get("objectiveLayout", "fixed")
             or not matching_gate_fingerprint(
                 state.get("gateConfigSha256"), config_bytes)
             or state.get("gateConfigSha256") != result.get("gateConfigSha256")
@@ -133,6 +139,10 @@ def next_dispatch_from_checkpoint(
             and cycle.get("hostileZones", False) is not
                 state.get("hostileZones", False)):
         raise ValueError("Restart-cycle hostile-zone variant mismatch")
+    if (isinstance(cycle, dict)
+            and cycle.get("objectiveLayout", "fixed") !=
+                state.get("objectiveLayout", "fixed")):
+        raise ValueError("Restart-cycle objective-layout variant mismatch")
     if cycle is None:
         inputs = next_dispatch(result, config_bytes, run_id)
         if inputs is None:
@@ -231,9 +241,10 @@ def main() -> int:
         return 0
     # The artifact must contain a verified actor + FULL optimizer pair.
     # Never dispatch an apparently passing run with only a newer LATEST.
-    best_root = CHECKPOINT_STATE_FILE.parent / "best"
-    if state.get("hostileZones", False):
-        best_root /= "zones-on"
+    best_root = champion.variant_root(
+        state.get("hostileZones", False),
+        state.get("objectiveLayout", "fixed"),
+        CHECKPOINT_STATE_FILE.parent / "best")
     best = champion.read(result["gate"], best_root)
     if (best is None or not best["evaluatedForGate"]
             or best["successPercent"] != state["bestSuccessPercent"]):
