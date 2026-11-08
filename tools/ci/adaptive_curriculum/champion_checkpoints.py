@@ -6,6 +6,7 @@ is kept byte-for-byte (actor, critic, Adam, RNG, update counter). The global
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import json
 import math
@@ -17,6 +18,22 @@ import mappo_curriculum as existing
 
 
 ROOT = existing.MODEL_ROOT / "best"
+
+
+@contextmanager
+def variant_namespace(hostile_zones: bool):
+    """Isolate zone-on BEST while retaining legacy paths and checkpoints."""
+    if type(hostile_zones) is not bool:
+        raise ValueError("hostile_zones must be a boolean")
+    global ROOT
+    previous = ROOT
+    if hostile_zones:
+        ROOT = previous / "zones-on"
+    try:
+        yield
+    finally:
+        ROOT = previous
+
 LATEST_ACTOR = existing.MODEL_ROOT / "latest/blue_patrol_generalized_v10.txt"
 ACTOR_NAME = "blue_patrol_generalized_v10.txt"
 TRAINING_NAME = "blue_patrol_generalized_training_v7.txt"
@@ -85,8 +102,8 @@ def _validate(directory: Path, gate: str) -> dict:
     return metadata
 
 
-def read(gate: str, root: Path = ROOT) -> dict | None:
-    directory = root / gate
+def read(gate: str, root: Path | None = None) -> dict | None:
+    directory = (ROOT if root is None else root) / gate
     if not directory.exists():
         return None
     return _validate(directory, gate)
