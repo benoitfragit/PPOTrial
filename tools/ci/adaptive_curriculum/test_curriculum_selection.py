@@ -197,6 +197,9 @@ class CurriculumSelectionTests(unittest.TestCase):
     def test_three_blue_gates_and_runtime_scenario_variants(self):
         self.assert_scenario_contract(3)
 
+    def test_four_blue_gates_and_runtime_scenario_variants(self):
+        self.assert_scenario_contract(4)
+
     def test_gui_uses_same_selected_two_team_prefix(self):
         sys.path.insert(0, str(ROOT / "tools"))
         import local_mappo_gui_curriculum as gui

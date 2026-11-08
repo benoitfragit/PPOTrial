@@ -381,5 +381,6 @@ int main()
     if (!RejectInvalidSettings()) return 5;
     if (!CheckRandomizedObjective()) return 6;
     if (!CheckTriangularScenario(3U)) return 7;
+    if (!CheckTriangularScenario(4U)) return 8;
     return 0;
 }
