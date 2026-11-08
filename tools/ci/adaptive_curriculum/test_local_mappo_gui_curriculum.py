@@ -203,9 +203,14 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
                 "--max-team-size", "3", "--dry-run",
                 "--state-root", folder])
             # No globally existing latest checkpoint can be accidentally used.
-            with patch.object(local, "ROOT", Path(folder)):
-                with self.assertRaisesRegex(ValueError, "evaluated BEST"):
-                    local._run_unlocked(configured)
+            import os
+            previous = Path.cwd()
+            try:
+                with patch.object(local, "ROOT", Path(folder)):
+                    with self.assertRaisesRegex(ValueError, "evaluated BEST"):
+                        local._run_unlocked(configured)
+            finally:
+                os.chdir(previous)
 
     def test_explicit_source_cli_is_opt_in(self) -> None:
         historical = local.parse_args([])

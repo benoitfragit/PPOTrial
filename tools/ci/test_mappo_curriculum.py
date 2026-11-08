@@ -143,12 +143,13 @@ class WatchdogTests(unittest.TestCase):
                 "'import time; time.sleep(20)'], "
                 "stdout=sys.stdout, stderr=sys.stderr)\n"
                 "print('PARENT_EXITED', flush=True)\n"
+                "import time; time.sleep(0.30)\n"
             )
             started = __import__("time").monotonic()
             with self.assertRaisesRegex(RuntimeError, "budget_timeout"):
                 watchdog.run(
                     [sys.executable, "-u", "-c", parent],
-                    "4v4", 0.25, root / "training.log",
+                    "4v4", 0.80, root / "training.log",
                     root / "combined.log", re.compile("Evaluation"),
                     lambda: 3, watchdog.WatchdogLimits(
                         heartbeat_seconds=0.05, quiet_warning_seconds=0.10,
