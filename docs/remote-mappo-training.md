@@ -209,7 +209,8 @@ certification: every preceding gate in the selected curriculum is replayed
 (including zero-Red patrol scenarios), whether the restart originates from
 `branch` or from a numeric run ID. For 3v0 through 3v3, this includes the
 1v0/2v0/1v1/2v1/2v2 scenarios; for 4v0 through 4v4, earlier 3vX scenarios
-are also rehearsed. The current gate receives a strict majority of blocks.
+are also rehearsed. At 3vX/4vX the current gate receives a strict majority
+of blocks; the original 2v2 weighted shares remain unchanged.
 Rehearsal does not set `validatedGates`, award an artificial PASS or
 replace BEST without evaluation. Only independent gate evaluations
 (20 cases per campaign) determine promotion.
