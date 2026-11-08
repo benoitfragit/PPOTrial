@@ -333,8 +333,8 @@ jobs:
                   retrainSelectedGate=os.environ["RETRAIN_SELECTED_GATE"].lower() == "true",
               ),
           )
-          if int(os.environ['MAX_TEAM_SIZE']) != 2:
-              fresh['maxTeamSize'] = int(os.environ['MAX_TEAM_SIZE'])
+          if int(os.environ.get('MAX_TEAM_SIZE') or '2') != 2:
+              fresh['maxTeamSize'] = int(os.environ.get('MAX_TEAM_SIZE') or '2')
           if hostile_zones:
               fresh['hostileZones'] = True
               fresh['restartCycle']['hostileZones'] = True
