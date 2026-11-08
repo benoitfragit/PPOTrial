@@ -47,6 +47,30 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
             local.profiles.select_weighted_stage(
                 stages, target_index, 36, validated, "balanced_v1")["id"])
 
+    def test_new_gui_evaluations_match_ci_twenty_distinct_seeds(self) -> None:
+        settings = {"training": {"checkpointEvery": 10},
+                    "evaluation": {"episodes": 8, "seed": 4242}}
+        self.assertIs(local.training_evaluation_for_campaign(
+            settings, local.parse_args([])), settings)
+        self.assertEqual(settings["evaluation"], {"episodes": 8, "seed": 4242})
+        for size in (2, 3, 4):
+            selected = local.parse_args([
+                "--max-team-size", str(size),
+                "--start-gate", f"{size}v{size}",
+                "--source-actor", "actor.txt",
+                "--source-training", "training.txt"])
+            effective = local.training_evaluation_for_campaign(settings, selected)
+            self.assertEqual(effective["evaluation"]["episodes"], 20)
+            self.assertEqual(effective["evaluation"]["seed"], 1004242)
+            self.assertEqual(
+                len({effective["evaluation"]["seed"] + case
+                     for case in range(20)}), 20)
+            self.assertEqual(settings["evaluation"]["episodes"], 8)
+        workflow = (local.ROOT / ".github/workflows/mappo-training-windows.yml"
+                   ).read_text(encoding="utf-8")
+        self.assertIn("-Name episodes -Value 20", workflow)
+        self.assertIn("-Name seed -Value 1004242", workflow)
+
     def test_shared_balanced_cycle_length_for_three_and_four_teams(self) -> None:
         for size in (3, 4):
             document = __import__("json").loads(local.adaptive.GATES_FILE.read_bytes())

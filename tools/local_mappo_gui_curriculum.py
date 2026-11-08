@@ -151,6 +151,21 @@ def session_state_root(options: LauncherOptions) -> Path:
             / scenario_variant(options) / gate)
 
 
+def training_evaluation_for_campaign(
+        original: dict, options: LauncherOptions) -> dict:
+    """Use the CI's twenty independent evaluation cases for new campaigns.
+
+    Keep the historical local run-84 shortcut's existing configuration intact.
+    This modifies only the Python-generated block JSON, never a model or agent.
+    """
+    if legacy_shortcut(options):
+        return original
+    settings = json.loads(json.dumps(original))
+    settings["evaluation"]["episodes"] = 20
+    settings["evaluation"]["seed"] = 1004242
+    return settings
+
+
 def balanced_schedule(stages: list[dict], target_index: int,
                       validated_gates: list[str], profile: str,
                       start_block: int = 0) -> list[dict]:
@@ -610,8 +625,9 @@ def _run_unlocked(options: LauncherOptions) -> int:
     _print_schedule(stages, target_index, validated_gates,
                     options.profile, state["blockIndex"])
     preserved = FileSnapshot(PRESERVED_RUNTIME_FILES)
-    original_training = json.loads(
-        curriculum.TRAINING_FILE.read_text(encoding="utf-8"))
+    original_training = training_evaluation_for_campaign(
+        json.loads(curriculum.TRAINING_FILE.read_text(encoding="utf-8")),
+        options)
     original_scenario = json.loads(
         curriculum.SCENARIO_FILE.read_text(encoding="utf-8"))
     cadence = original_training["training"].get("checkpointEvery")
