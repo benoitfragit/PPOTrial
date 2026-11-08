@@ -7,9 +7,9 @@ from pathlib import Path
 import sys
 import unittest
 from unittest.mock import patch
-import champion_checkpoints as champion
 
 import progressive_gate as gate
+import champion_checkpoints as champion
 import dispatch_next_gate as dispatcher
 
 
