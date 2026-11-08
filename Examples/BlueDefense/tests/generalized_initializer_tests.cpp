@@ -213,6 +213,10 @@ int main()
         return 3;
     if (!BlueTeamFitsWorld(3U))
         return 4;
+    if (!BlueTeamFitsWorld(2U))
+        return 6;
+    if (!BlueTeamFitsWorld(4U))
+        return 7;
     if (!InitialHoldoutResetIsDeterministic())
         return 5;
 
