@@ -33,6 +33,7 @@ sys.path.insert(0, str(ADAPTIVE_TOOLS))
 import mappo_curriculum as curriculum  # noqa: E402
 import progressive_gate as adaptive  # noqa: E402
 import rehearsal_profiles as profiles  # noqa: E402
+import champion_checkpoints as champion  # noqa: E402
 
 
 LATEST_ACTOR = Path(
@@ -65,6 +66,11 @@ class LauncherOptions:
     state_root: Path
     max_blocks: int
     dry_run: bool
+    max_team_size: int = 2
+    target_gate: str | None = None
+    objective_layout: str = "fixed"
+    hostile_zones: bool = False
+    validated_gates: tuple[str, ...] | None = None
 
 
 class FileSnapshot:
@@ -95,17 +101,48 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def load_production_stages() -> tuple[list[dict], int, list[str]]:
-    """Load the repository gate contract and locate the final 2v2 gate."""
-    document = json.loads(adaptive.GATES_FILE.read_bytes())
-    stages = adaptive.select_curriculum(document, 2)
+def load_production_stages(
+        max_team_size: int = 2, target_gate: str | None = None,
+        validated_gates: list[str] | None = None
+        ) -> tuple[list[dict], int, list[str]]:
+    """Load a canonical gate prefix without assuming new gate certifications."""
+    stages = adaptive.select_curriculum(
+        json.loads(adaptive.GATES_FILE.read_bytes()), max_team_size)
     names = [stage["id"] for stage in stages]
-    if TARGET_GATE not in names:
-        raise ValueError("The adaptive curriculum has no 2v2 target gate")
-    target_index = names.index(TARGET_GATE)
-    if target_index != len(stages) - 1:
-        raise ValueError("The local visual curriculum requires final gate 2v2")
-    return stages, target_index, names[:target_index]
+    requested = target_gate or f"{max_team_size}v{max_team_size}"
+    if requested not in names:
+        raise ValueError("Gate is outside selected max_team_size")
+    index = names.index(requested)
+    # Historical run 84 only: 1v0, 2v0, 1v1, 2v1 were validated.
+    prior = (names[:index] if max_team_size == 2 and requested == TARGET_GATE
+             and validated_gates is None else list(validated_gates or []))
+    if len(prior) != len(set(prior)) or any(x not in names[:index] for x in prior):
+        raise ValueError("Only unique previously validated gates are allowed")
+    return stages, index, prior
+
+
+def scenario_variant(options: LauncherOptions) -> str:
+    """Stable identity for the two orthogonal CI scenario options."""
+    if options.objective_layout not in ("fixed", "randomized"):
+        raise ValueError("Invalid objective layout")
+    return (options.objective_layout
+            + ("_zones" if options.hostile_zones else "_no_zones"))
+
+
+def legacy_shortcut(options: LauncherOptions) -> bool:
+    """Only the original run-84 invocation uses the original local state."""
+    return (options.max_team_size == 2
+            and options.target_gate in (None, "2v2")
+            and options.validated_gates is None
+            and scenario_variant(options) == "fixed_no_zones")
+
+
+def session_state_root(options: LauncherOptions) -> Path:
+    if legacy_shortcut(options):
+        return options.state_root
+    return (options.state_root
+            / f"{options.max_team_size}v{options.max_team_size}"
+            / scenario_variant(options))
 
 
 def balanced_schedule(stages: list[dict], target_index: int,
@@ -195,7 +232,7 @@ def _create_source_backup(session_root: Path, source_updates: int) -> None:
 
 def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
     """Open a resumable local session or create one from the run-84 pair."""
-    state_path = options.state_root / STATE_NAME
+    state_path = session_state_root(options) / STATE_NAME
     if state_path.is_file():
         state = json.loads(state_path.read_text(encoding="utf-8"))
         required = {
@@ -206,6 +243,14 @@ def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
                 or state["formatVersion"] != SESSION_FORMAT_VERSION
                 or state["profile"] != options.profile
                 or state["sourceUpdates"] != options.expected_source_updates
+                or state.get("maxTeamSize", 2) != options.max_team_size
+                or state.get("targetGate", "2v2") !=
+                    (options.target_gate or f"{options.max_team_size}v{options.max_team_size}")
+                or state.get("objectiveLayout", "fixed") != options.objective_layout
+                or state.get("hostileZones", False) is not options.hostile_zones
+                or state.get("gateConfigSha256",
+                    hashlib.sha256(adaptive.GATES_FILE.read_bytes()).hexdigest())
+                    != hashlib.sha256(adaptive.GATES_FILE.read_bytes()).hexdigest()
                 or type(state["blockIndex"]) is not int
                 or state["blockIndex"] < 0
                 or type(state["lastCheckpointUpdates"]) is not int):
@@ -220,7 +265,7 @@ def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
             _write_state(state_path, state)
         session_root = Path(state["sessionDirectory"])
         resolved_session = session_root.resolve()
-        if (not resolved_session.is_relative_to(options.state_root.resolve())
+        if (not resolved_session.is_relative_to(session_state_root(options).resolve())
                 or not resolved_session.is_dir()):
             raise ValueError("Local GUI session directory is missing")
         return state, resolved_session
@@ -228,12 +273,17 @@ def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
     source_updates = _validate_checkpoint_pair(
         options.expected_source_updates)
     timestamp = time.strftime("%Y%m%d-%H%M%S")
-    session_root = options.state_root / f"session-{timestamp}"
+    session_root = session_state_root(options) / f"session-{timestamp}"
     session_root.mkdir(parents=True, exist_ok=False)
     _create_source_backup(session_root, source_updates)
     state = {
         "formatVersion": SESSION_FORMAT_VERSION,
         "profile": options.profile,
+        "maxTeamSize": options.max_team_size,
+        "targetGate": options.target_gate or f"{options.max_team_size}v{options.max_team_size}",
+        "objectiveLayout": options.objective_layout,
+        "hostileZones": options.hostile_zones,
+        "gateConfigSha256": hashlib.sha256(adaptive.GATES_FILE.read_bytes()).hexdigest(),
         "sourceUpdates": source_updates,
         "blockIndex": 0,
         "lastCheckpointUpdates": source_updates,
@@ -308,13 +358,25 @@ def run(options: LauncherOptions) -> int:
     if options.max_blocks < 0:
         raise ValueError("max-blocks must be nonnegative")
 
-    stages, target_index, validated_gates = load_production_stages()
+    history = (list(options.validated_gates)
+               if options.validated_gates is not None else
+               None if legacy_shortcut(options) else [])
+    stages, target_index, validated_gates = load_production_stages(
+        options.max_team_size, options.target_gate, history)
+    if options.max_team_size > 2 and options.profile != "balanced_v1":
+        raise ValueError("3v3/4v4 GUI requires unified balanced_v1")
+    print(f"[LOCAL_GUI] max_team_size={options.max_team_size}"
+          f" gate={stages[target_index]['id']}"
+          f" variant={scenario_variant(options)}"
+          f" sha256={hashlib.sha256(adaptive.GATES_FILE.read_bytes()).hexdigest()}"
+          f" validated={','.join(validated_gates) or '-'}", flush=True)
     if options.dry_run:
         updates = curriculum.read_updates()
-        if not (options.state_root / STATE_NAME).is_file():
+        if legacy_shortcut(options) and not (
+                session_state_root(options) / STATE_NAME).is_file():
             _validate_checkpoint_pair(options.expected_source_updates)
         start_block = 0
-        state_path = options.state_root / STATE_NAME
+        state_path = session_state_root(options) / STATE_NAME
         if state_path.is_file():
             state = json.loads(state_path.read_text(encoding="utf-8"))
             start_block = int(state["blockIndex"])
@@ -326,6 +388,13 @@ def run(options: LauncherOptions) -> int:
               f"{next_update_target(updates, cadence, options.block_updates)}")
         return 0
 
+    if not legacy_shortcut(options):
+        with champion.variant_namespace(
+                options.hostile_zones, options.objective_layout):
+            for prior_gate in validated_gates:
+                best = champion.read(prior_gate)
+                if best is None or not best["evaluatedForGate"]:
+                    raise ValueError(f"Uncertified rehearsal gate: {prior_gate}")
     state, session_root = _load_or_create_state(options)
     _print_schedule(stages, target_index, validated_gates,
                     options.profile, state["blockIndex"])
@@ -349,6 +418,9 @@ def run(options: LauncherOptions) -> int:
             selected = profiles.select_weighted_stage(
                 stages, target_index, state["blockIndex"],
                 validated_gates, options.profile)
+            selected = dict(
+                selected, hostileZones=options.hostile_zones,
+                objectiveLayout=options.objective_layout)
             target = next_update_target(
                 updates, cadence, options.block_updates)
             block_root = session_root / "blocks" / (
@@ -375,7 +447,7 @@ def run(options: LauncherOptions) -> int:
                         "GUI reported completion before the target update")
                 state["blockIndex"] += 1
                 completed_blocks += 1
-            _write_state(options.state_root / STATE_NAME, state)
+            _write_state(session_state_root(options) / STATE_NAME, state)
             if not completed:
                 print("[LOCAL_GUI] Visual run stopped before block completion; "
                       "the same rehearsal will resume next time.", flush=True)
@@ -399,6 +471,13 @@ def parse_args(argv: list[str] | None = None) -> LauncherOptions:
     parser.add_argument("--max-seconds", type=int, default=7200)
     parser.add_argument("--block-updates", type=int, default=10)
     parser.add_argument("--expected-source-updates", type=int, default=1790)
+    parser.add_argument("--max-team-size", type=int, choices=(2, 3, 4), default=2)
+    parser.add_argument("--start-gate", default=None)
+    parser.add_argument("--objective-layout", choices=("fixed", "randomized"),
+                        default="fixed")
+    parser.add_argument("--hostile-zones", action="store_true")
+    parser.add_argument("--validated-gates", default=None,
+                        help="Comma-separated previously evaluated BEST gates")
     parser.add_argument("--state-root", type=Path, default=DEFAULT_STATE_ROOT)
     parser.add_argument(
         "--max-blocks", type=int, default=0,
@@ -415,7 +494,11 @@ def parse_args(argv: list[str] | None = None) -> LauncherOptions:
         block_updates=args.block_updates,
         expected_source_updates=args.expected_source_updates,
         state_root=state_root, max_blocks=args.max_blocks,
-        dry_run=args.dry_run)
+        dry_run=args.dry_run, max_team_size=args.max_team_size,
+        target_gate=args.start_gate,
+        objective_layout=args.objective_layout, hostile_zones=args.hostile_zones,
+        validated_gates=(tuple(filter(None, args.validated_gates.split(",")))
+                         if args.validated_gates is not None else None))
 
 
 def main(argv: list[str] | None = None) -> int:
