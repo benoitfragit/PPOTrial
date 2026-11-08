@@ -13,6 +13,7 @@ from pathlib import Path
 
 import branch_checkpoint_seed as branch
 import dispatch_next_gate as dispatcher
+import rehearsal_profiles as profiles
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -184,6 +185,18 @@ class BranchCheckpointSeedTests(unittest.TestCase):
             self.assertEqual(checkpoint["lastCheckpointUpdates"], 1791)
             self.assertFalse(checkpoint["passed"])
             self.assertEqual(checkpoint["validatedGates"], [])
+            # A branch seed is unverified, but balanced rehearses all earlier
+            # scenarios, including one/two/three Blues and zero-Red patrol.
+            stages = json.loads(gates.read_text(encoding="utf-8"))["gates"]
+            current = next(i for i, item in enumerate(stages)
+                           if item["id"] == "3v3")
+            total = profiles.weighted_cycle_length(
+                stages, current, checkpoint["validatedGates"], "balanced_v1")
+            replayed = {profiles.select_weighted_stage(
+                stages, current, block, checkpoint["validatedGates"],
+                "balanced_v1")["id"] for block in range(total)}
+            self.assertEqual(replayed,
+                             {item["id"] for item in stages[:current + 1]})
             self.assertFalse(checkpoint["championRequired"])
             self.assertEqual(checkpoint["rehearsalProfile"], "balanced_v1")
             self.assertTrue(checkpoint["hostileZones"])
