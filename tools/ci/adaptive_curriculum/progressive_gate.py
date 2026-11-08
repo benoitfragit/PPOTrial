@@ -415,9 +415,12 @@ def _run_gate(args: argparse.Namespace) -> dict:
     retrain_selected_gate = (isinstance(cycle, dict)
                              and cycle.get("retrainSelectedGate") is True
                              and cycle.get("startGate") == stage["id"])
-    rehearsal_profile = getattr(args, "rehearsal_profile", "legacy")
-    if rehearsal_profile not in profiles.PROFILES:
-        raise ValueError("Unknown rehearsal profile")
+    requested_profile = getattr(args, "rehearsal_profile", "legacy")
+    rehearsal_profile = profiles.effective_profile(requested_profile,
+                                                   max_team_size)
+    if rehearsal_profile != requested_profile:
+        print("[ADAPTIVE_GATE] Automatic balanced rehearsals for 3vX/4vX: "
+              f"{requested_profile} -> {rehearsal_profile}", flush=True)
     saved_profile = state.get("rehearsalProfile", "legacy")
     if args.resume and saved_profile != rehearsal_profile:
         raise ValueError("Rehearsal profile mismatch with restored checkpoint")
@@ -431,6 +434,18 @@ def _run_gate(args: argparse.Namespace) -> dict:
             and cycle.get("objectiveLayout", "fixed") != objective_layout):
         raise ValueError("Restart-cycle objective-layout variant mismatch")
     state["rehearsalProfile"] = rehearsal_profile
+    # Never certify 3vX/4vX from a quick favorable evaluation before all
+    # previous scenarios have been trained during a full deterministic cycle.
+    # blockIndex is persisted in the full checkpoint and survives resumes.
+    mandatory_rehearsal_blocks = (
+        profiles.weighted_cycle_length(stages, state["gateIndex"],
+                                       state["validatedGates"], rehearsal_profile)
+        if max_team_size >= 3 and state["gateIndex"] >= 5
+        and rehearsal_profile == "balanced_v1" else 0)
+    if mandatory_rehearsal_blocks:
+        print(f"[ADAPTIVE_GATE] gate={stage['id']} mandatory replay "
+              f"blocks={state['blockIndex']}/{mandatory_rehearsal_blocks}",
+              flush=True)
     if cycle is not None:
         # Preserve the separate restart action's previously agreed policy.
         uniform = cycle["sameThresholdAllGates"]
@@ -457,6 +472,7 @@ def _run_gate(args: argparse.Namespace) -> dict:
     if (args.resume and existing_best is not None
             and existing_best["evaluatedForGate"]
             and existing_best["successPercent"] >= args.threshold_percent
+            and state["blockIndex"] >= mandatory_rehearsal_blocks
             and not retrain_selected_gate):
         state["bestSuccessPercent"] = existing_best["successPercent"]
         state["lastSuccessPercent"] = (
@@ -576,7 +592,16 @@ def _run_gate(args: argparse.Namespace) -> dict:
                         success = evaluated["successPercent"]
                         state["lastSuccessPercent"] = success
                         state["bestSuccessPercent"] = best["successPercent"]
-                        passed = best["successPercent"] >= args.threshold_percent
+                        passed = (
+                            best["successPercent"] >= args.threshold_percent
+                            and state["blockIndex"] >= mandatory_rehearsal_blocks)
+                        if (not passed and mandatory_rehearsal_blocks
+                                and best["successPercent"] >= args.threshold_percent):
+                            print(f"[ADAPTIVE_GATE] gate={stage['id']} "
+                                  "PASS deferred: balanced rehearsal "
+                                  f"{state['blockIndex']}/"
+                                  f"{mandatory_rehearsal_blocks} blocks",
+                                  flush=True)
             state["elapsedSeconds"] += max(0.0, time.monotonic() - started)
             started = time.monotonic()
             # Until the new training budget ends, retain a resumable state.

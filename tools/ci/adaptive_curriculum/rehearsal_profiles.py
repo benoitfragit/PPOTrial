@@ -1,13 +1,25 @@
-"""Versioned, opt-in training rehearsal schedules for progressive Blue MAPPO.
+"""Versioned rehearsal schedules for progressive Blue MAPPO.
 
-The legacy schedule lives in progressive_gate.py and remains the default.
-The balanced_v1 profile replays every earlier curriculum scenario regardless of
-checkpoint source or certification. Rehearsal never certifies a gate as passed.
-Each named v1 profile is immutable so checkpoint resumes preserve semantics.
+Legacy stays the 2v2 default. For team sizes 3 and 4, legacy automatically
+upgrades to balanced_v1, which replays every preceding gate independent of
+checkpoint provenance or certification. Rehearsal never certifies a gate.
 """
 from __future__ import annotations
 
 PROFILES = ("legacy", "balanced_v1", "patrol_focus_v1", "combat_focus_v1")
+
+
+def effective_profile(requested: str, max_team_size: int) -> str:
+    """Require general balanced rehearsals for 3vX/4vX regardless of source."""
+    if requested not in PROFILES or max_team_size not in (2, 3, 4):
+        raise ValueError("Invalid curriculum rehearsal profile or team size")
+    if max_team_size >= 3:
+        if requested == "legacy":
+            return "balanced_v1"
+        if requested != "balanced_v1":
+            raise ValueError("3vX/4vX require balanced_v1 rehearsal")
+    return requested
+
 
 # Integer block shares; each full 2v2 cycle contains exactly 20 blocks.
 WEIGHTS = {
@@ -26,11 +38,10 @@ WEIGHTS = {
 
 def _adaptive_balanced_weights(
         stages: list[dict], index: int, eligible: list[dict]) -> dict[str, int]:
-    """Derive non-uniform 3vX/4vX shares from the current validated gate set.
+    """Derive non-uniform 3vX/4vX shares from all preceding gates.
 
-    A strict majority of every complete deterministic cycle belongs to the
-    current gate. Earlier validated patrol and combat gates remain eligible;
-    no skipped or future gate can receive weight.
+    A strict majority of each full cycle belongs to the current gate.
+    Rehearsal does not certify previous gates or replace an evaluated BEST.
     """
     legacy = ("1v0", "2v0", "1v1", "2v1", "2v2")
     if (len(stages) not in (9, 14)
@@ -46,7 +57,7 @@ def _adaptive_balanced_weights(
         if previous["id"] == current["id"]:
             continue
         blue, red = previous["blue"], previous["red"]
-        # Keep a patrol and a combat anchor for each validated team size;
+        # Keep a patrol and combat anchor for each preceding team size;
         # prioritize the current and immediately preceding team sizes.
         weight = 1 + int(red == 0 or red == blue)
         weight += int(blue in (current["blue"], current["blue"] - 1))

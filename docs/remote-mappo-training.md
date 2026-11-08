@@ -211,9 +211,19 @@ certification: every preceding gate in the selected curriculum is replayed
 1v0/2v0/1v1/2v1/2v2 scenarios; for 4v0 through 4v4, earlier 3vX scenarios
 are also rehearsed. At 3vX/4vX the current gate receives a strict majority
 of blocks; the original 2v2 weighted shares remain unchanged.
+For team sizes 3 and 4, selecting legacy automatically uses balanced_v1
+(while 2v2 keeps its original legacy behavior). Other 2v2-only profiles are
+rejected on these team sizes.
+A 3vX or 4vX gate cannot PASS until at least one complete deterministic
+balanced rehearsal cycle has executed, including every preceding scenario.
+An early 20-case evaluation (even 100%) or previously evaluated BEST cannot
+skip this minimum. Rehearsal blockIndex persists across resumed GitHub runs;
+a subsequent evaluation of the active gate must meet the success threshold.
 Rehearsal does not set `validatedGates`, award an artificial PASS or
 replace BEST without evaluation. Only independent gate evaluations
-(20 cases per campaign) determine promotion.
+(20 cases per campaign) determine promotion. There is no 2000-update global
+limit: the executable maxUpdates is a temporary per-block cumulative target;
+each gate has its own wall-clock budget.
 
 To begin at 2v2, 3v3 or 4v4, select `max_team_size` accordingly,
 `start_gate` for the desired stage, `rehearsal_profile=balanced_v1`,

@@ -183,7 +183,8 @@ jobs:
               validated_rehearsal_history)
           from tools.ci.adaptive_curriculum import champion_checkpoints as champion
           from tools.ci.adaptive_curriculum import branch_checkpoint_seed as branch_seed
-          from tools.ci.adaptive_curriculum.rehearsal_profiles import PROFILES
+          from tools.ci.adaptive_curriculum.rehearsal_profiles import (
+              PROFILES, effective_profile)
           from tools.ci import mappo_curriculum
 
           root = Path('resources/model/BluePatrol')
@@ -214,6 +215,12 @@ jobs:
           rehearsal_profile = os.environ['REHEARSAL_PROFILE'] or 'legacy'
           if rehearsal_profile not in PROFILES:
               raise RuntimeError('Unknown rehearsal profile')
+          effective = effective_profile(
+              rehearsal_profile, int(os.environ.get('MAX_TEAM_SIZE') or '2'))
+          if effective != rehearsal_profile:
+              print('[RESTART] Automatic 3vX/4vX balanced rehearsals: '
+                    f'{rehearsal_profile} -> {effective}', flush=True)
+          rehearsal_profile = effective
           if start_gate not in stage_names:
               raise RuntimeError('Unknown target gate')
 
@@ -435,6 +442,10 @@ jobs:
         run: |
           REHEARSAL_PROFILE="${REHEARSAL_PROFILE:-legacy}"
           MAX_TEAM_SIZE="${MAX_TEAM_SIZE:-2}"
+          if [[ "$MAX_TEAM_SIZE" != 2 && "$REHEARSAL_PROFILE" == legacy ]]; then
+            REHEARSAL_PROFILE=balanced_v1
+            echo '[RESTART] Automatically selected balanced_v1 for 3vX/4vX'
+          fi
           SCENARIO_VARIANT="${SCENARIO_VARIANT:-fixed_no_zones}"
           if [[ "$GITHUB_REF" != refs/heads/* ]]; then
             echo 'Restart requires a branch ref' >&2
