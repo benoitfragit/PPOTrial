@@ -288,10 +288,6 @@ bool Valid(SpawnSettings const& settings) noexcept
         return false;
 
     auto const& objective = settings.objective;
-    auto const fractionRange = [](SpawnRange const& range) {
-        return FiniteRange(range) && range.minimum >= -1.F
-            && range.maximum <= 1.F;
-    };
     if (objective.mode != ObjectiveSpawnMode::Fixed
         && objective.mode != ObjectiveSpawnMode::Randomized)
         return false;
