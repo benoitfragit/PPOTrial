@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <cstddef>
 #include <random>
 #include <set>
@@ -233,6 +234,11 @@ bool RejectInvalidSettings()
 
 bool CheckTriangularScenario(std::size_t blues)
 {
+    auto const fail = [](int line) {
+        std::cerr << "[SPAWN_TEST_ERROR] CheckTriangularScenario line "
+                  << line << '\\n';
+        return false;
+    };
     auto document = ValidScenario();
     document["blueTeam"]["activeCount"] = blues;
     defense::WorldBounds const world{22329.375F, 35727.F};
@@ -252,7 +258,7 @@ bool CheckTriangularScenario(std::size_t blues)
                     randomObjective ? "randomized" : "fixed";
                 auto parsed = defense::ParseSpawnSettings(document);
                 if (!parsed)
-                    return false;
+                    return fail(__LINE__);
                 for (auto& zone : parsed->restrictedZones.items)
                     zone.lethalRadiusMeters = 7000.F;
                 for (int const side : {-1, 1})
@@ -269,16 +275,16 @@ bool CheckTriangularScenario(std::size_t blues)
                             || first->objective.destroyed
                             || !std::isfinite(first->objective.north)
                             || !std::isfinite(first->objective.east))
-                            return false;
+                            return fail(__LINE__);
                         if (!hostile && !first->restrictedZones.front().spawn.destroyed)
-                            return false;
+                            return fail(__LINE__);
                         if (hostile && randomObjective)
                             for (auto const& zone : first->restrictedZones)
                                 if (std::hypot(
                                     first->objective.north - zone.spawn.north,
                                     first->objective.east - zone.spawn.east)
                                         <= 8000.F)
-                                    return false;
+                                    return fail(__LINE__);
                     }
             }
     return true;
@@ -286,6 +292,11 @@ bool CheckTriangularScenario(std::size_t blues)
 
 bool CheckRandomizedObjective()
 {
+    auto const fail = [](int line) {
+        std::cerr << "[SPAWN_TEST_ERROR] CheckRandomizedObjective line "
+                  << line << '\\n';
+        return false;
+    };
     auto document = ValidScenario();
     document["redTeam"]["activeCount"] = 2U;
     document["objectiveSpawn"] = {
@@ -306,7 +317,7 @@ bool CheckRandomizedObjective()
     });
     auto parsed = defense::ParseSpawnSettings(document);
     if (!parsed)
-        return false;
+        return fail(__LINE__);
     for (auto& zone : parsed->restrictedZones.items)
         zone.lethalRadiusMeters = 7000.F;
     defense::WorldBounds const world{22329.375F, 35727.F};
@@ -325,7 +336,7 @@ bool CheckRandomizedObjective()
                 side, *parsed, world, replay, nullptr, &blueSpawns);
             if (!layout || !repeated || !Same(*layout, *repeated)
                 || !diagnostic.empty() || layout->objective.destroyed)
-                return false;
+                return fail(__LINE__);
             samples.emplace(layout->objective.north, layout->objective.east);
             auto const objective = defense::MakeSpawn(
                 "blue_objective", *layout, world, rng);
@@ -333,22 +344,22 @@ bool CheckRandomizedObjective()
                 || objective->east * static_cast<float>(side) <= 0.F
                 || std::fabs(objective->north) >= world.halfNorth - 1000.F
                 || std::fabs(objective->east) >= world.halfEast - 1000.F)
-                return false;
+                return fail(__LINE__);
             for (auto const& zone : layout->restrictedZones)
                 if (std::hypot(objective->north - zone.spawn.north,
                                objective->east - zone.spawn.east) <= 9000.F)
-                    return false;
+                    return fail(__LINE__);
             for (auto const& red : layout->red)
             {
                 float const desired = std::atan2(
                     objective->east - red.east, objective->north - red.north);
                 if (std::fabs(std::remainder(red.heading - desired,
                                             6.283185307179586F)) > 0.1201F)
-                    return false;
+                    return fail(__LINE__);
             }
         }
     if (samples.size() < 16U)
-        return false;
+        return fail(__LINE__);
 
     // Deterministic impossible geometry must fail without unsafe fallback.
     parsed->objective.northFraction = {0.F, 0.F};
@@ -362,7 +373,7 @@ bool CheckRandomizedObjective()
     if (defense::GenerateEpisodeSpawnLayout(
             1, *parsed, world, impossible, &diagnostic, &blueSpawns)
         || diagnostic.find("cannot place objective") == std::string::npos)
-        return false;
+        return fail(__LINE__);
     document["objectiveSpawn"]["mode"] = "unknown";
     return !defense::ParseSpawnSettings(document);
 }
@@ -374,11 +385,11 @@ bool CheckRandomizedObjective()
  */
 int main()
 {
-    if (!CheckTeam(1U, 0U)) return 1;
-    if (!CheckTeam(2U, 2U)) return 2;
-    if (!CheckTeam(4U, 4U)) return 3;
-    if (!CheckTeam(9U, 10U)) return 4;
-    if (!RejectInvalidSettings()) return 5;
+    if (!CheckTeam(1U, 0U)) { std::cerr << "[SPAWN_TEST_ERROR] 1v0\n"; return 1; }
+    if (!CheckTeam(2U, 2U)) { std::cerr << "[SPAWN_TEST_ERROR] 2v2\n"; return 2; }
+    if (!CheckTeam(4U, 4U)) { std::cerr << "[SPAWN_TEST_ERROR] 4v4\n"; return 3; }
+    if (!CheckTeam(9U, 10U)) { std::cerr << "[SPAWN_TEST_ERROR] 9v10\n"; return 4; }
+    if (!RejectInvalidSettings()) { std::cerr << "[SPAWN_TEST_ERROR] invalid settings\n"; return 5; }
     if (!CheckRandomizedObjective()) return 6;
     if (!CheckTriangularScenario(3U)) return 7;
     if (!CheckTriangularScenario(4U)) return 8;
