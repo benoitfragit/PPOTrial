@@ -200,7 +200,8 @@ jobs:
               raise RuntimeError('Incompatible V10 actor or full V7 optimizer semantic contract')
 
           gates_bytes = Path('tools/ci/adaptive_curriculum/gates.json').read_bytes()
-          stages = select_curriculum(json.loads(gates_bytes), int(os.environ['MAX_TEAM_SIZE']))
+          stages = select_curriculum(
+              json.loads(gates_bytes), int(os.environ.get('MAX_TEAM_SIZE') or '2'))
           stage_names = [stage['id'] for stage in stages]
           start_gate = os.environ['START_GATE']
           rehearsal_profile = os.environ['REHEARSAL_PROFILE'] or 'legacy'
@@ -216,7 +217,7 @@ jobs:
               'randomized_no_zones': ('randomized', False),
               'randomized_zones': ('randomized', True),
           }
-          selection = os.environ['SCENARIO_VARIANT']
+          selection = os.environ.get('SCENARIO_VARIANT') or 'fixed_no_zones'
           if selection not in variants:
               raise RuntimeError('Invalid scenario variant')
           objective_layout, hostile_zones = variants[selection]
@@ -396,6 +397,8 @@ jobs:
         shell: bash
         run: |
           REHEARSAL_PROFILE="${REHEARSAL_PROFILE:-legacy}"
+          MAX_TEAM_SIZE="${MAX_TEAM_SIZE:-2}"
+          SCENARIO_VARIANT="${SCENARIO_VARIANT:-fixed_no_zones}"
           if [[ "$GITHUB_REF" != refs/heads/* ]]; then
             echo 'Restart requires a branch ref' >&2
             exit 1
