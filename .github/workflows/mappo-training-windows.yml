@@ -58,7 +58,7 @@ on:
           - 4v3
           - 4v4
       rehearsal_profile:
-        description: "Training rehearsal profile (legacy preserves existing scheduling)"
+        description: "Rehearsal profile (3vX/4vX require balanced_v1; 2v2 legacy unchanged)"
         required: false
         type: choice
         default: legacy
