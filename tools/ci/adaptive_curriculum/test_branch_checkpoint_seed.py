@@ -168,7 +168,7 @@ class BranchCheckpointSeedTests(unittest.TestCase):
                 "SCENARIO_VARIANT": "randomized_zones",
                 "SUCCESS_PERCENT": "85",
                 "SAME_THRESHOLD": "true",
-                "REHEARSAL_PROFILE": "balanced_v1",
+                "REHEARSAL_PROFILE": "legacy",
                 "AUTO_ADVANCE": "true",
                 "RETRAIN_SELECTED_GATE": "false",
             })
@@ -199,6 +199,10 @@ class BranchCheckpointSeedTests(unittest.TestCase):
                              {item["id"] for item in stages[:current + 1]})
             self.assertFalse(checkpoint["championRequired"])
             self.assertEqual(checkpoint["rehearsalProfile"], "balanced_v1")
+            self.assertEqual(checkpoint["restartCycle"]["rehearsalProfile"],
+                             "balanced_v1")
+            self.assertIn("Automatic 3vX/4vX balanced rehearsals",
+                          completed.stdout)
             self.assertTrue(checkpoint["hostileZones"])
             self.assertEqual(checkpoint["objectiveLayout"], "randomized")
             cycle = checkpoint["restartCycle"]
