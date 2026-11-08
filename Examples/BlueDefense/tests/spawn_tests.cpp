@@ -16,6 +16,7 @@
 #include <set>
 #include <utility>
 #include <string>
+#include <vector>
 
 namespace defense = ppo::examples::bluedefense;
 
@@ -230,6 +231,59 @@ bool RejectInvalidSettings()
     return true;
 }
 
+bool CheckTriangularScenario(std::size_t blues)
+{
+    auto document = ValidScenario();
+    document["blueTeam"]["activeCount"] = blues;
+    defense::WorldBounds const world{22329.375F, 35727.F};
+    std::vector<defense::Spawn> initialBlues;
+    initialBlues.reserve(blues);
+    for (std::size_t index = 0U; index < blues; ++index)
+        initialBlues.push_back(
+            {static_cast<float>(index) * 500.F, 0.F, 0.F, 0.F, false});
+
+    for (std::size_t reds = 0U; reds <= blues; ++reds)
+        for (bool const hostile : {false, true})
+            for (bool const randomObjective : {false, true})
+            {
+                document["redTeam"]["activeCount"] = reds;
+                document["restrictedZones"]["enabled"] = hostile;
+                document["objectiveSpawn"]["mode"] =
+                    randomObjective ? "randomized" : "fixed";
+                auto parsed = defense::ParseSpawnSettings(document);
+                if (!parsed)
+                    return false;
+                for (auto& zone : parsed->restrictedZones.items)
+                    zone.lethalRadiusMeters = 7000.F;
+                for (int const side : {-1, 1})
+                    for (unsigned seed = 0U; seed < 8U; ++seed)
+                    {
+                        std::mt19937 rng{seed};
+                        std::mt19937 replay{seed};
+                        auto const first = defense::GenerateEpisodeSpawnLayout(
+                            side, *parsed, world, rng, nullptr, &initialBlues);
+                        auto const second = defense::GenerateEpisodeSpawnLayout(
+                            side, *parsed, world, replay, nullptr, &initialBlues);
+                        if (!first || !second || !Same(*first, *second)
+                            || first->red.size() != reds
+                            || first->objective.destroyed
+                            || !std::isfinite(first->objective.north)
+                            || !std::isfinite(first->objective.east))
+                            return false;
+                        if (!hostile && !first->restrictedZones.front().spawn.destroyed)
+                            return false;
+                        if (hostile && randomObjective)
+                            for (auto const& zone : first->restrictedZones)
+                                if (std::hypot(
+                                    first->objective.north - zone.spawn.north,
+                                    first->objective.east - zone.spawn.east)
+                                        <= 8000.F)
+                                    return false;
+                    }
+            }
+    return true;
+}
+
 bool CheckRandomizedObjective()
 {
     auto document = ValidScenario();
@@ -326,5 +380,6 @@ int main()
     if (!CheckTeam(9U, 10U)) return 4;
     if (!RejectInvalidSettings()) return 5;
     if (!CheckRandomizedObjective()) return 6;
+    if (!CheckTriangularScenario(3U)) return 7;
     return 0;
 }
