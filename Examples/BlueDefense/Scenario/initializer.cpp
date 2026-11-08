@@ -14,6 +14,8 @@
 #include <charconv>
 #include <iostream>
 #include <random>
+#include <optional>
+#include <vector>
 #include <string_view>
 
 namespace ppo::examples::bluedefense {
@@ -66,6 +68,43 @@ void BuildPatrolTrackOverlay(InitializerContext& config) noexcept
         overlay.m_north[sample] = pose.north;
         overlay.m_east[sample] = pose.east;
     }
+}
+
+/** @brief Reuse the exact patrol/formation spawn for objective clearance. */
+std::optional<Spawn> InitialBluePose(InitializerContext const& config,
+                                     WorldBounds const& bounds,
+                                     std::size_t physicalIndex)
+{
+    defenders::Parameters parameters{};
+    parameters.halfNorth = bounds.halfNorth;
+    parameters.halfEast = bounds.halfEast;
+    parameters.cruiseSpeed = config.patrolCruiseSpeed;
+    parameters.maxRotationRate = config.patrolMaximumRotationRate;
+    parameters.collisionDistance = config.patrolCollisionDistance;
+    parameters.geometry = config.patrolGeometry;
+    auto const assignment = config.blueTeamRoles->Assignment(physicalIndex);
+    if (!assignment)
+        return std::nullopt;
+    auto const leader = defenders::PatrolReference(
+        parameters, config.side, config.arclength);
+    defenders::Reference reference = leader;
+    float speed{};
+    if (assignment->role == defenders::BlueRole::Teammate)
+    {
+        auto const leaderPose = defenders::EvaluatePatrolCurve(
+            parameters.geometry, config.arclength);
+        auto const target = defenders::EvaluateFormationReference(
+            parameters.geometry, leaderPose, assignment->formationSlot,
+            parameters.cruiseSpeed);
+        reference.north = target.pose.north;
+        reference.east = target.pose.east;
+        reference.heading = target.pose.heading;
+        speed = target.speed;
+    }
+    auto const mobile = defenders::OnReference(parameters, reference);
+    if (assignment->role == defenders::BlueRole::Leader)
+        speed = mobile.speed;
+    return Spawn{mobile.north, mobile.east, mobile.heading, speed, false};
 }
 
 } // namespace
@@ -166,10 +205,23 @@ void InitializeEntity(ppo::model::Entity& entity)
                   << (geometry.direction > 0 ? "counter-clockwise" : "clockwise")
                   << " leader=blue_" << config.leaderGuardIndex + 1U
                   << '\n';
+        std::vector<Spawn> initialBlues;
+        initialBlues.reserve(activeBlueCount);
+        for (std::size_t index = 0U; index < activeBlueCount; ++index)
+        {
+            auto const initial = InitialBluePose(config, bounds, index);
+            if (!initial)
+            {
+                config.episodeLayoutGenerationFailed = true;
+                std::cerr << "[BLUE_DEFENSE] Invalid initial Blue pose.\n";
+                return;
+            }
+            initialBlues.push_back(*initial);
+        }
         std::string spawnDiagnostic;
         config.episodeLayout = GenerateEpisodeSpawnLayout(
             config.side, config.spawnSettings, bounds, config.rng,
-            &spawnDiagnostic);
+            &spawnDiagnostic, &initialBlues);
         if (!config.episodeLayout)
         {
             config.episodeLayoutGenerationFailed = true;
@@ -192,40 +244,12 @@ void InitializeEntity(ppo::model::Entity& entity)
     {
         pose = Spawn{};
     }
-    if (pose && generalizedBlue)
+    if (generalizedBlue
+        && *generalizedBlue < config.spawnSettings.blueTeam->activeCount)
     {
-        defenders::Parameters parameters{};
-        parameters.halfNorth = bounds.halfNorth;
-        parameters.halfEast = bounds.halfEast;
-        parameters.cruiseSpeed = config.patrolCruiseSpeed;
-        parameters.maxRotationRate = config.patrolMaximumRotationRate;
-        parameters.collisionDistance = config.patrolCollisionDistance;
-        parameters.geometry = config.patrolGeometry;
-        auto const leader = defenders::PatrolReference(
-            parameters, config.side, config.arclength);
-        defenders::Reference reference = leader;
-        auto const assignment =
-            config.blueTeamRoles->Assignment(*generalizedBlue);
-        if (!assignment)
+        pose = InitialBluePose(config, bounds, *generalizedBlue);
+        if (!pose)
             return;
-        if (assignment->role == defenders::BlueRole::Teammate)
-        {
-            auto const leaderPose = defenders::EvaluatePatrolCurve(
-                parameters.geometry, config.arclength);
-            auto const target = defenders::EvaluateFormationReference(
-                parameters.geometry, leaderPose, assignment->formationSlot,
-                parameters.cruiseSpeed);
-            reference.north = target.pose.north;
-            reference.east = target.pose.east;
-            reference.heading = target.pose.heading;
-            pose->speed = target.speed;
-        }
-        auto const mobile = defenders::OnReference(parameters, reference);
-        pose->north = mobile.north;
-        pose->east = mobile.east;
-        pose->heading = mobile.heading;
-        if (assignment->role == defenders::BlueRole::Leader)
-            pose->speed = mobile.speed;
     }
     if (pose)
     {

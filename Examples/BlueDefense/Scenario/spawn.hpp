@@ -34,6 +34,23 @@ struct SpawnRange final
     float maximum{};
 };
 
+/** @brief Optional per-episode objective position selection. */
+enum class ObjectiveSpawnMode { Fixed, Randomized };
+
+struct ObjectiveSpawnSettings final
+{
+    static constexpr std::size_t MaximumPlacementAttempts{4096U};
+    ObjectiveSpawnMode mode{ObjectiveSpawnMode::Fixed};
+    SpawnRange northFraction{-0.65F, 0.65F};
+    /** @brief Positive east magnitude, mirrored by the episode side. */
+    SpawnRange eastFraction{0.55F, 0.85F};
+    float worldMarginMeters{1000.F};
+    float zoneSafetyMarginMeters{1000.F};
+    float minimumBlueSeparationMeters{2000.F};
+    float minimumRedSeparationMeters{2000.F};
+    std::size_t maximumPlacementAttempts{1024U};
+};
+
 /** @brief Configurable geometric bounds for all N hostile attacker spawns. */
 struct RedSpawnSettings final
 {
@@ -125,6 +142,8 @@ struct RestrictedZoneSpawnSettings final
     SpawnRange randomEast{};
     /** @brief Mirrors the east magnitude onto the side opposite the objective. */
     bool oppositeObjective{false};
+    /** @brief Derived from the actual ECS platform weapon, never guessed. */
+    float lethalRadiusMeters{0.F};
 };
 
 /** @brief Global switch and bounded-at-load collection of hostile zones. */
@@ -140,6 +159,8 @@ struct RestrictedZonesSpawnSettings final
 struct SpawnSettings final
 {
     RedSpawnSettings red{};
+    /** @brief Fixed by default; random mode uses explicit bounded geometry. */
+    ObjectiveSpawnSettings objective{};
     /** @brief Mandatory generalized red-team configuration, validated at load. */
     std::optional<RedTeamSpawnSettings> redTeam{};
     /** @brief Mandatory generalized blue-team configuration, validated at load. */
@@ -185,6 +206,8 @@ struct EpisodeSpawnLayout final
         std::numeric_limits<std::size_t>::max();
 
     int side{1};
+    /** @brief Immutable defended objective pose, sampled once per episode. */
+    Spawn objective{};
     /** @brief Red poses in stable red_1..red_N order. */
     std::vector<Spawn> red{};
     /**
@@ -241,7 +264,8 @@ bool Valid(SpawnSettings const& settings) noexcept;
  */
 std::optional<EpisodeSpawnLayout> GenerateEpisodeSpawnLayout(
     int side, SpawnSettings const& settings, WorldBounds const& world,
-    std::mt19937& rng, std::string* diagnostic = nullptr);
+    std::mt19937& rng, std::string* diagnostic = nullptr,
+    std::vector<Spawn> const* initialBlues = nullptr);
 
 /**
  * @brief Builds the initial pose of one BlueDefense entity.

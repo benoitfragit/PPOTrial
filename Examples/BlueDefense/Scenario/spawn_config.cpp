@@ -8,6 +8,8 @@
 
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <array>
+#include <utility>
 #include <cmath>
 #include <initializer_list>
 #include <string>
@@ -215,6 +217,79 @@ bool ParseRestrictedZones(nlohmann::json const& settings,
 /**
  * @brief Lit et vérifie des données depuis l'état ou les entrées.
  */
+bool ParseObjectiveSpawn(nlohmann::json const& settings,
+                         SpawnSettings& result, std::string& diagnostic)
+{
+    auto const item = settings.find("objectiveSpawn");
+    if (item == settings.end())
+        return true; // Legacy fixed mode and RNG remain unchanged.
+    if (!item->is_object()
+        || !OnlyKeys(*item,
+            {"mode", "northFraction", "eastFraction", "worldMarginMeters",
+             "zoneSafetyMarginMeters", "minimumBlueSeparationMeters",
+             "minimumRedSeparationMeters", "maximumPlacementAttempts"},
+            "objectiveSpawn", diagnostic))
+        return false;
+    auto const mode = item->find("mode");
+    if (mode == item->end() || !mode->is_string())
+    {
+        diagnostic = "objectiveSpawn.mode must be fixed or randomized";
+        return false;
+    }
+    std::string const value = mode->get<std::string>();
+    if (value == "randomized")
+        result.objective.mode = ObjectiveSpawnMode::Randomized;
+    else if (value != "fixed")
+    {
+        diagnostic = "objectiveSpawn.mode must be fixed or randomized";
+        return false;
+    }
+    for (auto const& [key, target] : std::array<std::pair<
+             char const*, SpawnRange*>, 2>{{
+                {"northFraction", &result.objective.northFraction},
+                {"eastFraction", &result.objective.eastFraction}}})
+    {
+        auto const entry = item->find(key);
+        if (entry == item->end())
+            continue;
+        auto const parsed = ParseRange(*entry,
+            std::string{"objectiveSpawn."} + key, diagnostic);
+        if (!parsed)
+            return false;
+        *target = *parsed;
+    }
+    for (auto const& [key, target] : std::array<std::pair<
+             char const*, float*>, 4>{{
+                {"worldMarginMeters", &result.objective.worldMarginMeters},
+                {"zoneSafetyMarginMeters", &result.objective.zoneSafetyMarginMeters},
+                {"minimumBlueSeparationMeters", &result.objective.minimumBlueSeparationMeters},
+                {"minimumRedSeparationMeters", &result.objective.minimumRedSeparationMeters}}})
+    {
+        if (!item->contains(key))
+            continue;
+        auto const number = Number(*item, key);
+        if (!number)
+        {
+            diagnostic = std::string{"objectiveSpawn."} + key
+                + " must be a finite number";
+            return false;
+        }
+        *target = *number;
+    }
+    if (item->contains("maximumPlacementAttempts"))
+    {
+        auto const attempts = Step(*item, "maximumPlacementAttempts");
+        if (!attempts)
+        {
+            diagnostic = "objectiveSpawn.maximumPlacementAttempts must be an unsigned integer";
+            return false;
+        }
+        result.objective.maximumPlacementAttempts = *attempts;
+    }
+    return true;
+}
+
+/** @brief Read the generalized red-team placement and activation contract. */
 bool ParseRedTeam(nlohmann::json const& settings,
                   SpawnSettings& result,
                   std::string& diagnostic)
@@ -377,6 +452,8 @@ std::optional<SpawnSettings> ParseSpawnSettings(
     if (!ParseRedTeam(settings, result, error))
         return fail(error);
     if (!ParseBlueTeam(settings, result, error))
+        return fail(error);
+    if (!ParseObjectiveSpawn(settings, result, error))
         return fail(error);
     if (!ParseRestrictedZones(settings, result, error))
         return fail(error);
