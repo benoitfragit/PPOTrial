@@ -107,6 +107,29 @@ class WatchdogTests(unittest.TestCase):
             self.assertEqual(state["status"], "incomplete")
             self.assertEqual(state["stopReason"], "budget_timeout")
 
+    def test_stalled_optimizer_updates_fail_without_promotion(self):
+        import mappo_process_watchdog as watchdog
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with self.assertRaisesRegex(RuntimeError, "stalled_optimizer_updates"):
+                watchdog.run(
+                    [sys.executable, "-u", "-c",
+                     "import time; time.sleep(10)"],
+                    "3v2", 3.0, root / "training.log",
+                    root / "combined.log", re.compile("Evaluation"),
+                    lambda: 99, watchdog.WatchdogLimits(
+                        heartbeat_seconds=0.05, quiet_warning_seconds=0.08,
+                        stalled_update_seconds=0.2,
+                        budget_grace_seconds=1.0, shutdown_seconds=1.0),
+                    metadata={"blockIndex": 11, "primaryGate": "3v3",
+                              "targetUpdate": 100, "scenarioVariant": "fixed_zones"})
+            status = json.loads((root / "watchdog.json").read_text())
+            self.assertEqual(status["status"], "incomplete")
+            self.assertEqual(status["stopReason"], "stalled_optimizer_updates")
+            self.assertEqual(status["lastUpdate"], 99)
+            self.assertEqual(status["blockIndex"], 11)
+            self.assertEqual(status["scenarioVariant"], "fixed_zones")
+
     def test_explicit_mappo_error_is_never_swallowed(self):
         import mappo_process_watchdog as watchdog
         with tempfile.TemporaryDirectory() as folder:
