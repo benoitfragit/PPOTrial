@@ -166,10 +166,10 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
                 local._capture_session_checkpoint(second, 202)
                 local._activate_session_checkpoint(first, 101)
                 self.assertIn("first", live_actor.read_text())
-                self.assertEqual(local.curriculum.read_updates(), 101)
+                self.assertEqual(local.curriculum.read_updates(live_training), 101)
                 local._activate_session_checkpoint(second, 202)
                 self.assertIn("second", live_actor.read_text())
-                self.assertEqual(local.curriculum.read_updates(), 202)
+                self.assertEqual(local.curriculum.read_updates(live_training), 202)
                 with self.assertRaisesRegex(ValueError, "mismatch"):
                     local._activate_session_checkpoint(first, 202)
 
@@ -205,6 +205,17 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
         self.assertFalse(local.legacy_shortcut(configured))
         self.assertIn("fixed_no_zones",
                       local.session_state_root(configured).parts)
+
+    def test_exclusive_gui_lock_blocks_parallel_launches(self) -> None:
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(local, "ROOT", Path(directory)):
+                with local._exclusive_training_lock():
+                    with self.assertRaisesRegex(RuntimeError, "already.*active|is active"):
+                        with local._exclusive_training_lock():
+                            self.fail("Second GUI writer acquired the shared lock")
+                with local._exclusive_training_lock():
+                    pass
 
     def test_gui_files_are_restored_after_a_visual_run(self) -> None:
         self.assertIn(local.GUI_LAYOUT, local.PRESERVED_RUNTIME_FILES)
