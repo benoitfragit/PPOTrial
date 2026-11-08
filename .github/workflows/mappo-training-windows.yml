@@ -230,10 +230,13 @@ jobs:
           SAME_THRESHOLD_ALL_GATES: ${{ inputs.same_threshold_all_gates }}
           REHEARSAL_PROFILE: ${{ inputs.rehearsal_profile }}
         run: |
+          # Legacy dispatches did not provide max_team_size; keep 2v2 default.
+          $teamSize = $env:MAX_TEAM_SIZE
+          if ([string]::IsNullOrWhiteSpace($teamSize)) { $teamSize = "2" }
           $pythonArgs = @(
             "-u", "tools/ci/adaptive_curriculum/progressive_gate.py",
             "--gate", $env:GATE,
-            "--max-team-size", $env:MAX_TEAM_SIZE,
+            "--max-team-size", $teamSize,
             "--threshold-percent", $env:SUCCESS_PERCENT,
             "--max-seconds", $env:MAX_SECONDS,
             "--block-updates", "20"
