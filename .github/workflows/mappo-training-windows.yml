@@ -238,7 +238,12 @@ jobs:
             "--max-seconds", $env:MAX_SECONDS,
             "--block-updates", "20"
           )
-          switch ($env:SCENARIO_VARIANT) {
+          # Older manual/scripted callers have no scenario_variant input.
+          $scenarioVariant = $env:SCENARIO_VARIANT
+          if ([string]::IsNullOrWhiteSpace($scenarioVariant)) {
+            $scenarioVariant = "fixed_no_zones"
+          }
+          switch ($scenarioVariant) {
             "fixed_no_zones" {}
             "fixed_zones" { $pythonArgs += "--hostile-zones" }
             "randomized_no_zones" {
