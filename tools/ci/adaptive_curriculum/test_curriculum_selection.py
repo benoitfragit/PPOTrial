@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -151,6 +152,50 @@ class CurriculumSelectionTests(unittest.TestCase):
                 self.assertIn(label, content)
             self.assertNotIn("balanced_3v3", content)
             self.assertNotIn("balanced_4v4", content)
+
+    def assert_scenario_contract(self, blues: int) -> None:
+        original_training = {"training": {"maxUpdates": 1}}
+        original_scenario = {"blueDefense": {
+            "blueTeam": {"activeCount": 2},
+            "redTeam": {"activeCount": 2},
+            "restrictedZones": {"enabled": False},
+            "restrictedZoneSpawn": {"enabledProbability": 0.75},
+            "objectiveSpawn": {"mode": "fixed"}}}
+        stages = gate.select_curriculum(
+            json.loads(GATES.read_bytes()), blues)
+        candidates = [stage for stage in stages if stage["blue"] == blues]
+        self.assertEqual(len(candidates), blues + 1)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            train = root / "training.json"
+            scenario = root / "scenario.json"
+            with patch.object(gate.existing, "TRAINING_FILE", train), (
+                    patch.object(gate.existing, "SCENARIO_FILE", scenario)):
+                for stage in candidates:
+                    for zones in (False, True):
+                        for objective in ("fixed", "randomized"):
+                            with self.subTest(gate=stage["id"], zones=zones,
+                                              objective=objective):
+                                variant = dict(
+                                    stage, hostileZones=zones,
+                                    objectiveLayout=objective)
+                                gate.existing.apply_stage(
+                                    variant, 123, original_training,
+                                    original_scenario)
+                                actual = json.loads(scenario.read_text())
+                                settings = actual["blueDefense"]
+                                self.assertEqual(settings["blueTeam"]["activeCount"], blues)
+                                self.assertEqual(settings["redTeam"]["activeCount"],
+                                                 stage["red"])
+                                self.assertIs(settings["restrictedZones"]["enabled"], zones)
+                                self.assertEqual(settings["objectiveSpawn"]["mode"],
+                                                 objective)
+                                self.assertEqual(
+                                    json.loads(train.read_text())["training"]["maxUpdates"],
+                                    123)
+
+    def test_three_blue_gates_and_runtime_scenario_variants(self):
+        self.assert_scenario_contract(3)
 
     def test_gui_uses_same_selected_two_team_prefix(self):
         sys.path.insert(0, str(ROOT / "tools"))
