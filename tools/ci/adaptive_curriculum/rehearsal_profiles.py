@@ -1,7 +1,8 @@
 """Versioned, opt-in training rehearsal schedules for progressive Blue MAPPO.
 
 The legacy schedule lives in progressive_gate.py and remains the default.
-Profiles never introduce a new gate or certify a rehearsed gate as passed.
+The balanced_v1 profile replays every earlier curriculum scenario regardless of
+checkpoint source or certification. Rehearsal never certifies a gate as passed.
 Each named v1 profile is immutable so checkpoint resumes preserve semantics.
 """
 from __future__ import annotations
@@ -54,14 +55,27 @@ def _adaptive_balanced_weights(
     return weights
 
 
+def _eligible_stages(stages: list[dict], index: int,
+                     validated_gates: list[str], profile: str) -> list[dict]:
+    """Separate rehearsal eligibility from the certified gate history.
+
+    Balanced rehearses every preceding scenario even for a branch warm start
+    or a run with skipped gates. This does not change validatedGates, the
+    promotion rules or the selected gate's independent success evaluation.
+    Other profiles retain their historical certified-only replay behavior.
+    """
+    return [stage for position, stage in enumerate(stages)
+            if position == index or
+            (position < index and
+             (profile == "balanced_v1" or stage["id"] in validated_gates))]
+
+
 def weighted_cycle_length(stages: list[dict], index: int,
                           validated_gates: list[str], profile: str) -> int:
-    """Return full cycle length using the CI profile and validated history."""
+    """Return full cycle length using the CI profile and rehearsal eligibility."""
     if profile not in WEIGHTS or not 0 <= index < len(stages):
         raise ValueError("Invalid weighted rehearsal cycle")
-    eligible = [stage for position, stage in enumerate(stages)
-                if position == index or
-                (position < index and stage["id"] in validated_gates)]
+    eligible = _eligible_stages(stages, index, validated_gates, profile)
     weights = (_adaptive_balanced_weights(stages, index, eligible)
                if profile == "balanced_v1" and index >= 5
                else WEIGHTS[profile])
@@ -75,9 +89,9 @@ def select_weighted_stage(stages: list[dict], index: int, block: int,
                           profile: str) -> dict:
     """Return a deterministic, evenly interleaved rehearsal stage.
 
-    Only the current gate and previously validated gates are eligible.
-    Filtered-out gates never receive any blocks; their weights are not
-    transferred to an unvalidated gate. The current gate is always eligible.
+    Balanced_v1 replays all earlier gates independently of checkpoint origin
+    and gate certification. Other profiles replay only certified earlier gates.
+    Rehearsals never mark an earlier gate passed.
     """
     if profile not in WEIGHTS:
         raise ValueError(f"Unknown weighted rehearsal profile: {profile}")
@@ -85,9 +99,7 @@ def select_weighted_stage(stages: list[dict], index: int, block: int,
         raise ValueError("Invalid weighted rehearsal position")
     if not isinstance(validated_gates, list):
         raise ValueError("Validated rehearsal history must be a list")
-    eligible = [stage for stage_index, stage in enumerate(stages)
-                if stage_index == index
-                or (stage_index < index and stage["id"] in validated_gates)]
+    eligible = _eligible_stages(stages, index, validated_gates, profile)
     if profile == "balanced_v1" and index >= 5:
         weights = _adaptive_balanced_weights(stages, index, eligible)
     else:

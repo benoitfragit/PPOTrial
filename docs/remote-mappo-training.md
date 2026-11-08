@@ -204,7 +204,15 @@ updates and SHA-256 provenance. Its checkpoint artifact records the commit and
 three file hashes, and carries an *unverified warm start* into the existing
 `Progressive Blue Defense (Windows Release)` action. Existing BEST checkpoints
 from the branch are ignored; no prior gates are automatically declared passed.
-New training evaluations (20 independent cases per gate) determine promotion.
+With `balanced_v1`, rehearsal eligibility is independent of source and gate
+certification: every preceding gate in the selected curriculum is replayed
+(including zero-Red patrol scenarios), whether the restart originates from
+`branch` or from a numeric run ID. For 3v0 through 3v3, this includes the
+1v0/2v0/1v1/2v1/2v2 scenarios; for 4v0 through 4v4, earlier 3vX scenarios
+are also rehearsed. The current gate receives a strict majority of blocks.
+Rehearsal does not set `validatedGates`, award an artificial PASS or
+replace BEST without evaluation. Only independent gate evaluations
+(20 cases per campaign) determine promotion.
 
 To begin at 2v2, 3v3 or 4v4, select `max_team_size` accordingly,
 `start_gate` for the desired stage, `rehearsal_profile=balanced_v1`,
