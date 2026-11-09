@@ -107,11 +107,21 @@ def _assign_windows_job(process: subprocess.Popen[str]) -> object | None:
         # Popen retains the real process handle on Windows; assignment
         # cannot depend on a PID that may have been recycled.
         if not kernel.AssignProcessToJobObject(handle, int(process._handle)):
+            # Preserve the Win32 error before polling, which may change it.
+            error = ctypes.get_last_error()
             if process.poll() is not None:
                 # A very short-lived leaf finished before assignment.
                 kernel.CloseHandle(handle)
                 return None
-            raise OSError(ctypes.get_last_error(), "AssignProcessToJobObject failed")
+            if error == 5:  # ERROR_ACCESS_DENIED: exit can race assignment.
+                try:
+                    process.wait(timeout=0.1)
+                except subprocess.TimeoutExpired:
+                    pass
+                else:
+                    kernel.CloseHandle(handle)
+                    return None
+            raise OSError(error, "AssignProcessToJobObject failed")
         return handle
     except BaseException:
         kernel.CloseHandle(handle)
