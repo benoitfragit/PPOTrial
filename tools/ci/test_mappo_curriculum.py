@@ -27,6 +27,53 @@ def test_stages(first_updates: int = 3) -> dict:
 
 
 class WatchdogTests(unittest.TestCase):
+    def test_windows_job_assignment_allows_fast_exit_after_access_denied(self):
+        import ctypes
+        import mappo_process_watchdog as watchdog
+        from unittest.mock import Mock
+
+        kernel = Mock()
+        kernel.CreateJobObjectW.return_value = 123
+        kernel.SetInformationJobObject.return_value = 1
+        kernel.AssignProcessToJobObject.return_value = 0
+        process = Mock()
+        process._handle = 456
+        process.poll.return_value = None
+        process.wait.return_value = 0
+
+        with patch.object(watchdog.os, "name", "nt"), \
+                patch.object(ctypes, "WinDLL", return_value=kernel, create=True), \
+                patch.object(ctypes, "get_last_error", return_value=5, create=True):
+            self.assertIsNone(watchdog._assign_windows_job(process))
+
+        process.wait.assert_called_once_with(timeout=0.1)
+        kernel.CloseHandle.assert_called_once_with(123)
+
+    def test_windows_job_assignment_refuses_unmanaged_live_process(self):
+        import ctypes
+        import subprocess
+        import mappo_process_watchdog as watchdog
+        from unittest.mock import Mock
+
+        kernel = Mock()
+        kernel.CreateJobObjectW.return_value = 123
+        kernel.SetInformationJobObject.return_value = 1
+        kernel.AssignProcessToJobObject.return_value = 0
+        process = Mock()
+        process._handle = 456
+        process.poll.return_value = None
+        process.wait.side_effect = subprocess.TimeoutExpired("python", 0.1)
+
+        with patch.object(watchdog.os, "name", "nt"), \
+                patch.object(ctypes, "WinDLL", return_value=kernel, create=True), \
+                patch.object(ctypes, "get_last_error", return_value=5, create=True):
+            with self.assertRaises(OSError) as error:
+                watchdog._assign_windows_job(process)
+
+        self.assertEqual(error.exception.errno, 5)
+        process.wait.assert_called_once_with(timeout=0.1)
+        kernel.CloseHandle.assert_called_once_with(123)
+
     def test_chatty_process_and_matching_evaluation_are_preserved(self):
         import mappo_process_watchdog as watchdog
         with tempfile.TemporaryDirectory() as folder:
