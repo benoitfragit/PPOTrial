@@ -1,0 +1,97 @@
+name: Blue MAPPO - Export BEST ONNX (read-only)
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'tools/blue_onnx/**'
+      - '.github/workflows/blue-onnx-export.yml'
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Completed Progressive Blue Defense run with blue-mappo-checkpoints artifact"
+        required: true
+        type: number
+      model_gate:
+        description: "Evaluated BEST gate to export"
+        required: true
+        type: choice
+        default: 4v4
+        options: [1v0, 2v0, 1v1, 1v2, 2v2, 3v3, 4v0, 4v1, 4v4]
+      model_variant:
+        description: "BEST namespace (objective layout / hostile zones)"
+        required: true
+        type: choice
+        default: fixed
+        options: [fixed, fixed-zones-on, randomized, randomized-zones-on]
+  workflow_run:
+    workflows: ["Progressive Blue Defense (Windows Release)"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  regression:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ONNX verification dependencies
+        run: python -m pip install 'numpy>=1.26,<3' 'onnx>=1.16,<2' 'onnxruntime>=1.19,<2'
+      - name: Run isolated exporter tests
+        run: python -m unittest discover -s tools/blue_onnx -p 'test_*.py' -v
+
+  export:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == github.event.repository.default_branch) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve training run
+        id: input
+        env:
+          MANUAL_RUN: ${{ inputs.source_run_id }}
+          COMPLETED_RUN: ${{ github.event.workflow_run.id }}
+        run: |
+          echo "id=${MANUAL_RUN:-$COMPLETED_RUN}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore BEST checkpoints (read only)
+        uses: actions/download-artifact@v4
+        with:
+          name: blue-mappo-checkpoints
+          run-id: ${{ steps.input.outputs.id }}
+          github-token: ${{ github.token }}
+          path: resources/model/BluePatrol
+
+      - name: Install ONNX verification dependencies
+        run: python -m pip install 'numpy>=1.26,<3' 'onnx>=1.16,<2' 'onnxruntime>=1.19,<2'
+
+      - name: Test exporter
+        run: python -m unittest discover -s tools/blue_onnx -p 'test_*.py' -v
+
+      - name: Export evaluated BEST pairs only
+        env:
+          EXPORT_MODE: ${{ github.event_name }}
+          MODEL_GATE: ${{ inputs.model_gate }}
+          MODEL_VARIANT: ${{ inputs.model_variant }}
+          SOURCE_RUN_ID: ${{ steps.input.outputs.id }}
+        run: |
+          if [ "$EXPORT_MODE" = "workflow_dispatch" ]; then
+            python tools/blue_onnx/export_best.py \
+              --best-root resources/model/BluePatrol/best \
+              --output-dir build/blue-onnx \
+              --gate "$MODEL_GATE" --variant "$MODEL_VARIANT"
+          else
+            python tools/blue_onnx/export_best.py \
+              --best-root resources/model/BluePatrol/best \
+              --output-dir build/blue-onnx
+          fi
+
+      - name: Publish ONNX models and manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: blue-best-onnx
+          path: build/blue-onnx/**
+          if-no-files-found: warn
+          retention-days: 30
