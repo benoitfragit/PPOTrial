@@ -38,15 +38,15 @@ jobs:
         run: python -m unittest discover -s tools/blue_onnx -p 'test_*.py' -v
 
   export:
-    if: ${ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Resolve training run
         id: input
         env:
-          MANUAL_RUN: ${ inputs.source_run_id }}
-          COMPLETED_RUN: ${ github.event.workflow_run.id }}
+          MANUAL_RUN: ${{ inputs.source_run_id }}
+          COMPLETED_RUN: ${{ github.event.workflow_run.id }}
         run: |
           echo "id=${MANUAL_RUN:-$COMPLETED_RUN}" >> "$GITHUB_OUTPUT"
 
@@ -54,8 +54,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: blue-mappo-checkpoints
-          run-id: ${ steps.input.outputs.id }}
-          github-token: ${ github.token }}
+          run-id: ${{ steps.input.outputs.id }}
+          github-token: ${{ github.token }}
           path: resources/model/BluePatrol
 
       - name: Install ONNX verification dependencies
@@ -66,9 +66,9 @@ jobs:
 
       - name: Export evaluated BEST pairs only
         env:
-          EXPORT_MODE: ${ github.event_name }}
-          MODEL_GATE: ${ inputs.model_gate }}
-          SOURCE_RUN_ID: ${ steps.input.outputs.id }}
+          EXPORT_MODE: ${{ github.event_name }}
+          MODEL_GATE: ${{ inputs.model_gate }}
+          SOURCE_RUN_ID: ${{ steps.input.outputs.id }}
         run: |
           python - <<'PY'
           import hashlib
