@@ -1,0 +1,147 @@
+name: Blue MAPPO - Export BEST ONNX (read-only)
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'tools/blue_onnx/**'
+      - '.github/workflows/blue-onnx-export.yml'
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Completed Progressive Blue Defense run with blue-mappo-checkpoints artifact"
+        required: true
+        type: number
+      model_gate:
+        description: "Evaluated BEST gate to export"
+        required: true
+        type: choice
+        default: 4v4
+        options: [1v0, 2v0, 1v1, 1v2, 2v2, 3v3, 4v0, 4v1, 4v4]
+  workflow_run:
+    workflows: ["Progressive Blue Defense (Windows Release)"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  regression:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ONNX verification dependencies
+        run: python -m pip install 'numpy>=1.26,<3' 'onnx>=1.16,<2' 'onnxruntime>=1.19,<2'
+      - name: Run isolated exporter tests
+        run: python -m unittest discover -s tools/blue_onnx -p 'test_*.py' -v
+
+  export:
+    if: ${ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve training run
+        id: input
+        env:
+          MANUAL_RUN: ${ inputs.source_run_id }}
+          COMPLETED_RUN: ${ github.event.workflow_run.id }}
+        run: |
+          echo "id=${MANUAL_RUN:-$COMPLETED_RUN}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore BEST checkpoints (read only)
+        uses: actions/download-artifact@v4
+        with:
+          name: blue-mappo-checkpoints
+          run-id: ${ steps.input.outputs.id }}
+          github-token: ${ github.token }}
+          path: resources/model/BluePatrol
+
+      - name: Install ONNX verification dependencies
+        run: python -m pip install 'numpy>=1.26,<3' 'onnx>=1.16,<2' 'onnxruntime>=1.19,<2'
+
+      - name: Test exporter
+        run: python -m unittest discover -s tools/blue_onnx -p 'test_*.py' -v
+
+      - name: Export evaluated BEST pairs only
+        env:
+          EXPORT_MODE: ${ github.event_name }}
+          MODEL_GATE: ${ inputs.model_gate }}
+          SOURCE_RUN_ID: ${ steps.input.outputs.id }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          import numpy as np
+
+          sys.path.insert(0, "tools/blue_onnx")
+          from export import export, parse_checkpoint
+
+          root = Path("resources/model/BluePatrol/best")
+          output = Path("build/blue-onnx")
+          if os.environ["EXPORT_MODE"] == "workflow_dispatch":
+              candidates = [root / os.environ["MODEL_GATE"]]
+          else:
+              candidates = sorted(d for d in root.iterdir()
+                                  if d.is_dir()) if root.exists() else []
+          exported = []
+          for folder in candidates:
+              manifest_path = folder / "champion.json"
+              if not manifest_path.exists():
+                  if os.environ["EXPORT_MODE"] == "workflow_dispatch":
+                      raise RuntimeError(f"Missing BEST manifest: {manifest_path}")
+                  continue
+              manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+              if not manifest.get("evaluatedForGate", False):
+                  if os.environ["EXPORT_MODE"] == "workflow_dispatch":
+                      raise RuntimeError(f"BEST not yet evaluated: {folder.name}")
+                  continue
+              if manifest.get("gate") != folder.name:
+                  raise RuntimeError("Champion gate mismatch")
+              actor = folder / "blue_patrol_generalized_v10.txt"
+              training = folder / "blue_patrol_generalized_training_v7.txt"
+              if not actor.is_file() or not training.is_file():
+                  raise RuntimeError(f"Incomplete BEST pair: {folder}")
+              for checkpoint in (actor, training):
+                  digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+                  if manifest.get("sha256", {}).get(checkpoint.name) != digest:
+                      raise RuntimeError(f"BEST SHA256 mismatch: {checkpoint}")
+              v10 = parse_checkpoint(actor.read_text(encoding="utf-8"))
+              v7 = parse_checkpoint(training.read_text(encoding="utf-8"))
+              if v7.metadata["updates"] != manifest["updates"]:
+                  raise RuntimeError("BEST update mismatch")
+              for name in ("red", "friendly"):
+                  for key, value in v10.actor[name].items():
+                      np.testing.assert_array_equal(value, v7.actor[name][key])
+              for layer10, layer7 in zip(v10.actor["layers"], v7.actor["layers"]):
+                  np.testing.assert_array_equal(layer10["w"], layer7["w"])
+                  np.testing.assert_array_equal(layer10["b"], layer7["b"])
+              np.testing.assert_array_equal(v10.actor["log_std"], v7.actor["log_std"])
+              export(training, output / folder.name)
+              exported.append(folder.name)
+          if not exported:
+              if os.environ["EXPORT_MODE"] == "workflow_dispatch":
+                  raise RuntimeError("No evaluated BEST pair to export")
+              print("No evaluated BEST checkpoint in this run; nothing to publish")
+          else:
+              print(f"ONNX exported for: {', '.join(exported)}")
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+                  f.write("### Read-only ONNX export\n")
+                  f.write(f"- Source training run: {os.environ['SOURCE_RUN_ID']}\n")
+                  f.write(f"- Evaluated BEST gates: {', '.join(exported)}\n")
+                  f.write("- Contents: Blue Actor + centralized Critic\n")
+                  f.write("- ONNX syntax, inference graphs and V7/V10 matching verified; "
+                          "direct RLTools parity remains unverified\n")
+          PY
+
+      - name: Publish ONNX models and manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: blue-best-onnx
+          path: build/blue-onnx/**
+          if-no-files-found: warn
+          retention-days: 30
