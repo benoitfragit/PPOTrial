@@ -49,11 +49,22 @@ Puis ouvrir `blue_actor.onnx` ou `blue_critic.onnx` sur
 
 Workflow `Blue MAPPO - Export BEST ONNX (read-only)` :
 
-- **Manuel** : fournir l'ID d'un run Progressive Blue Defense et la gate BEST
-  (ex. 4v4).
-- **Automatique** : à la fin d'un run Progressive Blue Defense **réussi** sur
-  la branche par défaut, exporter les couples BEST évalués contenus dans
-  l'artefact `blue-mappo-checkpoints`.
+- **Manuel** : fournir l'ID d'un run Progressive Blue Defense, la gate BEST
+  (ex. 4v4) et la variante de scénario : `fixed`, `fixed-zones-on`,
+  `randomized` ou `randomized-zones-on`.
+- **Automatique** : à la fin d'un run Progressive Blue Defense **réussi**
+  dont la branche source est la branche par défaut, exporter les couples BEST
+  évalués dans tous les espaces de noms de l'artefact
+  `blue-mappo-checkpoints`, y compris les variantes imbriquées.
+- Le script réutilisable `export_best.py` effectue exactement les mêmes
+  validations en CI et en local. Exemple d'export de tous les BEST évalués :
+
+```bash
+python tools/blue_onnx/export_best.py \
+    --best-root resources/model/BluePatrol/best \
+    --output-dir build/blue-onnx
+```
+
 - Vérification du manifeste `champion.json`, des SHA256, du compteur d'updates
   et de l'identité des poids V10 / V7.
 - Publication séparée `blue-best-onnx` (30 jours) : jamais d'écriture
@@ -66,6 +77,8 @@ python -m unittest discover -s tools/blue_onnx -p "test_*.py" -v
 ```
 
 - Tests de format V10/V7 et de rejet des données erronées.
+- Tests du traitement des BEST : quatre espaces de noms, sélection manuelle,
+  intégrité SHA256, correspondance des poids et lecture seule.
 - `onnx.checker.check_model`, ONNX Runtime contre référence NumPy pour
   les deux réseaux, pistes masquées, ensembles vides et permutation.
 - **Non certifié à ce stade** : égalité numérique RLTools C++ versus ONNX
