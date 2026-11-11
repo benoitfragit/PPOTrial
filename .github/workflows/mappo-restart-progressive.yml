@@ -236,12 +236,22 @@ jobs:
           if selection not in variants:
               raise RuntimeError('Invalid scenario variant')
           objective_layout, hostile_zones = variants[selection]
-          if (not use_branch and (
-                  type(source.get('hostileZones', False)) is not bool
-                  or source.get('hostileZones', False) is not hostile_zones
-                  or source.get('objectiveLayout', 'fixed') != objective_layout)):
-              raise RuntimeError('Cannot restart across scenario variants')
-          champion.ROOT = champion.variant_root(hostile_zones, objective_layout)
+          best_root = root / 'best'
+          destination_best_root = champion.variant_root(
+              hostile_zones, objective_layout, best_root)
+          cross_variant = False
+          if not use_branch:
+              source_zones = source.get('hostileZones', False)
+              source_layout = source.get('objectiveLayout', 'fixed')
+              if (type(source_zones) is not bool
+                      or source_layout not in ('fixed', 'randomized')):
+                  raise RuntimeError('Invalid source scenario variant')
+              cross_variant = (source_zones != hostile_zones
+                               or source_layout != objective_layout)
+          # The evaluated pair belongs to the original scenario namespace.
+          champion.ROOT = (champion.variant_root(
+              source_zones, source_layout, best_root)
+              if not use_branch else destination_best_root)
           threshold = float(os.environ["SUCCESS_PERCENT"])
           if not 0 < threshold <= 100:
               raise RuntimeError("success_percent must be in (0, 100]")
@@ -301,6 +311,10 @@ jobs:
               # A historical source gate remains readable as a BEST pair.
               # Active training gates are defined exclusively by the new schedule.
               source_best = champion.read(source_gate)
+              if cross_variant and (
+                      source_best is None or not source_best['evaluatedForGate']):
+                  raise RuntimeError(
+                      'Cross-variant restart requires an evaluated source BEST pair')
               if source_run_id == '41865674608' and (
                       source_gate != '4v1' or source_best is None
                       or not source_best['evaluatedForGate']):
@@ -309,7 +323,19 @@ jobs:
                   raise RuntimeError('Mandatory source champion pair is missing')
               if source_best is not None:
                   updates = champion.restore_latest(source_gate)
-                  if start_gate != source_gate:
+                  if cross_variant:
+                      # Retain source BEST archives, including when the target
+                      # namespace is their parent (e.g. randomized -> fixed).
+                      # Only clear destination gates, never other variants.
+                      import shutil
+                      champion.ROOT = destination_best_root
+                      for gate_name in stage_names:
+                          shutil.rmtree(champion.ROOT / gate_name,
+                                      ignore_errors=True)
+                      champion.seed(start_gate, None)
+                      print('[RESTART] Evaluated source BEST restored; new '
+                            'variant seeded without historical certification')
+                  elif start_gate != source_gate:
                       destination = champion.ROOT / start_gate
                       if destination.exists():
                           import shutil
@@ -336,6 +362,10 @@ jobs:
                              for gate_id in source_validated)
                       or (source_gate in source_validated) != source.get('passed')):
                   raise RuntimeError('Inconsistent source gate validation history')
+              if cross_variant:
+                  # Scores from fixed, randomized, zones-on and zones-off
+                  # cannot certify one another, including future campaigns.
+                  source_validated = []
               source_provenance = {
                   'sourceRunId': int(os.environ['SOURCE_RUN_ID'])
               }
