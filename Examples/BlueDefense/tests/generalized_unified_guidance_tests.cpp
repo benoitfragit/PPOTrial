@@ -398,6 +398,27 @@ bool PatrolRewardRelevance()
     return blue::GeneralizedPatrolRewardRelevant(before, after);
 }
 
+/** @brief Quantifies virtual slot motion independently of vehicle motion. */
+bool HeadingSensitiveReferences()
+{
+    auto const parameters = Config();
+    blue::Mobile leader{10000.F, 5000.F, 0.F, 300.F, 0.F, true};
+    auto const offset = blue::EvaluateFormationOffset(0U, 8000.F, 0.55F);
+    auto const first = blue::GeneralizedPhysicalSlot(parameters, leader, offset);
+    for (float const delta : {0.08726646F, -0.08726646F, 0.5F, -0.5F})
+    {
+        leader.heading = delta;
+        auto const next = blue::GeneralizedPhysicalSlot(parameters, leader, offset);
+        float const displacement = std::hypot(next.pose.north - first.pose.north,
+            next.pose.east - first.pose.east);
+        if (!first.valid || !next.valid
+            || !Near(displacement, 16000.F * std::abs(std::sin(0.5F * delta)))
+            || leader.north != 10000.F || leader.east != 5000.F)
+            return false;
+    }
+    return true;
+}
+
 } // namespace
 
 int main()
@@ -408,5 +429,6 @@ int main()
     if (!SharedPhysicalGuidance()) { std::cerr << "shared physical guidance\n"; return 5; }
     if (!PatrolRewardRelevance()) { std::cerr << "patrol reward priority\n"; return 6; }
     if (!DistantHostilePursuit()) { std::cerr << "distant red pursuit\n"; return 7; }
+    if (!HeadingSensitiveReferences()) { std::cerr << "virtual slot motion\n"; return 8; }
     return 0;
 }

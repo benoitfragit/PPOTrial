@@ -97,17 +97,20 @@ std::size_t AliveCount(std::array<Mobile, Capacity> const& mobiles,
  * @brief Publishes the exact patrol references supplied to policy inference.
  * @param context Scenario context receiving render-only fixed-capacity data.
  * @param targets Physical-index targets computed for the current observation.
- * @param roles Immutable physical-to-role assignment for the episode.
+ * @param roles Current physical-to-role assignment.
+ * @param state Matching observation snapshot; only active Reds hide references.
  */
 void PublishPatrolReferenceOverlay(
     InitializerContext& context, GeneralizedPatrolTargets const& targets,
-    BlueTeamRoles const& roles) noexcept
+    BlueTeamRoles const& roles, GeneralizedRuntimeState const& state) noexcept
 {
     auto& overlay = context.patrolReferenceOverlay;
     overlay = ppo::model::sPatrolReferenceOverlay{};
     if (!roles.IsValid())
         return;
 
+    overlay.m_showInPatrol = !GeneralizedHasActiveRed(state)
+        && state.blues[roles.LeaderPhysicalIndex()].available;
     overlay.m_activeReferenceCount = roles.ActiveBlueCount();
     for (std::size_t physicalIndex = 0U;
          physicalIndex < roles.ActiveBlueCount(); ++physicalIndex)
@@ -749,7 +752,7 @@ void GeneralizedPatrolMappoAgent::ChooseAction()
         {
             auto& context = registry_->ctx().get<InitializerContext>();
             PublishPatrolReferenceOverlay(
-                context, beforeTargets_, roles);
+                context, beforeTargets_, roles, beforeStep_);
             PublishPatrolWaypointOverlay(context, waypointSequencer_);
         }
         BuildObservations(parameters, beforeStep_, observations, beforeTargets_);
@@ -875,10 +878,12 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             followTransitionStep_ = 0U;
             afterTargets = waypointSequencer_.PhysicalTargets(
                 parameters, after, Roles(), training_.noThreatPatrol);
-            PublishPatrolReferenceOverlay(context, afterTargets, Roles());
-            PublishPatrolWaypointOverlay(context, waypointSequencer_);
         }
         BuildObservations(parameters, after, observations, afterTargets);
+        // Refresh from the resolved state, including spawn/loss transitions,
+        // so the next renderer snapshot cannot retain pre-step visibility.
+        PublishPatrolReferenceOverlay(context, afterTargets, Roles(), after);
+        PublishPatrolWaypointOverlay(context, waypointSequencer_);
 
         std::array<bool, TeamCapacity::MaximumBlueMobiles> availability{};
         for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)

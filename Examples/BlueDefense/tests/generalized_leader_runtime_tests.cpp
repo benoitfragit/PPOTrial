@@ -79,21 +79,47 @@ void RunCase(std::size_t const count, std::size_t const redCount,
         *objective, {}, {}, mode, checkpoints.directory / "latest.txt",
         checkpoints.directory / "training.txt", actor};
     agent.Init();
+    std::size_t visibilitySteps = 0U;
+    if (redCount != 0U && !activeRed)
+    {
+        agent.ChooseAction();
+        Require(context.patrolReferenceOverlay.Visible(),
+            "configured but inactive Red hid patrol references");
+        auto [redState] = red->get<model::sEntityState>();
+        redState.m_destroyed = false;
+        Require(!agent.SetNewState() && !context.patrolReferenceOverlay.Visible(),
+            "Red activation retained visible references in the resolved snapshot");
+        Require(context.patrolReferenceOverlay.m_references[0].m_valid,
+            "render-only hiding changed policy guidance validity");
+        agent.ChooseAction();
+        redState.m_destroyed = true;
+        Require(!agent.SetNewState() && context.patrolReferenceOverlay.Visible(),
+            "patrol references did not return after the active threat disappeared");
+        visibilitySteps = 2U;
+    }
     for (std::size_t loss = 0U; loss < count; ++loss)
     {
         std::size_t const oldLeader = context.blueTeamRoles->LeaderPhysicalIndex();
         agent.ChooseAction();
+        Require(context.patrolReferenceOverlay.Visible() == !activeRed,
+            "patrol reference visibility disagrees with actual Red activity");
         auto [state] = guards[oldLeader]->get<model::sEntityState>();
         state.m_destroyed = true; // Physics/world resolution is authoritative.
         bool const done = agent.SetNewState();
         bool const expectedEnd = redCount == 0U || loss + 1U == count;
         Require(done == expectedEnd, "leader loss changed mission termination");
         if (expectedEnd)
+        {
+            Require(!context.patrolReferenceOverlay.Visible(),
+                "leader loss left a ghost patrol marker");
             break;
+        }
         Require(context.blueTeamRoles->LeaderPhysicalIndex() == loss,
             "controller did not promote the first physical survivor");
         Require(context.patrolReferenceOverlay.m_references[0].m_valid,
             "new leader guidance was not published");
+        Require(context.patrolReferenceOverlay.Visible() == !activeRed,
+            "leader relief retained stale patrol visibility");
         agent.ChooseAction();
         for (std::size_t index = 0U; index < count; ++index)
         {
@@ -110,7 +136,8 @@ void RunCase(std::size_t const count, std::size_t const redCount,
         auto const snapshot = agent.GetSnapshot();
         Require(snapshot.m_common.m_completedEvaluations == 0U,
             "relief unexpectedly started an evaluation");
-        Require(snapshot.m_common.m_step == static_cast<long long>(2U * (loss + 1U)),
+        Require(snapshot.m_common.m_step
+                == static_cast<long long>(visibilitySteps + 2U * (loss + 1U)),
             "relief reset or dropped the physical trajectory step");
     }
 }

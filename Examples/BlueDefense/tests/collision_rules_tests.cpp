@@ -400,6 +400,7 @@ void TestPatrolOverlaySnapshot()
     }
     auto& sourceReferences = context.patrolReferenceOverlay;
     sourceReferences.m_activeReferenceCount = 4U;
+    sourceReferences.m_showInPatrol = true;
     for (std::size_t roleIndex = 0U; roleIndex < 4U; ++roleIndex)
     {
         float const role = static_cast<float>(roleIndex);
@@ -443,7 +444,7 @@ void TestPatrolOverlaySnapshot()
             "BlueDefense snapshot has no patrol-reference overlay");
     auto const& references =
         snapshot.ctx().get<sPatrolReferenceOverlay>();
-    Require(references.Valid() && references.m_activeReferenceCount == 4U,
+    Require(references.Visible() && references.m_activeReferenceCount == 4U,
             "patrol-reference overlay active prefix is invalid");
     Require(references.m_references[0U].m_valid
                 && references.m_references[3U].m_valid
@@ -459,9 +460,23 @@ void TestPatrolOverlaySnapshot()
                 && waypoints.m_waypoints[9U].m_north == 509.F,
             "patrol-waypoint overlay changed the frozen sequence");
 
+    for (bool const show : {false, true, false})
+    {
+        sourceReferences.m_showInPatrol = show;
+        snapshot.ctx().clear(); // Same fresh-context contract as Environment.
+        rules.CopySnapshot(world, snapshot);
+        auto const& copied = snapshot.ctx().get<sPatrolReferenceOverlay>();
+        Require(copied.Visible() == show
+                && copied.m_references[3U].m_guidanceEast == 403.F
+                && snapshot.ctx().get<sBlueTeamRoleOverlay>().Valid(),
+            "snapshot lost visibility, exact guidance or real-vehicle role badges");
+    }
+
     sPatrolReferenceOverlay capacity{};
     capacity.m_activeReferenceCount = 1U;
     Require(capacity.Valid(), "P=1 patrol-reference overlay was rejected");
+    capacity.m_showInPatrol = true;
+    Require(!capacity.Visible(), "invalid leader target was advertised as visible");
     capacity.m_activeReferenceCount = capacity.ReferenceCapacity;
     Require(capacity.Valid(), "P=9 patrol-reference overlay was rejected");
     capacity.m_activeReferenceCount = 0U;
