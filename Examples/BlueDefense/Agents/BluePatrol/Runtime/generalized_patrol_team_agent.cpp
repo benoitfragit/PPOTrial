@@ -1072,6 +1072,17 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         transition.responsibilities.threatContainment = Clamp(
             ObjectiveThreatLevel(beforeStep_, parameters)
                 - ObjectiveThreatLevel(after, parameters), -1.F, 1.F);
+        DefenseTrack const objectiveBefore{beforeStep_.objectiveNorth,
+            beforeStep_.objectiveEast, 0.F, 0.F, beforeStep_.objectiveAvailable};
+        for (std::size_t index = 0U; index < counts_.redMobiles; ++index)
+        {
+            Mobile const& red = beforeStep_.reds[index];
+            if (red.available && !after.reds[index].available)
+                transition.responsibilities.redNeutralizationRiskBefore[index] =
+                    ObjectiveThreatRisk(parameters.defense,
+                        {red.north, red.east, red.heading, red.speed, red.available},
+                        objectiveBefore);
+        }
         float const patrolWeight = rewardWeights_[static_cast<std::size_t>(
             GeneralizedRewardChannel::PatrolTracking)];
         float const formationWeight = rewardWeights_[static_cast<std::size_t>(

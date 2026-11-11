@@ -141,6 +141,42 @@ void RunCase(std::size_t const count, std::size_t const redCount,
             "relief reset or dropped the physical trajectory step");
     }
 }
+
+/** @brief The ECS reward must use live pre-loss kinematics, including the objective. */
+void NeutralizationCredit(Checkpoints const& checkpoints,
+    std::filesystem::path const& actor, float const distance, float const risk)
+{
+    entt::registry registry;
+    auto& context = registry.ctx().emplace<scenario::InitializerContext>();
+    context.patrolGeometryReady = true;
+    context.blueTeamRoles = blue::BlueTeamRoles::Create(1U, 0U);
+    auto guard = Mobile(registry, -20000.F, false);
+    auto red = Mobile(registry, distance, false);
+    auto objective = Mobile(registry, 0.F, false);
+    auto [redState] = red->get<model::sEntityState>();
+    redState.m_speed = 1.F;
+    redState.m_rotation = blue::kPi;
+    std::array<model::BaseEntity*, 9U> guards{};
+    std::array<model::BaseEntity*, 10U> attackers{};
+    guards[0] = guard.get();
+    attackers[0] = red.get();
+    blue::GeneralizedPatrolMappoAgent agent{guards, 1U, attackers, 1U,
+        *objective, {}, {}, blue::GeneralizedPatrolExecutionMode::Training,
+        checkpoints.directory / "latest.txt", checkpoints.directory / "training.txt", actor};
+    agent.Init();
+    agent.ChooseAction();
+    redState.m_destroyed = true;
+    redState.m_x = 500000.F; // Post-loss data must not erase the pre-loss risk.
+    redState.m_speed = -1.F;
+    Require(agent.SetNewState(), "last neutralized Red did not end the mission");
+    auto const snapshot = agent.GetSnapshot();
+    Require(std::abs(snapshot.m_rewards[static_cast<std::size_t>(
+                blue::GeneralizedRewardChannel::RedNeutralization)] - (1.F + risk))
+            < 1.e-6F, "runtime neutralization did not use pre-loss objective risk");
+    Require(std::abs(snapshot.m_rewards[static_cast<std::size_t>(
+                blue::GeneralizedRewardChannel::ThreatContainment)] - risk)
+            < 1.e-6F, "existing threat containment changed during neutralization");
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -150,6 +186,9 @@ int main(int argc, char** argv)
     try
     {
         Checkpoints checkpoints;
+        NeutralizationCredit(checkpoints, argv[1], 120000.F, 0.F);
+        NeutralizationCredit(checkpoints, argv[1], 63333.333F, 0.5F);
+        NeutralizationCredit(checkpoints, argv[1], 9999.F, 1.F);
         for (auto mode : {blue::GeneralizedPatrolExecutionMode::Training,
                 blue::GeneralizedPatrolExecutionMode::ProductionInference})
             for (std::size_t count : {1U, 2U, 3U, 4U, 9U})

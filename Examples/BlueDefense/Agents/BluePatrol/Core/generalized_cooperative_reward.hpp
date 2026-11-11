@@ -142,6 +142,8 @@ struct GeneralizedResponsibilitySignals final
     float leaderPatrol{};
     /** @brief Team-average reduction of objective danger, in [-1, 1]. */
     float threatContainment{};
+    /** @brief Objective risk in [0,1] for each Red immediately before loss. */
+    std::array<float, TeamCapacity::MaximumRedMobiles> redNeutralizationRiskBefore{};
     /** @brief Blue-motion-only progress towards the living red set. */
     float pursuitProgress{};
     /** @brief Restrict a sole Red's approach reward to the physical leader. */
@@ -292,6 +294,9 @@ inline bool ValidSignals(GeneralizedResponsibilitySignals const& signals,
         || !std::isfinite(signals.pursuitProgress)
         || std::abs(signals.pursuitProgress) > 1.F)
         return false;
+    for (float const risk : signals.redNeutralizationRiskBefore)
+        if (!std::isfinite(risk) || risk < 0.F || risk > 1.F)
+            return false;
     for (std::size_t slot = 0U; slot + 1U < blueCount; ++slot)
         if (!std::isfinite(signals.formationSlots[slot]))
             return false;
@@ -335,7 +340,8 @@ inline bool ValidSettings(GeneralizedRewardSettings const& settings) noexcept
 /**
  * @brief Aggregates normalized role-specific and cooperative rewards.
  *
- * Red neutralization is divided by active N. Team blue-loss telemetry is
+ * Red neutralization credits (1 + pre-loss objective risk) / active N.
+ * Its channel lies in [0,2]. Team blue-loss telemetry is
  * divided by P. OwnLoss is a separate undiluted individual event. Collective
  * rewards remain present after death so earlier actions retain mission credit;
  * result.active masks only physical actions and local responsibility signals.
@@ -376,7 +382,7 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
     std::size_t const redCount = generalized_reward_detail::Count(
         transition.before.redActive);
     std::size_t blueLosses = 0U;
-    std::size_t redNeutralized = 0U;
+    float redNeutralizationCredit = 0.F;
     std::size_t remainingReds = 0U;
     for (std::size_t index = 0U; index < blueCount; ++index)
         blueLosses += transition.before.blueAlive[index]
@@ -384,15 +390,16 @@ inline GeneralizedRewardStatus AggregateGeneralizedCooperativeRewards(
     for (std::size_t index = 0U;
          index < TeamCapacity::MaximumRedMobiles; ++index)
     {
-        redNeutralized += transition.before.redAlive[index]
-            && !transition.after.redAlive[index] ? 1U : 0U;
+        if (transition.before.redAlive[index] && !transition.after.redAlive[index])
+            redNeutralizationCredit += 1.F
+                + transition.responsibilities.redNeutralizationRiskBefore[index];
         remainingReds += transition.after.redAlive[index] ? 1U : 0U;
     }
 
     float const blueSurvival = -static_cast<float>(blueLosses)
         / static_cast<float>(blueCount);
     float const redNeutralization = redCount > 0U
-        ? static_cast<float>(redNeutralized) / static_cast<float>(redCount)
+        ? redNeutralizationCredit / static_cast<float>(redCount)
         : 0.F;
     // Sparse loss avoids a positive per-step living bonus that would make
     // reward depend on episode duration.

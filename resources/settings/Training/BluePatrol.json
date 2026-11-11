@@ -41,7 +41,7 @@
       "deactivationRisk": 0.1,
       "activationDistanceMeters": 90000,
       "deactivationDistanceMeters": 110000,
-      "protectedRadiusMeters": 12000,
+      "protectedRadiusMeters": 10000,
       "timeToIntrusionSeconds": 300,
       "teammateThreatDistanceMeters": 30000,
       "teammateVulnerabilityWeight": 0.75

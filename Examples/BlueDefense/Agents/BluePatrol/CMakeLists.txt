@@ -31,6 +31,8 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_executable(BlueDefensePatrolGeometryTests ../../tests/patrol_geometry_tests.cpp)
     target_link_libraries(BlueDefensePatrolGeometryTests PRIVATE
         BlueDefenseDefenderBackend nlohmann_json::nlohmann_json)
+    target_compile_definitions(BlueDefensePatrolGeometryTests PRIVATE
+        PPO_SETTINGS_ROOT="${CMAKE_SOURCE_DIR}/resources/settings")
     add_test(NAME BlueDefensePatrolGeometryTests COMMAND BlueDefensePatrolGeometryTests)
     add_executable(BlueDefenseAttentionTests ../../tests/attention_tests.cpp)
     target_link_libraries(BlueDefenseAttentionTests PRIVATE BlueDefenseDefenderBackend)
