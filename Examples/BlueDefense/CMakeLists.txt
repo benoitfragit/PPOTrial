@@ -28,6 +28,32 @@ target_link_libraries(PPOBlueDefenseExample PUBLIC
     BlueDefenseDefenderBackend BlueDefensePatrolRuntime)
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
+    add_executable(BlueDefenseGeneralizedLeaderRuntimeTests
+        tests/generalized_leader_runtime_tests.cpp)
+    target_compile_features(BlueDefenseGeneralizedLeaderRuntimeTests PRIVATE cxx_std_17)
+    target_include_directories(BlueDefenseGeneralizedLeaderRuntimeTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/Scenario")
+    target_link_libraries(BlueDefenseGeneralizedLeaderRuntimeTests PRIVATE
+        BlueDefensePatrolRuntime)
+    set(_leader_test_actor "${CMAKE_CURRENT_BINARY_DIR}/leader-test-actor.txt")
+    set(_leader_test_marker "${CMAKE_CURRENT_BINARY_DIR}/leader-test-actor.marker")
+    add_test(NAME BlueDefenseLeaderFixtureSetup
+        COMMAND BlueDefenseInferenceCheckpointFixture
+            prepare "${_leader_test_actor}" "${_leader_test_marker}")
+    set_tests_properties(BlueDefenseLeaderFixtureSetup PROPERTIES
+        FIXTURES_SETUP BlueLeaderActor)
+    add_test(NAME BlueDefenseGeneralizedLeaderRuntimeTests
+        COMMAND BlueDefenseGeneralizedLeaderRuntimeTests "${_leader_test_actor}")
+    set_tests_properties(BlueDefenseGeneralizedLeaderRuntimeTests PROPERTIES
+        FIXTURES_REQUIRED BlueLeaderActor)
+    add_test(NAME BlueDefenseLeaderFixtureCleanup
+        COMMAND BlueDefenseInferenceCheckpointFixture
+            cleanup "${_leader_test_actor}" "${_leader_test_marker}")
+    set_tests_properties(BlueDefenseLeaderFixtureCleanup PROPERTIES
+        FIXTURES_CLEANUP BlueLeaderActor)
+    unset(_leader_test_actor)
+    unset(_leader_test_marker)
+
     add_executable(BlueDefenseSpawnTests tests/spawn_tests.cpp)
     target_compile_features(BlueDefenseSpawnTests PRIVATE cxx_std_17)
     target_include_directories(BlueDefenseSpawnTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Scenario")

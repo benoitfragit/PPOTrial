@@ -5,6 +5,7 @@
 #include "generalized_reward_shaping.hpp"
 #include "generalized_cooperative_reward.hpp"
 #include "generalized_advantage.hpp"
+#include "generalized_leader_succession.hpp"
 
 #include <cmath>
 #include <cstring>
@@ -263,6 +264,122 @@ bool CombatAndPendingThreats()
     }
     return true;
 }
+
+/** @brief Repeated relief preserves physical losses, masks and mission credit. */
+bool LeaderSuccession(std::size_t const count, bool const activeRed)
+{
+    auto const parameters = TestParameters(1);
+    auto roles = *blue::BlueTeamRoles::Create(count, count - 1U);
+    auto state = StateAt(parameters, roles, 0.F);
+    blue::PatrolNoThreatSettings settings{};
+    blue::GeneralizedPatrolWaypointSequencer sequencer{};
+    blue::GeneralizedPatrolLapProgress lap{};
+    // Seed actual progress so relief must discard more than an empty state.
+    sequencer.Observe(parameters, state, state, roles, settings);
+    sequencer.Observe(parameters, state, state, roles, settings);
+    auto advanced = StateAt(parameters, roles, 60.F);
+    lap.Observe(parameters, state, advanced, roles, settings);
+    if (!sequencer.Following() || lap.DistanceMeters() <= 0.F)
+        return false;
+    state = advanced;
+    state.counts.redMobiles = 1U;
+    state.reds[0] = {20000.F, 10000.F, 0.F, 250.F, 0.F, activeRed};
+    if (blue::RelieveGeneralizedLeader(state, roles, sequencer, lap)
+        || !sequencer.Following() || lap.DistanceMeters() <= 0.F)
+        return false; // A live leader is never replaced.
+
+    for (std::size_t lost = 0U; lost < count; ++lost)
+    {
+        auto const oldRoles = roles;
+        auto const before = state;
+        auto const beforeTargets = sequencer.PhysicalTargets(
+            parameters, before, oldRoles, settings);
+        std::size_t const oldLeader = oldRoles.LeaderPhysicalIndex();
+        state.blues[oldLeader].available = false;
+        auto const rewardTargets = sequencer.PhysicalTargets(
+            parameters, state, oldRoles, settings);
+        bool const lastLost = lost + 1U == count;
+        if (blue::RelieveGeneralizedLeader(state, roles, sequencer, lap) == lastLost)
+            return false;
+        if (!lastLost && (roles.LeaderPhysicalIndex() != lost
+                || !roles.IsValid() || roles.ActiveBlueCount() != count
+                || sequencer.Following() || sequencer.Completed()
+                || sequencer.ActiveWaypointIndex() != 0U
+                || sequencer.ValidatedWaypointCount() != 0U
+                || lap.DistanceMeters() != 0.F || lap.Completed()))
+            return false;
+        state.failed = blue::GeneralizedBlueTeamFailed(
+            state, parameters, roles.LeaderPhysicalIndex());
+        auto const outcome = episode::EvaluateOutcome(state, !activeRed,
+            sequencer, roles.LeaderPhysicalIndex(), false,
+            settings, parameters.dt, lost + 1U, 4096U);
+        if (outcome.missionFailed != lastLost || outcome.terminated != lastLost
+            || outcome.patrolCompleted || outcome.truncated
+            || !TerminalRewards(oldRoles, before, state, outcome,
+                lastLost ? -1.F : 0.F, 0.F, !activeRed))
+            return false;
+        blue::GeneralizedRewardTransition transition{};
+        transition.before = CombatMask(before);
+        transition.after = CombatMask(state);
+        transition.pendingThreats = !activeRed;
+        transition.missionFailed = lastLost;
+        blue::GeneralizedCooperativeRewards rewards{};
+        if (blue::AggregateGeneralizedCooperativeRewards(
+                oldRoles, transition, {}, rewards)
+                != blue::GeneralizedRewardStatus::Applied
+            || rewards.perBlue[oldLeader].values[static_cast<std::size_t>(
+                    blue::GeneralizedRewardChannel::OwnLoss)] != -1.F)
+            return false;
+        for (std::size_t index = 0U; index < count; ++index)
+            if (blue::GeneralizedUnifiedPatrolConvergenceShaping(parameters,
+                    before, state, beforeTargets, rewardTargets, oldRoles,
+                    index, settings) != 0.F)
+                return false; // No synthetic progress across leader loss.
+        auto const targets = sequencer.PhysicalTargets(
+            parameters, state, roles, settings);
+        std::array<blue::GeneralizedObservation,
+            blue::TeamCapacity::MaximumBlueMobiles> observations{};
+        if (!blue::BuildGeneralizedObservations(
+                parameters, state, roles, observations, &targets))
+            return false;
+        for (std::size_t index = 0U; index < count; ++index)
+        {
+            auto const& values = observations[index].values;
+            if (!blue::Valid(observations[index])
+                || targets[index].valid != state.blues[index].available
+                || values[blue::GeneralizedObservationLayout::PatrolOffset + 7U]
+                    != (state.blues[index].available ? 1.F : 0.F)
+                || values[blue::GeneralizedObservationLayout::RoleOffset]
+                    != (index == roles.LeaderPhysicalIndex() ? -1.F : 1.F)
+                || values[blue::GeneralizedTrackMaskIndex(
+                        blue::GeneralizedObservationLayout::RedOffset, 0U,
+                        blue::GeneralizedObservationLayout::RedFeatures)]
+                    != (activeRed ? 1.F : 0.F))
+                return false;
+        }
+        float const advantage = blue::GeneralizedMissionAdvantage(
+            2.F, 3.F, 4.F, 5.F, 0.9F, 0.8F,
+            outcome.terminated, outcome.truncated);
+        if (std::abs(advantage - (lastLost ? -1.F : 6.2F)) > 1.e-5F)
+            return false; // Relief keeps bootstrap and trace; last loss stops both.
+    }
+    return true;
+}
+
+/** @brief No relief in Pvs0, even while a teammate survives the leader. */
+bool NoThreatLeaderLoss()
+{
+    auto roles = *blue::BlueTeamRoles::Create(2U, 1U);
+    auto state = StateAt(TestParameters(1), roles, 0.F);
+    state.blues[1].available = false;
+    blue::GeneralizedPatrolWaypointSequencer sequencer{};
+    blue::GeneralizedPatrolLapProgress lap{};
+    auto const outcome = episode::EvaluateOutcome(state, false, sequencer,
+        1U, false, {}, 0.2F, 1U, 4096U);
+    return !blue::RelieveGeneralizedLeader(state, roles, sequencer, lap)
+        && roles.LeaderPhysicalIndex() == 1U
+        && outcome.missionFailed && outcome.terminated && !outcome.patrolCompleted;
+}
 } // namespace
 
 int main()
@@ -287,5 +404,14 @@ int main()
         }
     if (!TimeoutAndFailure()) { std::cerr << "timeout/failure\n"; return 2; }
     if (!CombatAndPendingThreats()) { std::cerr << "combat/pending\n"; return 3; }
+    for (std::size_t count : {1U, 2U, 3U, 4U, 9U})
+        for (bool const activeRed : {false, true})
+            if (!LeaderSuccession(count, activeRed))
+            {
+                std::cerr << "leader succession P=" << count
+                          << " activeRed=" << activeRed << '\n';
+                return 5;
+            }
+    if (!NoThreatLeaderLoss()) { std::cerr << "Pvs0 leader loss\n"; return 6; }
     return 0;
 }

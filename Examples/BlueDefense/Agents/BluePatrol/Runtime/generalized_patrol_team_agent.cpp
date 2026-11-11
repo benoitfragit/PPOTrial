@@ -7,6 +7,7 @@
 #include "generalized_patrol_team_agent.hpp"
 #include "generalized_patrol_production_policy.hpp"
 #include "generalized_episode_outcome.hpp"
+#include "generalized_leader_succession.hpp"
 
 #include "generalized_cooperative_reward.hpp"
 #include "generalized_patrol_learner.hpp"
@@ -830,7 +831,9 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         GeneralizedRuntimeState const after = ReadState(parameters);
         std::array<GeneralizedObservation,
                    TeamCapacity::MaximumBlueMobiles> observations{};
-        BlueTeamRoles const& roles = Roles();
+        // The action and its reward belong to the roles before physics. The
+        // next observation may already describe a promoted physical teammate.
+        BlueTeamRoles const roles = Roles();
         std::size_t const leaderIndex = roles.LeaderPhysicalIndex();
         GeneralizedPatrolTargets const baselineFrozenTargets =
             beforeTargets_[leaderIndex].valid
@@ -864,6 +867,17 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                 GeneralizedPhysicalSlotRotationFeasible(
                     parameters, beforeTargets_[index], afterTargets[index]);
         }
+        GeneralizedPatrolTargets const rewardAfterTargets = afterTargets;
+        auto& context = registry_->ctx().get<InitializerContext>();
+        if (RelieveGeneralizedLeader(after, *context.blueTeamRoles,
+                waypointSequencer_, noThreatLap_))
+        {
+            followTransitionStep_ = 0U;
+            afterTargets = waypointSequencer_.PhysicalTargets(
+                parameters, after, Roles(), training_.noThreatPatrol);
+            PublishPatrolReferenceOverlay(context, afterTargets, Roles());
+            PublishPatrolWaypointOverlay(context, waypointSequencer_);
+        }
         BuildObservations(parameters, after, observations, afterTargets);
 
         std::array<bool, TeamCapacity::MaximumBlueMobiles> availability{};
@@ -890,7 +904,8 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                 training_.noThreatPatrol, beforeTargets_, frozenAfterTargets);
         }
         auto const outcome = generalized_episode_detail::EvaluateOutcome(
-            after, pendingThreats, waypointSequencer_, leaderIndex, lapCompleted,
+            after, pendingThreats, waypointSequencer_,
+            Roles().LeaderPhysicalIndex(), lapCompleted,
             training_.noThreatPatrol, parameters.dt, episodeStep_,
             evaluation_.InProgress()
                 ? training_.evaluation.maxSteps : parameters.episodeSteps);
@@ -1064,7 +1079,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             GeneralizedPatrolRewardRelevant(beforeStep_, after);
         transition.responsibilities.leaderPatrol = patrolRelevant
             ? GeneralizedUnifiedPatrolConvergenceShaping(
-                parameters, beforeStep_, after, beforeTargets_, afterTargets,
+                parameters, beforeStep_, after, beforeTargets_, rewardAfterTargets,
                 roles, roles.LeaderPhysicalIndex(), training_.noThreatPatrol)
                 / std::max(patrolWeight, 1.F)
             : 0.F;
@@ -1080,7 +1095,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                 transition.responsibilities.formationSlots[assignment.formationSlot] =
                     patrolRelevant
                     ? GeneralizedUnifiedPatrolConvergenceShaping(
-                        parameters, beforeStep_, after, beforeTargets_, afterTargets,
+                        parameters, beforeStep_, after, beforeTargets_, rewardAfterTargets,
                         roles, index, training_.noThreatPatrol)
                         / std::max(formationWeight, 1.F)
                     : GeneralizedCooperationWeight(parameters, beforeStep_)
