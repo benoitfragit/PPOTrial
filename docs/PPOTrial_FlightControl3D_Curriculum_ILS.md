@@ -40,14 +40,16 @@ et en Gate Glide la pente de trajectoire est contrôlée à ±1,5° de la descen
 Les trois tolérances angulaires sont configurables par gateHeadingDegrees, gateRouteDegrees
 et gateSlopeDegrees ; un crash annule la réussite pédagogique de l'épisode. LOC et Glide exigent le maintien confirmé du/des faisceaux pendant gateHoldSeconds ; les rappels LOC sont évalués comme LOC. Le succès pédagogique est >=92 % sur 20 épisodes, donc >=19/20. L'évaluation de la gate Joint conserve le contrat strict >=19/20 arrêts sûrs, seul critère de promotion du BEST. Les gates pédagogiques ne promeuvent pas de BEST ; latest est le seul point de passage. Le dernier verdict de validation apparaît sous la forme [FLIGHT_GATE] stage=... successes=... episodes=... passed=true/false.
 
-## Lancement GitHub CI
+## Lancement GitHub CI (correctif 12 novembre 2026)
 
-Avant fusion de la PR #83, le workflow de formation peut être déclenché par ajout du label **flight-curriculum** à la PR (créer le label si nécessaire). Il s'exécute sur le code de la branche de PR. Après fusion, Actions > **FlightControl3D Curriculum Training** > Run workflow : choisir progressive (par défaut), loc, glide ou joint et additional_updates (10 par défaut). Le workflow_dispatch GitHub requiert que le fichier workflow existe sur la branche par défaut, d'où le déclenchement par label avant fusion.
+GitHub Actions > **FlightControl3D Curriculum Training** > **Run workflow**, branche contenant le correctif, `stage=progressive`. Le déclencheur par label `flight-curriculum` reste possible sur une PR.
 
-- Premier run : checkpoint entraînement historique versionné dans resources/model/FlightControl3D/latest, copié vers build/flight-training.
-- À chaque run : restauration possible via resume_run_id ; choisir **l'identifiant d'un run de ce même workflow** dont l'artifact flight-control-training est disponible.
-- Mode progressive : démarrer à LOC ou reprendre curriculum_stage.txt du run téléchargé. Après un bilan >=19/20, passer à Glide, puis Joint dans ce même run ; sinon garder la gate actuelle pour le run suivant. Aucune avance sans évaluation.
-- La compilation et les tests core/reward/simulator/session précèdent l'entraînement. Les artefacts sauvegardent latest, la télémétrie par gate, le statut de reprise et les éventuels fichiers BEST existants. Une campagne ne modifie jamais resources/model/FlightControl3D/latest du dépôt Git.
-- Les mises à jour PPO sont cumulatives ; additional_updates désigne le nombre de nouvelles mises à jour **par bloc de gate**.
+- `additional_updates=10` : **intervalle d'évaluation** (10 updates PPO, puis 20 épisodes indépendants). Ce n'est plus le budget total d'un lancement.
+- `max_additional_updates=1000` : budget cumulé maximal de l'exécution CI, partagé entre LOC, Glide et Joint.
+- Le workflow répète la gate courante après `passed=false`, sans avancer. Après `passed=true`, il passe automatiquement à la gate suivante. Le critère >=19/20 reste inchangé, sans requalification fictive des BEST.
+- Une limite de 280 minutes de pilotage avant chaque bloc protège le job GitHub (`timeout-minutes=350`). Si le budget global ou la durée sont atteints sans achever la cible, le job est indiqué **incomplete** et quitte avec code 2 (pas de faux vert).
+- Même si le run est incomplet ou échoue, `if: always()` publie l'artefact `flight-control-training` (30 jours) avec `latest`, `curriculum_stage.txt`, `curriculum_status.txt`, logs et CSV. Reprendre via `resume_run_id` contenant l'identifiant du run, même s'il était rouge pour budget insuffisant.
+- Lancement sur une gate explicite (`stage=loc|glide|joint`) : répète cette seule gate jusqu'à validation (ou limite), et enregistre la gate suivante pour une reprise progressive.
+- Un état `done` restauré est idempotent : aucun nouvel update ne doit être demandé pour une campagne déjà achevée.
 
-Aucun résultat de convergence ni validation d'atterrissage n'est revendiqué tant qu'une évaluation de politique entraînée sur des graines indépendantes n'a pas réussi.
+La CI compile toujours FlightControlHeadless en Release, exécute CTest, puis cinq tests de régression Python à simulateur factice. Le vrai entraînement et la convergence des politiques restent **non vérifiés** tant qu'un run CI réel n'est pas inspecté.
