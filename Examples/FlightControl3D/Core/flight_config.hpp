@@ -42,7 +42,7 @@ struct MissionSettings final
 struct InitialSettings final
 {
     bool approach{}, gearDown{};
-    /** Probability of an exact inbound LOC/glide start; other starts are split equally left/right. */
+    /** Long-run LOC/glide share; the remainder is balanced between left and right. */
     double runwayAlignedProbability{};
     Range distanceMeters{}, bearingDegrees{}, heightMeters{}, speedMps{}, headingOffsetDegrees{};
     Range rollDegrees{}, pitchDegrees{}, slopeDegrees{};

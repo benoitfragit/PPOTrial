@@ -74,7 +74,8 @@ int main()
             "instruments compare target and actual CAS");
         Check(text.instruments.find("-3.00")!=std::string::npos && text.instruments.find("-2.00")!=std::string::npos,
             "instruments compare target and actual flight-path slope, not pitch");
-        Check(text.instruments.find("LOC acquisition")!=std::string::npos
+        Check(text.instruments.find("LOC / GLIDE acquisition")!=std::string::npos
+            && text.instruments.find("Signal not visible | LOC acquiring | GLIDE acquiring")!=std::string::npos
             && text.instruments.find("12.5 / 900")!=std::string::npos
             && text.instruments.find("Crash after 7.5")!=std::string::npos,
             "instruments identify guidance source and simulated episode durations");

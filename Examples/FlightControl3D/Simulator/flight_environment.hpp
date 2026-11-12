@@ -26,6 +26,7 @@ private:
     FlightPlan plan_;
     JsbsimAircraft fdm_;
     std::mt19937 rng_;
+    SpawnPlacementSampler spawnPlacements_{};
     AircraftState aircraft_{};
     MissionState mission_{};
 };

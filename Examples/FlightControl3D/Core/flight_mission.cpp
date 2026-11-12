@@ -144,24 +144,51 @@ double AdvancePatrol(Config const& c,FlightPlan const& plan,MissionState& s,
     }
     return std::max(progress,0.0);
 }
+/** @brief Capture edges confirmed by the acquisition/loss state machine. */
+struct CaptureTransition final { bool entered{},lost{}; };
+
 /**
- * @brief Confirms one capture with tolerance hysteresis and a stable hold.
+ * @brief Updates one reversible beam capture with acquisition/loss hysteresis.
  * @param eligible True only for finite airborne front-sector geometry and a compatible heading.
  * @param error Signed angular beam error in radians.
  * @param tolerance Capture tolerance in radians.
  * @param c Validated mission timing and hysteresis settings.
- * @param hold In/out continuous eligible hold duration in seconds.
- * @param captured In/out irreversible capture flag.
- * @return True exactly once when this call confirms the capture.
+ * @param acquisitionSeconds In/out continuous acquisition hold duration.
+ * @param lossSeconds In/out continuous release hold duration.
+ * @param captured In/out active capture flag.
+ * @return Entry and loss transitions confirmed during this step.
  */
-bool Capture(bool eligible,double error,double tolerance,Config const& c,double& hold,bool& captured) noexcept
+CaptureTransition UpdateCapture(bool eligible,double error,double tolerance,Config const& c,
+    double& acquisitionSeconds,double& lossSeconds,bool& captured) noexcept
 {
-    if(captured) return false;
-    if(!eligible) { hold=0;return false; }
-    if(std::abs(error)<=tolerance) hold+=c.mission.physicsDt;
-    else if(std::abs(error)>tolerance*c.mission.captureHysteresis) hold=0;
-    if(hold>=c.mission.captureHoldSeconds) { captured=true;return true; }
-    return false;
+    double const absoluteError=std::abs(error);
+    double const hold=c.mission.captureHoldSeconds;
+    if(captured)
+    {
+        acquisitionSeconds=hold;
+        bool const outsideRelease=!eligible || absoluteError>tolerance*c.mission.captureHysteresis;
+        lossSeconds=outsideRelease ? std::min(lossSeconds+c.mission.physicsDt,hold) : 0;
+        if(lossSeconds>=hold)
+        {
+            captured=false;
+            acquisitionSeconds=0;
+            lossSeconds=0;
+            return {false,true};
+        }
+        return {};
+    }
+    lossSeconds=0;
+    if(!eligible) { acquisitionSeconds=0;return {}; }
+    if(absoluteError<=tolerance)
+        acquisitionSeconds=std::min(acquisitionSeconds+c.mission.physicsDt,hold);
+    else if(absoluteError>tolerance*c.mission.captureHysteresis)
+        acquisitionSeconds=0;
+    if(acquisitionSeconds>=hold)
+    {
+        captured=true;
+        return {true,false};
+    }
+    return {};
 }
 float Unit(double value) noexcept
 {
@@ -293,10 +320,13 @@ Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& miss
                 +(a.position.east-previous.east)*de)/lengthSquared, 0.0, 1.0) : 0;
             g.pathDistance = Distance(a.position, {previous.north+t*dn, previous.east+t*de, previous.up+t*(g.target.up-previous.up)});
         }
+        g.targetValid=true;
     }
     else
     {
-        bool const flare = g.height <= c.mission.flareHeightMeters;
+        bool const flare = mission.capturedGlide && g.ilsValid
+            && std::abs(g.glideError)<=c.mission.glideCaptureDegrees*DegreesToRadians*c.mission.captureHysteresis
+            && g.height <= c.mission.flareHeightMeters;
         g.mode=mission.phase==Phase::Rollout ? GuidanceMode::Rollout
             : flare ? GuidanceMode::Flare
             : mission.capturedGlide ? GuidanceMode::Glide : GuidanceMode::Localizer;
@@ -304,16 +334,24 @@ Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& miss
         g.targetSlope = flare || mission.phase == Phase::Rollout ? 0 : -slope;
         g.target = FromRunway(c.runway, 0, 0, c.runway.thresholdHeightMeters);
         g.pathDistance = std::hypot(g.cross, g.height-(c.runway.thresholdHeightMeters-std::min(g.along,0.0)*std::tan(slope)));
-        if(mission.phase == Phase::Approach && !g.ilsValid)
+        // Once both beams are captured the policy follows the angular ILS
+        // errors directly; a threshold point would be a competing reference.
+        g.targetValid=g.mode!=GuidanceMode::Glide;
+        if(mission.phase == Phase::Approach
+            && (!mission.capturedLocalizer || !mission.capturedGlide))
         {
-            // Geometric fallback guides toward a front-side ILS intercept, not
-            // toward a touchdown from behind the runway or outside the sector.
-            double const intercept = c.mission.switchDistanceMeters;
-            g.target = FromRunway(c.runway,-intercept,0,c.runway.thresholdHeightMeters+intercept*std::tan(slope));
+            // Until both beams are stably captured, keep a continuous target
+            // halfway between the aircraft and threshold on the LOC/glide.
+            // Backside geometry uses the configured front-side intercept.
+            double const targetAlong=g.along<0 ? g.along/2 : -c.mission.switchDistanceMeters;
+            g.target = FromRunway(c.runway,targetAlong,0,
+                c.runway.thresholdHeightMeters-targetAlong*std::tan(slope));
             g.pathDistance = Distance(a.position,g.target);
+            g.targetValid=true;
         }
     }
-    g.courseError = WrapAngle(std::atan2(g.target.east-a.position.east,g.target.north-a.position.north)-a.heading);
+    g.courseError = g.targetValid
+        ? WrapAngle(std::atan2(g.target.east-a.position.east,g.target.north-a.position.north)-a.heading) : 0;
     return g;
 }
 
@@ -338,14 +376,31 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
     if(s.phase!=Phase::Rollout)
     {
         bool const captureGeometry=g.ilsValid && headingCompatible && !contact && IsFinite(after);
-        enteredLocalizer=Capture(captureGeometry,g.localizer,c.mission.localizerCaptureDegrees*DegreesToRadians,
-            c,s.localizerHoldSeconds,s.capturedLocalizer);
-        if(s.capturedLocalizer)
-            enteredGlide=Capture(captureGeometry,g.glideError,c.mission.glideCaptureDegrees*DegreesToRadians,
-                c,s.glideHoldSeconds,s.capturedGlide);
-        else s.glideHoldSeconds=0;
+        auto const localizer=UpdateCapture(captureGeometry,g.localizer,
+            c.mission.localizerCaptureDegrees*DegreesToRadians,c,s.localizerHoldSeconds,
+            s.localizerLossSeconds,s.capturedLocalizer);
+        enteredLocalizer=localizer.entered && !s.rewardedLocalizerCapture;
+        if(localizer.entered) s.rewardedLocalizerCapture=true;
+        if(!localizer.lost && s.capturedLocalizer)
+        {
+            auto const glide=UpdateCapture(captureGeometry,g.glideError,
+                c.mission.glideCaptureDegrees*DegreesToRadians,c,s.glideHoldSeconds,
+                s.glideLossSeconds,s.capturedGlide);
+            enteredGlide=glide.entered && !s.rewardedGlideCapture;
+            if(glide.entered) s.rewardedGlideCapture=true;
+        }
+        else
+        {
+            s.glideHoldSeconds=0;
+            s.glideLossSeconds=0;
+            s.capturedGlide=false;
+        }
     }
-    else { s.localizerHoldSeconds=0;s.glideHoldSeconds=0; }
+    else
+    {
+        s.localizerHoldSeconds=0;s.glideHoldSeconds=0;
+        s.localizerLossSeconds=0;s.glideLossSeconds=0;
+    }
     // A completed racetrack never implies ILS capture.  Patrol remains the
     // active reference until the localizer hold above has been confirmed.
     if(s.phase==Phase::Patrol && s.capturedLocalizer) s.phase=Phase::Approach;
@@ -404,10 +459,11 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
                 // threshold; that must never earn a positive ILS reward.
                 add(channel,progress<0 ? std::min(value,0.0) : value);
             }
-            if(!g.ilsValid)
+            if(!s.capturedLocalizer || !s.capturedGlide)
             {
-                double const previousDistance=Distance(referenceBefore.position,g.target);
-                double const progressToIntercept=std::clamp((previousDistance-g.pathDistance)/(c.mission.approachSpeed*dt),-1.0,1.0);
+                double const previousDistance=previousGuidance.pathDistance;
+                double const progressToIntercept=std::clamp((previousDistance-g.pathDistance)
+                    /(c.mission.approachSpeed*dt),-1.0,1.0);
                 add(Reward::Path,GuidanceReward(c,GuidanceQuality(previousDistance,c.reward.pathTolerance),
                     GuidanceQuality(g.pathDistance,c.reward.pathTolerance),progressToIntercept));
             }
@@ -453,14 +509,16 @@ Observation Observe(Config const& c, FlightPlan const& plan, MissionState const&
     if (!IsFinite(a)) return {}; // Terminal invalid FDM observations never propagate NaNs to PPO.
     auto const g = Guide(c,plan,s,a);
     auto const& n = c.normalization;
-    double const dn = g.target.north-a.position.north, de = g.target.east-a.position.east;
+    double const dn = g.targetValid ? g.target.north-a.position.north : 0;
+    double const de = g.targetValid ? g.target.east-a.position.east : 0;
     double const forward = dn*std::cos(a.heading)+de*std::sin(a.heading);
     double const right = -dn*std::sin(a.heading)+de*std::cos(a.heading);
     double const heading = WrapAngle(a.heading-c.runway.headingDegrees*DegreesToRadians);
     double const slope = std::atan2(g.relativeVelocity.up,std::hypot(g.relativeVelocity.north,g.relativeVelocity.east));
     auto const deckVelocity=DeckVelocity(c.runway,a.position);
     auto const normal=RunwayNormal(c.runway);
-    return {Unit(forward/n.distance), Unit(right/n.distance), Unit((g.target.up-a.position.up)/n.altitude),
+    return {Unit(forward/n.distance), Unit(right/n.distance),
+        Unit(g.targetValid ? (g.target.up-a.position.up)/n.altitude : 0),
         Unit(g.along/n.distance), Unit(g.cross/n.distance), Unit(g.distance/n.distance), Unit(g.height/n.altitude),
         Unit(a.airspeed/n.speed), Unit(a.velocity.north/n.speed), Unit(a.velocity.east/n.speed), Unit(a.velocity.up/n.speed),
         Unit(std::sin(a.roll)), Unit(std::cos(a.roll)), Unit(std::sin(a.pitch)), Unit(std::cos(a.pitch)),

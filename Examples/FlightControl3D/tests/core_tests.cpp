@@ -20,6 +20,22 @@ void Geometry(Config const& c)
 {
     auto const plan=MakeFlightPlan(c);
     Check(plan.count==2*(c.mission.straightSamples+c.mission.turnSamples),"plan point count");
+    double previousAlong{};
+    for(std::size_t point=0;point<c.mission.straightSamples;++point)
+    {
+        auto const local=ToRunway(c.runway,plan.points[point]);
+        Check(Near(local[1],0),"inbound racetrack straight lies on the localizer");
+        if(point>0) Check(local[0]>previousAlong,"localizer-aligned racetrack straight points toward the threshold");
+        previousAlong=local[0];
+    }
+    AircraftState ilsPresentation{};
+    ilsPresentation.position=plan.points[0];
+    ilsPresentation.heading=c.runway.headingDegrees*DegreesToRadians;
+    auto const presentation=Guide(c,plan,MissionState{},ilsPresentation);
+    Check(presentation.ilsValid
+        && std::abs(presentation.localizer)<=c.mission.localizerCaptureDegrees*DegreesToRadians
+        && std::abs(presentation.glideError)<=c.mission.glideCaptureDegrees*DegreesToRadians,
+        "inbound racetrack straight crosses both LOC and glide capture windows");
     for (double h : {0.,90.,181.,359.})
     {
         auto runway=c.runway; runway.headingDegrees=h;
@@ -114,7 +130,7 @@ void Configuration()
 {
     std::ifstream source(PPO_FLIGHT_CONFIG); nlohmann::json valid; source>>valid;
     TemporaryDirectory temporary("flight-config-"); auto const path=temporary.path/"config.json";
-    for (int test=0; test<14; ++test)
+    for (int test=0; test<16; ++test)
     {
         auto json=valid;
         if (test==0) json["normalization"]["speed"]=0;
@@ -131,6 +147,9 @@ void Configuration()
         if (test==11) json["initial"].erase("runwayAlignedProbability");
         if (test==12) json["initial"]["bearingDegrees"]={-20,20};
         if (test==13) json["mission"]["patrolLookaheadSeconds"]=0;
+        if (test==14) json["initial"]["distanceMeters"]={5000,
+            json["mission"]["ilsRangeMeters"].get<double>()+1};
+        if (test==15) json["mission"]["racetrackCenterCross"]=0;
         { std::ofstream stream(path); stream<<json; }
         Rejects([&] { LoadConfig(path); },"invalid JSON accepted");
     }
@@ -177,7 +196,9 @@ void AlignedStarts(Config c)
     {
         c.initial.runwayAlignedProbability=probability;
         std::mt19937 rng(279),same(279);
+        SpawnPlacementSampler placements{},samePlacements{};
         std::size_t alignedCount=0,left=0,right=0;
+        std::array<bool,3> familyBlock{};
         double firstDistance=0,firstSpeed=0,firstRoll=0;
         bool variedDistance=false,variedSpeed=false,variedRoll=false;
         for(std::size_t sample=0;sample<1000;++sample)
@@ -185,7 +206,10 @@ void AlignedStarts(Config c)
             auto motion=SampleRunway(c,rng),copy=SampleRunway(c,same);
             motion.base.headingDegrees=headings[sample%headings.size()];copy.base.headingDegrees=motion.base.headingDegrees;
             auto const runway=RunwayAt(motion,0),replicaRunway=RunwayAt(copy,0);
-            auto const aircraft=SampleAircraft(c,runway,rng),replica=SampleAircraft(c,replicaRunway,same);
+            auto const placement=placements.Next(probability,rng);
+            auto const replicaPlacement=samePlacements.Next(probability,same);
+            auto const aircraft=SampleAircraft(c,runway,placement,rng);
+            auto const replica=SampleAircraft(c,replicaRunway,replicaPlacement,same);
             auto const local=DeckCoordinates(runway,aircraft.position);
             double const offset=WrapAngle(aircraft.heading-runway.headingDegrees*DegreesToRadians);
             bool const aligned=Near(local.east,0,1e-7) && Near(offset,0,1e-10);
@@ -205,13 +229,25 @@ void AlignedStarts(Config c)
                 if(local.east>0) ++right;
                 Check(local.east*offset<0 && std::cos(offset)>0,
                     "left/right starts point inward and never away from the runway");
+                Check(local.up>=c.initial.heightMeters.minimum-1e-7 && local.up<=c.initial.heightMeters.maximum+1e-7,
+                    "side starts keep the configured height envelope");
             }
             double const distance=std::hypot(local.north,local.east);
-            Check(distance>=c.initial.distanceMeters.minimum-1e-7 && distance<=c.initial.distanceMeters.maximum+1e-7
-                && local.up>=c.initial.heightMeters.minimum-1e-7 && local.up<=c.initial.heightMeters.maximum+1e-7,
-                "both spawn components keep the configured airborne envelope");
-            Check(aircraft.position.north==replica.position.north && aircraft.heading==replica.heading && rng==same,
+            Check(distance>=c.initial.distanceMeters.minimum-1e-7 && distance<=c.initial.distanceMeters.maximum+1e-7,
+                "all spawn families keep the configured distance envelope");
+            Check(placement==replicaPlacement && aircraft.position.north==replica.position.north
+                && aircraft.heading==replica.heading && rng==same,
                 "spawn mixture is reproducible for the same seed");
+            if(probability==1.0/3.0)
+            {
+                familyBlock[static_cast<std::size_t>(placement)]=true;
+                if(sample%familyBlock.size()==familyBlock.size()-1)
+                {
+                    Check(familyBlock[0] && familyBlock[1] && familyBlock[2],
+                        "each balanced block contains left, LOC/glide and right exactly once");
+                    familyBlock={};
+                }
+            }
             if(sample==0) { firstDistance=distance;firstSpeed=aircraft.airspeed;firstRoll=aircraft.roll; }
             else
             {
@@ -223,9 +259,10 @@ void AlignedStarts(Config c)
         Check(variedDistance && variedSpeed && variedRoll,"aligned starts must retain the other random parameters");
         if(probability==0) Check(alignedCount==0,"zero probability retains broad random starts");
         if(probability==1) Check(alignedCount==1000,"unit probability aligns every start on all runway headings");
-        if(probability==1.0/3.0) Check(alignedCount>250 && alignedCount<420,
-            "balanced probability produces the LOC/glide, left and right families");
-        if(probability<1) Check(left>100 && right>100,"side starts are balanced across the runway");
+        if(probability==1.0/3.0) Check(alignedCount>=333 && alignedCount<=334,
+            "balanced scheduler preserves the configured LOC/glide share");
+        if(probability<1) Check(std::max(left,right)-std::min(left,right)<=1,
+            "side starts remain prefix-balanced across the runway");
     }
 }
 
@@ -266,19 +303,59 @@ void CapturePriority(Config const& c)
         glideReward+=result.rewards[static_cast<std::size_t>(Reward::EnterGlide)];
     }
     Check(inbound.capturedGlide && Guide(c,plan,inbound,onBeam).mode==GuidanceMode::Glide
+        && !Guide(c,plan,inbound,onBeam).targetValid
         && Near(glideReward,c.reward.weights[static_cast<std::size_t>(Reward::EnterGlide)]),
-        "glide capture follows LOC capture and changes the active guidance source");
+        "glide capture follows LOC capture and removes the competing threshold point");
+
+    auto const outsideBeam=Approach(c,-6000,5000);
+    AdvanceMission(c,plan,inbound,onBeam,outsideBeam);
+    Check(inbound.capturedLocalizer && inbound.capturedGlide,
+        "a transient ILS dropout does not release either capture");
+    for(std::size_t step=1;step<holdSteps;++step)
+        AdvanceMission(c,plan,inbound,outsideBeam,outsideBeam);
+    auto const intercept=DeckCoordinates(c.runway,Guide(c,plan,inbound,outsideBeam).target);
+    Check(inbound.phase==Phase::Approach && !inbound.capturedLocalizer && !inbound.capturedGlide
+        && Guide(c,plan,inbound,outsideBeam).mode==GuidanceMode::Localizer
+        && Near(intercept.north,-3000) && Near(intercept.east,0),
+        "sustained beam loss keeps approach priority but returns to a continuous LOC/glide intercept");
+
+    double repeatedCaptureReward{};
+    for(std::size_t step=0;step<holdSteps;++step)
+    {
+        auto const result=AdvanceMission(c,plan,inbound,onBeam,onBeam);
+        repeatedCaptureReward+=result.rewards[static_cast<std::size_t>(Reward::EnterLocalizer)]
+            +result.rewards[static_cast<std::size_t>(Reward::EnterGlide)];
+    }
+    auto const localizerTarget=DeckCoordinates(c.runway,Guide(c,plan,inbound,onBeam).target);
+    Check(inbound.capturedLocalizer && !inbound.capturedGlide && Near(localizerTarget.north,-3000),
+        "LOC reacquisition alone cannot point guidance at the runway");
+    for(std::size_t step=0;step<holdSteps;++step)
+    {
+        auto const result=AdvanceMission(c,plan,inbound,onBeam,onBeam);
+        repeatedCaptureReward+=result.rewards[static_cast<std::size_t>(Reward::EnterLocalizer)]
+            +result.rewards[static_cast<std::size_t>(Reward::EnterGlide)];
+    }
+    auto const glideGuidance=Guide(c,plan,inbound,onBeam);
+    auto const observation=Observe(c,plan,inbound,onBeam);
+    Check(inbound.capturedLocalizer && inbound.capturedGlide && !glideGuidance.targetValid
+        && observation[0]==0 && observation[1]==0 && observation[2]==0
+        && repeatedCaptureReward==0,
+        "LOC/glide recapture suppresses the threshold point without repeating entry bonuses");
 }
 void RandomizationAndMotion(Config const& c)
 {
     std::mt19937 rng(91),same(91);
+    SpawnPlacementSampler placements{},samePlacements{};
     bool differentPositions=false,differentAttitudes=false;
     AircraftState first{};
     for (std::size_t sample=0;sample<1000;++sample)
     {
         auto const motion=SampleRunway(c,rng),repeated=SampleRunway(c,same);
         auto const runway=RunwayAt(motion,0),copy=RunwayAt(repeated,0);
-        auto const aircraft=SampleAircraft(c,runway,rng),replica=SampleAircraft(c,copy,same);
+        auto const placement=placements.Next(c.initial.runwayAlignedProbability,rng);
+        auto const replicaPlacement=samePlacements.Next(c.initial.runwayAlignedProbability,same);
+        auto const aircraft=SampleAircraft(c,runway,placement,rng);
+        auto const replica=SampleAircraft(c,copy,replicaPlacement,same);
         auto const local=DeckCoordinates(runway,aircraft.position);
         double const distance=std::hypot(local.north,local.east);
         Check(distance>=c.initial.distanceMeters.minimum-1e-7 && distance<=c.initial.distanceMeters.maximum+1e-7,"random spawn distance bounds");
@@ -290,7 +367,8 @@ void RandomizationAndMotion(Config const& c)
             auto const delta=Subtract(aircraft.position,plan.points[i]);
             nearest=std::min(nearest,std::sqrt(Dot(delta,delta)));
         }
-        Check(local.north<0 && nearest<2000,"default starts stay on approach side and near the racetrack");
+        Check(local.north<0 && nearest<3*c.normalization.path,
+            "default starts stay on the approach side within bounded racetrack rally range");
         if(std::abs(local.east)<1e-7)
             Check(Near(local.up,c.runway.thresholdHeightMeters-local.north*std::tan(c.mission.glideDegrees*DegreesToRadians),1e-7),
                 "centreline spawn is exactly on glide");
@@ -299,7 +377,9 @@ void RandomizationAndMotion(Config const& c)
         Check(aircraft.airspeed>=c.initial.speedMps.minimum && aircraft.airspeed<=c.initial.speedMps.maximum,"random spawn speed bounds");
         Check(aircraft.roll>=c.initial.rollDegrees.minimum*DegreesToRadians && aircraft.roll<=c.initial.rollDegrees.maximum*DegreesToRadians,"random roll bounds");
         Check(aircraft.pitch>=c.initial.pitchDegrees.minimum*DegreesToRadians && aircraft.pitch<=c.initial.pitchDegrees.maximum*DegreesToRadians,"random pitch bounds");
-        Check(aircraft.position.north==replica.position.north && aircraft.heading==replica.heading && aircraft.airspeed==replica.airspeed,"seeded reproducible randomization");
+        Check(placement==replicaPlacement && aircraft.position.north==replica.position.north
+            && aircraft.heading==replica.heading && aircraft.airspeed==replica.airspeed,
+            "seeded reproducible randomization");
         if (sample==0) first=aircraft;
         else { differentPositions=differentPositions || aircraft.position.north!=first.position.north;
             differentAttitudes=differentAttitudes || aircraft.heading!=first.heading || aircraft.roll!=first.roll; }

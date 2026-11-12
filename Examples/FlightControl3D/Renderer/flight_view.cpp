@@ -44,7 +44,7 @@ char const* GuidanceModeName(GuidanceMode mode) noexcept
     switch(mode)
     {
     case GuidanceMode::Patrol: return "Hippodrome";
-    case GuidanceMode::Localizer: return "LOC acquisition";
+    case GuidanceMode::Localizer: return "LOC / GLIDE acquisition";
     case GuidanceMode::Glide: return "GLIDE tracking";
     case GuidanceMode::Flare: return "Flare";
     case GuidanceMode::Rollout: return "Runway rollout";
@@ -104,8 +104,11 @@ void DrawFlightScene(FlightSnapshot const& s,RenderTexture2D const& target)
     }
     for(std::size_t j=0;j<s.plan.count;++j) Segment(s.plan.points[j],s.plan.points[(j+1)%s.plan.count],{65,158,220,255});
     Color const guidanceColor=GuidanceColor(s.guidance.mode);
-    Segment(s.aircraft.position,s.guidance.target,guidanceColor);
-    DrawSphere(World(s.guidance.target),0.035F,guidanceColor);
+    if(s.guidance.targetValid)
+    {
+        Segment(s.aircraft.position,s.guidance.target,guidanceColor);
+        DrawSphere(World(s.guidance.target),0.035F,guidanceColor);
+    }
     Color const color=s.mission.outcome==Outcome::Crash ? RED : SKYBLUE;
     auto const nose=AircraftPoint(s.aircraft,4.5,0,0),tail=AircraftPoint(s.aircraft,-4.5,0,0);
     DrawCylinderEx(World(nose),World(tail),0.006F,0.004F,8,color);
@@ -165,7 +168,10 @@ void DrawFlightInstruments(FlightSnapshot const& s)
         "LOC   %+.2f deg",s.guidance.localizer/DegreesToRadians);
     ImGui::TextColored({GlideColor.r/255.F,GlideColor.g/255.F,GlideColor.b/255.F,1},
         "GLIDE %+.2f deg",s.guidance.glideError/DegreesToRadians);
-    ImGui::TextDisabled("%s",s.guidance.ilsValid ? "ILS signal valid" : "Outside ILS sector");
+    ImGui::TextDisabled("Signal %s | LOC %s | GLIDE %s",
+        s.guidance.ilsValid ? "visible" : "not visible",
+        s.mission.capturedLocalizer ? "captured" : "acquiring",
+        s.mission.capturedGlide ? "captured" : "acquiring");
     auto const& result=s.mission.touchedDown ? s.mission : s.lastEpisode;
     if(ImGui::CollapsingHeader("Aircraft / landing details"))
     {

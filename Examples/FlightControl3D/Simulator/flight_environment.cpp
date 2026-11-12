@@ -19,7 +19,8 @@ Observation FlightEnvironment::Reset()
     episodeConfig_.runway=RunwayAt(motion_,0);
     plan_=MakeFlightPlan(episodeConfig_);
     fdm_.SetRunwayMotion(motion_);
-    auto const initial=SampleAircraft(config_,episodeConfig_.runway,rng_);
+    auto const placement=spawnPlacements_.Next(config_.initial.runwayAlignedProbability,rng_);
+    auto const initial=SampleAircraft(config_,episodeConfig_.runway,placement,rng_);
     mission_.waypoint=ClosestPatrolWaypoint(plan_,initial.position);
     aircraft_ = fdm_.Reset(initial);
     return ObservationNow();

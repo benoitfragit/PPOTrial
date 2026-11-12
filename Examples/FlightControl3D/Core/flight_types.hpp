@@ -49,6 +49,8 @@ struct Guidance final
     Vec3 target{}, relativeVelocity{};
     /** @brief Source that owns the current target point and speed/slope commands. */
     GuidanceMode mode{GuidanceMode::Patrol};
+    /** @brief True only when target/course-error fields are an active control reference. */
+    bool targetValid{};
     bool ilsValid{};
 };
 
@@ -70,9 +72,15 @@ struct MissionState final
     std::uint64_t steps{};
     double stoppedSeconds{};
     double localizerHoldSeconds{},glideHoldSeconds{};
+    /** @brief Continuous time outside each beam's release envelope. */
+    double localizerLossSeconds{},glideLossSeconds{};
     std::size_t waypointsPassed{},completedLaps{};
     bool pathQualified{};
-    bool capturedLocalizer{}, capturedGlide{}, touchedDown{};
+    /** @brief Active captures; sustained beam loss clears them and requires reacquisition. */
+    bool capturedLocalizer{}, capturedGlide{};
+    /** @brief Preserve the existing one-shot entry bonuses across later reacquisitions. */
+    bool rewardedLocalizerCapture{},rewardedGlideCapture{};
+    bool touchedDown{};
     bool contactAttempted{},firstWheelContact{};
     double touchdownCrossMeters{},touchdownSinkMps{},touchdownSpeedMps{},touchdownGearPosition{};
     double touchdownFromThreshold{}, stopFromThreshold{}, groundRoll{};

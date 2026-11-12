@@ -22,13 +22,13 @@
     "maxTouchdownSink": 3.0, "maxTouchdownSpeed": 60.0, "maxTouchdownRollDegrees": 8.0,
     "minTouchdownPitchDegrees": -3.0, "maxTouchdownPitchDegrees": 12.0, "maxTouchdownHeadingDegrees": 15.0,
     "gearDownMinimum": 0.99, "contactHeightMeters": 0.3, "stoppedSpeed": 1.0, "stoppedHoldSeconds": 2.0,
-    "racetrackCenterAlong": -8000.0, "racetrackCenterCross": 0.0, "racetrackHalfStraight": 2000.0,
+    "racetrackCenterAlong": -8000.0, "racetrackCenterCross": 1500.0, "racetrackHalfStraight": 2000.0,
     "racetrackRadius": 1500.0, "patrolAltitude": 600.0, "waypointRadius": 100.0, "patrolLookaheadSeconds": 5.0,
     "turnSamples": 16, "straightSamples": 4
   },
   "initial": {
     "runwayAlignedProbability": 0.3333333333333333,
-    "approach": false, "gearDown": false, "distanceMeters": [5000.0, 7500.0], "bearingDegrees": [8.0, 20.0],
+    "approach": false, "gearDown": false, "distanceMeters": [5000.0, 14000.0], "bearingDegrees": [12.0, 30.0],
     "heightMeters": [400.0, 1000.0], "speedMps": [55.0, 80.0], "pitchDegrees": [-4.0, 8.0],
     "headingOffsetDegrees": [-3.0, 3.0], "rollDegrees": [-15.0, 15.0], "slopeDegrees": [-3.0, 3.0],
     "throttle": 0.65, "flap": 0.0, "approachFlap": 0.33, "rolloutFlap": 0.33, "propeller": 1.0

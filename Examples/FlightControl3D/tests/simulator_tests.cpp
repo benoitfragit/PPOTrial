@@ -60,10 +60,12 @@ int main()
         }
         JsbsimAircraft fdm(random,DefaultDataRoot());
         std::mt19937 generator(77);
+        SpawnPlacementSampler placements{};
         auto const motion=SampleRunway(random,generator);
         auto const deck=RunwayAt(motion,0);
         fdm.SetRunwayMotion(motion);
-        fdm.Reset(SampleAircraft(random,deck,generator));
+        auto const placement=placements.Next(random.initial.runwayAlignedProbability,generator);
+        fdm.Reset(SampleAircraft(random,deck,placement,generator));
         auto const probe=fdm.ProbeGround(FromRunway(deck,500,0,10));
         auto const expected=RunwayNormal(deck),velocity=DeckVelocity(deck,FromRunway(deck,500,0,0));
         Check(Near(probe.height,10,1e-6) && Near(probe.normal.north,expected.north,1e-6)

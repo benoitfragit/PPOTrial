@@ -154,8 +154,8 @@ void SecondaryGuidance(Config const& c)
         "outside ILS uses secondary geometric intercept guidance without claiming a signal");
     MissionState approach{};approach.phase=Phase::Approach;
     auto const target=DeckCoordinates(c.runway,Guide(c,plan,approach,outside).target);
-    Check(Near(target.north,-c.mission.switchDistanceMeters) && Near(target.east,0) && target.up>c.runway.thresholdHeightMeters,
-        "fallback target is ahead of the runway on the glide path");
+    Check(Near(target.north,-2000) && Near(target.east,0) && target.up>c.runway.thresholdHeightMeters,
+        "uncaptured approach target stays continuously ahead on the LOC/glide path");
 }
 void MovingFrame(Config c)
 {

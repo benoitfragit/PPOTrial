@@ -64,6 +64,7 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
         signature.erase("guidanceVersion");
         signature["mission"].erase("patrolLookaheadSeconds");
         signature["mission"]["approachHeadingToleranceDegrees"]=60;
+        signature["mission"]["racetrackCenterCross"]=0;
     }
     else signature["initial"]["runwayAlignedProbability"]=0.25;
     old.checkpointSignature=signature.dump();
@@ -105,8 +106,16 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     signature=nlohmann::json::parse(c.checkpointSignature);signature["guidanceVersion"]=2;
     Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
         "guidance V2 remains usable as a training warm start");
+    signature["guidanceVersion"]=3;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "guidance V3 remains usable as a training warm start");
     signature["guidanceVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown guidance contract is rejected");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("spawnVersion");
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "legacy random placement remains usable as a training warm start");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature["spawnVersion"]=999;
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown spawn contract is rejected");
 }
 int main()
 {

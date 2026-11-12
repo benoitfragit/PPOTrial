@@ -72,13 +72,38 @@ RunwayMotion SampleRunway(Config const& c, std::mt19937& rng)
     motion.seaHeight=d.seaHeightMeters;
     return motion;
 }
-AircraftState SampleAircraft(Config const& c, Runway const& runway, std::mt19937& rng)
+SpawnPlacement SpawnPlacementSampler::Next(double alignedProbability,std::mt19937& rng)
+{
+    std::array<double,3> const weights{(1-alignedProbability)/2,alignedProbability,
+        (1-alignedProbability)/2};
+    std::size_t const first=std::uniform_int_distribution<std::size_t>(0,weights.size()-1)(rng);
+    std::size_t selected=first;
+    double selectedDeficit=weights[selected]*static_cast<double>(samples_+1)
+        -static_cast<double>(counts_[selected]);
+    for(std::size_t offset=1;offset<weights.size();++offset)
+    {
+        std::size_t const candidate=(first+offset)%weights.size();
+        double const deficit=weights[candidate]*static_cast<double>(samples_+1)
+            -static_cast<double>(counts_[candidate]);
+        // Mathematically equal thirds can differ by a few ULPs after parsing.
+        if(deficit>selectedDeficit+1e-12)
+        {
+            selected=candidate;
+            selectedDeficit=deficit;
+        }
+    }
+    ++counts_[selected];
+    ++samples_;
+    return static_cast<SpawnPlacement>(selected);
+}
+AircraftState SampleAircraft(Config const& c, Runway const& runway,
+    SpawnPlacement placement,std::mt19937& rng)
 {
     auto const& i=c.initial;
-    bool const onGlide=i.runwayAlignedProbability==1
-        || (i.runwayAlignedProbability>0 && Draw({0,1},rng)<i.runwayAlignedProbability);
+    bool const onGlide=placement==SpawnPlacement::LocalizerGlide;
     double const distance=Draw(i.distanceMeters,rng);
-    double const side=onGlide ? 0 : (Draw({0,1},rng)<0.5 ? -1.0 : 1.0);
+    double const side=placement==SpawnPlacement::Left ? -1.0
+        : placement==SpawnPlacement::Right ? 1.0 : 0.0;
     double const bearing=side*Draw(i.bearingDegrees,rng)*DegreesToRadians;
     AircraftState aircraft{};
     auto const local=Add(Scale(RunwayForward(runway),-distance*std::cos(bearing)),Scale(RunwayRight(runway),distance*std::sin(bearing)));

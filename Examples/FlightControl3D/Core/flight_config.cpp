@@ -156,7 +156,8 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics.erase("evaluation");
     semantics["distribution"] = {training.minLogStd,training.maxLogStd};
     semantics["rewardVersion"] = 3;
-    semantics["guidanceVersion"] = 3;
+    semantics["guidanceVersion"] = 4;
+    semantics["spawnVersion"] = 2;
     config.checkpointSignature = semantics.dump();
     Validate(config);
     return config;
@@ -175,7 +176,8 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
         if(signature->contains("rewardVersion") && (*signature)["rewardVersion"]!=2
             && (*signature)["rewardVersion"]!=3) return false;
         if(signature->contains("guidanceVersion") && (*signature)["guidanceVersion"]!=2
-            && (*signature)["guidanceVersion"]!=3) return false;
+            && (*signature)["guidanceVersion"]!=3 && (*signature)["guidanceVersion"]!=4) return false;
+        if(signature->contains("spawnVersion") && (*signature)["spawnVersion"]!=2) return false;
     }
     for(char const* name : {"distanceMeters","bearingDegrees","headingOffsetDegrees"})
     {
@@ -190,9 +192,11 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
         || !previous["mission"].is_object() || !next["mission"].is_object()) return false;
     previous["mission"].erase("patrolLookaheadSeconds"); next["mission"].erase("patrolLookaheadSeconds");
     previous["mission"].erase("approachHeadingToleranceDegrees"); next["mission"].erase("approachHeadingToleranceDegrees");
+    previous["mission"].erase("racetrackCenterCross"); next["mission"].erase("racetrackCenterCross");
     previous.erase("reward"); next.erase("reward");
     previous.erase("rewardVersion"); next.erase("rewardVersion");
     previous.erase("guidanceVersion"); next.erase("guidanceVersion");
+    previous.erase("spawnVersion"); next.erase("spawnVersion");
     return previous==next;
 }
 
@@ -232,12 +236,14 @@ void Validate(Config const& c)
         && m.waypointRadius > 0 && m.patrolLookaheadSeconds > 0 && m.patrolLookaheadSeconds <= 60
         && m.turnSamples >= 4 && m.straightSamples >= 1
         && 2*(m.turnSamples + m.straightSamples) <= MaximumWaypoints, "racetrack geometry/capacity");
+    Require(std::abs(m.racetrackCenterCross-m.racetrackRadius)<=1e-9,
+        "inbound racetrack straight must align with the localizer");
     double const minimumSegment=std::min(2*m.racetrackHalfStraight/static_cast<double>(m.straightSamples),
         2*m.racetrackRadius*std::sin(Pi/(2*static_cast<double>(m.turnSamples))));
     Require(2*m.waypointRadius<minimumSegment && m.maximumWaypointStepMeters<minimumSegment,"non-overlapping sequential waypoint gates");
     Require(std::hypot(m.racetrackCenterAlong, m.racetrackCenterCross) + m.racetrackHalfStraight + m.racetrackRadius
         < m.maxDistanceMeters, "racetrack outside episode bounds");
-    Require(i.distanceMeters.minimum>r.lengthMeters && i.distanceMeters.maximum<m.maxDistanceMeters
+    Require(i.distanceMeters.minimum>r.lengthMeters && i.distanceMeters.maximum<=m.ilsRangeMeters
         && i.heightMeters.minimum>m.flareHeightMeters && i.heightMeters.maximum<m.maxAltitudeMeters
         && i.speedMps.minimum>m.flareSpeed && i.speedMps.maximum<=c.normalization.speed,
         "bounded airborne spawn distance/height/speed");
