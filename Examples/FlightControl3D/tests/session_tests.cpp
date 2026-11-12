@@ -232,6 +232,15 @@ int main()
         for(std::size_t i=0;i<1000 && !training.Finished();++i) training.Tick();
         Check(training.Finished() && training.Snapshot().validationCampaigns==1 && training.Snapshot().lastValidation.episodes==2,"complete independent candidate validation");
         Check(!store.BestMetrics() && !training.Snapshot().hasBest,"failed candidate is never promoted as BEST");
+        // A capture-only curriculum gate must never mint a landing BEST.
+        auto gateConfig=c;gateConfig.training.curriculumStage=CurriculumStage::Loc;
+        gateConfig.training.gateHoldSeconds=0.1;gateConfig.training.resume=false;
+        TemporaryDirectory gateDirectory("flight-session-gate-");
+        FlightSession gateTraining(gateConfig,true,gateDirectory.path);
+        for(std::size_t step=0;step<600 && !gateTraining.Finished();++step) gateTraining.Tick();
+        Check(gateTraining.Finished() && gateTraining.Snapshot().gateEvaluated==gateConfig.evaluation.episodes
+            && !std::filesystem::exists(gateDirectory.path/"best/current.json"),
+            "independent LOC gate evaluation cannot promote an unvalidated landing BEST");
         training.Learner().Save(directory.path/"after-validation.txt");
         Check(ReadFile(directory.path/"after-validation.txt")==original,"candidate validation leaves weights, Adam and RNG frozen");
         Rejects([&] { FlightSession noBest(c,false,directory.path); },"production must not fall back to unvalidated training");

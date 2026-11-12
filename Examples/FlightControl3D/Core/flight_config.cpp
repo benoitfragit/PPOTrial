@@ -338,7 +338,7 @@ void Validate(Config const& c)
         "Adam hyperparameters");
     Require(std::isfinite(t.locReminderProbability) && t.locReminderProbability>=0
         && t.locReminderProbability<=1 && std::isfinite(t.glideOffsetMeters)
-        && t.glideOffsetMeters>0 && t.glideOffsetMeters<1000
+        && t.glideOffsetMeters>0 && t.glideOffsetMeters<minimumGlideHeight-m.flareHeightMeters
         && std::isfinite(t.gateHoldSeconds) && t.gateHoldSeconds>=m.physicsDt
         && (t.curriculumStage==CurriculumStage::Joint || t.gateHoldSeconds<=m.maxSeconds),
         "curriculum settings");
