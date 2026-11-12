@@ -1022,6 +1022,9 @@ class ProgressiveGateTests(unittest.TestCase):
 
     def test_run_117_manual_fixed_threshold_resume_dispatches_4v4(self) -> None:
         """Manual auto_advance=true must not invalidate a passed 4v3 gate."""
+        production = Path(__file__).resolve().with_name("gates.json")
+        gate.existing.write_json(
+            gate.GATES_FILE, json.loads(production.read_text(encoding="utf-8")))
         config = gate.GATES_FILE.read_bytes()
         digest = hashlib.sha256(config).hexdigest()
         state = {
