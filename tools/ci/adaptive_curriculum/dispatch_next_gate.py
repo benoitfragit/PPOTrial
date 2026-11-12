@@ -219,10 +219,11 @@ def next_dispatch_from_checkpoint(
             or isinstance(current_threshold, bool)
             or float(current_threshold) != threshold):
         raise ValueError("Restart-cycle success threshold mismatch")
-    # No second orchestrator: same-threshold runs explicitly disable the
-    # ordinary dispatcher while retaining the user's opt-in in restartCycle.
-    if result.get("autoAdvance") is not False:
-        raise ValueError("Fixed-threshold cycle enabled a duplicate dispatcher")
+    # This workflow has only one advance job. A manual gate resume may pass
+    # auto_advance=true even when the bootstrap used false for its first run.
+    # The saved restart-cycle opt-in remains authoritative for continuation.
+    if type(result.get("autoAdvance")) is not bool:
+        raise ValueError("Invalid fixed-threshold auto-advance choice")
     if not cycle["autoAdvance"] or not result["passed"]:
         return None
     inputs = next_dispatch(dict(result, autoAdvance=True), config_bytes, run_id)
