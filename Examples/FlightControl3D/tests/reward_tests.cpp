@@ -57,7 +57,14 @@ void Convergence(Config const& c)
     auto const denseShaping=AdvanceMission(c,plan,outsidePatrol,outside,outsideCloser);
     Check(!Guide(c,plan,outsidePatrol,outsideCloser).ilsValid
         && Channel(denseShaping,Reward::Localizer)>0 && Channel(denseShaping,Reward::Glide)==0,
-        "dense LOC guides acquisition outside the physical signal sector without premature glide shaping");
+        "dense LOC guides patrol acquisition outside the signal sector");
+    auto const outsideObservation=Observe(c,plan,outsidePatrol,outsideCloser);
+    Check(outsideObservation[22]!=0 && outsideObservation[23]!=0 && outsideObservation[24]==0,
+        "out-of-sector geometric LOC/glide errors remain observable with ILS valid false");
+    MissionState directApproach{};directApproach.phase=Phase::Approach;
+    auto const approachShaping=AdvanceMission(c,plan,directApproach,outside,outsideCloser);
+    Check(!directApproach.capturedLocalizer && Channel(approachShaping,Reward::Glide)>0,
+        "approach learns glide correction before radio LOC capture");
     auto const beyondRange=At(c,-16000,0,1000),nearerBeyondRange=At(c,-15999.8,0,1000);
     MissionState beyondRangePatrol{};
     auto const noGeometry=AdvanceMission(c,plan,beyondRangePatrol,beyondRange,nearerBeyondRange);
@@ -130,12 +137,34 @@ void ProgressAndAmplitude(Config const& c)
     // telescopes exactly, including delayed oscillations.
     double const ilsWeights=c.reward.weights[1]+c.reward.weights[2];
     double const maximumIls=ilsWeights*(c.reward.ilsDecaySeconds+c.mission.physicsDt+c.reward.convergenceSeconds);
-    double const maximumSecondary=(c.reward.weights[3]+c.reward.weights[4])*c.mission.maxSeconds;
+    double const maximumSecondary=(c.reward.weights[3]+c.reward.weights[4])*
+        (c.reward.ilsDecaySeconds+c.mission.physicsDt+c.reward.convergenceSeconds);
     double const captures=c.reward.weights[5]+c.reward.weights[6];
     Check(maximumIls+maximumSecondary+captures<c.reward.weights[7],
         "continuous ILS shaping plus captures remains below touchdown bonus");
-    Check(!c.initial.approach && c.reward.weights[7]==100 && c.reward.weights[8]==100 && c.reward.weights[9]==-100,
-        "default mission keeps the racetrack as fallback and preserves outcome amplitudes");
+    Check(c.initial.approach && c.reward.weights[7]==100 && c.reward.weights[8]==100 && c.reward.weights[9]==-100,
+        "default mission starts on ILS and preserves outcome amplitudes");
+}
+void SpeedAndSlopeShaping(Config const& c)
+{
+    auto unstable=At(c,-6000,0,600);
+    unstable.airspeed=c.mission.approachSpeed-2*c.reward.speedTolerance;
+    unstable.velocity=Add(Scale(RunwayForward(c.runway),unstable.airspeed),
+        Scale(RunwayNormal(c.runway),-0.30*unstable.airspeed));
+    auto improved=unstable;improved.airspeed+=1;
+    improved.velocity=Add(Scale(RunwayForward(c.runway),improved.airspeed),
+        Scale(RunwayNormal(c.runway),-0.25*improved.airspeed));
+    auto worsened=unstable;worsened.airspeed-=1;
+    worsened.velocity=Add(Scale(RunwayForward(c.runway),worsened.airspeed),
+        Scale(RunwayNormal(c.runway),-0.35*worsened.airspeed));
+    auto const steady=ApproachStep(c,unstable,unstable);
+    auto const better=ApproachStep(c,unstable,improved);
+    auto const worse=ApproachStep(c,unstable,worsened);
+    for(auto channel : {Reward::Speed,Reward::Slope})
+        Check(Channel(better,channel)>Channel(steady,channel)
+            && Channel(steady,channel)>Channel(worse,channel)
+            && Channel(steady,channel)>0,
+            "speed/slope reward stays dense outside tolerance and discriminates correction from regression");
 }
 void SecondaryGuidance(Config const& c)
 {
@@ -224,7 +253,7 @@ int main()
     try
     {
         auto const config=LoadConfig(PPO_FLIGHT_CONFIG);
-        Convergence(config);ProgressAndAmplitude(config);SecondaryGuidance(config);MovingFrame(config);
+        Convergence(config);ProgressAndAmplitude(config);SpeedAndSlopeShaping(config);SecondaryGuidance(config);MovingFrame(config);
     }
     catch(std::exception const& error) {std::cerr<<error.what()<<'\n';return 1;}
     std::cout<<"Flight guidance reward regressions passed\n";

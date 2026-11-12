@@ -14,10 +14,6 @@ Vec3 RelativeVelocity(Runway const& r, AircraftState const& state) noexcept
     auto const velocity=Subtract(state.velocity,DeckVelocity(r,state.position));
     return {Dot(velocity,RunwayForward(r)),Dot(velocity,RunwayRight(r)),Dot(velocity,RunwayNormal(r))};
 }
-double Quality(double error, double tolerance) noexcept
-{
-    return std::max(0.0, 1.0-std::abs(error)/tolerance);
-}
 double GuidanceQuality(double error, double tolerance) noexcept
 {
     // A finite error outside the capture tolerance must still provide guidance.
@@ -608,10 +604,9 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
             {
                 bool const localizer=channel==Reward::Localizer;
                 double const tolerance=(localizer ? c.reward.localizerToleranceDegrees : c.reward.glideToleranceDegrees)*DegreesToRadians;
-                // LOC is the acquisition signal. GLIDE becomes dense only once
-                // LOC is captured, so it cannot pull the aircraft vertically
-                // while lateral alignment is still being acquired.
-                bool const enabled=localizer || s.capturedLocalizer;
+                // Initial approach supplies both geometric beam errors before
+                // radio capture; patrol acquisition remains LOC-led.
+                bool const enabled=localizer || s.phase==Phase::Approach || s.capturedLocalizer;
                 double const previousQuality=enabled && IlsShapingEnvelope(c,previousGuidance)
                     ? GuidanceQuality(localizer ? previousGuidance.localizer : previousGuidance.glideError,tolerance) : 0;
                 double const quality=enabled && IlsShapingEnvelope(c,g)
@@ -629,9 +624,21 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         }
         if (s.phase != Phase::Rollout)
         {
-            add(Reward::Speed,dt*Quality(after.airspeed-g.targetSpeed,c.reward.speedTolerance));
-            double const relativeSlope=std::atan2(g.relativeVelocity.up,std::hypot(g.relativeVelocity.north,g.relativeVelocity.east));
-            add(Reward::Slope,dt*Quality(relativeSlope-g.targetSlope,c.reward.slopeToleranceDegrees*DegreesToRadians));
+            // Dense, signed tracking improvement remains available beyond the
+            // capture tolerances. The potential cancels on an out-and-back,
+            // while the decaying hold term cannot outweigh a safe landing.
+            double const guidanceScale=std::exp(-static_cast<double>(s.steps-1)*dt/c.reward.ilsDecaySeconds);
+            double const airspeedProgress=std::clamp(after.airspeed/g.targetSpeed,0.0,1.0);
+            double const previousSpeedQuality=GuidanceQuality(referenceBefore.airspeed-previousGuidance.targetSpeed,c.reward.speedTolerance);
+            double const speedQuality=GuidanceQuality(after.airspeed-g.targetSpeed,c.reward.speedTolerance);
+            add(Reward::Speed,GuidanceReward(c,previousSpeedQuality,speedQuality,airspeedProgress,guidanceScale));
+            double const previousSlope=std::atan2(previousGuidance.relativeVelocity.up,
+                std::hypot(previousGuidance.relativeVelocity.north,previousGuidance.relativeVelocity.east));
+            double const slope=std::atan2(g.relativeVelocity.up,std::hypot(g.relativeVelocity.north,g.relativeVelocity.east));
+            double const tolerance=c.reward.slopeToleranceDegrees*DegreesToRadians;
+            double const previousSlopeQuality=GuidanceQuality(previousSlope-previousGuidance.targetSlope,tolerance);
+            double const slopeQuality=GuidanceQuality(slope-g.targetSlope,tolerance);
+            add(Reward::Slope,GuidanceReward(c,previousSlopeQuality,slopeQuality,airspeedProgress,guidanceScale));
         }
         if (contact && !s.touchedDown)
         {
@@ -683,8 +690,8 @@ Observation Observe(Config const& c, FlightPlan const& plan, MissionState const&
         Unit(a.airspeed/n.speed), Unit(a.velocity.north/n.speed), Unit(a.velocity.east/n.speed), Unit(a.velocity.up/n.speed),
         Unit(std::sin(a.roll)), Unit(std::cos(a.roll)), Unit(std::sin(a.pitch)), Unit(std::cos(a.pitch)),
         Unit(std::sin(heading)), Unit(std::cos(heading)), Unit(a.rollRate/n.rate), Unit(a.pitchRate/n.rate), Unit(a.yawRate/n.rate),
-        Unit(std::sin(slope)), Unit(std::cos(slope)), Unit(g.ilsValid ? g.localizer/(n.localizerDegrees*DegreesToRadians) : 0),
-        Unit(g.ilsValid ? g.glideError/(n.glideDegrees*DegreesToRadians) : 0), Unit(g.ilsValid), Unit(g.targetSpeed/n.speed),
+        Unit(std::sin(slope)), Unit(std::cos(slope)), Unit(IlsShapingEnvelope(c,g) ? g.localizer/(n.localizerDegrees*DegreesToRadians) : 0),
+        Unit(IlsShapingEnvelope(c,g) ? g.glideError/(n.glideDegrees*DegreesToRadians) : 0), Unit(g.ilsValid), Unit(g.targetSpeed/n.speed),
         Unit(g.targetSlope/Pi), Unit(std::sin(g.courseError)), Unit(std::cos(g.courseError)), Unit(g.pathDistance/n.path),
         Unit(a.gearPosition), Unit(a.weightOnWheels), Unit(s.phase==Phase::Patrol), Unit(s.phase==Phase::Approach), Unit(s.phase==Phase::Rollout),
         Unit(static_cast<double>(s.steps)*c.mission.physicsDt/c.mission.maxSeconds), Unit(s.capturedLocalizer), Unit(s.capturedGlide),
