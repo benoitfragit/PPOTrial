@@ -3023,7 +3023,7 @@ EnvironmentRenderer::DrawAgentPlot(std::shared_ptr<AgentController> const& agent
     agent->m_plots[0].m_name = state.m_name + "-Loss";
     agent->m_plots[1].m_name = state.m_name + "-ActorLoss";
     agent->m_plots[2].m_name = state.m_name + "-ValueLoss";
-    agent->m_plots[3].m_name = state.m_name + "-EntropyLoss";
+    agent->m_plots[3].m_name = state.m_name + (m_flightControlView ? "-Entropy" : "-EntropyLoss");
 
     if (ImGui::BeginTable("##agentplots", 2, ImGuiTableFlags_SizingStretchSame))
     {
@@ -4414,8 +4414,9 @@ EnvironmentRenderer::DrawAgentsWindow(entt::registry const& snapshot)
                             state.m_common.m_valueloss,
                             state.m_common.m_entropyloss);
                     }
-                    ImGui::TextDisabled(
-                        "Losses sampled from the last PPO mini-batch.");
+                    ImGui::TextDisabled("%s",m_flightControlView
+                        ? "Means over the last PPO update."
+                        : "Losses sampled from the last PPO mini-batch.");
                     DrawAgentPlot(agent, state);
                     ImGui::EndTabItem();
                 }

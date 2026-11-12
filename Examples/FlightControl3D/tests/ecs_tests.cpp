@@ -23,6 +23,23 @@ FlightSnapshot WaitSnapshot(ppo::model::Environment const& environment,std::uint
     }
     throw std::runtime_error("FlightControl3D: timed out waiting for ECS transport snapshot");
 }
+void CheckLearningDiagnostics(ppo::model::Environment const& environment,double valueWeight)
+{
+    bool found=false;
+    environment.ReadSnapshot([&found,valueWeight](entt::registry const& registry)
+    {
+        auto const stats=registry.ctx().get<FlightSnapshot>().learning;
+        registry.view<ppo::model::sAgentStateSnaphot>().each([&found,&stats,valueWeight](auto const& agent)
+        {
+            Check(agent.m_common.m_actorloss==static_cast<float>(stats.policyLoss)
+                && agent.m_common.m_valueloss==static_cast<float>(stats.valueLoss)
+                && agent.m_common.m_loss==static_cast<float>(stats.policyLoss+valueWeight*stats.valueLoss),
+                "shared UI receives actual PPO losses and the weighted total");
+            found=true;
+        });
+    });
+    Check(found,"Flight learning diagnostics are published to the shared UI");
+}
 }
 int main()
 {
@@ -44,6 +61,7 @@ int main()
             auto const preview=WaitSnapshot(environment,0,false);
             Check(preview.mission.steps==0 && !preview.resumed,"paused preview does not train or advance physics");
             environment.Play();WaitSnapshot(environment,1,true);
+            CheckLearningDiagnostics(environment,LoadConfig(configPath).training.valueWeight);
             environment.Stop();environment.Play();
             auto const continued=WaitSnapshot(environment,2,true);
             Check(continued.trainingUpdateLimit==2,"Stop/Play continues a completed block through real ECS callbacks");

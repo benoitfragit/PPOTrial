@@ -78,6 +78,7 @@ public:
         result.m_common.m_actorloss=static_cast<float>(state.learning.policyLoss);
         result.m_common.m_valueloss=static_cast<float>(state.learning.valueLoss);
         result.m_common.m_entropyloss=static_cast<float>(state.learning.entropy);
+        result.m_common.m_loss=static_cast<float>(state.learning.policyLoss+config_.training.valueWeight*state.learning.valueLoss);
         for (std::size_t i=0;i<RewardCount;++i)
         {
             result.m_rewardnames.emplace_back(RewardNames[i]);
