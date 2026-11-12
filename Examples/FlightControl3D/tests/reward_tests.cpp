@@ -99,7 +99,7 @@ void ProgressAndAmplitude(Config const& c)
         Check(weight>=100*c.reward.weights[static_cast<std::size_t>(Reward::Path)],"ILS strongly outweighs the secondary path");
     }
     // Late approaches should still receive guidance, with a decayed magnitude.
-    MissionState late{};late.phase=Phase::Approach;
+    MissionState late{};late.phase=Phase::Approach;late.capturedLocalizer=true;
     late.steps=static_cast<std::uint64_t>(std::round(c.reward.ilsDecaySeconds/c.mission.physicsDt));
     auto const delayed=AdvanceMission(c,MakeFlightPlan(c),late,before,forward);
     double const decay=std::exp(-static_cast<double>(late.steps-1)*c.mission.physicsDt/c.reward.ilsDecaySeconds);
@@ -110,7 +110,7 @@ void ProgressAndAmplitude(Config const& c)
     // the return occurs after the progress reward has decayed.
     auto const offBeam=At(c,-6000,2000,700),nearBeam=At(c,-6000,1000,500);
     auto const earlyImprovement=ApproachStep(c,offBeam,nearBeam);
-    MissionState lateReversal{};lateReversal.phase=Phase::Approach;
+    MissionState lateReversal{};lateReversal.phase=Phase::Approach;lateReversal.capturedLocalizer=true;
     lateReversal.steps=static_cast<std::uint64_t>(std::round(c.reward.ilsDecaySeconds/c.mission.physicsDt));
     auto const reversed=AdvanceMission(c,MakeFlightPlan(c),lateReversal,nearBeam,offBeam);
     for(auto const channel : {Reward::Localizer,Reward::Glide})

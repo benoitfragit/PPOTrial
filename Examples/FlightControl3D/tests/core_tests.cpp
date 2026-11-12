@@ -203,6 +203,8 @@ void OrderedNavigation(Config const& config)
     AdvanceMission(c,plan,shortcut,before,after);
     Check(!shortcut.pathQualified && shortcut.waypointsPassed==0 && shortcut.completedLaps==0,"teleport/shortcut invalidates lap progress");
     MissionState stopped{};a.position=plan.points[0];
+    auto const inboundSegment=Subtract(plan.points[0],plan.points[plan.count-1]);
+    a.heading=std::atan2(inboundSegment.east,inboundSegment.north);
     auto const stationary=AdvanceMission(c,plan,stopped,a,a);
     Check(stationary.rewards[0]==0 && stopped.waypoint==1,"stationary aircraft earns no path progression");
 }
