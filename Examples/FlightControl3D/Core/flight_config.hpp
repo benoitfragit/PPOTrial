@@ -35,12 +35,15 @@ struct MissionSettings final
     double gearDownMinimum{}, contactHeightMeters{}, stoppedSpeed{}, stoppedHoldSeconds{};
     double racetrackCenterAlong{}, racetrackCenterCross{}, racetrackHalfStraight{};
     double racetrackRadius{}, patrolAltitude{}, waypointRadius{};
+    /** @brief Time horizon used to place the continuous rally target on the racetrack. */
+    double patrolLookaheadSeconds{};
     std::size_t turnSamples{}, straightSamples{};
 };
 struct InitialSettings final
 {
     bool approach{}, gearDown{};
-    double runwayAlignedProbability{}; // Centreline position and runway heading; other state remains randomized.
+    /** Probability of an exact inbound LOC/glide start; other starts are split equally left/right. */
+    double runwayAlignedProbability{};
     Range distanceMeters{}, bearingDegrees{}, heightMeters{}, speedMps{}, headingOffsetDegrees{};
     Range rollDegrees{}, pitchDegrees{}, slopeDegrees{};
     double throttle{}, flap{}, approachFlap{},rolloutFlap{},propeller{};

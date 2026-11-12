@@ -35,7 +35,7 @@ Le JSON livré active `training.resume: true` et `checkpointEvery: 1`. En entra�
 
 Le desktop traite `maxUpdates` comme un budget supplémentaire à partir du modèle chargé. Par exemple, un `latest` à l'update 120 et un budget de 10 000 donnent une fin de bloc à 10 120. Après validation finale, un nouveau Play prolonge le budget en conservant le même learner. Le renderer diffère Stop/join et Play hors du verrou de snapshot, puis le callback ECS `Init` prolonge la session terminée. Le headless conserve son budget total existant. L'UI affiche la source du modèle et la limite du bloc courant ; le journal contient `[FLIGHT_SESSION] Resumed latest` et l'update chargé.
 
-La reprise d'entraînement conserve les poids, Adam et le RNG lors d'un changement des intervalles horizontaux, de `initial.approach` ou des réglages de reward. La signature interne `rewardVersion: 2` distingue le nouveau shaping du précédent ; un ancien checkpoint sans ce marqueur peut amorcer l'entraînement. Les changements de géométrie de piste, de guidage configuré, de physique ou d'autres observations restent incompatibles. Un BEST correspondant à un ancien contrat est conservé avec ses générations et son contrôle d'intégrité, mais son score n'est pas réutilisé. L'inférence exige une validation complète du contrat courant avant toute promotion.
+La reprise d'entraînement conserve les poids, Adam et le RNG lors d'un changement des intervalles horizontaux, de l'orientation d'interception, de `initial.approach`, du guidage compatible déclaré ou des réglages de reward. `rewardVersion: 3` et `guidanceVersion: 2` séparent les contrats de shaping et de guidage. Un ancien checkpoint sans `guidanceVersion` peut amorcer l'entraînement, mais son BEST n'est jamais réutilisé sans une nouvelle validation. Les changements de géométrie de piste, de physique ou d'autres observations restent incompatibles. Un BEST antérieur est conservé avec ses générations et son contrôle d'intégrité ; l'inférence exige un BEST validé sur le contrat exact.
 
 ## Interface FlightControl3D
 
@@ -44,7 +44,7 @@ Le profil graphique est sélectionné explicitement au lancement dédié ou depu
 | Panneau | Informations et commandes |
 |---|---|
 | Vue 3D | Avion, piste, hippodrome et références LOC/GLIDE |
-| FlightControl3D, à droite | Tableau consigne/mesure : CAS en m/s et pente trajectoire en degrés ; distance, hauteur et écarts ILS ; détails avion et poser repliables |
+| FlightControl3D, à droite | Source active Hippodrome/LOC/GLIDE, temps simulé courant et durée/cause du dernier épisode ; tableau consigne/mesure, écarts ILS et détails du poser |
 | Learning | Compteurs d'épisodes, entraînement PPO, validation, BEST et diagnostics ; poids affichés en lecture seule |
 | Simulation | Play/Pause/Stop, deux cases LOC et GLIDE indépendantes, sélection de caméra ; distance de poursuite uniquement pour cette caméra |
 
@@ -76,27 +76,27 @@ La configuration unique est `resources/settings/Scenarios/FlightControl3D.json`.
 | Paramètre avion | Plage initiale livrée |
 |---|---|
 | Distance horizontale dans le repère piste | 5 à 7,5 km |
-| Azimut de départ côté approche | −20 à +20° |
-| Décalage de cap | −180 à +180° |
-| Hauteur au-dessus du plan courant de la piste | 400 à 1 000 m |
+| Azimut latéral gauche/droite | 8 à 20°, signe équiprobable |
+| Écart autour du cap d'interception | −3 à +3° |
+| Hauteur | Glide exact sur l'axe ; 400 à 1 000 m sur les côtés |
 | Vitesse calibrée | 55 à 80 m/s |
 | Roulis / tangage / pente | ±15° / −4 à +8° / ±3° |
 
-`initial.runwayAlignedProbability` règle le mélange des départs : `0.5` par défaut donne une probabilité de 50 % d'être sur le prolongement de l'axe, avant le seuil, avec le cap de la piste orienté vers celle-ci. Le repère utilisé est celui de la piste réellement tirée pour l'épisode, y compris sa translation et son inclinaison. Les autres départs conservent l'azimut ±20° et le cap indépendant ±180° indiqués ci-dessus. Distance, hauteur, vitesse, roulis, tangage et pente restent aléatoires dans les deux cas ; être dans l'axe horizontal ne signifie pas être sur le glide.
+`initial.runwayAlignedProbability` vaut `1/3` par défaut. Cette famille est placée exactement sur le LOC et le glide, avant le seuil, cap piste et pente de descente configurée. Le complément est partagé à parts égales entre la gauche et la droite ; chaque cap vise le seuil avec seulement le jitter configuré. Le validateur interdit un azimut ou un jitter qui permettrait de partir dos à la piste ou hors de l'enveloppe de cap de capture. Le repère est celui de la piste réellement tirée, translation, tangage et roulis compris.
 
-Cette probabilité finie doit appartenir à [0, 1] : `0` conserve le tirage précédent, `1` aligne tous les départs. Le mélange s'applique à chaque reset, quelle que soit la phase initiale. Les checkpoints sans ce nouveau champ peuvent amorcer l'entraînement ; modifier sa valeur conserve les poids et Adam, mais exige une nouvelle validation du BEST sur la distribution courante. Les récompenses et les dimensions du réseau restent identiques.
+Cette probabilité finie doit appartenir à [0, 1] : `0` ne produit que les deux interceptions latérales et `1` uniquement le LOC/glide exact. Le mélange s'applique à chaque reset. Modifier la distribution conserve les poids et Adam comme warm start, mais exige une nouvelle validation du BEST. Les récompenses et les dimensions du réseau restent identiques.
 
 La position de la piste varie de ±2 km sur les deux axes ; son orientation varie de ±35°. La surface peut avancer de 0 à 3 m/s. La houle tire une amplitude verticale de 0 à 0,8 m, une période de 8 à 14 s, des amplitudes de tangage de 0 à 0,25° et de roulis de 0 à 0,4°, avec phases indépendantes. Le pivot de rotation est au centre de la piste. Ces valeurs sont des réglages JSON modifiables ; le schéma refuse les plages incohérentes et les départs sous la mer.
 
 Le callback `FGGroundCallback` fournit réellement à JSBSim la surface finie, sa normale et sa vitesse au point de contact. Le pont bouge dans la physique, le guidage et le rendu. Hors de son rectangle, le contact correspond au plan de la mer. Il s'agit d'une surface rigide cinématique avec mouvements sinusoïdaux ; aucun modèle hydrodynamique de navire n'est revendiqué.
 
-Le scénario livré démarre directement en approche (`initial.approach: true`) pour donner la priorité au LOC/glide. La position, le cap, l'attitude et la vitesse restent randomisés. Pour exercer d'abord l'hippodrome, sélectionner `initial.approach: false` ; `requiredLaps: 1` demande alors un tour qualifié avant la transition irréversible, avec les conditions de distance, côté approche, cap, écart latéral et altitude.
+Le scénario livré démarre en phase hippodrome (`initial.approach: false`), qui joue le rôle de guidage secondaire. Une capture LOC maintenue pendant `captureHoldSeconds`, dans le secteur avant et avec un cap compatible, provoque immédiatement la transition irréversible vers l'approche, même sans tour terminé. Sinon, `requiredLaps: 1` conserve la voie de repli historique : un tour physique qualifié autorise la transition lorsque distance, côté approche, cap, écart latéral et altitude sont compatibles.
 
-Le flightplan hippodrome est lié à la piste courante. Son endpoint actif est choisi sur le segment 3D le plus proche au reset. Hors corridor ou après dépassement d'une porte ratée, la cible est réacquise sur un segment proche et la progression du tour est invalidée. Une reprise de guidage ne valide ni porte ni tour fictif. Les portes restent ordonnées et non superposées ; un avion immobile n'accumule aucun progrès.
+Le flightplan hippodrome est lié à la piste courante. Pendant le ralliement, la position est projetée sur le segment 3D le plus proche et la cible est avancée de `patrolSpeed × patrolLookaheadSeconds` sur le circuit. Après acquisition, les portes séquentielles restent fixes et autoritaires pour la validation du tour. Hors corridor ou après une porte ratée, le ralliement anticipé reprend et toute progression incomplète est invalidée. Une réacquisition ne valide ni porte ni tour fictif ; un avion immobile n'accumule aucun progrès.
 
-BlueAgent utilise 26 waypoints : 3 par ligne droite et 10 par demi-tour, avec un ralliement par projection/anticipation puis un suivi séquentiel. Flight3D utilise une implémentation 3D distincte : `2 * (straightSamples + turnSamples)`, soit 40 points avec 4 et 16 dans le JSON livré. Dans les deux cas, le waypoint actif reste fixe entre deux passages ; ce n'est pas un point qui parcourt librement le circuit. Flight3D recalcule en plus les positions avec le mouvement de la piste. Les composants BlueAgent ne sont pas modifiés.
+Comme BlueAgent, Flight3D sépare désormais un ralliement par projection/anticipation d'un suivi séquentiel physiquement validé. Flight3D conserve son implémentation 3D distincte et `2 × (straightSamples + turnSamples)`, soit 40 portes avec 4 et 16 dans le JSON livré, recalculées avec le mouvement de la piste. Le point anticipé ne remplace pas les portes de validation. Les composants BlueAgent et RLMission ne sont pas modifiés.
 
-Le LOC et le glide nécessitent un maintien confirmé et une hystérésis ; aucune capture à l'arrière de la piste ou hors secteur. Hors signal, le guidage géométrique secondaire vise un point d'interception à `-switchDistanceMeters` sur le glide, plutôt qu'un poser depuis l'arrière. À faible hauteur, la vitesse cible diminue et la pente cible devient nulle pour l'arrondi. Les volets ont des positions JSON par phase ; ils ne constituent pas une action discrète supplémentaire.
+Le LOC et le glide nécessitent un maintien confirmé et une hystérésis ; aucune capture à l'arrière de la piste, hors secteur, au contact du sol ou avec un cap incompatible. La capture LOC a priorité sur l'hippodrome. Le glide ne peut être confirmé qu'après le LOC. En phase approche hors signal, le guidage géométrique vise un point d'interception à `-switchDistanceMeters` sur le glide, plutôt qu'un poser depuis l'arrière. À faible hauteur, la vitesse cible diminue et la pente cible devient nulle pour l'arrondi.
 
 ## Observation, actions et PPO
 
@@ -207,3 +207,18 @@ Le profil de reward JSBSim augmente le feedback ILS sans changer la physique, l'
 - Tests de régression : amplitude initiale, décroissance du progrès, sorties de secteur, trajectoire stationnaire, aller-retour sans gain net même lorsque le retour survient après la constante de décroissance, et validation JSON des paramètres invalides.
 
 **Validation :** revue du diff et vérifications numériques des bornes ; compilation C++ et CI à confirmer avant fusion. Le comportement appris doit être évalué séparément.
+
+## Départs symétriques et priorité LOC (11 novembre 2026)
+
+Le contrat `guidanceVersion=2` introduit les trois familles de départ équilibrées,
+le ralliement anticipé vers l'hippodrome, la priorité irréversible donnée à une
+capture LOC compatible avec le cap et la capture GLIDE postérieure. La source du
+point de guidage est transportée dans le snapshot uniquement pour le rendu ; les
+56 observations et les dix canaux de reward conservent leurs dimensions. Les
+tests déterministes couvrent les côtés gauche/droit, le départ LOC/glide, le refus
+d'une capture perpendiculaire, la priorité LOC et les durées affichées.
+
+Validation locale demandée pour ce correctif : compilation de la seule cible
+`FlightControl3D` en Release dans `build/release`, réussie. Aucun CTest, test
+unitaire, build Debug ou campagne de convergence n'a été exécuté, conformément à
+la consigne explicite ; ces vérifications restent donc non validées.

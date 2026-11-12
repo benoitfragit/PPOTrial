@@ -21,6 +21,8 @@ struct FlightSnapshot final
     std::uint64_t episodes{}, touchdowns{}, stops{}, crashes{}, timeouts{};
     double glideDegrees{}, ilsRange{}, stepSeconds{};
     bool training{}, finished{}, failed{};
+    /** @brief Current limit and last duration in simulated, not wall-clock, seconds. */
+    double elapsedSeconds{},maximumEpisodeSeconds{},lastEpisodeSeconds{};
     ValidationMetrics validation{},lastValidation{};
     std::uint64_t validationCampaigns{};
     double bestScore{};

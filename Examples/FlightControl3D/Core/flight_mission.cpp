@@ -42,6 +42,72 @@ double SegmentDistance(Vec3 point,Vec3 start,Vec3 end) noexcept
     double const fraction=square>0 ? std::clamp(Dot(Subtract(point,start),direction)/square,0.0,1.0) : 0;
     return Distance(point,Add(start,Scale(direction,fraction)));
 }
+
+struct PlanProjection final
+{
+    Vec3 point{};
+    std::size_t segmentEnd{};
+    double distance{std::numeric_limits<double>::max()};
+};
+
+/**
+ * @brief Projects a position onto the closest segment of a closed flight plan.
+ * @param plan Bounded closed flight plan.
+ * @param position World position to project.
+ * @return Closest point, segment endpoint index and three-dimensional distance.
+ */
+PlanProjection ProjectOnPlan(FlightPlan const& plan,Vec3 const& position) noexcept
+{
+    PlanProjection best{};
+    if(plan.count==0) { best.point=position;best.distance=0;return best; }
+    for(std::size_t endIndex=0;endIndex<plan.count;++endIndex)
+    {
+        auto const& start=plan.points[(endIndex+plan.count-1)%plan.count];
+        auto const& end=plan.points[endIndex];
+        auto const direction=Subtract(end,start);
+        double const square=Dot(direction,direction);
+        double const fraction=square>0
+            ? std::clamp(Dot(Subtract(position,start),direction)/square,0.0,1.0) : 0;
+        auto const point=Add(start,Scale(direction,fraction));
+        double const distance=Distance(position,point);
+        if(distance<best.distance)
+        {
+            best={point,endIndex,distance};
+        }
+    }
+    return best;
+}
+
+/**
+ * @brief Advances a bounded lookahead from a projection along a closed flight plan.
+ * @param plan Bounded closed flight plan.
+ * @param projection Valid projection on one of the plan segments.
+ * @param lookahead Non-negative distance to advance along the loop.
+ * @return World point reached after wrapping at most once around the circuit.
+ */
+Vec3 LookAheadOnPlan(FlightPlan const& plan,PlanProjection const& projection,double lookahead) noexcept
+{
+    if(plan.count==0) return projection.point;
+    double circuit{};
+    for(std::size_t endIndex=0;endIndex<plan.count;++endIndex)
+        circuit+=Distance(plan.points[(endIndex+plan.count-1)%plan.count],plan.points[endIndex]);
+    if(circuit<=0) return projection.point;
+    double remaining=std::fmod(std::max(lookahead,0.0),circuit);
+    auto start=projection.point;
+    std::size_t endIndex=projection.segmentEnd;
+    for(std::size_t segment=0;segment<=plan.count;++segment)
+    {
+        auto const& end=plan.points[endIndex];
+        double const length=Distance(start,end);
+        if(length>0 && remaining<=length)
+            return Add(start,Scale(Subtract(end,start),remaining/length));
+        remaining-=length;
+        start=end;
+        endIndex=(endIndex+1)%plan.count;
+    }
+    return start;
+}
+
 double AdvancePatrol(Config const& c,FlightPlan const& plan,MissionState& s,
     AircraftState const& before,AircraftState const& after,Runway const& previousDeck) noexcept
 {
@@ -78,11 +144,23 @@ double AdvancePatrol(Config const& c,FlightPlan const& plan,MissionState& s,
     }
     return std::max(progress,0.0);
 }
-bool Capture(double error,double tolerance,Config const& c,double& hold,bool& captured) noexcept
+/**
+ * @brief Confirms one capture with tolerance hysteresis and a stable hold.
+ * @param eligible True only for finite airborne front-sector geometry and a compatible heading.
+ * @param error Signed angular beam error in radians.
+ * @param tolerance Capture tolerance in radians.
+ * @param c Validated mission timing and hysteresis settings.
+ * @param hold In/out continuous eligible hold duration in seconds.
+ * @param captured In/out irreversible capture flag.
+ * @return True exactly once when this call confirms the capture.
+ */
+bool Capture(bool eligible,double error,double tolerance,Config const& c,double& hold,bool& captured) noexcept
 {
+    if(captured) return false;
+    if(!eligible) { hold=0;return false; }
     if(std::abs(error)<=tolerance) hold+=c.mission.physicsDt;
     else if(std::abs(error)>tolerance*c.mission.captureHysteresis) hold=0;
-    if(!captured && hold>=c.mission.captureHoldSeconds) { captured=true;return true; }
+    if(hold>=c.mission.captureHoldSeconds) { captured=true;return true; }
     return false;
 }
 float Unit(double value) noexcept
@@ -197,18 +275,31 @@ Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& miss
     g.targetSpeed = c.mission.patrolSpeed;
     if (mission.phase == Phase::Patrol && plan.count > 1)
     {
-        std::size_t const next = mission.waypoint % plan.count;
-        g.target = plan.points[next];
-        auto const& previous = plan.points[(next+plan.count-1)%plan.count];
-        double const dn = g.target.north-previous.north, de = g.target.east-previous.east;
-        double const lengthSquared = dn*dn+de*de;
-        double const t = lengthSquared > 0 ? std::clamp(((a.position.north-previous.north)*dn
-            +(a.position.east-previous.east)*de)/lengthSquared, 0.0, 1.0) : 0;
-        g.pathDistance = Distance(a.position, {previous.north+t*dn, previous.east+t*de, previous.up+t*(g.target.up-previous.up)});
+        g.mode=GuidanceMode::Patrol;
+        if(!mission.pathQualified)
+        {
+            auto const projection=ProjectOnPlan(plan,a.position);
+            g.target=LookAheadOnPlan(plan,projection,c.mission.patrolSpeed*c.mission.patrolLookaheadSeconds);
+            g.pathDistance=projection.distance;
+        }
+        else
+        {
+            std::size_t const next = mission.waypoint % plan.count;
+            g.target = plan.points[next];
+            auto const& previous = plan.points[(next+plan.count-1)%plan.count];
+            double const dn = g.target.north-previous.north, de = g.target.east-previous.east;
+            double const lengthSquared = dn*dn+de*de;
+            double const t = lengthSquared > 0 ? std::clamp(((a.position.north-previous.north)*dn
+                +(a.position.east-previous.east)*de)/lengthSquared, 0.0, 1.0) : 0;
+            g.pathDistance = Distance(a.position, {previous.north+t*dn, previous.east+t*de, previous.up+t*(g.target.up-previous.up)});
+        }
     }
     else
     {
         bool const flare = g.height <= c.mission.flareHeightMeters;
+        g.mode=mission.phase==Phase::Rollout ? GuidanceMode::Rollout
+            : flare ? GuidanceMode::Flare
+            : mission.capturedGlide ? GuidanceMode::Glide : GuidanceMode::Localizer;
         g.targetSpeed = mission.phase == Phase::Rollout ? 0 : (flare ? c.mission.flareSpeed : c.mission.approachSpeed);
         g.targetSlope = flare || mission.phase == Phase::Rollout ? 0 : -slope;
         g.target = FromRunway(c.runway, 0, 0, c.runway.thresholdHeightMeters);
@@ -240,14 +331,30 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
     auto g = Guide(c,plan,s,after);
     auto const& previousDeck=previousRunway ? *previousRunway : c.runway;
     double const pathProgress=AdvancePatrol(c,plan,s,before,after,previousDeck);
-    double const glideHeight=c.runway.thresholdHeightMeters-g.along*std::tan(c.mission.glideDegrees*DegreesToRadians);
-    if (s.phase == Phase::Patrol && s.completedLaps>=c.mission.requiredLaps && g.distance <= c.mission.switchDistanceMeters && g.along < 0
-        && std::abs(g.cross)<=c.mission.approachCrossToleranceMeters
-        && std::abs(g.height-glideHeight)<=c.mission.approachAltitudeToleranceMeters
-        && std::abs(WrapAngle(after.heading-c.runway.headingDegrees*DegreesToRadians))<=c.mission.approachHeadingToleranceDegrees*DegreesToRadians)
-        s.phase = Phase::Approach;
-    g = Guide(c,plan,s,after);
     bool const contact = after.weightOnWheels || after.structuralContact || g.height <= c.mission.contactHeightMeters;
+    double const headingError=WrapAngle(after.heading-c.runway.headingDegrees*DegreesToRadians);
+    bool const headingCompatible=std::abs(headingError)<=c.mission.approachHeadingToleranceDegrees*DegreesToRadians;
+    bool enteredLocalizer{},enteredGlide{};
+    if(s.phase!=Phase::Rollout)
+    {
+        bool const captureGeometry=g.ilsValid && headingCompatible && !contact && IsFinite(after);
+        enteredLocalizer=Capture(captureGeometry,g.localizer,c.mission.localizerCaptureDegrees*DegreesToRadians,
+            c,s.localizerHoldSeconds,s.capturedLocalizer);
+        if(s.capturedLocalizer)
+            enteredGlide=Capture(captureGeometry,g.glideError,c.mission.glideCaptureDegrees*DegreesToRadians,
+                c,s.glideHoldSeconds,s.capturedGlide);
+        else s.glideHoldSeconds=0;
+    }
+    else { s.localizerHoldSeconds=0;s.glideHoldSeconds=0; }
+    double const glideHeight=c.runway.thresholdHeightMeters-g.along*std::tan(c.mission.glideDegrees*DegreesToRadians);
+    if(s.phase==Phase::Patrol)
+    {
+        bool const completedPatrol=s.completedLaps>=c.mission.requiredLaps && g.distance<=c.mission.switchDistanceMeters
+            && g.along<0 && std::abs(g.cross)<=c.mission.approachCrossToleranceMeters
+            && std::abs(g.height-glideHeight)<=c.mission.approachAltitudeToleranceMeters && headingCompatible;
+        if(s.capturedLocalizer || completedPatrol) s.phase=Phase::Approach;
+    }
+    g = Guide(c,plan,s,after);
     if(contact && !s.contactAttempted && IsFinite(after))
     {
         s.contactAttempted=true;s.firstWheelContact=after.weightOnWheels;
@@ -309,14 +416,9 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
                 add(Reward::Path,GuidanceReward(c,GuidanceQuality(previousDistance,c.reward.pathTolerance),
                     GuidanceQuality(g.pathDistance,c.reward.pathTolerance),progressToIntercept));
             }
-            if(g.ilsValid)
-            {
-                if(Capture(g.localizer,c.mission.localizerCaptureDegrees*DegreesToRadians,c,s.localizerHoldSeconds,s.capturedLocalizer)) add(Reward::EnterLocalizer,1);
-                if(Capture(g.glideError,c.mission.glideCaptureDegrees*DegreesToRadians,c,s.glideHoldSeconds,s.capturedGlide)) add(Reward::EnterGlide,1);
-            }
-            else { s.localizerHoldSeconds=0;s.glideHoldSeconds=0; }
+            if(enteredLocalizer) add(Reward::EnterLocalizer,1);
+            if(enteredGlide) add(Reward::EnterGlide,1);
         }
-        else { s.localizerHoldSeconds=0;s.glideHoldSeconds=0; }
         if (s.phase != Phase::Rollout)
         {
             add(Reward::Speed,dt*Quality(after.airspeed-g.targetSpeed,c.reward.speedTolerance));

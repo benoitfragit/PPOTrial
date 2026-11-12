@@ -15,6 +15,14 @@ std::array<double, 2> ToRunway(Runway const& runway, Vec3 const& point) noexcept
 FlightPlan MakeFlightPlan(Config const& config) noexcept;
 /** Endpoint of the closest 3D segment, used for initial rally and missed-gate recovery. */
 std::size_t ClosestPatrolWaypoint(FlightPlan const& plan,Vec3 position) noexcept;
+/**
+ * @brief Resolves the active racetrack, LOC, glide, flare or rollout reference.
+ * @param config Validated episode configuration and instantaneous runway pose.
+ * @param plan Closed racetrack bound to the current runway pose.
+ * @param mission Current phase, capture state and ordered waypoint progress.
+ * @param aircraft Current finite aircraft state.
+ * @return Value-only guidance consumed by observations, rewards and rendering.
+ */
 Guidance Guide(Config const& config, FlightPlan const& plan,
     MissionState const& mission, AircraftState const& aircraft) noexcept;
 /** Called after each FDM substep; landing limits also inspect the pre-impact state. */

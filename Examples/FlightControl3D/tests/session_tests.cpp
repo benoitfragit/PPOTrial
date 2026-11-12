@@ -41,7 +41,7 @@ void DesktopContinuation(Config c)
     {std::ofstream broken(store.Latest());broken<<"broken";}
     Rejects([&] {FlightSession invalid(c,true,directory.path);},"corrupt latest must not silently create a new policy");
 }
-enum class TrainingContractChange { HorizontalStarts, Rewards, LegacyStarts, AlignedProbability };
+enum class TrainingContractChange { HorizontalStarts, Rewards, LegacyStarts, LegacyGuidance, AlignedProbability };
 void ChangedTrainingContract(Config c,TrainingContractChange change)
 {
     c.training.rolloutSteps=8;c.training.minibatch=4;c.training.epochs=1;c.training.maxUpdates=1;
@@ -59,6 +59,12 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     else if(change==TrainingContractChange::HorizontalStarts)
     {signature["initial"]["distanceMeters"]={7000,14000};signature["initial"]["bearingDegrees"]={-180,180};}
     else if(change==TrainingContractChange::LegacyStarts) signature["initial"].erase("runwayAlignedProbability");
+    else if(change==TrainingContractChange::LegacyGuidance)
+    {
+        signature.erase("guidanceVersion");
+        signature["mission"].erase("patrolLookaheadSeconds");
+        signature["mission"]["approachHeadingToleranceDegrees"]=60;
+    }
     else signature["initial"]["runwayAlignedProbability"]=0.25;
     old.checkpointSignature=signature.dump();
     FlightModelStore oldStore(old,directory.path);
@@ -104,7 +110,8 @@ int main()
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
         DesktopContinuation(c);
         for(auto change : {TrainingContractChange::HorizontalStarts,TrainingContractChange::Rewards,
-            TrainingContractChange::LegacyStarts,TrainingContractChange::AlignedProbability}) ChangedTrainingContract(c,change);
+            TrainingContractChange::LegacyStarts,TrainingContractChange::LegacyGuidance,
+            TrainingContractChange::AlignedProbability}) ChangedTrainingContract(c,change);
         c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
         c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;
         TemporaryDirectory directory("flight-session-");

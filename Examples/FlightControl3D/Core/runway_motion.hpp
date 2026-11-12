@@ -22,5 +22,12 @@ struct RunwayMotion final
 };
 Runway RunwayAt(RunwayMotion const& motion, double seconds) noexcept;
 RunwayMotion SampleRunway(Config const& config, std::mt19937& rng);
+/**
+ * @brief Samples an inbound LOC/glide, left-intercept or right-intercept start.
+ * @param config Validated episode configuration.
+ * @param runway Instantaneous runway pose used as the local frame.
+ * @param rng Episode random generator advanced deterministically.
+ * @return Finite airborne state expressed in the world tangent frame.
+ */
 AircraftState SampleAircraft(Config const& config, Runway const& runway, std::mt19937& rng);
 } // namespace ppo::examples::flight

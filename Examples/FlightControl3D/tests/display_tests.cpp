@@ -59,7 +59,10 @@ int main()
         FlightSnapshot state{};
         state.aircraft.airspeed=61.5; state.aircraft.pitch=8*DegreesToRadians;
         state.guidance.targetSpeed=56; state.guidance.targetSlope=-3*DegreesToRadians;
+        state.guidance.mode=GuidanceMode::Localizer;
         state.guidance.relativeVelocity={100,0,-100*std::tan(2*DegreesToRadians)};
+        state.elapsedSeconds=12.5;state.maximumEpisodeSeconds=900;
+        state.lastEpisode.outcome=Outcome::Crash;state.lastEpisodeSeconds=7.5;
         ControlPositions positions{};
         auto text=Frame(state,positions);
         Check(text.controls.find("[x] LOC")!=std::string::npos && text.controls.find("[x] GLIDE")!=std::string::npos,
@@ -71,6 +74,10 @@ int main()
             "instruments compare target and actual CAS");
         Check(text.instruments.find("-3.00")!=std::string::npos && text.instruments.find("-2.00")!=std::string::npos,
             "instruments compare target and actual flight-path slope, not pitch");
+        Check(text.instruments.find("LOC acquisition")!=std::string::npos
+            && text.instruments.find("12.5 / 900")!=std::string::npos
+            && text.instruments.find("Crash after 7.5")!=std::string::npos,
+            "instruments identify guidance source and simulated episode durations");
         Check(text.instruments.find("Episodes")==std::string::npos && text.instruments.find("BEST")==std::string::npos
             && text.instruments.find("Actor")==std::string::npos,"training data is not duplicated in flight instruments");
         text=Click(state,positions,positions.localizer);

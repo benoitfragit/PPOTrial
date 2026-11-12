@@ -39,6 +39,25 @@ char const* PhaseName(Phase p) noexcept
 { return p==Phase::Patrol ? "Hippodrome" : p==Phase::Approach ? "ILS / flare" : "Rollout"; }
 char const* OutcomeName(Outcome p) noexcept
 { return p==Outcome::Flying ? "In flight" : p==Outcome::Stopped ? "Stopped on runway" : p==Outcome::Crash ? "Crash" : "Time limit"; }
+char const* GuidanceModeName(GuidanceMode mode) noexcept
+{
+    switch(mode)
+    {
+    case GuidanceMode::Patrol: return "Hippodrome";
+    case GuidanceMode::Localizer: return "LOC acquisition";
+    case GuidanceMode::Glide: return "GLIDE tracking";
+    case GuidanceMode::Flare: return "Flare";
+    case GuidanceMode::Rollout: return "Runway rollout";
+    }
+    return "Unknown";
+}
+Color GuidanceColor(GuidanceMode mode) noexcept
+{
+    if(mode==GuidanceMode::Patrol) return {65,158,220,255};
+    if(mode==GuidanceMode::Localizer) return LocalizerColor;
+    if(mode==GuidanceMode::Glide) return GlideColor;
+    return {220,230,240,255};
+}
 }
 void DrawFlightScene(FlightSnapshot const& s,RenderTexture2D const& target)
 {
@@ -84,7 +103,9 @@ void DrawFlightScene(FlightSnapshot const& s,RenderTexture2D const& target)
         Segment(FromRunway(r,along,0,0.1),FromRunway(r,along+r.lengthMeters/48,0,0.1),WHITE);
     }
     for(std::size_t j=0;j<s.plan.count;++j) Segment(s.plan.points[j],s.plan.points[(j+1)%s.plan.count],{65,158,220,255});
-    Segment(s.aircraft.position,s.guidance.target,{220,230,240,255});
+    Color const guidanceColor=GuidanceColor(s.guidance.mode);
+    Segment(s.aircraft.position,s.guidance.target,guidanceColor);
+    DrawSphere(World(s.guidance.target),0.035F,guidanceColor);
     Color const color=s.mission.outcome==Outcome::Crash ? RED : SKYBLUE;
     auto const nose=AircraftPoint(s.aircraft,4.5,0,0),tail=AircraftPoint(s.aircraft,-4.5,0,0);
     DrawCylinderEx(World(nose),World(tail),0.006F,0.004F,8,color);
@@ -122,6 +143,10 @@ void DrawFlightInstruments(FlightSnapshot const& s)
     if (!ImGui::Begin("FlightControl3D")) { ImGui::End(); return; }
     if (s.failed) ImGui::TextColored({1,0.3F,0.3F,1},"Simulation stopped: see FLIGHT_ERROR in the log.");
     ImGui::Text("%s | %s%s",PhaseName(s.mission.phase),OutcomeName(s.mission.outcome),s.finished ? " | Complete" : "");
+    ImGui::Text("Guidance: %s",GuidanceModeName(s.guidance.mode));
+    ImGui::Text("Episode time %.1f / %.0f simulated s",s.elapsedSeconds,s.maximumEpisodeSeconds);
+    if(s.lastEpisode.outcome!=Outcome::Flying)
+        ImGui::Text("Last episode: %s after %.1f simulated s",OutcomeName(s.lastEpisode.outcome),s.lastEpisodeSeconds);
     if(ImGui::BeginTable("##flight-targets",3,ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH))
     {
         ImGui::TableSetupColumn("Measure"); ImGui::TableSetupColumn("Target"); ImGui::TableSetupColumn("Actual");

@@ -75,23 +75,31 @@ RunwayMotion SampleRunway(Config const& c, std::mt19937& rng)
 AircraftState SampleAircraft(Config const& c, Runway const& runway, std::mt19937& rng)
 {
     auto const& i=c.initial;
-    // At zero probability keep the original random sequence, including broad starts.
-    bool const aligned=i.runwayAlignedProbability>0
-        && (i.runwayAlignedProbability==1 || Draw({0,1},rng)<i.runwayAlignedProbability);
+    bool const onGlide=i.runwayAlignedProbability==1
+        || (i.runwayAlignedProbability>0 && Draw({0,1},rng)<i.runwayAlignedProbability);
     double const distance=Draw(i.distanceMeters,rng);
-    double const bearing=aligned ? 0 : Draw(i.bearingDegrees,rng)*DegreesToRadians;
-    double const height=Draw(i.heightMeters,rng);
+    double const side=onGlide ? 0 : (Draw({0,1},rng)<0.5 ? -1.0 : 1.0);
+    double const bearing=side*Draw(i.bearingDegrees,rng)*DegreesToRadians;
     AircraftState aircraft{};
     auto const local=Add(Scale(RunwayForward(runway),-distance*std::cos(bearing)),Scale(RunwayRight(runway),distance*std::sin(bearing)));
     aircraft.position=Add(runway.origin,local);
     // Height is above the instantaneous runway tangent plane.
+    double const localAlong=-distance*std::cos(bearing);
+    double const height=onGlide
+        ? runway.thresholdHeightMeters-localAlong*std::tan(c.mission.glideDegrees*DegreesToRadians)
+        : Draw(i.heightMeters,rng);
     aircraft.position=Add(aircraft.position,Scale(RunwayNormal(runway),height));
     aircraft.airspeed=Draw(i.speedMps,rng);
-    double const headingOffset=aligned ? 0 : Draw(i.headingOffsetDegrees,rng);
-    aircraft.heading=WrapAngle((runway.headingDegrees+headingOffset)*DegreesToRadians);
+    if(onGlide) aircraft.heading=WrapAngle(runway.headingDegrees*DegreesToRadians);
+    else
+    {
+        auto const threshold=Add(runway.origin,Scale(RunwayNormal(runway),runway.thresholdHeightMeters));
+        aircraft.heading=WrapAngle(std::atan2(threshold.east-aircraft.position.east,
+            threshold.north-aircraft.position.north)+Draw(i.headingOffsetDegrees,rng)*DegreesToRadians);
+    }
     aircraft.roll=Draw(i.rollDegrees,rng)*DegreesToRadians;
     aircraft.pitch=Draw(i.pitchDegrees,rng)*DegreesToRadians;
-    double const slope=Draw(i.slopeDegrees,rng)*DegreesToRadians;
+    double const slope=(onGlide ? -c.mission.glideDegrees : Draw(i.slopeDegrees,rng))*DegreesToRadians;
     aircraft.velocity={aircraft.airspeed*std::cos(slope)*std::cos(aircraft.heading),
         aircraft.airspeed*std::cos(slope)*std::sin(aircraft.heading),aircraft.airspeed*std::sin(slope)};
     return aircraft;

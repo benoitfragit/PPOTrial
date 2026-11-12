@@ -5,9 +5,10 @@ int main()
     try
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
-        c.initial.distanceMeters={10000,10000}; c.initial.bearingDegrees={0,0}; c.initial.heightMeters={600,600};
+        c.initial.distanceMeters={10000,10000}; c.initial.bearingDegrees={8,8}; c.initial.heightMeters={600,600};
         c.initial.headingOffsetDegrees={0,0}; c.initial.rollDegrees={0,0}; c.initial.pitchDegrees={2,2};
         c.initial.slopeDegrees={0,0}; c.initial.speedMps={65,65};
+        c.initial.approach=true;c.initial.runwayAlignedProbability=1;
         auto& d=c.runwayRandomization;
         d.northMeters={0,0}; d.eastMeters={0,0}; d.headingOffsetDegrees={0,0}; d.deckHeightMeters={15,15};
         d.speedMps={0,0}; d.heaveAmplitudeMeters={0,0}; d.pitchAmplitudeDegrees={0,0}; d.rollAmplitudeDegrees={0,0};
@@ -15,8 +16,10 @@ int main()
         auto const obs=env.Reset(); auto const initial=env.Aircraft();
         Check(env.Mission().phase==Phase::Approach,"default real FDM reset prioritizes ILS without a compulsory patrol lap");
         Check(IsFinite(initial) && !initial.weightOnWheels && Near(initial.gearPosition,0,0.01),"initial gear must really be up");
-        Check(Near(initial.position.up,615,0.02),"JSBSim altitude conversion");
-        auto const point=FromRunway(env.Settings().runway,-10000,0,600);
+        double const initialHeight=env.Settings().runway.thresholdHeightMeters
+            +10000*std::tan(c.mission.glideDegrees*DegreesToRadians);
+        auto const point=FromRunway(env.Settings().runway,-10000,0,initialHeight);
+        Check(Near(initial.position.up,point.up,0.02),"JSBSim altitude conversion");
         Check(Near(initial.position.north,point.north,0.02) && Near(initial.position.east,point.east,0.02),"JSBSim geodetic conversion");
         for(float value:obs) Check(std::isfinite(value) && std::abs(value)<=1,"JSBSim finite observation");
         auto const action=Controls{0,0,0,c.initial.throttle,0,true};
@@ -47,7 +50,9 @@ int main()
         {
             randomized.Reset();
             auto const local=DeckCoordinates(randomized.Settings().runway,randomized.Aircraft().position);
-            Check(local.up>=random.initial.heightMeters.minimum-0.1 && local.up<=random.initial.heightMeters.maximum+0.1,"real FDM randomized airborne height");
+            double const expectedHeight=randomized.Settings().runway.thresholdHeightMeters
+                -local.north*std::tan(random.mission.glideDegrees*DegreesToRadians);
+            Check(Near(local.up,expectedHeight,0.1),"real FDM reset preserves the configured glide height");
             Check(local.north<0 && Near(local.east,0,0.02)
                 && Near(WrapAngle(randomized.Aircraft().heading-randomized.Settings().runway.headingDegrees*DegreesToRadians),0,1e-6),
                 "native JSBSim reset preserves runway centreline and inbound heading on moving tilted runways");

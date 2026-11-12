@@ -79,7 +79,7 @@ Config LoadConfig(std::filesystem::path const& path)
         "approachHeadingToleranceDegrees", "approachCrossToleranceMeters", "approachAltitudeToleranceMeters", "patrolSpeed", "approachSpeed", "flareSpeed", "flareHeightMeters",
         "maxTouchdownSink", "maxTouchdownSpeed", "maxTouchdownRollDegrees", "maxTouchdownPitchDegrees", "minTouchdownPitchDegrees", "maxTouchdownHeadingDegrees",
         "gearDownMinimum", "contactHeightMeters", "stoppedSpeed", "stoppedHoldSeconds", "racetrackCenterAlong", "racetrackCenterCross",
-        "racetrackHalfStraight", "racetrackRadius", "patrolAltitude", "waypointRadius", "turnSamples", "straightSamples"});
+        "racetrackHalfStraight", "racetrackRadius", "patrolAltitude", "waypointRadius", "patrolLookaheadSeconds", "turnSamples", "straightSamples"});
     auto& mission = config.mission;
 #define READ_M(field) mission.field = Number(m, #field)
     READ_M(physicsDt); READ_M(maxSeconds); READ_M(maxDistanceMeters); READ_M(maxAltitudeMeters);
@@ -91,7 +91,7 @@ Config LoadConfig(std::filesystem::path const& path)
     READ_M(maxTouchdownRollDegrees); READ_M(maxTouchdownPitchDegrees); READ_M(minTouchdownPitchDegrees); READ_M(maxTouchdownHeadingDegrees);
     READ_M(gearDownMinimum); READ_M(contactHeightMeters); READ_M(stoppedSpeed); READ_M(stoppedHoldSeconds);
     READ_M(racetrackCenterAlong); READ_M(racetrackCenterCross); READ_M(racetrackHalfStraight);
-    READ_M(racetrackRadius); READ_M(patrolAltitude); READ_M(waypointRadius);
+    READ_M(racetrackRadius); READ_M(patrolAltitude); READ_M(waypointRadius); READ_M(patrolLookaheadSeconds);
 #undef READ_M
     mission.actionSubsteps = Integer(m, "actionSubsteps", 100);
     mission.turnSamples = Integer(m, "turnSamples", MaximumWaypoints);
@@ -156,6 +156,7 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics.erase("evaluation");
     semantics["distribution"] = {training.minLogStd,training.maxLogStd};
     semantics["rewardVersion"] = 3;
+    semantics["guidanceVersion"] = 2;
     config.checkpointSignature = semantics.dump();
     Validate(config);
     return config;
@@ -173,8 +174,9 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
             || !(*signature)["initial"].contains("approach") || !(*signature)["initial"]["approach"].is_boolean()) return false;
         if(signature->contains("rewardVersion") && (*signature)["rewardVersion"]!=2
             && (*signature)["rewardVersion"]!=3) return false;
+        if(signature->contains("guidanceVersion") && (*signature)["guidanceVersion"]!=2) return false;
     }
-    for(char const* name : {"distanceMeters","bearingDegrees"})
+    for(char const* name : {"distanceMeters","bearingDegrees","headingOffsetDegrees"})
     {
         if(!previous["initial"].contains(name) || !next["initial"].contains(name)) return false;
         previous["initial"].erase(name); next["initial"].erase(name);
@@ -183,8 +185,13 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
     // reused: production compares the complete, unmodified signature instead.
     previous["initial"].erase("runwayAlignedProbability"); next["initial"].erase("runwayAlignedProbability");
     previous["initial"].erase("approach"); next["initial"].erase("approach");
+    if(!previous.contains("mission") || !next.contains("mission")
+        || !previous["mission"].is_object() || !next["mission"].is_object()) return false;
+    previous["mission"].erase("patrolLookaheadSeconds"); next["mission"].erase("patrolLookaheadSeconds");
+    previous["mission"].erase("approachHeadingToleranceDegrees"); next["mission"].erase("approachHeadingToleranceDegrees");
     previous.erase("reward"); next.erase("reward");
     previous.erase("rewardVersion"); next.erase("rewardVersion");
+    previous.erase("guidanceVersion"); next.erase("guidanceVersion");
     return previous==next;
 }
 
@@ -221,7 +228,8 @@ void Validate(Config const& c)
         && m.maxTouchdownHeadingDegrees>0 && m.maxTouchdownHeadingDegrees<90
         && m.gearDownMinimum > 0 && m.gearDownMinimum <= 1 && m.contactHeightMeters > 0 && m.stoppedHoldSeconds > 0, "landing limits");
     Require(m.racetrackHalfStraight > 0 && m.racetrackRadius > 0 && m.patrolAltitude > m.flareHeightMeters
-        && m.waypointRadius > 0 && m.turnSamples >= 4 && m.straightSamples >= 1
+        && m.waypointRadius > 0 && m.patrolLookaheadSeconds > 0 && m.patrolLookaheadSeconds <= 60
+        && m.turnSamples >= 4 && m.straightSamples >= 1
         && 2*(m.turnSamples + m.straightSamples) <= MaximumWaypoints, "racetrack geometry/capacity");
     double const minimumSegment=std::min(2*m.racetrackHalfStraight/static_cast<double>(m.straightSamples),
         2*m.racetrackRadius*std::sin(Pi/(2*static_cast<double>(m.turnSamples))));
@@ -232,10 +240,14 @@ void Validate(Config const& c)
         && i.heightMeters.minimum>m.flareHeightMeters && i.heightMeters.maximum<m.maxAltitudeMeters
         && i.speedMps.minimum>m.flareSpeed && i.speedMps.maximum<=c.normalization.speed,
         "bounded airborne spawn distance/height/speed");
-    Require(i.bearingDegrees.minimum>=-180 && i.bearingDegrees.maximum<=180
+    Require(i.bearingDegrees.minimum>0 && i.bearingDegrees.maximum<90
         && i.headingOffsetDegrees.minimum>=-180 && i.headingOffsetDegrees.maximum<=180
         && i.rollDegrees.minimum>=-30 && i.rollDegrees.maximum<=30 && i.pitchDegrees.minimum>=-15 && i.pitchDegrees.maximum<=15
         && i.slopeDegrees.minimum>=-10 && i.slopeDegrees.maximum<=10,"reasonable spawn attitude/course");
+    double const maximumHeadingJitter=std::max(std::abs(i.headingOffsetDegrees.minimum),std::abs(i.headingOffsetDegrees.maximum));
+    Require(maximumHeadingJitter<i.bearingDegrees.minimum
+        && i.bearingDegrees.maximum+maximumHeadingJitter<=m.approachHeadingToleranceDegrees,
+        "left/right starts must point inward within the LOC capture heading envelope");
     Require(i.throttle >= 0 && i.throttle <= 1 && i.flap >= 0 && i.flap <= 1 && i.approachFlap>=0 && i.approachFlap<=1
         && i.rolloutFlap>=0 && i.rolloutFlap<=1 && i.propeller >= 0 && i.propeller <= 1, "initial and phase controls");
     Require(d.heaveAmplitudeMeters.minimum>=0 && d.heaveAmplitudeMeters.maximum<=5 && d.wavePeriodSeconds.minimum>=3
@@ -247,7 +259,12 @@ void Validate(Config const& c)
         && std::max(std::abs(d.eastMeters.minimum),std::abs(d.eastMeters.maximum))<=m.maxDistanceMeters,
         "bounded runway spawn position/course");
     double const maximumTilt=std::sin(d.pitchAmplitudeDegrees.maximum*DegreesToRadians)+std::sin(d.rollAmplitudeDegrees.maximum*DegreesToRadians);
-    Require(i.heightMeters.minimum-i.distanceMeters.maximum*maximumTilt+d.deckHeightMeters.minimum-d.heaveAmplitudeMeters.maximum>d.seaHeightMeters,
+    double const minimumGlideHeight=r.thresholdHeightMeters+i.distanceMeters.minimum*std::tan(m.glideDegrees*DegreesToRadians);
+    double const maximumGlideHeight=r.thresholdHeightMeters+i.distanceMeters.maximum*std::tan(m.glideDegrees*DegreesToRadians);
+    Require(minimumGlideHeight>m.flareHeightMeters && maximumGlideHeight<m.maxAltitudeMeters,
+        "LOC/glide starts must remain inside the airborne altitude envelope");
+    double const minimumInitialHeight=std::min(i.heightMeters.minimum,minimumGlideHeight);
+    Require(minimumInitialHeight-i.distanceMeters.maximum*maximumTilt+d.deckHeightMeters.minimum-d.heaveAmplitudeMeters.maximum>d.seaHeightMeters,
         "all randomized aircraft starts must remain above the sea");
     Require(d.deckHeightMeters.minimum-d.heaveAmplitudeMeters.maximum-r.lengthMeters*std::sin(d.pitchAmplitudeDegrees.maximum*DegreesToRadians)/2
         > d.seaHeightMeters,"deck must remain above sea");

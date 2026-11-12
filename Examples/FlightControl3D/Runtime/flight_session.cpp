@@ -74,6 +74,9 @@ FlightSnapshot FlightSession::Snapshot() const noexcept
     FlightSnapshot state{active.Settings().runway,active.Plan(),active.Aircraft(),active.Mission(),lastEpisode_,
         active.CurrentGuidance(),controls_,lastStep_,learner_.Stats(),episodes_,touchdowns_,stops_,crashes_,timeouts_,
         config_.mission.glideDegrees,config_.mission.ilsRangeMeters,config_.StepSeconds(),training_,finished_,false};
+    state.elapsedSeconds=static_cast<double>(state.mission.steps)*active.Settings().mission.physicsDt;
+    state.maximumEpisodeSeconds=active.Settings().mission.maxSeconds;
+    state.lastEpisodeSeconds=static_cast<double>(state.lastEpisode.steps)*config_.mission.physicsDt;
     state.validation=validation_;state.lastValidation=lastValidation_;state.validationCampaigns=validationCampaigns_;
     state.validating=static_cast<bool>(validationEnvironment_);state.hasBest=best_.has_value();state.bestScore=best_ ? best_->Score() : 0;
     state.localizerCaptureDegrees=config_.mission.localizerCaptureDegrees;

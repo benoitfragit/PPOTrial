@@ -35,7 +35,7 @@ void Geometry(Config const& c)
     Check(g.ilsValid && Near(g.localizer,0) && Near(g.glideError,0),"on LOC/glide");
     Check(!s.capturedLocalizer && !s.capturedGlide,"captures require a stable hold");
     double captures=first.rewards[5]+first.rewards[6];
-    for(std::size_t i=0;i<static_cast<std::size_t>(std::ceil(c.mission.captureHoldSeconds/c.mission.physicsDt))+1;++i)
+    for(std::size_t i=0;i<2*static_cast<std::size_t>(std::ceil(c.mission.captureHoldSeconds/c.mission.physicsDt))+2;++i)
     { auto const stable=AdvanceMission(c,plan,s,a,a);captures+=stable.rewards[5]+stable.rewards[6]; }
     Check(s.capturedLocalizer && s.capturedGlide && Near(captures,c.reward.weights[5]+c.reward.weights[6]),"confirmed one-shot capture events");
     auto const again=AdvanceMission(c,plan,s,a,a);
@@ -114,7 +114,7 @@ void Configuration()
 {
     std::ifstream source(PPO_FLIGHT_CONFIG); nlohmann::json valid; source>>valid;
     TemporaryDirectory temporary("flight-config-"); auto const path=temporary.path/"config.json";
-    for (int test=0; test<12; ++test)
+    for (int test=0; test<14; ++test)
     {
         auto json=valid;
         if (test==0) json["normalization"]["speed"]=0;
@@ -129,11 +129,13 @@ void Configuration()
         if (test==9) json["initial"]["runwayAlignedProbability"]=1.01;
         if (test==10) json["initial"]["runwayAlignedProbability"]=true;
         if (test==11) json["initial"].erase("runwayAlignedProbability");
+        if (test==12) json["initial"]["bearingDegrees"]={-20,20};
+        if (test==13) json["mission"]["patrolLookaheadSeconds"]=0;
         { std::ofstream stream(path); stream<<json; }
         Rejects([&] { LoadConfig(path); },"invalid JSON accepted");
     }
     auto c=LoadConfig(PPO_FLIGHT_CONFIG);
-    Check(c.initial.runwayAlignedProbability==0.5,"default aligned-start probability");
+    Check(Near(c.initial.runwayAlignedProbability,1.0/3.0),"balanced LOC/glide-start probability");
     for(double probability : {std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity()})
     {
         c.initial.runwayAlignedProbability=probability;
@@ -171,11 +173,11 @@ void OrderedNavigation(Config const& config)
 void AlignedStarts(Config c)
 {
     std::array<double,4> const headings{0,90,181,359};
-    for(double probability : {0.0,1.0,0.5})
+    for(double probability : {0.0,1.0,1.0/3.0})
     {
         c.initial.runwayAlignedProbability=probability;
         std::mt19937 rng(279),same(279);
-        std::size_t alignedCount=0,left=0,right=0,leftHeading=0,rightHeading=0,away=0;
+        std::size_t alignedCount=0,left=0,right=0;
         double firstDistance=0,firstSpeed=0,firstRoll=0;
         bool variedDistance=false,variedSpeed=false,variedRoll=false;
         for(std::size_t sample=0;sample<1000;++sample)
@@ -190,16 +192,19 @@ void AlignedStarts(Config c)
             if(aligned)
             {
                 ++alignedCount;
-                Check(local.north<0 && Dot(aircraft.velocity,RunwayForward(runway))>0,
-                    "aligned starts are before the threshold and fly towards the runway");
+                double const expectedHeight=runway.thresholdHeightMeters-local.north*std::tan(c.mission.glideDegrees*DegreesToRadians);
+                double const slope=std::atan2(aircraft.velocity.up,std::hypot(aircraft.velocity.north,aircraft.velocity.east));
+                Check(local.north<0 && Near(local.up,expectedHeight,1e-7)
+                    && Near(slope,-c.mission.glideDegrees*DegreesToRadians,1e-10)
+                    && Dot(aircraft.velocity,RunwayForward(runway))>0,
+                    "aligned starts are inbound on the exact LOC/glide geometry");
             }
             else
             {
                 if(local.east<0) ++left;
                 if(local.east>0) ++right;
-                if(offset<0) ++leftHeading;
-                if(offset>0) ++rightHeading;
-                if(std::cos(offset)<0) ++away;
+                Check(local.east*offset<0 && std::cos(offset)>0,
+                    "left/right starts point inward and never away from the runway");
             }
             double const distance=std::hypot(local.north,local.east);
             Check(distance>=c.initial.distanceMeters.minimum-1e-7 && distance<=c.initial.distanceMeters.maximum+1e-7
@@ -218,10 +223,43 @@ void AlignedStarts(Config c)
         Check(variedDistance && variedSpeed && variedRoll,"aligned starts must retain the other random parameters");
         if(probability==0) Check(alignedCount==0,"zero probability retains broad random starts");
         if(probability==1) Check(alignedCount==1000,"unit probability aligns every start on all runway headings");
-        if(probability==0.5) Check(alignedCount>400 && alignedCount<600,"half-probability produces both spawn components");
-        if(probability<1) Check(left>100 && right>100 && leftHeading>100 && rightHeading>100 && away>100,
-            "broad starts retain both sides, both heading signs and reversed courses");
+        if(probability==1.0/3.0) Check(alignedCount>250 && alignedCount<420,
+            "balanced probability produces the LOC/glide, left and right families");
+        if(probability<1) Check(left>100 && right>100,"side starts are balanced across the runway");
     }
+}
+
+void CapturePriority(Config const& c)
+{
+    auto const plan=MakeFlightPlan(c);
+    auto onBeam=Approach(c,-6000);
+    MissionState crossing{};
+    auto perpendicular=onBeam;perpendicular.heading+=Pi/2;
+    std::size_t const holdSteps=static_cast<std::size_t>(std::ceil(c.mission.captureHoldSeconds/c.mission.physicsDt))+1;
+    for(std::size_t step=0;step<holdSteps;++step) AdvanceMission(c,plan,crossing,perpendicular,perpendicular);
+    Check(crossing.phase==Phase::Patrol && !crossing.capturedLocalizer,
+        "crossing the localizer with an incompatible heading cannot capture it");
+
+    MissionState inbound{};
+    double localizerReward{},glideReward{};
+    for(std::size_t step=0;step<holdSteps;++step)
+    {
+        auto const result=AdvanceMission(c,plan,inbound,onBeam,onBeam);
+        localizerReward+=result.rewards[static_cast<std::size_t>(Reward::EnterLocalizer)];
+        glideReward+=result.rewards[static_cast<std::size_t>(Reward::EnterGlide)];
+    }
+    Check(inbound.phase==Phase::Approach && inbound.capturedLocalizer && !inbound.capturedGlide
+        && Guide(c,plan,inbound,onBeam).mode==GuidanceMode::Localizer
+        && Near(localizerReward,c.reward.weights[static_cast<std::size_t>(Reward::EnterLocalizer)]) && glideReward==0,
+        "confirmed LOC capture overrides the secondary racetrack before a completed lap");
+    for(std::size_t step=0;step<holdSteps;++step)
+    {
+        auto const result=AdvanceMission(c,plan,inbound,onBeam,onBeam);
+        glideReward+=result.rewards[static_cast<std::size_t>(Reward::EnterGlide)];
+    }
+    Check(inbound.capturedGlide && Guide(c,plan,inbound,onBeam).mode==GuidanceMode::Glide
+        && Near(glideReward,c.reward.weights[static_cast<std::size_t>(Reward::EnterGlide)]),
+        "glide capture follows LOC capture and changes the active guidance source");
 }
 void RandomizationAndMotion(Config const& c)
 {
@@ -245,7 +283,11 @@ void RandomizationAndMotion(Config const& c)
             nearest=std::min(nearest,std::sqrt(Dot(delta,delta)));
         }
         Check(local.north<0 && nearest<2000,"default starts stay on approach side and near the racetrack");
-        Check(local.up>=c.initial.heightMeters.minimum-1e-7 && local.up<=c.initial.heightMeters.maximum+1e-7,"random spawn height bounds");
+        if(std::abs(local.east)<1e-7)
+            Check(Near(local.up,c.runway.thresholdHeightMeters-local.north*std::tan(c.mission.glideDegrees*DegreesToRadians),1e-7),
+                "centreline spawn is exactly on glide");
+        else Check(local.up>=c.initial.heightMeters.minimum-1e-7 && local.up<=c.initial.heightMeters.maximum+1e-7,
+            "left/right spawn height bounds");
         Check(aircraft.airspeed>=c.initial.speedMps.minimum && aircraft.airspeed<=c.initial.speedMps.maximum,"random spawn speed bounds");
         Check(aircraft.roll>=c.initial.rollDegrees.minimum*DegreesToRadians && aircraft.roll<=c.initial.rollDegrees.maximum*DegreesToRadians,"random roll bounds");
         Check(aircraft.pitch>=c.initial.pitchDegrees.minimum*DegreesToRadians && aircraft.pitch<=c.initial.pitchDegrees.maximum*DegreesToRadians,"random pitch bounds");
@@ -322,7 +364,7 @@ void DisplayReferences(Config const& config)
 }
 int main()
 {
-    try { auto const c=LoadConfig(PPO_FLIGHT_CONFIG); Geometry(c); Landing(c); Configuration(); OrderedNavigation(c); AlignedStarts(c); RandomizationAndMotion(c); DisplayReferences(c); }
+    try { auto const c=LoadConfig(PPO_FLIGHT_CONFIG); Geometry(c); Landing(c); Configuration(); OrderedNavigation(c); AlignedStarts(c); CapturePriority(c); RandomizationAndMotion(c); DisplayReferences(c); }
     catch(std::exception const& e) { std::cerr<<e.what()<<'\n'; return 1; }
     std::cout<<"Flight mission/configuration regressions passed\n";
 }

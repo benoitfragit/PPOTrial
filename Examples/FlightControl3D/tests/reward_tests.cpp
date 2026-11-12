@@ -112,8 +112,8 @@ void ProgressAndAmplitude(Config const& c)
     double const captures=c.reward.weights[5]+c.reward.weights[6];
     Check(maximumIls+maximumSecondary+captures<c.reward.weights[7],
         "continuous ILS shaping plus captures remains below touchdown bonus");
-    Check(c.initial.approach && c.reward.weights[7]==100 && c.reward.weights[8]==100 && c.reward.weights[9]==-100,
-        "default mission prioritizes approach and preserves outcome amplitudes");
+    Check(!c.initial.approach && c.reward.weights[7]==100 && c.reward.weights[8]==100 && c.reward.weights[9]==-100,
+        "default mission keeps the racetrack as fallback and preserves outcome amplitudes");
 }
 void SecondaryGuidance(Config const& c)
 {
@@ -121,6 +121,12 @@ void SecondaryGuidance(Config const& c)
     Check(ClosestPatrolWaypoint(plan,plan.points[0])==1 && ClosestPatrolWaypoint(plan,plan.points[1])==2,
         "rally from a waypoint targets the following segment endpoint");
     Check(ClosestPatrolWaypoint({}, {})==0,"empty flightplan recovery is bounded");
+    MissionState rally{};
+    auto const rallyGuidance=Guide(c,plan,rally,plan.points[0]);
+    Check(rallyGuidance.mode==GuidanceMode::Patrol && rallyGuidance.pathDistance==0
+        && std::hypot(rallyGuidance.target.north-plan.points[0].north,
+            rallyGuidance.target.east-plan.points[0].east)>0,
+        "rally guidance projects onto the racetrack and anticipates forward like Blue patrol");
     MissionState patrol{};
     auto const midpoint=Scale(Add(plan.points[0],plan.points[1]),0.5);
     auto before=At(c,0,0,600);before.position=Add(midpoint,Scale(RunwayRight(c.runway),-1500));

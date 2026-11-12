@@ -38,6 +38,8 @@ struct Controls final
 
 enum class Phase : std::uint8_t { Patrol, Approach, Rollout };
 enum class Outcome : std::uint8_t { Flying, Stopped, Crash, Timeout };
+/** @brief Active navigation reference exposed to the policy snapshot and renderer. */
+enum class GuidanceMode : std::uint8_t { Patrol, Localizer, Glide, Flare, Rollout };
 
 struct Guidance final
 {
@@ -45,6 +47,8 @@ struct Guidance final
     double targetSpeed{}, targetSlope{}, pathDistance{}, courseError{};
     double height{};
     Vec3 target{}, relativeVelocity{};
+    /** @brief Source that owns the current target point and speed/slope commands. */
+    GuidanceMode mode{GuidanceMode::Patrol};
     bool ilsValid{};
 };
 
