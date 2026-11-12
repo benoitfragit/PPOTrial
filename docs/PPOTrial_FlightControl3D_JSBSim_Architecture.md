@@ -35,7 +35,7 @@ Le JSON livré active `training.resume: true` et `checkpointEvery: 1`. En entra�
 
 Le desktop traite `maxUpdates` comme un budget supplémentaire à partir du modèle chargé. Par exemple, un `latest` à l'update 120 et un budget de 10 000 donnent une fin de bloc à 10 120. Après validation finale, un nouveau Play prolonge le budget en conservant le même learner. Le renderer diffère Stop/join et Play hors du verrou de snapshot, puis le callback ECS `Init` prolonge la session terminée. Le headless conserve son budget total existant. L'UI affiche la source du modèle et la limite du bloc courant ; le journal contient `[FLIGHT_SESSION] Resumed latest` et l'update chargé.
 
-La reprise d'entraînement conserve les poids, Adam et le RNG lors d'un changement des intervalles horizontaux, de l'orientation d'interception, de `initial.approach`, du guidage compatible déclaré ou des réglages de reward. `rewardVersion: 6`, `guidanceVersion: 10` et `spawnVersion: 2` séparent les contrats de shaping, de guidage et d'ordonnancement initial. Les checkpoints de guidage V2 à V9 et de reward V2 à V5, les placements aléatoires antérieurs et les signatures sans ces versions peuvent amorcer l'entraînement, mais leur BEST n'est jamais réutilisé sans une nouvelle validation. Les changements de géométrie de piste, de physique ou d'autres observations restent incompatibles. Un BEST antérieur est conservé avec ses générations et son contrôle d'intégrité ; l'inférence exige un BEST validé sur le contrat exact.
+La reprise d'entraînement conserve les poids, Adam et le RNG lors d'un changement des intervalles horizontaux, de l'orientation d'interception, de `initial.approach`, de `maxDistanceMeters`, du guidage compatible déclaré ou des réglages de reward. `rewardVersion: 10`, `guidanceVersion: 13` et `spawnVersion: 2` séparent les contrats de shaping, de guidage et d'ordonnancement initial. Les checkpoints de guidage V2 à V13 et de reward V2 à V10, les placements aléatoires antérieurs et les signatures sans ces versions peuvent amorcer l'entraînement lorsque leur largeur de réseau correspond, mais leur BEST n'est jamais réutilisé sans une nouvelle validation. Les changements de géométrie de piste, de physique ou d'autres observations restent incompatibles. Un BEST antérieur est conservé avec ses générations et son contrôle d'intégrité ; l'inférence exige un BEST validé sur le contrat exact.
 
 ## Interface FlightControl3D
 
@@ -90,7 +90,7 @@ La position de la piste varie de ±2 km sur les deux axes ; son orientation vari
 
 Le callback `FGGroundCallback` fournit réellement à JSBSim la surface finie, sa normale et sa vitesse au point de contact. Le pont bouge dans la physique, le guidage et le rendu. Hors de son rectangle, le contact correspond au plan de la mer. Il s'agit d'une surface rigide cinématique avec mouvements sinusoïdaux ; aucun modèle hydrodynamique de navire n'est revendiqué.
 
-Le scénario livré démarre en phase hippodrome (`initial.approach: false`), qui joue le rôle de guidage secondaire. Une capture LOC maintenue pendant `captureHoldSeconds`, dans le secteur avant et avec un cap compatible, donne immédiatement la priorité à l'approche, même sans tour terminé. Une perte LOC ou GLIDE confirmée avant l'engagement final rend la priorité à l'hippodrome. Terminer le nombre de tours configuré ne change jamais à lui seul la phase ou le point de guidage : sans capture LOC confirmée, l'hippodrome reste la référence active.
+Le scénario livré démarre directement en phase approche (`initial.approach: true`) afin d'apprendre l'interception ILS. L'hippodrome reste le guidage secondaire de récupération : une perte LOC ou GLIDE confirmée avant l'engagement final lui rend la priorité. Une nouvelle capture LOC maintenue pendant `captureHoldSeconds`, dans le secteur avant et avec un cap compatible, redonne ensuite la priorité à l'approche, même sans tour terminé. Terminer le nombre de tours configuré ne change jamais à lui seul la phase ou le point de guidage.
 
 Le flightplan hippodrome est lié à la piste courante. Sa branche entrante est exactement superposée à l'axe LOC et parcourue vers le seuil ; à l'altitude de patrouille livrée, sa partie éloignée traverse aussi la fenêtre de capture du glide. Le suivi d'hippodrome peut donc présenter naturellement l'avion à l'ILS sans contrôleur d'affectation externe. Pendant le ralliement, la position est projetée sur le segment 3D le plus proche et la cible est avancée de `patrolSpeed × patrolLookaheadSeconds` sur le circuit. Après acquisition, les portes séquentielles restent fixes et autoritaires pour la validation du tour. Hors corridor ou après une porte ratée, le ralliement anticipé reprend et toute progression incomplète est invalidée. Une réacquisition ne valide ni porte ni tour fictif ; un avion immobile n'accumule aucun progrès.
 
@@ -116,39 +116,46 @@ L'acteur et le critic reçoivent le même vecteur ; le correctif de shaping ne c
 | Mission | 9 | Trois phases, temps écoulé, deux captures actives, progression des portes, tours terminés, qualification du tour |
 | Piste mobile | 9 | Vitesse N/E/U, normale du pont, vitesses de rotation |
 
-Hors signal ILS valide, les deux erreurs ILS de l'observation valent zéro et le flag de validité vaut zéro. Le vecteur géométrique reste disponible pendant l'hippodrome et l'acquisition. Pendant le suivi LOC+GLIDE capturé, ses trois composantes sont nulles et l'erreur de direction est neutre afin de ne pas envoyer le point du seuil à la politique ; les coordonnées de la piste restent disponibles.
+L'erreur LOC reste observable dans tout le volume avant non terminal, même au-delà de la portée radio. Elle est encodée par `sin(erreur_LOC)` : son signe distingue les deux côtés et sa magnitude reste strictement croissante de 0° à 90°, sans plateau à ±35°. L'erreur GLIDE reste observable dans la portée ILS avant ; toutes deux peuvent donc être présentes hors secteur alors que le flag `ilsValid` vaut zéro. Derrière le seuil, le LOC vaut zéro ; hors de la portée ILS, le GLIDE vaut zéro. Le vecteur géométrique reste disponible pendant l'hippodrome et l'acquisition. Pendant le suivi LOC+GLIDE capturé, ses trois composantes sont nulles et l'erreur de direction est neutre afin de ne pas envoyer le point du seuil à la politique ; les coordonnées de la piste restent disponibles.
 
 L'acteur produit cinq moyennes, cinq log-écarts-types et un logit Bernoulli. Les commandes continues sont profondeur, ailerons, direction, gaz symétriques et freinage symétrique. Les échantillons gaussiens latents sont transformés par `tanh` ; gaz et freinage sont ensuite convertis vers [0, 1]. Le train est un tirage binaire réel, pas une gaussienne seuillée.
 
 PPO conserve l'échantillon latent et sa log-probabilité jointe avec le Bernoulli. La transformation étant fixe, le Jacobien s'annule dans le ratio PPO ; les calculs utilisent donc la densité latente. La régularisation d'entropie est explicitement celle de la gaussienne latente × Bernoulli. Les dérivées des moyennes, log-écarts-types et du logit incluent le clipping et l'entropie.
 
-Acteur et critic utilisent deux couches cachées tanh, de largeur sélectionnable 32, 64 ou 128. Les dimensions de l'observation et des sorties sont des contrats structurels. Les matrices et buffers RLtools sont fixes ; le stockage du rollout est alloué au démarrage. Les hyperparamètres PPO/Adam, tailles de rollout/minibatch et budgets sont configurables.
+Acteur et critic utilisent deux couches cachées tanh, de largeur sélectionnable 32, 64 ou 128 ; la configuration livrée emploie 128. Les dimensions de l'observation, des sorties et la largeur sont des contrats structurels : un ancien checkpoint de largeur 64 ne peut pas être chargé dans le réseau 128. Les matrices et buffers RLtools sont fixes ; le stockage du rollout est alloué au démarrage. Les hyperparamètres PPO/Adam, tailles de rollout/minibatch et budgets sont configurables.
 
-Un crash ou un arrêt réussi est terminal. La limite de temps est une troncature : la valeur suivante est conservée pour le bootstrap, mais le GAE ne franchit jamais le reset. Le clipping de norme et le contrôle de finitude arrêtent l'utilisation d'un optimiseur défaillant.
+Un crash ou un arrêt réussi est terminal. La limite de distance livrée vaut 18 km depuis le seuil, soit 3 km au-delà de la portée radio ILS : le LOC de shaping reste visible dans cette zone, puis franchir la limite provoque un crash pénalisé et déclenche immédiatement l'épisode suivant, sans bootstrap. La limite de temps est une troncature : la valeur suivante est conservée pour le bootstrap, mais le GAE ne franchit jamais le reset. Le clipping de norme et le contrôle de finitude arrêtent l'utilisation d'un optimiseur défaillant.
 
 ## Récompenses, toucher et arrêt
 
 Les dix canaux propres à FlightControl3D sont `Path`, `Localizer`, `Glide`, `Speed`, `Slope`, `EnterLocalizer`, `EnterGlide`, `Touchdown`, `Stop`, `Crash`. Aucune modification des canaux Blue MAPPO n'est effectuée.
 
-Les guidages `Localizer` et `Glide` utilisent une qualité lisse `Q(e) = tolérance / (tolérance + abs(e))`. Elle reste strictement positive pour une erreur finie, même loin de la tolérance de capture. Leur contribution est `poids * [dt * Q_après * progrès + convergenceSeconds * (Q_après − Q_avant)]`.
+GLIDE utilise la qualité lisse rationnelle `Q(e) = tolérance / (tolérance + abs(e))`. LOC emploie une qualité composite bornée. Sa moitié géométrique vaut `1 − clamp(abs(erreur_LOC) / 90°, 0, 1)` : son gradient reste constant sur tout le demi-plan avant et ne s'effondre donc plus entre les départs à 12° et 30°, ni hors du secteur radio. Sa moitié trajectoire compare le cap sol relatif à la piste avec un cap d'interception `−clamp(2 × erreur_LOC, −60°, +60°)`. Ce cap est plus intérieur que la ligne directe vers le seuil et récompense le début du bon virage avant une variation latérale importante. `localizerCourseBlend=0.5`, `localizerInterceptGain=2` et `localizerInterceptLimitDegrees=60` rendent ces choix explicites dans le JSON.
+
+La contribution générique reste `poids * [dt * Q_après * progrès + convergenceSeconds * (Q_après − Q_avant)]`. Pour LOC seulement, `localizerSustainScale=0.25` multiplie le premier terme et `localizerConvergenceScale=5` multiplie le second. La qualité composite reste dans `[0,1]` : ce changement ne relève pas la borne maximale du canal. Le potentiel correctif exige que les deux états successifs appartiennent déjà à l'enveloppe avant ; franchir sa limite géométrique ne crée aucun saut de reward.
 
 La différence signée récompense le rapprochement et pénalise l'éloignement. Elle n'est pas clippée : une amélioration lente suivie d'une régression rapide ne doit pas créer de bonus net. Le facteur de temps vaut 20 secondes dans le JSON. La comparaison avant/après utilise la même phase, le même waypoint et les deux repères successifs de la piste, sans gain artificiel dû au seul mouvement rigide du pont.
 
-Avant le seuil, le shaping LOC est dense dans toute la portée ILS, y compris hors du secteur radio, et agit dès la phase HIPP. Le shaping GLIDE devient dense seulement après capture du LOC. Cette géométrie privilégiée ne modifie ni `ilsValid`, ni les observations radio, ni l'UI, ni les captures : le vrai signal conserve son secteur configuré. Le progrès est l'avancement longitudinal relatif à la piste, normalisé par la vitesse cible et borné entre −1 et +1. Un déplacement qui s'éloigne du seuil ne peut rapporter de contribution LOC/glide positive, même si l'erreur angulaire diminue avec la distance. Une géométrie stationnaire ne reçoit pas de maintien répété. Hors de la portée avant, le shaping ILS reste nul. `Path` et son point restent strictement réservés à HIPP ; ils sont nuls et invalides pendant toute la phase APPROACH.
+Avant le seuil, le shaping LOC et l'observation `localizer_sin` sont denses dans tout le volume non terminal, y compris au-delà de la portée et hors du secteur radio, et agissent dès la phase HIPP. En APPROACH, GLIDE reste dense avant sa capture mais seulement dans la portée ILS ; en HIPP, il attend la capture du LOC. Cette géométrie d'apprentissage ne modifie ni `ilsValid`, ni l'UI, ni les captures : le vrai signal conserve sa portée et son secteur configurés. Le progrès est l'avancement longitudinal relatif à la piste, normalisé par la vitesse cible et borné entre −1 et +1. Un déplacement qui s'éloigne du seuil ne peut rapporter de contribution LOC/glide positive, même si l'erreur angulaire diminue avec la distance. Une géométrie stationnaire ne reçoit pas de maintien répété. Derrière le seuil ou au-delà de la limite terminale, le shaping LOC reste nul. `Path` et son point restent strictement réservés à HIPP ; ils sont nuls et invalides pendant toute la phase APPROACH.
 
-En patrouille, `Path` reprend le shaping borné de BlueAgent : coût rationnel composé à 50 % de l'écart à la courbe, 30 % de l'écart de vitesse et 20 % de l'écart de cap, amélioration signée, progression physique projetée et pénalité de coût courant. Le résultat est borné dans `[-1, 1]` avant le poids existant `0,002`. Stationner, reculer, s'écarter ou tourner autour d'une porte ne rapporte rien de positif. Le tour complet ne rapporte aucun nouveau bonus dédié. Les canaux `Speed` et `Slope` conservent la qualité triangulaire `max(0, 1 − abs(erreur)/tolérance)` pondérée par le temps physique. Les captures restent payées une seule fois par épisode après maintien confirmé.
+En patrouille, `Path` reprend le shaping borné de BlueAgent : coût rationnel composé à 50 % de l'écart à la courbe, 30 % de l'écart de vitesse et 20 % de l'écart de cap, amélioration signée, progression physique projetée et pénalité de coût courant. Le résultat est borné dans `[-1, 1]` avant le poids existant `0,002`. Stationner, reculer, s'écarter ou tourner autour d'une porte ne rapporte rien de positif. Le tour complet ne rapporte aucun nouveau bonus dédié. Après capture LOC confirmée seulement, les canaux `Speed` et `Slope` utilisent la même qualité rationnelle et une amélioration signée, avec un maintien décroissant ; ils restent disponibles hors tolérance sans pouvoir exploiter un aller-retour fermé. Ils valent exactement zéro avant capture et dès une perte LOC confirmée. Les captures restent payées une seule fois par épisode après maintien confirmé.
 
 | Canal | Poids livré | Amplitude et rôle |
 |---|---:|---|
-| Localizer | 0,25 | Maintien maximal +0,25 par seconde ; potentiel signé au plus 5 en valeur absolue par transition |
-| Glide | 0,25 | Même amplitude que LOC, activée après capture LOC |
-| Path | 0,002 | 125 fois moins pondéré que chaque axe ILS ; convergence élémentaire au plus 0,04 |
-| Speed / Slope | 0,002 chacun | Soutien au pilotage, plafonné à +0,002 par seconde et par canal |
+| Localizer | 0,30 | Maintien maximal +0,075 par seconde ; potentiel signé au plus 30 en valeur absolue par transition |
+| Glide | 0,25 | Maintien maximal +0,25 par seconde ; potentiel signé au plus 5 par transition |
+| Path | 0,002 | 150 fois moins pondéré que LOC ; convergence élémentaire au plus 0,04 |
+| Speed / Slope | 0,01 chacun | Guidages secondaires actifs uniquement sous capture LOC confirmée, chacun 30 fois moins pondéré que LOC |
 | EnterLocalizer / EnterGlide | +2 chacun | Événement unique confirmé |
 | Touchdown / Stop | +100 chacun | Poser sûr puis arrêt confirmé |
 | Crash | −100 | Échec terminal |
 
-Dans le secteur ILS, la borne non actualisée du maintien et du potentiel LOC/GLIDE vaut environ 80,005 avec la décroissance livrée. Vitesse et pente ajoutent au plus 3,6, puis les captures 4, soit moins de 88 avant le poser. Cette borne exclut le guidage géométrique hors secteur. Les récompenses de réussite restent donc dominantes dans cette comparaison ; cela ne garantit pas la convergence d'une politique PPO.
+Dans le volume avant, la borne non actualisée du maintien et du potentiel LOC/GLIDE vaut environ 80,503 avec la décroissance livrée. Après capture LOC seulement, vitesse et pente ajoutent au plus 3,2, puis les captures 4, soit environ 87,7 avant le poser. L'extension de portée du LOC ne change pas cette borne car sa qualité reste dans `[0,1]`. Les récompenses de réussite restent donc dominantes dans cette comparaison ; cela ne garantit pas la convergence d'une politique PPO.
+
+Après chaque rollout optimisé, `[FLIGHT_UPDATE]` journalise les pertes, l'entropie,
+le reward total moyen et la contribution moyenne pondérée de chacun des dix
+canaux par action de l'acteur. Ces moyennes portent sur les 2 048 transitions de
+l'update, pas sur le seul dernier sous-pas affiché par l'IHM.
 
 Le toucher nécessite un contact physique des roues, un train suffisamment sorti, une position sur la piste et une vitesse, un taux de descente et une attitude acceptables. La première abscisse de toucher provient du point physique de roue JSBSim ; les coordonnées des trois trains sont contrôlées dans le rectangle de piste. La vitesse verticale avant impact est vérifiée pour éviter que le solveur de contact ne masque un poser dur. Les vitesses et attitudes de sécurité sont relatives à la piste mobile. Un contact structurel ou un poser sans train provoque un crash sans récompense de toucher. La télémétrie garde aussi l'impact non valide : position signée, erreur latérale, vitesse verticale/horizontale et position réelle du train.
 
@@ -181,6 +188,8 @@ et les générations BEST restent locaux. Lorsqu'il est présent dans le dépôt
 le test de session CI le charge par le même chemin que le desktop et exige une
 reprise propre à la frontière d'un update avec un budget additionnel. Le workflow
 FlightControl3D est également déclenché par toute modification de ce checkpoint.
+Il expose aussi `workflow_dispatch` : depuis l'onglet GitHub Actions, **Run workflow**
+relance manuellement toute la matrice Linux/Windows en Debug/Release.
 
 La réussite exige un poser sûr puis l'arrêt confirmé sur la piste. Par défaut, le seuil est **92 %**, donc au moins **19 succès sur 20**. Un candidat ne devient production qu'après la campagne complète et le franchissement de ce seuil. Le score est le pourcentage de réussites ; à score identique, une abscisse moyenne d'arrêt plus courte départage les candidats. Un candidat identique, moins bon, incomplet ou sous le seuil conserve le BEST précédent.
 
@@ -399,7 +408,81 @@ interpréter la disparition géométrique normale du signal comme une remise de 
 La caméra affiche en grand `HIPP`, `APPROACH` ou `ROLLOUT`, la vitesse réelle et
 la pente de trajectoire en haut à droite. `GEAR` apparaît uniquement lorsque la
 position physique du train atteint `gearDownMinimum`. Les
-poids de shaping restent inchangés : LOC et GLIDE valent déjà 0,25 chacun contre
-0,002 pour `Path`; le tableau principal a été corrigé pour refléter ces valeurs.
+poids de shaping livrés sont LOC `0,30`, GLIDE `0,25`, Speed/Slope `0,01`
+chacun et Path `0,002` ; le tableau principal reflète ces valeurs.
 
 Validation locale : ni compilation ni test exécuté, conformément à la consigne.
+
+## Renforcement du potentiel correctif LOC V8 (12 novembre 2026)
+
+Le contrat `rewardVersion=8` sépare l'intensité du potentiel correctif LOC de
+son maintien récurrent. `localizerConvergenceScale=5` multiplie uniquement la
+différence signée de qualité latérale ; `localizerSustainScale=0.25` réduit
+uniquement le terme reçu en restant aligné et en progressant. GLIDE, Speed et
+Slope conservent leurs formules et leurs échelles. Les checkpoints V2 à V7
+restent utilisables comme warm start, mais leur BEST exige une nouvelle
+validation sur le contrat complet.
+
+Les tests déterministes couvrent le facteur correctif LOC sans amplification de
+GLIDE, le maintien sur l'axe, l'absence de saut à l'entrée de l'enveloppe,
+l'annulation d'un aller-retour, la borne cumulée avant le poser et le refus des
+échelles non finies ou hors intervalle.
+
+Validation locale : contrôle statique du JSON et du diff uniquement ; compilation
+et CTest non exécutés, conformément à la consigne.
+
+## Qualité LOC d'interception et réseau 128 V9 (12 novembre 2026)
+
+Le contrat `rewardVersion=9` remplace la qualité LOC rationnelle par le mélange
+borné de l'erreur latérale linéaire et du cap d'interception. Le mélange conserve
+exactement la plage `[0,1]` utilisée par la formule V8, donc sa borne cumulative,
+mais fournit un gradient plus fort loin du faisceau et un retour dès que la
+trajectoire s'oriente vers une vraie interception. GLIDE, Speed, Slope et les
+événements terminaux sont inchangés. Les versions V2 à V8 restent acceptées pour
+un warm start de même architecture ; le passage livré de 64 à 128 impose en
+pratique un nouveau modèle et empêche de reprendre l'ancien critic et son Adam.
+
+Les régressions couvrent le gradient géométrique constant, les trajectoires
+intérieure et extérieure à position identique, le comportement réel JSBSim sous
+les deux directions d'aileron, les bornes de configuration et les moyennes de
+reward par rollout.
+
+Validation locale : contrôle statique du JSON et du diff uniquement ; compilation
+et CTest non exécutés, conformément à la consigne.
+
+## Portée LOC et objectifs secondaires V10 (12 novembre 2026)
+
+Le contrat `rewardVersion=10` active `Speed` et `Slope` uniquement sous une
+capture LOC confirmée. Les deux canaux sont exactement nuls pendant le
+ralliement, avant capture et dès une perte LOC confirmée ; ils ne peuvent plus
+être optimisés loin de l'approche. Le contrat `guidanceVersion=12` étend en
+parallèle le shaping LOC et l'observation `localizer_error` jusqu'à la limite
+terminale du demi-plan avant. La portée radio réelle, `ilsValid`, les transitions
+de capture et le GLIDE restent inchangés.
+
+Les régressions déterministes couvrent le LOC au-delà de la portée radio,
+l'absence de GLIDE dans cette zone, le silence Speed/Slope avant capture et leur
+coupure sur une perte LOC confirmée. Les versions reward V2 à V9 et guidance V2
+à V11 restent utilisables comme warm start de même architecture ; un BEST exige
+toujours une validation sur le contrat exact.
+
+Validation locale : contrôle statique du JSON et du diff uniquement ; compilation
+et CTest non exécutés, conformément à la consigne.
+
+## Observation LOC signée V13 (12 novembre 2026)
+
+Le contrat `guidanceVersion=13` remplace la normalisation LOC saturée à ±35° par
+`sin(erreur_LOC)`. Le réseau reçoit une valeur positive du côté `RunwayRight` et
+négative du côté opposé. Sa magnitude continue d'augmenter jusqu'à ±90° au lieu
+de rester bloquée à ±1 hors du secteur radio. Le champ JSON devenu sans effet
+`normalization.localizerDegrees` est supprimé. Le reward demeure symétrique : un
+état et son miroir associés à des actions miroir reçoivent la même valeur, sans
+introduire de préférence fixe pour un côté.
+
+Les tests couvrent les observations à ±45° et ±60°, ainsi que les trajectoires
+intérieure et extérieure depuis chacun des deux côtés. Guidance V2 à V12 reste
+acceptée pour un warm start de même architecture ; le BEST doit être revalidé
+sur V13.
+
+Validation locale : contrôle statique du diff uniquement ; compilation et CTest
+non exécutés, conformément à la consigne.

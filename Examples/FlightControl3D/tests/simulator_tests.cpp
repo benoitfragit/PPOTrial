@@ -1,5 +1,57 @@
 #include "test_support.hpp"
 using namespace ppo::examples::flight;
+
+namespace {
+struct InterceptProbe final
+{
+    double initialError{},finalError{},localizerReward{};
+    bool ended{};
+};
+
+InterceptProbe ProbeIntercept(Config config,double aileron)
+{
+    config.initial.runwayAlignedProbability=0;
+    config.initial.distanceMeters={10000,10000};config.initial.bearingDegrees={20,20};
+    config.initial.heightMeters={600,600};config.initial.speedMps={65,65};
+    config.initial.headingOffsetDegrees={0,0};config.initial.rollDegrees={0,0};
+    config.initial.pitchDegrees={2,2};config.initial.slopeDegrees={0,0};
+    auto& randomization=config.runwayRandomization;
+    randomization.northMeters={0,0};randomization.eastMeters={0,0};
+    randomization.headingOffsetDegrees={0,0};randomization.deckHeightMeters={15,15};
+    randomization.speedMps={0,0};randomization.heaveAmplitudeMeters={0,0};
+    randomization.pitchAmplitudeDegrees={0,0};randomization.rollAmplitudeDegrees={0,0};
+    FlightEnvironment environment(config,DefaultDataRoot(),731U);
+    environment.Reset();
+    InterceptProbe probe{};
+    probe.initialError=std::abs(environment.CurrentGuidance().localizer);
+    Controls const controls{0,aileron,0,config.initial.throttle,0,false};
+    for(std::size_t action=0;action<15;++action)
+    {
+        auto const step=environment.Step(controls);
+        probe.localizerReward+=step.rewards[static_cast<std::size_t>(Reward::Localizer)];
+        if(step.terminated || step.truncated) {probe.ended=true;break;}
+    }
+    probe.finalError=std::abs(environment.CurrentGuidance().localizer);
+    return probe;
+}
+
+void InterceptActionReward(Config const& config)
+{
+    auto const neutral=ProbeIntercept(config,0);
+    auto const positive=ProbeIntercept(config,0.2);
+    auto const negative=ProbeIntercept(config,-0.2);
+    auto const& inward=positive.finalError<negative.finalError ? positive : negative;
+    auto const& outward=positive.finalError<negative.finalError ? negative : positive;
+    Check(neutral.initialError>0 && Near(neutral.initialError,positive.initialError,1e-9)
+        && Near(neutral.initialError,negative.initialError,1e-9)
+        && !neutral.ended && !positive.ended && !negative.ended
+        && !Near(positive.finalError,negative.finalError,1e-8)
+        && inward.localizerReward>neutral.localizerReward
+        && neutral.localizerReward>outward.localizerReward,
+        "real FDM LOC reward prefers the aileron direction that establishes the inward interception");
+}
+}
+
 int main()
 {
     try
@@ -37,6 +89,7 @@ int main()
         env.Reset(); env.Step({0.5,0.6,0.2,c.initial.throttle,0,false});
         Check(std::abs(env.Aircraft().rollRate-neutral.rollRate)>1e-4 && std::abs(env.Aircraft().pitchRate-neutral.pitchRate)>1e-4,"aileron/elevator affect actual FDM");
         Check(std::isfinite(baseline.reward),"real transition reward");
+        InterceptActionReward(c);
         c.mission.maxSeconds=0.2; c.mission.actionSubsteps=1;
         FlightEnvironment shortEpisode(c); shortEpisode.Reset();
         StepResult last{};

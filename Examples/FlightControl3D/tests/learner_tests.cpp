@@ -52,20 +52,37 @@ void Training(Config c)
     FlightLearner learner(c); FlightEnvironment environment(c);
     auto observation=environment.Reset();
     auto const original=learner.Evaluate(observation);
+    double rewardSum{};
+    std::array<double,RewardCount> rewardSums{};
     for (std::size_t i=0;i<c.training.rolloutSteps;++i)
     {
         auto const action=learner.Choose(observation);
         auto const result=environment.Step(ToControls(action));
         auto const next=environment.ObservationNow();
         learner.Record(observation,action,result,next);
+        rewardSum+=result.reward;
+        for(std::size_t channel=0;channel<RewardCount;++channel)
+            rewardSums[channel]+=result.rewards[channel];
         observation=(result.terminated || result.truncated) ? environment.Reset() : next;
     }
     Check(learner.Ready(),"rollout filled");
     Rejects([&] { learner.Save(path); },"incomplete checkpoint boundary");
     learner.Optimize();
     Check(learner.Stats().updates==1 && std::isfinite(learner.Stats().valueLoss),"real RLtools PPO update");
+    Check(Near(learner.Stats().meanReward,rewardSum/static_cast<double>(c.training.rolloutSteps)),
+        "rollout mean reward diagnostic");
+    for(std::size_t channel=0;channel<RewardCount;++channel)
+        Check(Near(learner.Stats().meanRewards[channel],
+            rewardSums[channel]/static_cast<double>(c.training.rolloutSteps)),
+            "rollout mean reward-channel diagnostic");
     Check(learner.Evaluate(observation)!=original,"actor changes after PPO");
     learner.Save(path);
+    {
+        std::ifstream checkpoint(path);
+        for(std::string line;std::getline(checkpoint,line);)
+            Check(line.empty() || (line.back()!=' ' && line.back()!='\t'),
+                "checkpoint lines have no trailing whitespace");
+    }
     FlightLearner restored(c); restored.Load(path);
     Check(learner.Evaluate(observation)==restored.Evaluate(observation),"checkpoint exact actor roundtrip");
     auto const a=learner.Choose(observation), b=restored.Choose(observation);

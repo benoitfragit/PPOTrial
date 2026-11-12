@@ -36,6 +36,8 @@ struct FlightLearner::Impl
     std::vector<std::size_t> order;
     std::size_t collected{};
     LearningStats stats{};
+    double rewardSum{};
+    std::array<double,RewardCount> rewardSums{};
     bool failed{};
     explicit Impl(Config const& c) : config(c), rng(c.training.seed), rows(c.training.rolloutSteps), order(rows.size())
     { std::iota(order.begin(),order.end(),0U); }
@@ -142,7 +144,14 @@ class Learner final : public FlightLearner::Impl
         auto matrix = [&](auto const& m)
         {
             using M = std::decay_t<decltype(m)>;
-            for (Index i=0; i<M::ROWS; ++i) for (Index j=0; j<M::COLS; ++j) stream << rlt::get(m,i,j) << ' ';
+            bool first=true;
+            for (Index i=0; i<M::ROWS; ++i)
+                for (Index j=0; j<M::COLS; ++j)
+                {
+                    if (!first) stream << ' ';
+                    stream << rlt::get(m,i,j);
+                    first=false;
+                }
             stream << '\n';
         };
         auto layer = [&](auto const& l) { VisitParameter(l.weights,matrix); VisitParameter(l.biases,matrix); };
@@ -266,6 +275,16 @@ public:
                 }
             }
             if (!std::isfinite(stats.policyLoss) || !std::isfinite(stats.valueLoss)) throw std::runtime_error("FlightControl3D: invalid training diagnostics");
+            stats.meanReward=rewardSum/static_cast<double>(collected);
+            for(std::size_t channel=0;channel<RewardCount;++channel)
+                stats.meanRewards[channel]=rewardSums[channel]/static_cast<double>(collected);
+            if(!std::isfinite(stats.meanReward))
+                throw std::runtime_error("FlightControl3D: invalid mean reward diagnostic");
+            for(double const reward:stats.meanRewards)
+                if(!std::isfinite(reward))
+                    throw std::runtime_error("FlightControl3D: invalid mean reward-channel diagnostic");
+            rewardSum=0;
+            rewardSums.fill(0);
             ++stats.updates; collected=0;
         }
         catch (...) { failed=true; throw; }
@@ -307,7 +326,7 @@ public:
         rlt::copy(device_,device_,*candidateCritic,critic_);
         rng=candidateRng;
         actorOptimizer_.age=actorAge; criticOptimizer_.age=criticAge;
-        stats={}; stats.updates=updates; collected=0;
+        stats={}; stats.updates=updates; collected=0;rewardSum=0;rewardSums.fill(0);
     }
 };
 } // namespace
@@ -334,8 +353,13 @@ void FlightLearner::Record(Observation const& observation, PolicyAction const& a
     if (Ready()) throw std::logic_error("FlightControl3D: rollout full");
     if (!std::isfinite(step.reward) || !std::isfinite(action.logProbability) || (step.terminated && step.truncated))
         throw std::invalid_argument("FlightControl3D: invalid transition");
+    for(double const reward:step.rewards)
+        if(!std::isfinite(reward)) throw std::invalid_argument("FlightControl3D: invalid reward channel");
     auto& row=impl_->rows[impl_->collected];
     row={observation,action,step.reward,impl_->Value(observation),step.terminated ? 0 : impl_->Value(next),0,0,step.terminated,step.truncated};
+    impl_->rewardSum+=step.reward;
+    for(std::size_t channel=0;channel<RewardCount;++channel)
+        impl_->rewardSums[channel]+=step.rewards[channel];
     ++impl_->collected;
 }
 

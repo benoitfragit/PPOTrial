@@ -41,7 +41,11 @@ void DesktopContinuation(Config c)
     {std::ofstream broken(store.Latest());broken<<"broken";}
     Rejects([&] {FlightSession invalid(c,true,directory.path);},"corrupt latest must not silently create a new policy");
 }
-enum class TrainingContractChange { HorizontalStarts, Rewards, LegacyStarts, LegacyGuidance, AlignedProbability };
+enum class TrainingContractChange
+{
+    HorizontalStarts, Rewards, LegacyStarts, LegacyGuidance, AlignedProbability,
+    EpisodeBoundary
+};
 void CommittedTrainingCheckpoint(Config c)
 {
     std::filesystem::path const checkpoint{PPO_FLIGHT_COMMITTED_CHECKPOINT};
@@ -80,7 +84,10 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
         signature["mission"]["approachHeadingToleranceDegrees"]=60;
         signature["mission"]["racetrackCenterCross"]=0;
     }
-    else signature["initial"]["runwayAlignedProbability"]=0.25;
+    else if(change==TrainingContractChange::AlignedProbability)
+        signature["initial"]["runwayAlignedProbability"]=0.25;
+    else
+        signature["mission"]["maxDistanceMeters"]=30000.0;
     old.checkpointSignature=signature.dump();
     FlightModelStore oldStore(old,directory.path);
     FlightLearner oldPolicy(old);oldPolicy.Save(oldStore.Latest());
@@ -124,6 +131,29 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     signature["rewardVersion"]=5;
     Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
         "previous reward V5 remains usable as a training warm start");
+    signature["rewardVersion"]=6;
+    signature["reward"].erase("localizerConvergenceScale");
+    signature["reward"].erase("localizerSustainScale");
+    signature["reward"].erase("localizerCourseBlend");
+    signature["reward"].erase("localizerInterceptGain");
+    signature["reward"].erase("localizerInterceptLimitDegrees");
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "previous reward V6 remains usable as a training warm start");
+    signature["rewardVersion"]=7;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "previous reward V7 remains usable as a training warm start");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=8;
+    signature["reward"].erase("localizerCourseBlend");
+    signature["reward"].erase("localizerInterceptGain");
+    signature["reward"].erase("localizerInterceptLimitDegrees");
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "previous reward V8 remains usable as a training warm start");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=9;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "previous reward V9 remains usable as a training warm start");
+    signature["rewardVersion"]=10;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "current reward V10 remains compatible");
     signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown shaping contract is rejected");
     signature=nlohmann::json::parse(c.checkpointSignature);signature["guidanceVersion"]=2;
@@ -150,6 +180,19 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     signature["guidanceVersion"]=9;
     Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
         "guidance V9 remains usable as a training warm start");
+    signature["guidanceVersion"]=10;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "guidance V10 remains usable as a training warm start");
+    signature["guidanceVersion"]=11;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "guidance V11 remains usable as a training warm start");
+    signature["guidanceVersion"]=12;
+    signature["normalization"]["localizerDegrees"]=35.0;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "guidance V12 with the retired LOC scale remains usable as a training warm start");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature["guidanceVersion"]=13;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "current guidance V13 remains compatible");
     signature["guidanceVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown guidance contract is rejected");
     signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("spawnVersion");
@@ -167,7 +210,8 @@ int main()
         DesktopContinuation(c);
         for(auto change : {TrainingContractChange::HorizontalStarts,TrainingContractChange::Rewards,
             TrainingContractChange::LegacyStarts,TrainingContractChange::LegacyGuidance,
-            TrainingContractChange::AlignedProbability}) ChangedTrainingContract(c,change);
+            TrainingContractChange::AlignedProbability,TrainingContractChange::EpisodeBoundary})
+            ChangedTrainingContract(c,change);
         c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
         c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;
         TemporaryDirectory directory("flight-session-");

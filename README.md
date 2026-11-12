@@ -48,14 +48,34 @@ Le multiplicateur `training.ilsCaptureScale` élargit temporairement les toléra
 de capture pendant l'apprentissage seulement. L'évaluation et l'inférence gardent
 les angles réalistes de `mission`, et modifier ce multiplicateur permet de reprendre
 le checkpoint `latest` sans réinitialiser les poids ni Adam.
-Le shaping LOC reste dense avant le seuil dans toute la portée ILS, y compris
-avant capture et hors secteur radio. Le shaping GLIDE ne s'active qu'après capture
-du LOC. En APPROACH, le point et le reward hippodrome sont coupés ; le signal
+Le shaping LOC et son observation signée `sin(erreur_LOC)` restent denses sur
+tout le demi-plan avant jusqu'à la limite terminale de 18 km, y compris avant
+capture et au-delà de la portée radio. Le signe distingue directement la gauche
+de la droite et la magnitude ne sature plus à la limite du secteur radio. En
+APPROACH, le shaping GLIDE est lui aussi disponible avant
+capture dans la portée ILS ; en HIPP, il reste subordonné au LOC. Le LOC livré
+pèse `0.30`, contre `0.01` pour chacun des guidages secondaires `Speed` et
+`Slope`. Ces deux canaux secondaires valent strictement zéro avant la capture
+LOC confirmée et dès sa perte : l'agent ne peut donc pas les récolter au loin.
+Son potentiel correctif signé est multiplié par `5`, tandis que son maintien
+récurrent est limité à `0.25` de l'amplitude générique afin de privilégier la
+correction latérale sans rendre le vol simplement aligné plus rentable que le poser.
+Sa qualité mélange à parts égales une erreur angulaire linéaire et un cap
+d'interception intérieur de gain `2`, borné à `60°`.
+Le signal apparaît ainsi dès que la trajectoire commence le bon virage, avant
+qu'un déplacement latéral important soit visible. L'acteur et le critic livrés
+utilisent deux couches de largeur `128`. Chaque update écrit aussi les moyennes
+pondérées des dix canaux dans une ligne `[FLIGHT_UPDATE]` du journal.
+En APPROACH, le point et le reward hippodrome sont coupés ; le signal
 affiché et la capture conservent néanmoins leur géométrie physique stricte.
+Une distance supérieure à 18 km du seuil termine immédiatement l'épisode comme
+un crash pénalisé, au lieu de laisser voler l'agent sans shaping ILS jusqu'au timeout.
 Le checkpoint complet `resources/model/FlightControl3D/latest/flight_hybrid_v1.txt`
 peut être commité comme point de départ : la CI le charge réellement lorsqu'il
 est présent et vérifie une reprise à la frontière d'un update PPO. La sauvegarde
 `.previous` reste locale.
+Le workflow **FlightControl3D JSBSim** peut aussi être relancé manuellement depuis
+GitHub Actions avec **Run workflow** ; sa matrice couvre Linux et Windows en Debug et Release.
 L'IHM distingue signal visible, captures actives et durées d'épisode en secondes
 simulées, avec un grand badge `HIPP` ou `APPROACH`, la vitesse, la pente et
 `GEAR` lorsque le train est physiquement sorti sur la caméra. La conception

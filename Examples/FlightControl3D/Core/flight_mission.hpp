@@ -35,7 +35,7 @@ inline constexpr std::array<char const*, ObservationSize> ObservationNames{
     "target_forward", "target_right", "target_up", "runway_along", "runway_cross", "runway_distance",
     "height", "airspeed", "velocity_north", "velocity_east", "velocity_up",
     "roll_sin", "roll_cos", "pitch_sin", "pitch_cos", "heading_error_sin", "heading_error_cos",
-    "roll_rate", "pitch_rate", "yaw_rate", "slope_sin", "slope_cos", "localizer_error", "glide_error",
+    "roll_rate", "pitch_rate", "yaw_rate", "slope_sin", "slope_cos", "localizer_sin", "glide_error",
     "ils_valid", "target_speed", "target_slope", "course_error_sin", "course_error_cos", "path_distance",
     "gear_position", "weight_on_wheels", "patrol", "approach", "rollout", "elapsed",
     "localizer_captured", "glide_captured", "touchdown", "touchdown_distance", "remaining_runway", "stopped_hold",

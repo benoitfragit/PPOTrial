@@ -51,13 +51,23 @@ struct InitialSettings final
 };
 struct Normalization final
 {
-    double distance{}, altitude{}, speed{}, rate{}, path{}, localizerDegrees{}, glideDegrees{};
+    double distance{}, altitude{}, speed{}, rate{}, path{}, glideDegrees{};
 };
 struct RewardSettings final
 {
     std::array<double, RewardCount> weights{};
     double pathTolerance{}, localizerToleranceDegrees{}, glideToleranceDegrees{};
     double speedTolerance{}, slopeToleranceDegrees{};
+    /** @brief Multiplier applied only to the signed LOC quality improvement. */
+    double localizerConvergenceScale{};
+    /** @brief Multiplier applied only to recurring aligned LOC progress. */
+    double localizerSustainScale{};
+    /** @brief Fraction of LOC quality supplied by the bounded intercept-course quality. */
+    double localizerCourseBlend{};
+    /** @brief Gain from signed LOC angle to the desired intercept course. */
+    double localizerInterceptGain{};
+    /** @brief Absolute bound for the desired LOC intercept course, in degrees. */
+    double localizerInterceptLimitDegrees{};
     double convergenceSeconds{}, ilsDecaySeconds{};
 };
 struct TrainingSettings final
@@ -96,7 +106,15 @@ struct Config final
 /** Strict versioned JSON. Missing, unknown and non-finite fields are errors. */
 Config LoadConfig(std::filesystem::path const& path);
 void Validate(Config const& config);
-/** Warm-start training may change horizontal starts, their mixture, entry phase and rewards; BEST requires an exact contract. */
+/**
+ * @brief Checks whether a stored learner can warm-start the current training contract.
+ * @param stored Serialized checkpoint signature from the stored learner.
+ * @param current Serialized checkpoint signature for the requested session.
+ * @return True for compatible training-only changes; BEST still requires an exact contract.
+ *
+ * Compatible changes include horizontal starts, their mixture, entry phase,
+ * reward settings and the terminal distance boundary.
+ */
 bool CompatibleTrainingSignature(std::string const& stored,std::string const& current);
 
 } // namespace ppo::examples::flight

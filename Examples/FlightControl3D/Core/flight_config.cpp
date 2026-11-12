@@ -111,11 +111,13 @@ Config LoadConfig(std::filesystem::path const& path)
     initial.throttle=Number(i,"throttle"); initial.flap=Number(i,"flap"); initial.propeller=Number(i,"propeller");
     initial.approachFlap=Number(i,"approachFlap");initial.rolloutFlap=Number(i,"rolloutFlap");
     auto const& n = root.at("normalization");
-    Keys(n, {"distance", "altitude", "speed", "rate", "path", "localizerDegrees", "glideDegrees"});
+    Keys(n, {"distance", "altitude", "speed", "rate", "path", "glideDegrees"});
     config.normalization = {Number(n,"distance"), Number(n,"altitude"), Number(n,"speed"), Number(n,"rate"),
-        Number(n,"path"), Number(n,"localizerDegrees"), Number(n,"glideDegrees")};
+        Number(n,"path"), Number(n,"glideDegrees")};
     auto const& w = root.at("reward");
-    Keys(w, {"weights", "pathTolerance", "localizerToleranceDegrees", "glideToleranceDegrees", "speedTolerance", "slopeToleranceDegrees", "convergenceSeconds", "ilsDecaySeconds"});
+    Keys(w, {"weights", "pathTolerance", "localizerToleranceDegrees", "glideToleranceDegrees", "speedTolerance", "slopeToleranceDegrees",
+        "localizerConvergenceScale", "localizerSustainScale", "localizerCourseBlend", "localizerInterceptGain",
+        "localizerInterceptLimitDegrees", "convergenceSeconds", "ilsDecaySeconds"});
     auto const& weights = w.at("weights");
     Require(weights.is_object() && weights.size() == RewardCount, "reward channel mismatch");
     for (std::size_t channel = 0; channel < RewardCount; ++channel)
@@ -125,6 +127,11 @@ Config LoadConfig(std::filesystem::path const& path)
     config.reward.glideToleranceDegrees = Number(w,"glideToleranceDegrees");
     config.reward.speedTolerance = Number(w,"speedTolerance");
     config.reward.slopeToleranceDegrees = Number(w,"slopeToleranceDegrees");
+    config.reward.localizerConvergenceScale = Number(w,"localizerConvergenceScale");
+    config.reward.localizerSustainScale = Number(w,"localizerSustainScale");
+    config.reward.localizerCourseBlend = Number(w,"localizerCourseBlend");
+    config.reward.localizerInterceptGain = Number(w,"localizerInterceptGain");
+    config.reward.localizerInterceptLimitDegrees = Number(w,"localizerInterceptLimitDegrees");
     config.reward.convergenceSeconds = Number(w,"convergenceSeconds");
     config.reward.ilsDecaySeconds = Number(w,"ilsDecaySeconds");
     auto const& t = root.at("training");
@@ -157,8 +164,8 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics.erase("training");
     semantics.erase("evaluation");
     semantics["distribution"] = {training.minLogStd,training.maxLogStd};
-    semantics["rewardVersion"] = 7;
-    semantics["guidanceVersion"] = 11;
+    semantics["rewardVersion"] = 10;
+    semantics["guidanceVersion"] = 13;
     semantics["spawnVersion"] = 2;
     config.checkpointSignature = semantics.dump();
     Validate(config);
@@ -178,13 +185,15 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
         if(signature->contains("rewardVersion") && (*signature)["rewardVersion"]!=2
             && (*signature)["rewardVersion"]!=3 && (*signature)["rewardVersion"]!=4
             && (*signature)["rewardVersion"]!=5 && (*signature)["rewardVersion"]!=6
-            && (*signature)["rewardVersion"]!=7) return false;
+            && (*signature)["rewardVersion"]!=7 && (*signature)["rewardVersion"]!=8
+            && (*signature)["rewardVersion"]!=9 && (*signature)["rewardVersion"]!=10) return false;
         if(signature->contains("guidanceVersion") && (*signature)["guidanceVersion"]!=2
             && (*signature)["guidanceVersion"]!=3 && (*signature)["guidanceVersion"]!=4
             && (*signature)["guidanceVersion"]!=5 && (*signature)["guidanceVersion"]!=6
             && (*signature)["guidanceVersion"]!=7 && (*signature)["guidanceVersion"]!=8
             && (*signature)["guidanceVersion"]!=9 && (*signature)["guidanceVersion"]!=10
-            && (*signature)["guidanceVersion"]!=11) return false;
+            && (*signature)["guidanceVersion"]!=11 && (*signature)["guidanceVersion"]!=12
+            && (*signature)["guidanceVersion"]!=13) return false;
         if(signature->contains("spawnVersion") && (*signature)["spawnVersion"]!=2) return false;
     }
     for(char const* name : {"distanceMeters","bearingDegrees","headingOffsetDegrees"})
@@ -192,10 +201,15 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
         if(!previous["initial"].contains(name) || !next["initial"].contains(name)) return false;
         previous["initial"].erase(name); next["initial"].erase(name);
     }
-    // These changes keep the observation/action contract. Old scores are never
-    // reused: production compares the complete, unmodified signature instead.
+    // These changes keep the network dimensions and may warm-start training.
+    // Old scores are never reused: production compares the complete signature.
     previous["initial"].erase("runwayAlignedProbability"); next["initial"].erase("runwayAlignedProbability");
     previous["initial"].erase("approach"); next["initial"].erase("approach");
+    if(!previous.contains("normalization") || !next.contains("normalization")
+        || !previous["normalization"].is_object() || !next["normalization"].is_object()) return false;
+    // V13 uses sin(localizer) and removes the obsolete configurable scale.
+    previous["normalization"].erase("localizerDegrees");
+    next["normalization"].erase("localizerDegrees");
     if(!previous.contains("mission") || !next.contains("mission")
         || !previous["mission"].is_object() || !next["mission"].is_object()) return false;
     previous["mission"].erase("patrolLookaheadSeconds"); next["mission"].erase("patrolLookaheadSeconds");
@@ -205,6 +219,9 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
     previous["mission"].erase("straightSamples"); next["mission"].erase("straightSamples");
     previous["mission"].erase("approachHeadingToleranceDegrees"); next["mission"].erase("approachHeadingToleranceDegrees");
     previous["mission"].erase("racetrackCenterCross"); next["mission"].erase("racetrackCenterCross");
+    // Episode-distance changes preserve the network contract and can warm-start
+    // training, but the complete signature still forces BEST revalidation.
+    previous["mission"].erase("maxDistanceMeters"); next["mission"].erase("maxDistanceMeters");
     previous.erase("reward"); next.erase("reward");
     previous.erase("rewardVersion"); next.erase("rewardVersion");
     previous.erase("guidanceVersion"); next.erase("guidanceVersion");
@@ -290,10 +307,21 @@ void Validate(Config const& c)
         > d.seaHeightMeters,"deck must remain above sea");
     auto const& n = c.normalization;
     Require(n.distance > 0 && n.altitude > 0 && n.speed > 0 && n.rate > 0 && n.path > 0
-        && n.localizerDegrees > 0 && n.glideDegrees > 0, "normalization scales");
+        && n.glideDegrees > 0, "normalization scales");
     auto const& w = c.reward;
     Require(w.pathTolerance > 0 && w.localizerToleranceDegrees > 0 && w.glideToleranceDegrees > 0
         && w.speedTolerance > 0 && w.slopeToleranceDegrees > 0, "reward tolerances");
+    Require(std::isfinite(w.localizerConvergenceScale) && w.localizerConvergenceScale > 0,
+        "positive finite localizer convergence scale");
+    Require(std::isfinite(w.localizerSustainScale) && w.localizerSustainScale >= 0
+        && w.localizerSustainScale <= 1, "localizer sustain scale within [0,1]");
+    Require(std::isfinite(w.localizerCourseBlend) && w.localizerCourseBlend >= 0
+        && w.localizerCourseBlend <= 1, "localizer course blend within [0,1]");
+    Require(std::isfinite(w.localizerInterceptGain) && w.localizerInterceptGain >= 1
+        && w.localizerInterceptGain <= 4, "localizer intercept gain within [1,4]");
+    Require(std::isfinite(w.localizerInterceptLimitDegrees)
+        && w.localizerInterceptLimitDegrees > i.bearingDegrees.maximum+maximumHeadingJitter
+        && w.localizerInterceptLimitDegrees < 90, "localizer intercept limit must cover initial bearings");
     Require(std::isfinite(w.convergenceSeconds) && w.convergenceSeconds >= 0, "finite non-negative convergence time scale");
     Require(std::isfinite(w.ilsDecaySeconds) && w.ilsDecaySeconds > 0, "positive finite ILS decay time scale");
     for (double weight : w.weights) Require(std::isfinite(weight), "finite reward weights");

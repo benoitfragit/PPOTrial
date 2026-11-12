@@ -13,7 +13,14 @@ struct Transition final
 };
 void ComputeAdvantages(Transition* transitions, std::size_t count, TrainingSettings const& settings) noexcept;
 
-struct LearningStats final { std::uint64_t updates{}; double policyLoss{}, valueLoss{}, entropy{}; };
+/** @brief Diagnostics from the last complete on-policy update. */
+struct LearningStats final
+{
+    std::uint64_t updates{};
+    double policyLoss{}, valueLoss{}, entropy{}, meanReward{};
+    /** @brief Mean weighted reward contribution per actor action and channel. */
+    std::array<double,RewardCount> meanRewards{};
+};
 
 /** RLtools MLPs with Gaussian + Bernoulli PPO; no JSBSim/ECS dependency. */
 class FlightLearner final

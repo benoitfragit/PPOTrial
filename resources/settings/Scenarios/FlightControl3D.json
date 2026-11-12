@@ -13,7 +13,7 @@
   },
   "mission": {
     "physicsDt": 0.01, "actionSubsteps": 10, "maxSeconds": 900.0,
-    "maxDistanceMeters": 30000.0, "maxAltitudeMeters": 5000.0,
+    "maxDistanceMeters": 18000.0, "maxAltitudeMeters": 5000.0,
     "switchDistanceMeters": 6500.0, "ilsRangeMeters": 15000.0, "ilsSectorDegrees": 35.0,
     "glideDegrees": 3.0, "localizerCaptureDegrees": 2.5, "glideCaptureDegrees": 0.7,
     "captureHoldSeconds": 0.5, "captureHysteresis": 1.5, "requiredLaps": 1, "pathCorridorMeters": 350.0, "maximumWaypointStepMeters": 50.0,
@@ -35,17 +35,20 @@
   },
   "normalization": {
     "distance": 30000.0, "altitude": 5000.0, "speed": 150.0, "rate": 2.0,
-    "path": 3000.0, "localizerDegrees": 35.0, "glideDegrees": 10.0
+    "path": 3000.0, "glideDegrees": 10.0
   },
   "reward": {
-    "weights": { "Path": 0.002, "Localizer": 0.25, "Glide": 0.25, "Speed": 0.04, "Slope": 0.04,
+    "weights": { "Path": 0.002, "Localizer": 0.30, "Glide": 0.25, "Speed": 0.01, "Slope": 0.01,
       "EnterLocalizer": 2.0, "EnterGlide": 2.0, "Touchdown": 100.0, "Stop": 100.0, "Crash": -100.0 },
     "pathTolerance": 500.0, "localizerToleranceDegrees": 5.0, "glideToleranceDegrees": 2.0,
-    "speedTolerance": 15.0, "slopeToleranceDegrees": 5.0, "convergenceSeconds": 20.0, "ilsDecaySeconds": 140.0
+    "speedTolerance": 15.0, "slopeToleranceDegrees": 5.0,
+    "localizerConvergenceScale": 5.0, "localizerSustainScale": 0.25,
+    "localizerCourseBlend": 0.5, "localizerInterceptGain": 2.0, "localizerInterceptLimitDegrees": 60.0,
+    "convergenceSeconds": 20.0, "ilsDecaySeconds": 140.0
   },
   "evaluation": { "seed": 4342, "episodes": 20, "everyUpdates": 10, "minimumSuccessRate": 0.92 },
   "training": {
-    "seed": 42, "rolloutSteps": 2048, "minibatch": 64, "epochs": 4, "maxUpdates": 10000, "checkpointEvery": 1, "hiddenWidth": 64,
+    "seed": 42, "rolloutSteps": 2048, "minibatch": 64, "epochs": 4, "maxUpdates": 10000, "checkpointEvery": 1, "hiddenWidth": 128,
     "ilsCaptureScale": 2.0,
     "actorRate": 0.0003, "criticRate": 0.0003, "gamma": 0.99, "lambda": 0.95, "clip": 0.2,
     "entropy": 0.001, "valueWeight": 0.5, "minLogStd": -5.0, "maxLogStd": 0.5, "initialLogStd": -1.0,

@@ -11,6 +11,13 @@ AircraftState At(Config const& c,double along,double cross,double height)
     aircraft.heading=c.runway.headingDegrees*DegreesToRadians;
     return aircraft;
 }
+AircraftState WithCourse(Config const& c,AircraftState aircraft,double courseDegrees)
+{
+    double const course=courseDegrees*DegreesToRadians;
+    aircraft.velocity=Add(Scale(RunwayForward(c.runway),aircraft.airspeed*std::cos(course)),
+        Scale(RunwayRight(c.runway),aircraft.airspeed*std::sin(course)));
+    return aircraft;
+}
 StepResult ApproachStep(Config const& c,AircraftState const& before,AircraftState const& after)
 {
     MissionState mission{};
@@ -41,11 +48,56 @@ void Convergence(Config const& c)
             "a closed error excursion cannot farm convergence");
         Check(Channel(stationary,channel)==0,"stationary geometry earns no repeated ILS shaping");
     }
+    auto unitLocalizerScale=c;
+    unitLocalizerScale.reward.localizerConvergenceScale=1;
+    auto const unitScaleImprovement=ApproachStep(unitLocalizerScale,far,closer);
+    Check(Near(Channel(improvement,Reward::Localizer),
+            c.reward.localizerConvergenceScale*Channel(unitScaleImprovement,Reward::Localizer),1e-12)
+        && Near(Channel(improvement,Reward::Glide),Channel(unitScaleImprovement,Reward::Glide),1e-12),
+        "LOC corrective potential is strengthened without scaling glide");
     Check(Channel(improvement,Reward::EnterLocalizer)==0 && Channel(improvement,Reward::EnterGlide)==0,
         "far convergence does not claim a capture");
 
-    MissionState patrol{};
+    auto geometricOnly=c;
+    geometricOnly.reward.localizerCourseBlend=0;
+    auto atAngle=[&](double degrees)
+    { return At(geometricOnly,-6000,6000*std::tan(degrees*DegreesToRadians),700); };
+    auto const nearCorrection=ApproachStep(geometricOnly,atAngle(10),atAngle(9.9));
+    auto const farCorrection=ApproachStep(geometricOnly,atAngle(25),atAngle(24.9));
+    Check(Channel(nearCorrection,Reward::Localizer)>0
+        && Near(Channel(nearCorrection,Reward::Localizer),Channel(farCorrection,Reward::Localizer),1e-10),
+        "linear LOC geometry keeps an equal corrective gradient across the front-side sector");
+
+    auto const rightState=At(c,-6000,1000,700);
+    auto const rightNeutral=WithCourse(c,rightState,0);
+    auto const rightInward=ApproachStep(c,rightNeutral,WithCourse(c,rightState,-5));
+    auto const rightOutward=ApproachStep(c,rightNeutral,WithCourse(c,rightState,5));
+    auto const leftState=At(c,-6000,-1000,700);
+    auto const leftNeutral=WithCourse(c,leftState,0);
+    auto const leftInward=ApproachStep(c,leftNeutral,WithCourse(c,leftState,5));
+    auto const leftOutward=ApproachStep(c,leftNeutral,WithCourse(c,leftState,-5));
+    Check(Channel(rightInward,Reward::Localizer)>0 && Channel(rightOutward,Reward::Localizer)<0
+        && Channel(leftInward,Reward::Localizer)>0 && Channel(leftOutward,Reward::Localizer)<0
+        && Near(Channel(rightInward,Reward::Localizer),Channel(leftInward,Reward::Localizer),1e-10)
+        && Near(Channel(rightOutward,Reward::Localizer),Channel(leftOutward,Reward::Localizer),1e-10),
+        "mirrored LOC states reward the corresponding inward course and penalize the outward course");
+
+    MissionState observing{};
     auto const plan=MakeFlightPlan(c);
+    auto observationAtAngle=[&](double degrees)
+    {
+        double const radians=degrees*DegreesToRadians;
+        return Observe(c,plan,observing,At(c,-6000,6000*std::tan(radians),700))[22];
+    };
+    double const right45=observationAtAngle(45),right60=observationAtAngle(60);
+    double const left45=observationAtAngle(-45),left60=observationAtAngle(-60);
+    Check(Near(right45,std::sin(45*DegreesToRadians))
+        && Near(right60,std::sin(60*DegreesToRadians))
+        && Near(left45,-right45) && Near(left60,-right60)
+        && std::abs(right60)>std::abs(right45) && std::abs(right60)<1,
+        "signed LOC observation preserves side and angular magnitude beyond the radio sector");
+
+    MissionState patrol{};
     auto const patrolImprovement=AdvanceMission(c,plan,patrol,far,closer);
     Check(patrol.phase==Phase::Patrol && Channel(patrolImprovement,Reward::Localizer)>0
         && Channel(patrolImprovement,Reward::Glide)==0
@@ -65,11 +117,23 @@ void Convergence(Config const& c)
     auto const approachShaping=AdvanceMission(c,plan,directApproach,outside,outsideCloser);
     Check(!directApproach.capturedLocalizer && Channel(approachShaping,Reward::Glide)>0,
         "approach learns glide correction before radio LOC capture");
-    auto const beyondRange=At(c,-16000,0,1000),nearerBeyondRange=At(c,-15999.8,0,1000);
+    auto const beyondRange=At(c,-16000,1000,1000),nearerBeyondRange=At(c,-15999.8,999.8,1000);
     MissionState beyondRangePatrol{};
-    auto const noGeometry=AdvanceMission(c,plan,beyondRangePatrol,beyondRange,nearerBeyondRange);
-    Check(Channel(noGeometry,Reward::Localizer)==0 && Channel(noGeometry,Reward::Glide)==0,
-        "ILS shaping remains bounded to the configured front-side range");
+    auto const farGeometry=AdvanceMission(c,plan,beyondRangePatrol,beyondRange,nearerBeyondRange);
+    auto const farObservation=Observe(c,plan,beyondRangePatrol,nearerBeyondRange);
+    Check(!Guide(c,plan,beyondRangePatrol,nearerBeyondRange).ilsValid
+        && Channel(farGeometry,Reward::Localizer)>0 && Channel(farGeometry,Reward::Glide)==0
+        && Channel(farGeometry,Reward::Speed)==0 && Channel(farGeometry,Reward::Slope)==0
+        && farObservation[22]!=0 && farObservation[23]==0,
+        "far LOC remains visible while glide, speed and slope stay silent");
+    auto const outsideBoundary=At(c,-c.mission.ilsRangeMeters-1,0,100);
+    auto const insideBoundary=At(c,-c.mission.ilsRangeMeters+1,0,100);
+    auto const envelopeEntry=ApproachStep(c,outsideBoundary,insideBoundary);
+    double const maximumEntrySustain=c.reward.weights[static_cast<std::size_t>(Reward::Localizer)]
+        *c.mission.physicsDt*c.reward.localizerSustainScale;
+    Check(Channel(envelopeEntry,Reward::Localizer)>0
+        && Channel(envelopeEntry,Reward::Localizer)<=maximumEntrySustain+1e-12,
+        "crossing the radio-range boundary neither gates LOC nor creates a corrective spike");
 
     // Slow improvement followed by one fast regression must also cancel.
     auto previous=far;double localizer{},glide{};
@@ -101,7 +165,9 @@ void ProgressAndAmplitude(Config const& c)
     for(auto const channel : {Reward::Localizer,Reward::Glide})
     {
         auto const weight=c.reward.weights[static_cast<std::size_t>(channel)];
-        Check(Near(Channel(correct,channel),weight*c.mission.physicsDt,1e-10),"on-beam progress is time scaled");
+        double const sustainScale=channel==Reward::Localizer ? c.reward.localizerSustainScale : 1.0;
+        Check(Near(Channel(correct,channel),weight*c.mission.physicsDt*sustainScale,1e-10),
+            "on-beam progress uses the channel sustain scale");
         Check(Channel(wrong,channel)<0,"following the beams away from the runway is penalized");
         Check(weight>=100*c.reward.weights[static_cast<std::size_t>(Reward::Path)],"ILS strongly outweighs the secondary path");
     }
@@ -135,15 +201,27 @@ void ProgressAndAmplitude(Config const& c)
 
     // With continuous in-sector ILS, only progress decays: signed convergence
     // telescopes exactly, including delayed oscillations.
-    double const ilsWeights=c.reward.weights[1]+c.reward.weights[2];
-    double const maximumIls=ilsWeights*(c.reward.ilsDecaySeconds+c.mission.physicsDt+c.reward.convergenceSeconds);
+    double const decayingSeconds=c.reward.ilsDecaySeconds+c.mission.physicsDt;
+    double const maximumLocalizer=c.reward.weights[1]*(
+        c.reward.localizerSustainScale*decayingSeconds
+        +c.reward.localizerConvergenceScale*c.reward.convergenceSeconds);
+    double const maximumGlide=c.reward.weights[2]*(decayingSeconds+c.reward.convergenceSeconds);
     double const maximumSecondary=(c.reward.weights[3]+c.reward.weights[4])*
-        (c.reward.ilsDecaySeconds+c.mission.physicsDt+c.reward.convergenceSeconds);
+        (decayingSeconds+c.reward.convergenceSeconds);
     double const captures=c.reward.weights[5]+c.reward.weights[6];
-    Check(maximumIls+maximumSecondary+captures<c.reward.weights[7],
+    Check(maximumLocalizer+maximumGlide+maximumSecondary+captures<c.reward.weights[7],
         "continuous ILS shaping plus captures remains below touchdown bonus");
-    Check(c.initial.approach && c.reward.weights[7]==100 && c.reward.weights[8]==100 && c.reward.weights[9]==-100,
-        "default mission starts on ILS and preserves outcome amplitudes");
+    double const localizerWeight=c.reward.weights[static_cast<std::size_t>(Reward::Localizer)];
+    double const speedWeight=c.reward.weights[static_cast<std::size_t>(Reward::Speed)];
+    double const slopeWeight=c.reward.weights[static_cast<std::size_t>(Reward::Slope)];
+    Check(Near(localizerWeight,0.30) && Near(speedWeight,0.01)
+        && Near(slopeWeight,0.01) && Near(localizerWeight,30*speedWeight)
+        && speedWeight>c.reward.weights[static_cast<std::size_t>(Reward::Path)],
+        "LOC dominates speed and slope while secondary flight guidance remains useful");
+    Check(c.initial.approach && c.reward.weights[7]==100 && c.reward.weights[8]==100 && c.reward.weights[9]==-100
+        && Near(c.reward.localizerCourseBlend,0.5) && Near(c.reward.localizerInterceptGain,2)
+        && Near(c.reward.localizerInterceptLimitDegrees,60) && c.training.hiddenWidth==128,
+        "default mission uses intercept-aware LOC, the larger network and preserved outcome amplitudes");
 }
 void SpeedAndSlopeShaping(Config const& c)
 {
@@ -165,6 +243,25 @@ void SpeedAndSlopeShaping(Config const& c)
             && Channel(steady,channel)>Channel(worse,channel)
             && Channel(steady,channel)>0,
             "speed/slope reward stays dense outside tolerance and discriminates correction from regression");
+
+    MissionState uncaptured{};
+    uncaptured.phase=Phase::Approach;
+    auto incompatible=improved;
+    incompatible.heading+=Pi;
+    auto const beforeCapture=AdvanceMission(c,MakeFlightPlan(c),uncaptured,unstable,incompatible);
+    Check(!uncaptured.capturedLocalizer
+        && Channel(beforeCapture,Reward::Speed)==0 && Channel(beforeCapture,Reward::Slope)==0,
+        "speed and slope stay silent before confirmed LOC capture");
+
+    MissionState lost{};
+    lost.phase=Phase::Approach;
+    lost.capturedLocalizer=true;
+    lost.localizerHoldSeconds=c.mission.captureHoldSeconds;
+    lost.localizerLossSeconds=c.mission.captureHoldSeconds-c.mission.physicsDt/2;
+    auto const afterLoss=AdvanceMission(c,MakeFlightPlan(c),lost,unstable,incompatible);
+    Check(!lost.capturedLocalizer
+        && Channel(afterLoss,Reward::Speed)==0 && Channel(afterLoss,Reward::Slope)==0,
+        "confirmed LOC loss immediately disables speed and slope reward");
 }
 void SecondaryGuidance(Config const& c)
 {
@@ -246,6 +343,31 @@ void MovingFrame(Config c)
     c.reward.ilsDecaySeconds=0;Rejects([&] {Validate(c);},"zero ILS decay rejected");
     c.reward.ilsDecaySeconds=std::numeric_limits<double>::infinity();
     Rejects([&] {Validate(c);},"non-finite ILS decay rejected");
+    c.reward.ilsDecaySeconds=140;
+    c.reward.localizerConvergenceScale=0;
+    Rejects([&] {Validate(c);},"zero LOC corrective scale rejected");
+    c.reward.localizerConvergenceScale=std::numeric_limits<double>::infinity();
+    Rejects([&] {Validate(c);},"non-finite LOC corrective scale rejected");
+    c.reward.localizerConvergenceScale=5;
+    c.reward.localizerSustainScale=-0.01;
+    Rejects([&] {Validate(c);},"negative LOC sustain scale rejected");
+    c.reward.localizerSustainScale=1.01;
+    Rejects([&] {Validate(c);},"LOC sustain scale above one rejected");
+    c.reward.localizerSustainScale=0.25;
+    c.reward.localizerCourseBlend=-0.01;
+    Rejects([&] {Validate(c);},"negative LOC course blend rejected");
+    c.reward.localizerCourseBlend=1.01;
+    Rejects([&] {Validate(c);},"LOC course blend above one rejected");
+    c.reward.localizerCourseBlend=0.5;
+    c.reward.localizerInterceptGain=0.99;
+    Rejects([&] {Validate(c);},"LOC intercept gain below one rejected");
+    c.reward.localizerInterceptGain=4.01;
+    Rejects([&] {Validate(c);},"excessive LOC intercept gain rejected");
+    c.reward.localizerInterceptGain=2;
+    c.reward.localizerInterceptLimitDegrees=c.initial.bearingDegrees.maximum+3;
+    Rejects([&] {Validate(c);},"LOC intercept limit must exceed every initial course");
+    c.reward.localizerInterceptLimitDegrees=90;
+    Rejects([&] {Validate(c);},"LOC intercept limit below ninety degrees required");
 }
 }
 int main()

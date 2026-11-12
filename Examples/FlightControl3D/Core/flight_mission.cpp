@@ -19,19 +19,79 @@ double GuidanceQuality(double error, double tolerance) noexcept
     // A finite error outside the capture tolerance must still provide guidance.
     return tolerance/(tolerance+std::abs(error));
 }
-bool IlsShapingEnvelope(Config const& c,Guidance const& guidance) noexcept
+/**
+ * @brief Maps an absolute angular error to a bounded constant-gradient quality.
+ * @param error Signed angular error in radians.
+ * @param fullScale Positive error magnitude mapped to zero quality.
+ * @return Quality clamped to [0,1].
+ */
+double LinearQuality(double error,double fullScale) noexcept
 {
-    // Reward geometry is deliberately denser than radio reception: it guides
-    // acquisition throughout the finite front-side range, while ilsValid stays
-    // authoritative for observations, UI state and capture transitions.
+    return 1.0-std::clamp(std::abs(error)/fullScale,0.0,1.0);
+}
+/**
+ * @brief Combines lateral beam error with an explicitly inward intercept course.
+ * @param c Valid flight-control configuration.
+ * @param guidance Current beam geometry and deck-relative velocity.
+ * @return Bounded LOC quality in [0,1].
+ *
+ * The geometric component has a constant gradient across the complete
+ * front-side angular range. The course component asks for a stronger inward
+ * course than the direct line to the threshold, so the actor is rewarded while
+ * establishing an interception before a large lateral displacement is visible.
+ */
+double LocalizerQuality(Config const& c,Guidance const& guidance) noexcept
+{
+    double const geometric=LinearQuality(guidance.localizer,Pi/2);
+    double const maximumIntercept=c.reward.localizerInterceptLimitDegrees*DegreesToRadians;
+    double const desiredCourse=-std::clamp(c.reward.localizerInterceptGain*guidance.localizer,
+        -maximumIntercept,maximumIntercept);
+    double const actualCourse=std::atan2(guidance.relativeVelocity.east,guidance.relativeVelocity.north);
+    double const course=LinearQuality(WrapAngle(actualCourse-desiredCourse),maximumIntercept);
+    return (1.0-c.reward.localizerCourseBlend)*geometric+c.reward.localizerCourseBlend*course;
+}
+/**
+ * @brief Reports whether geometric LOC shaping is available before the runway.
+ * @param c Valid flight-control configuration.
+ * @param guidance Current runway-relative geometry.
+ * @return True throughout the non-terminal front-side mission volume.
+ */
+bool LocalizerShapingEnvelope(Config const& c,Guidance const& guidance) noexcept
+{
+    // The learning signal deliberately out-ranges radio reception so an
+    // aircraft near the episode boundary still knows which way to intercept.
+    // ilsValid remains authoritative for capture transitions and UI state.
+    return guidance.along<0 && guidance.height>0
+        && guidance.distance<=c.mission.maxDistanceMeters;
+}
+/**
+ * @brief Reports whether geometric glide shaping is available before the runway.
+ * @param c Valid flight-control configuration.
+ * @param guidance Current runway-relative geometry.
+ * @return True inside the finite front-side radio range.
+ */
+bool GlideShapingEnvelope(Config const& c,Guidance const& guidance) noexcept
+{
     return guidance.along<0 && guidance.height>0
         && guidance.distance<=c.mission.ilsRangeMeters;
 }
-double GuidanceReward(Config const& c,double previousQuality,double quality,double progress,double sustainScale=1.0) noexcept
+/**
+ * @brief Combines decaying guidance maintenance with a signed corrective potential.
+ * @param c Valid flight-control configuration.
+ * @param previousQuality Guidance quality before the physics step.
+ * @param quality Guidance quality after the physics step.
+ * @param progress Bounded positive or negative progress multiplier.
+ * @param sustainScale Scale applied only to the recurring maintenance term.
+ * @param convergenceScale Scale applied only to the signed quality difference.
+ * @return Unweighted reward contribution for one physics step.
+ */
+double GuidanceReward(Config const& c,double previousQuality,double quality,double progress,
+    double sustainScale=1.0,double convergenceScale=1.0) noexcept
 {
     // The signed difference cancels on a closed error excursion. Do not clip it:
     // clipping would allow slow improvement / fast retreat to farm convergence.
-    return c.mission.physicsDt*sustainScale*quality*progress+c.reward.convergenceSeconds*(quality-previousQuality);
+    return c.mission.physicsDt*sustainScale*quality*progress
+        +c.reward.convergenceSeconds*convergenceScale*(quality-previousQuality);
 }
 AircraftState InCurrentDeckFrame(Runway const& previous,Runway const& current,AircraftState state) noexcept
 {
@@ -607,11 +667,24 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
                 // Initial approach supplies both geometric beam errors before
                 // radio capture; patrol acquisition remains LOC-led.
                 bool const enabled=localizer || s.phase==Phase::Approach || s.capturedLocalizer;
-                double const previousQuality=enabled && IlsShapingEnvelope(c,previousGuidance)
-                    ? GuidanceQuality(localizer ? previousGuidance.localizer : previousGuidance.glideError,tolerance) : 0;
-                double const quality=enabled && IlsShapingEnvelope(c,g)
-                    ? GuidanceQuality(localizer ? g.localizer : g.glideError,tolerance) : 0;
-                double const value=GuidanceReward(c,previousQuality,quality,progress,ilsScale);
+                bool const previousInEnvelope=enabled && (localizer
+                    ? LocalizerShapingEnvelope(c,previousGuidance)
+                    : GlideShapingEnvelope(c,previousGuidance));
+                bool const currentInEnvelope=enabled && (localizer
+                    ? LocalizerShapingEnvelope(c,g) : GlideShapingEnvelope(c,g));
+                double const previousQuality=previousInEnvelope
+                    ? (localizer ? LocalizerQuality(c,previousGuidance)
+                        : GuidanceQuality(previousGuidance.glideError,tolerance)) : 0;
+                double const quality=currentInEnvelope
+                    ? (localizer ? LocalizerQuality(c,g) : GuidanceQuality(g.glideError,tolerance)) : 0;
+                // Entering or leaving the finite shaping envelope is not an
+                // angular correction and must not create a potential spike.
+                double const correctivePreviousQuality=previousInEnvelope && currentInEnvelope
+                    ? previousQuality : quality;
+                double const sustainScale=ilsScale*(localizer ? c.reward.localizerSustainScale : 1.0);
+                double const convergenceScale=localizer ? c.reward.localizerConvergenceScale : 1.0;
+                double const value=GuidanceReward(c,correctivePreviousQuality,quality,progress,
+                    sustainScale,convergenceScale);
                 // Angular errors can shrink merely by flying away from the
                 // threshold; that must never earn a positive ILS reward.
                 add(channel,progress<0 ? std::min(value,0.0) : value);
@@ -622,11 +695,12 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
             if(enteredLocalizer) add(Reward::EnterLocalizer,1);
             if(enteredGlide) add(Reward::EnterGlide,1);
         }
-        if (s.phase != Phase::Rollout)
+        if (s.phase != Phase::Rollout && s.capturedLocalizer)
         {
-            // Dense, signed tracking improvement remains available beyond the
-            // capture tolerances. The potential cancels on an out-and-back,
-            // while the decaying hold term cannot outweigh a safe landing.
+            // Speed and slope are secondary final-approach objectives. Keeping
+            // them silent until confirmed LOC capture prevents reward farming
+            // far from the approach. A confirmed LOC loss cuts them at once.
+            // Their potential still cancels on an out-and-back.
             double const guidanceScale=std::exp(-static_cast<double>(s.steps-1)*dt/c.reward.ilsDecaySeconds);
             double const airspeedProgress=std::clamp(after.airspeed/g.targetSpeed,0.0,1.0);
             double const previousSpeedQuality=GuidanceQuality(referenceBefore.airspeed-previousGuidance.targetSpeed,c.reward.speedTolerance);
@@ -682,6 +756,9 @@ Observation Observe(Config const& c, FlightPlan const& plan, MissionState const&
     double const right = -dn*std::sin(a.heading)+de*std::cos(a.heading);
     double const heading = WrapAngle(a.heading-c.runway.headingDegrees*DegreesToRadians);
     double const slope = std::atan2(g.relativeVelocity.up,std::hypot(g.relativeVelocity.north,g.relativeVelocity.east));
+    // Front-side LOC lies in [-pi/2, pi/2], where sine is signed and strictly
+    // monotonic. Unlike the former sector-based scale, it never clips at 35°.
+    double const localizerObservation=LocalizerShapingEnvelope(c,g) ? std::sin(g.localizer) : 0;
     auto const deckVelocity=DeckVelocity(c.runway,a.position);
     auto const normal=RunwayNormal(c.runway);
     return {Unit(forward/n.distance), Unit(right/n.distance),
@@ -690,8 +767,8 @@ Observation Observe(Config const& c, FlightPlan const& plan, MissionState const&
         Unit(a.airspeed/n.speed), Unit(a.velocity.north/n.speed), Unit(a.velocity.east/n.speed), Unit(a.velocity.up/n.speed),
         Unit(std::sin(a.roll)), Unit(std::cos(a.roll)), Unit(std::sin(a.pitch)), Unit(std::cos(a.pitch)),
         Unit(std::sin(heading)), Unit(std::cos(heading)), Unit(a.rollRate/n.rate), Unit(a.pitchRate/n.rate), Unit(a.yawRate/n.rate),
-        Unit(std::sin(slope)), Unit(std::cos(slope)), Unit(IlsShapingEnvelope(c,g) ? g.localizer/(n.localizerDegrees*DegreesToRadians) : 0),
-        Unit(IlsShapingEnvelope(c,g) ? g.glideError/(n.glideDegrees*DegreesToRadians) : 0), Unit(g.ilsValid), Unit(g.targetSpeed/n.speed),
+        Unit(std::sin(slope)), Unit(std::cos(slope)), Unit(localizerObservation),
+        Unit(GlideShapingEnvelope(c,g) ? g.glideError/(n.glideDegrees*DegreesToRadians) : 0), Unit(g.ilsValid), Unit(g.targetSpeed/n.speed),
         Unit(g.targetSlope/Pi), Unit(std::sin(g.courseError)), Unit(std::cos(g.courseError)), Unit(g.pathDistance/n.path),
         Unit(a.gearPosition), Unit(a.weightOnWheels), Unit(s.phase==Phase::Patrol), Unit(s.phase==Phase::Approach), Unit(s.phase==Phase::Rollout),
         Unit(static_cast<double>(s.steps)*c.mission.physicsDt/c.mission.maxSeconds), Unit(s.capturedLocalizer), Unit(s.capturedGlide),

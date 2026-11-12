@@ -84,6 +84,14 @@ void Geometry(Config const& c)
     for (float value : Observe(c,plan,s,a)) Check(value==0,"invalid terminal observation");
     auto failure=AdvanceMission(c,plan,s,far,a);
     Check(failure.terminated && !failure.truncated && failure.reward==c.reward.weights[9],"NaN FDM crash");
+
+    MissionState escaped{};escaped.phase=Phase::Approach;
+    auto const insideBoundary=Approach(c,-c.mission.maxDistanceMeters+1);
+    auto const outsideBoundary=Approach(c,-c.mission.maxDistanceMeters-1);
+    auto const rangeFailure=AdvanceMission(c,plan,escaped,insideBoundary,outsideBoundary);
+    Check(rangeFailure.terminated && !rangeFailure.truncated && escaped.outcome==Outcome::Crash
+        && rangeFailure.reward==c.reward.weights[static_cast<std::size_t>(Reward::Crash)],
+        "leaving the recoverable distance is a penalized terminal failure");
 }
 void Landing(Config c)
 {
@@ -141,7 +149,7 @@ void Configuration()
 {
     std::ifstream source(PPO_FLIGHT_CONFIG); nlohmann::json valid; source>>valid;
     TemporaryDirectory temporary("flight-config-"); auto const path=temporary.path/"config.json";
-    for (int test=0; test<20; ++test)
+    for (int test=0; test<26; ++test)
     {
         auto json=valid;
         if (test==0) json["normalization"]["speed"]=0;
@@ -165,12 +173,19 @@ void Configuration()
         if (test==17) json["training"]["ilsCaptureScale"]=100.0;
         if (test==18) json["training"].erase("ilsCaptureScale");
         if (test==19) json["mission"]["patrolHeadingToleranceDegrees"]=0;
+        if (test==20) json["reward"].erase("localizerConvergenceScale");
+        if (test==21) json["reward"].erase("localizerSustainScale");
+        if (test==22) json["reward"].erase("localizerCourseBlend");
+        if (test==23) json["reward"].erase("localizerInterceptGain");
+        if (test==24) json["reward"].erase("localizerInterceptLimitDegrees");
+        if (test==25) json["normalization"]["localizerDegrees"]=35.0;
         { std::ofstream stream(path); stream<<json; }
         Rejects([&] { LoadConfig(path); },"invalid JSON accepted");
     }
     auto c=LoadConfig(PPO_FLIGHT_CONFIG);
     Check(Near(c.initial.runwayAlignedProbability,1.0/3.0),"balanced LOC/glide-start probability");
     Check(Near(c.training.ilsCaptureScale,2.0),"training-only ILS capture scale");
+    Check(Near(c.mission.maxDistanceMeters,18000),"bounded recovery margin beyond ILS range");
     for(double probability : {std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity()})
     {
         c.initial.runwayAlignedProbability=probability;

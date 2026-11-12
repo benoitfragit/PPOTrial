@@ -1,4 +1,5 @@
 #include "flight_session.hpp"
+#include <iostream>
 #include <utility>
 #include <limits>
 
@@ -17,6 +18,18 @@ Config EnvironmentConfig(Config config,bool training)
     config.mission.glideCaptureDegrees*=config.training.ilsCaptureScale;
     config.training.ilsCaptureScale=1.0;
     return config;
+}
+/** @brief Emits one complete rollout's losses and weighted reward-channel means. */
+void LogUpdate(LearningStats const& stats)
+{
+    std::cout<<"[FLIGHT_UPDATE] update="<<stats.updates
+        <<" mean_reward="<<stats.meanReward
+        <<" policy_loss="<<stats.policyLoss
+        <<" value_loss="<<stats.valueLoss
+        <<" entropy="<<stats.entropy;
+    for(std::size_t channel=0;channel<RewardCount;++channel)
+        std::cout<<' '<<RewardNames[channel]<<'='<<stats.meanRewards[channel];
+    std::cout<<std::endl;
 }
 }
 FlightSession::FlightSession(Config config, bool training, std::filesystem::path modelDirectory,
@@ -70,6 +83,7 @@ void FlightSession::Tick()
     if (training_ && learner_.Ready())
     {
         learner_.Optimize();
+        LogUpdate(learner_.Stats());
         bool const final=learner_.Stats().updates>=trainingUpdateLimit_;
         bool const validate=final || learner_.Stats().updates%config_.evaluation.everyUpdates==0;
         if(validate || learner_.Stats().updates%config_.training.checkpointEvery==0) learner_.Save(models_.Latest());
