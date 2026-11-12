@@ -341,6 +341,18 @@ void CapturePriority(Config const& c)
         && observation[0]==0 && observation[1]==0 && observation[2]==0
         && repeatedCaptureReward==0,
         "LOC/glide recapture suppresses the threshold point without repeating entry bonuses");
+
+    auto const flareAircraft=Approach(c,-50);
+    auto const flareGuidance=Guide(c,plan,inbound,flareAircraft);
+    auto rollout=inbound;rollout.phase=Phase::Rollout;
+    auto const rolloutGuidance=Guide(c,plan,rollout,flareAircraft);
+    Check(flareGuidance.mode==GuidanceMode::Flare && !flareGuidance.targetValid
+        && flareGuidance.target.north==flareAircraft.position.north
+        && flareGuidance.target.east==flareAircraft.position.east
+        && rolloutGuidance.mode==GuidanceMode::Rollout && !rolloutGuidance.targetValid
+        && rolloutGuidance.target.north==flareAircraft.position.north
+        && rolloutGuidance.target.east==flareAircraft.position.east,
+        "flare and rollout cannot reactivate a threshold guidance line");
 }
 void RandomizationAndMotion(Config const& c)
 {

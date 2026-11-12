@@ -332,11 +332,12 @@ Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& miss
             : mission.capturedGlide ? GuidanceMode::Glide : GuidanceMode::Localizer;
         g.targetSpeed = mission.phase == Phase::Rollout ? 0 : (flare ? c.mission.flareSpeed : c.mission.approachSpeed);
         g.targetSlope = flare || mission.phase == Phase::Rollout ? 0 : -slope;
-        g.target = FromRunway(c.runway, 0, 0, c.runway.thresholdHeightMeters);
+        // Captured approach, flare and rollout do not own a geometric point.
+        // Keep the stored value at the aircraft as a defensive no-op for any
+        // consumer that does not inspect targetValid.
+        g.target = a.position;
         g.pathDistance = std::hypot(g.cross, g.height-(c.runway.thresholdHeightMeters-std::min(g.along,0.0)*std::tan(slope)));
-        // Once both beams are captured the policy follows the angular ILS
-        // errors directly; a threshold point would be a competing reference.
-        g.targetValid=g.mode!=GuidanceMode::Glide;
+        g.targetValid=false;
         if(mission.phase == Phase::Approach
             && (!mission.capturedLocalizer || !mission.capturedGlide))
         {

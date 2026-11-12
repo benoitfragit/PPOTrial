@@ -35,7 +35,7 @@ Le JSON livré active `training.resume: true` et `checkpointEvery: 1`. En entra�
 
 Le desktop traite `maxUpdates` comme un budget supplémentaire à partir du modèle chargé. Par exemple, un `latest` à l'update 120 et un budget de 10 000 donnent une fin de bloc à 10 120. Après validation finale, un nouveau Play prolonge le budget en conservant le même learner. Le renderer diffère Stop/join et Play hors du verrou de snapshot, puis le callback ECS `Init` prolonge la session terminée. Le headless conserve son budget total existant. L'UI affiche la source du modèle et la limite du bloc courant ; le journal contient `[FLIGHT_SESSION] Resumed latest` et l'update chargé.
 
-La reprise d'entraînement conserve les poids, Adam et le RNG lors d'un changement des intervalles horizontaux, de l'orientation d'interception, de `initial.approach`, du guidage compatible déclaré ou des réglages de reward. `rewardVersion: 3`, `guidanceVersion: 4` et `spawnVersion: 2` séparent les contrats de shaping, de guidage et d'ordonnancement initial. Les checkpoints de guidage V2/V3, les placements aléatoires antérieurs et les signatures sans ces versions peuvent amorcer l'entraînement, mais leur BEST n'est jamais réutilisé sans une nouvelle validation. Les changements de géométrie de piste, de physique ou d'autres observations restent incompatibles. Un BEST antérieur est conservé avec ses générations et son contrôle d'intégrité ; l'inférence exige un BEST validé sur le contrat exact.
+La reprise d'entraînement conserve les poids, Adam et le RNG lors d'un changement des intervalles horizontaux, de l'orientation d'interception, de `initial.approach`, du guidage compatible déclaré ou des réglages de reward. `rewardVersion: 3`, `guidanceVersion: 5` et `spawnVersion: 2` séparent les contrats de shaping, de guidage et d'ordonnancement initial. Les checkpoints de guidage V2/V3/V4, les placements aléatoires antérieurs et les signatures sans ces versions peuvent amorcer l'entraînement, mais leur BEST n'est jamais réutilisé sans une nouvelle validation. Les changements de géométrie de piste, de physique ou d'autres observations restent incompatibles. Un BEST antérieur est conservé avec ses générations et son contrôle d'intégrité ; l'inférence exige un BEST validé sur le contrat exact.
 
 ## Interface FlightControl3D
 
@@ -98,7 +98,7 @@ Comme BlueAgent, Flight3D sépare désormais un ralliement par projection/antici
 
 Le signal ILS brut est visible uniquement devant le seuil, à moins de `ilsRangeMeters` (15 km), au-dessus du plan de piste et dans le secteur horizontal `±ilsSectorDegrees` (±35°). Cela ne constitue pas une capture. Le LOC exige en plus une erreur `±localizerCaptureDegrees` (±2,5°), un cap compatible à ±35° et un maintien de 0,5 s. Le glide exige ensuite `±glideCaptureDegrees` (±0,7°) pendant 0,5 s.
 
-La phase approche reste prioritaire après la première capture LOC, mais les captures LOC/GLIDE sont actives et réversibles. Une sortie au-delà des tolérances multipliées par `captureHysteresis`, ou une perte de signal, doit durer 0,5 s avant libération. Après libération, le guidage conserve un point continu à mi-distance longitudinale sur le LOC/glide et exige une recapture LOC puis GLIDE stable. Une fois les deux axes capturés, le point géométrique au seuil, son vecteur et son erreur de direction sont neutralisés : la politique suit directement les erreurs LOC/GLIDE, la pente et la vitesse. Le point ne revient que pour une réinterception, puis pour l'arrondi/roulage. À faible hauteur après capture glide, la vitesse cible diminue et la pente cible devient nulle pour l'arrondi.
+La phase approche reste prioritaire après la première capture LOC, mais les captures LOC/GLIDE sont actives et réversibles. Une sortie au-delà des tolérances multipliées par `captureHysteresis`, ou une perte de signal, doit durer 0,5 s avant libération. Après libération, le guidage conserve un point continu à mi-distance longitudinale sur le LOC/glide et exige une recapture LOC puis GLIDE stable. Une fois les deux axes capturés, le point géométrique au seuil, son vecteur et son erreur de direction sont neutralisés : la politique suit directement les erreurs LOC/GLIDE, la pente et la vitesse. Ce point ne revient que pour une réinterception ; l'arrondi et le roulage utilisent leurs consignes et la géométrie de piste sans cible au seuil. À faible hauteur après capture glide, la vitesse cible diminue et la pente cible devient nulle pour l'arrondi.
 
 ## Observation, actions et PPO
 
@@ -266,3 +266,13 @@ un BEST doit être revalidé sur V4.
 
 Validation locale de cette évolution : non exécutée à la demande de l'utilisateur ;
 le build Release et les tests restent à vérifier séparément.
+
+## Suppression définitive de la cible seuil (11 novembre 2026)
+
+Le contrat `guidanceVersion=5` neutralise aussi la cible géométrique pendant
+`Flare` et `Rollout`. Sa valeur défensive est la position courante de l'avion et
+`targetValid` reste faux : aucun consommateur ne peut donc tracer une ligne vers
+le seuil, même s'il oublie de vérifier le drapeau. Après l'hippodrome, la seule
+ligne autorisée est désormais celle de réinterception LOC/GLIDE.
+
+Validation locale : ni compilation ni test exécuté, conformément à la consigne.
