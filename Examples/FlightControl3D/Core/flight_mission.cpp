@@ -18,6 +18,23 @@ double Quality(double error, double tolerance) noexcept
 {
     return std::max(0.0, 1.0-std::abs(error)/tolerance);
 }
+double GuidanceQuality(double error, double tolerance) noexcept
+{
+    // A finite error outside the capture tolerance must still provide guidance.
+    return tolerance/(tolerance+std::abs(error));
+}
+double GuidanceReward(Config const& c,double previousQuality,double quality,double progress) noexcept
+{
+    // The signed difference cancels on a closed error excursion. Do not clip it:
+    // clipping would allow slow improvement / fast retreat to farm convergence.
+    return c.mission.physicsDt*quality*progress+c.reward.convergenceSeconds*(quality-previousQuality);
+}
+AircraftState InCurrentDeckFrame(Runway const& previous,Runway const& current,AircraftState state) noexcept
+{
+    auto const local=DeckCoordinates(previous,state.position);
+    state.position=FromRunway(current,local.north,local.east,local.up);
+    return state;
+}
 double SegmentDistance(Vec3 point,Vec3 start,Vec3 end) noexcept
 {
     auto const direction=Subtract(end,start);
@@ -36,7 +53,12 @@ double AdvancePatrol(Config const& c,FlightPlan const& plan,MissionState& s,
     double const length=std::sqrt(Dot(segment,segment));
     bool const qualified=length>0 && std::sqrt(Dot(movement,movement))<=c.mission.maximumWaypointStepMeters
         && SegmentDistance(old,start,end)<=c.mission.pathCorridorMeters && SegmentDistance(current,start,end)<=c.mission.pathCorridorMeters;
-    if(!qualified) { s.pathQualified=false;s.waypointsPassed=0;return 0; }
+    if(!qualified)
+    {
+        s.pathQualified=false;s.waypointsPassed=0;
+        s.waypoint=ClosestPatrolWaypoint(plan,after.position);
+        return 0;
+    }
     double const progress=Dot(movement,segment)/length;
     if(progress>0 && SegmentDistance(end,old,current)<=c.mission.waypointRadius)
     {
@@ -44,6 +66,15 @@ double AdvancePatrol(Config const& c,FlightPlan const& plan,MissionState& s,
         else { s.pathQualified=true;s.waypointsPassed=0; }
         if(s.waypointsPassed>=plan.count) { ++s.completedLaps;s.waypointsPassed=0; }
         s.waypoint=(s.waypoint+1)%plan.count;
+    }
+    else if(Dot(Subtract(current,start),segment)/length>length+c.mission.waypointRadius)
+    {
+        // A missed gate must not leave the aircraft chasing a point behind it.
+        // Reacquire guidance, but discard all credit for the incomplete lap.
+        s.pathQualified=false;s.waypointsPassed=0;
+        auto const closest=ClosestPatrolWaypoint(plan,after.position);
+        s.waypoint=closest==s.waypoint ? (s.waypoint+1)%plan.count : closest;
+        return 0;
     }
     return std::max(progress,0.0);
 }
@@ -137,6 +168,19 @@ FlightPlan MakeFlightPlan(Config const& c) noexcept
     return plan;
 }
 
+std::size_t ClosestPatrolWaypoint(FlightPlan const& plan,Vec3 position) noexcept
+{
+    std::size_t closest{};
+    double distance=std::numeric_limits<double>::max();
+    for(std::size_t i=0;i<plan.count;++i)
+    {
+        double const candidate=SegmentDistance(position,plan.points[(i+plan.count-1)%plan.count],plan.points[i]);
+        bool const atSegmentStart=Distance(position,plan.points[(i+plan.count-1)%plan.count])==0;
+        if(candidate<distance || (candidate==distance && atSegmentStart)) {distance=candidate;closest=i;}
+    }
+    return closest;
+}
+
 Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& mission, AircraftState const& a) noexcept
 {
     Guidance g{};
@@ -169,6 +213,14 @@ Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& miss
         g.targetSlope = flare || mission.phase == Phase::Rollout ? 0 : -slope;
         g.target = FromRunway(c.runway, 0, 0, c.runway.thresholdHeightMeters);
         g.pathDistance = std::hypot(g.cross, g.height-(c.runway.thresholdHeightMeters-std::min(g.along,0.0)*std::tan(slope)));
+        if(mission.phase == Phase::Approach && !g.ilsValid)
+        {
+            // Geometric fallback guides toward a front-side ILS intercept, not
+            // toward a touchdown from behind the runway or outside the sector.
+            double const intercept = c.mission.switchDistanceMeters;
+            g.target = FromRunway(c.runway,-intercept,0,c.runway.thresholdHeightMeters+intercept*std::tan(slope));
+            g.pathDistance = Distance(a.position,g.target);
+        }
     }
     g.courseError = WrapAngle(std::atan2(g.target.east-a.position.east,g.target.north-a.position.north)-a.heading);
     return g;
@@ -227,14 +279,40 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
             result.rewards[i] = c.reward.weights[i]*value;
         };
         double const dt = c.mission.physicsDt;
+        auto const referenceBefore=InCurrentDeckFrame(previousDeck,c.runway,before);
+        // Use the same phase and waypoint for both ends, including a gate pass.
+        auto const previousGuidance=Guide(c,plan,s,referenceBefore);
         if (s.phase == Phase::Patrol)
-            add(Reward::Path,dt*Quality(g.pathDistance,c.reward.pathTolerance)*std::clamp(pathProgress/(c.mission.patrolSpeed*dt),0.0,1.0));
-        if (s.phase == Phase::Approach && g.ilsValid)
+            add(Reward::Path,GuidanceReward(c,GuidanceQuality(previousGuidance.pathDistance,c.reward.pathTolerance),
+                GuidanceQuality(g.pathDistance,c.reward.pathTolerance),std::clamp(pathProgress/(c.mission.patrolSpeed*dt),0.0,1.0)));
+        if (s.phase == Phase::Approach)
         {
-            add(Reward::Localizer,dt*Quality(g.localizer,c.reward.localizerToleranceDegrees*DegreesToRadians));
-            add(Reward::Glide,dt*Quality(g.glideError,c.reward.glideToleranceDegrees*DegreesToRadians));
-            if(Capture(g.localizer,c.mission.localizerCaptureDegrees*DegreesToRadians,c,s.localizerHoldSeconds,s.capturedLocalizer)) add(Reward::EnterLocalizer,1);
-            if(Capture(g.glideError,c.mission.glideCaptureDegrees*DegreesToRadians,c,s.glideHoldSeconds,s.capturedGlide)) add(Reward::EnterGlide,1);
+            double const progress=std::clamp((g.along-previousGuidance.along)/(g.targetSpeed*dt),-1.0,1.0);
+            for(auto const channel : {Reward::Localizer,Reward::Glide})
+            {
+                bool const localizer=channel==Reward::Localizer;
+                double const tolerance=(localizer ? c.reward.localizerToleranceDegrees : c.reward.glideToleranceDegrees)*DegreesToRadians;
+                double const previousQuality=previousGuidance.ilsValid
+                    ? GuidanceQuality(localizer ? previousGuidance.localizer : previousGuidance.glideError,tolerance) : 0;
+                double const quality=g.ilsValid ? GuidanceQuality(localizer ? g.localizer : g.glideError,tolerance) : 0;
+                double const value=GuidanceReward(c,previousQuality,quality,progress);
+                // Angular errors can shrink merely by flying away from the
+                // threshold; that must never earn a positive ILS reward.
+                add(channel,progress<0 ? std::min(value,0.0) : value);
+            }
+            if(!g.ilsValid)
+            {
+                double const previousDistance=Distance(referenceBefore.position,g.target);
+                double const progressToIntercept=std::clamp((previousDistance-g.pathDistance)/(c.mission.approachSpeed*dt),-1.0,1.0);
+                add(Reward::Path,GuidanceReward(c,GuidanceQuality(previousDistance,c.reward.pathTolerance),
+                    GuidanceQuality(g.pathDistance,c.reward.pathTolerance),progressToIntercept));
+            }
+            if(g.ilsValid)
+            {
+                if(Capture(g.localizer,c.mission.localizerCaptureDegrees*DegreesToRadians,c,s.localizerHoldSeconds,s.capturedLocalizer)) add(Reward::EnterLocalizer,1);
+                if(Capture(g.glideError,c.mission.glideCaptureDegrees*DegreesToRadians,c,s.glideHoldSeconds,s.capturedGlide)) add(Reward::EnterGlide,1);
+            }
+            else { s.localizerHoldSeconds=0;s.glideHoldSeconds=0; }
         }
         else { s.localizerHoldSeconds=0;s.glideHoldSeconds=0; }
         if (s.phase != Phase::Rollout)

@@ -13,6 +13,7 @@ int main()
         d.speedMps={0,0}; d.heaveAmplitudeMeters={0,0}; d.pitchAmplitudeDegrees={0,0}; d.rollAmplitudeDegrees={0,0};
         FlightEnvironment env(c);
         auto const obs=env.Reset(); auto const initial=env.Aircraft();
+        Check(env.Mission().phase==Phase::Approach,"default real FDM reset prioritizes ILS without a compulsory patrol lap");
         Check(IsFinite(initial) && !initial.weightOnWheels && Near(initial.gearPosition,0,0.01),"initial gear must really be up");
         Check(Near(initial.position.up,615,0.02),"JSBSim altitude conversion");
         auto const point=FromRunway(env.Settings().runway,-10000,0,600);

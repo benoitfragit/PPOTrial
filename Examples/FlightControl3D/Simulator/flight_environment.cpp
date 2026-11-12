@@ -1,7 +1,6 @@
 #include "flight_environment.hpp"
 #include <stdexcept>
 #include <utility>
-#include <limits>
 
 namespace ppo::examples::flight {
 namespace {
@@ -21,13 +20,7 @@ Observation FlightEnvironment::Reset()
     plan_=MakeFlightPlan(episodeConfig_);
     fdm_.SetRunwayMotion(motion_);
     auto const initial=SampleAircraft(config_,episodeConfig_.runway,rng_);
-    // Select the nearest segment endpoint for the randomized airborne start.
-    double nearest=std::numeric_limits<double>::max();
-    for (std::size_t i=0;i<plan_.count;++i)
-    {
-        double const distance=std::hypot(initial.position.north-plan_.points[i].north,initial.position.east-plan_.points[i].east);
-        if (distance<nearest) { nearest=distance; mission_.waypoint=(i+1)%plan_.count; }
-    }
+    mission_.waypoint=ClosestPatrolWaypoint(plan_,initial.position);
     aircraft_ = fdm_.Reset(initial);
     return ObservationNow();
 }

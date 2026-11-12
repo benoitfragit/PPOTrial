@@ -41,14 +41,20 @@ void DesktopContinuation(Config c)
     {std::ofstream broken(store.Latest());broken<<"broken";}
     Rejects([&] {FlightSession invalid(c,true,directory.path);},"corrupt latest must not silently create a new policy");
 }
-void ChangedStarts(Config c)
+void ChangedTrainingContract(Config c,bool rewards)
 {
     c.training.rolloutSteps=8;c.training.minibatch=4;c.training.epochs=1;c.training.maxUpdates=1;
     c.training.resume=true;c.training.checkpointEvery=1;c.mission.maxSeconds=1;c.evaluation.episodes=2;
     TemporaryDirectory directory("flight-changed-starts-");
     auto old=c;
     auto signature=nlohmann::json::parse(c.checkpointSignature);
-    signature["initial"]["distanceMeters"]={7000,14000};signature["initial"]["bearingDegrees"]={-180,180};
+    if(rewards)
+    {
+        signature.erase("rewardVersion");signature["reward"].erase("convergenceSeconds");
+        signature["reward"]["weights"]["Path"]=0.02;signature["reward"]["weights"]["Speed"]=0.02;
+        signature["reward"]["weights"]["Slope"]=0.02;signature["initial"]["approach"]=false;
+    }
+    else {signature["initial"]["distanceMeters"]={7000,14000};signature["initial"]["bearingDegrees"]={-180,180};}
     old.checkpointSignature=signature.dump();
     FlightModelStore oldStore(old,directory.path);
     FlightLearner oldPolicy(old);oldPolicy.Save(oldStore.Latest());
@@ -60,11 +66,11 @@ void ChangedStarts(Config c)
     auto const generation=directory.path/"best"/nlohmann::json::parse(previous).at("checkpoint").get<std::string>();
     FlightSession resumed(c,true,directory.path,std::nullopt,TrainingBudget::AdditionalUpdates);
     Check(resumed.Snapshot().resumed && !resumed.Snapshot().hasBest
-        && ReadFile(pointer)==previous,"new starts resume training while preserving the old BEST without reusing its score");
+        && ReadFile(pointer)==previous,"changed training contract resumes while preserving the old BEST without reusing its score");
     Check(resumed.Learner().Collected()==0,"new episode starts with an empty collector");
     FlightLearner comparison(c);comparison.Load(oldStore.Latest());
-    Check(comparison.Evaluate({})==oldPolicy.Evaluate({}),"changed spawn ranges preserve learned policy outputs");
-    Rejects([&] {FlightSession inference(c,false,directory.path);},"inference rejects BEST validated on different starts");
+    Check(comparison.Evaluate({})==oldPolicy.Evaluate({}),"warm start preserves learned policy outputs");
+    Rejects([&] {FlightSession inference(c,false,directory.path);},"inference rejects BEST validated on a different contract");
     for(int i=0;i<1000 && !resumed.Finished();++i) resumed.Tick();
     Check(resumed.Finished() && ReadFile(pointer)==previous && std::filesystem::exists(generation),
         "failed revalidation keeps the previous BEST generation and pointer intact");
@@ -76,14 +82,18 @@ void ChangedStarts(Config c)
     Rejects([&] {FlightLearner rejected(incompatible);rejected.Load(oldStore.Latest());},"guidance changes remain incompatible");
     signature=nlohmann::json::parse(c.checkpointSignature);signature["initial"]["speedMps"]={60,80};
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature)
-        && !CompatibleTrainingSignature("broken",c.checkpointSignature),"only horizontal spawn changes are accepted");
+        && !CompatibleTrainingSignature("broken",c.checkpointSignature),"other observation/physics changes remain incompatible");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("reward");
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"missing reward contract is not a warm start");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=999;
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown shaping contract is rejected");
 }
 int main()
 {
     try
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
-        DesktopContinuation(c);ChangedStarts(c);
+        DesktopContinuation(c);ChangedTrainingContract(c,false);ChangedTrainingContract(c,true);
         c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
         c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;
         TemporaryDirectory directory("flight-session-");

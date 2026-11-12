@@ -53,6 +53,7 @@ struct RewardSettings final
     std::array<double, RewardCount> weights{};
     double pathTolerance{}, localizerToleranceDegrees{}, glideToleranceDegrees{};
     double speedTolerance{}, slopeToleranceDegrees{};
+    double convergenceSeconds{};
 };
 struct TrainingSettings final
 {
@@ -88,7 +89,7 @@ struct Config final
 /** Strict versioned JSON. Missing, unknown and non-finite fields are errors. */
 Config LoadConfig(std::filesystem::path const& path);
 void Validate(Config const& config);
-/** Training may resume after changing only the initial horizontal spawn ranges. */
+/** Warm-start training may change horizontal starts, entry phase and rewards; BEST requires an exact contract. */
 bool CompatibleTrainingSignature(std::string const& stored,std::string const& current);
 
 } // namespace ppo::examples::flight

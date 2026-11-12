@@ -35,7 +35,7 @@ Le JSON livré active `training.resume: true` et `checkpointEvery: 1`. En entra�
 
 Le desktop traite `maxUpdates` comme un budget supplémentaire à partir du modèle chargé. Par exemple, un `latest` à l'update 120 et un budget de 10 000 donnent une fin de bloc à 10 120. Après validation finale, un nouveau Play prolonge le budget en conservant le même learner. Le renderer diffère Stop/join et Play hors du verrou de snapshot, puis le callback ECS `Init` prolonge la session terminée. Le headless conserve son budget total existant. L'UI affiche la source du modèle et la limite du bloc courant ; le journal contient `[FLIGHT_SESSION] Resumed latest` et l'update chargé.
 
-Le rapprochement des départs demandé ici n'invalide pas les poids déjà appris : la compatibilité de reprise autorise seulement les changements de `initial.distanceMeters` et `initial.bearingDegrees`. Une modification du guidage, des observations ou des autres paramètres sémantiques reste incompatible. Un BEST validé sur d'autres départs est conservé avec son intégrité et ses générations, mais son score n'est pas présenté comme validé sur la nouvelle distribution. L'inférence exige une validation du contrat courant ; seul un candidat admissible sur les nouveaux départs peut actualiser le pointeur.
+La reprise d'entraînement conserve les poids, Adam et le RNG lors d'un changement des intervalles horizontaux, de `initial.approach` ou des réglages de reward. La signature interne `rewardVersion: 2` distingue le nouveau shaping du précédent ; un ancien checkpoint sans ce marqueur peut amorcer l'entraînement. Les changements de géométrie de piste, de guidage configuré, de physique ou d'autres observations restent incompatibles. Un BEST correspondant à un ancien contrat est conservé avec ses générations et son contrôle d'intégrité, mais son score n'est pas réutilisé. L'inférence exige une validation complète du contrat courant avant toute promotion.
 
 ## Interface FlightControl3D
 
@@ -86,11 +86,31 @@ La position de la piste varie de ±2 km sur les deux axes ; son orientation vari
 
 Le callback `FGGroundCallback` fournit réellement à JSBSim la surface finie, sa normale et sa vitesse au point de contact. Le pont bouge dans la physique, le guidage et le rendu. Hors de son rectangle, le contact correspond au plan de la mer. Il s'agit d'une surface rigide cinématique avec mouvements sinusoïdaux ; aucun modèle hydrodynamique de navire n'est revendiqué.
 
-Le flightplan hippodrome est référencé à la piste courante. Le prochain waypoint est choisi près du départ aléatoire. Les portes sont ordonnées, non superposées, franchies dans le sens de la trajectoire ; une excursion hors corridor ou un saut invalide la progression du tour. Un avion immobile ne gagne aucun progrès. La transition irréversible vers l'approche demande le nombre de tours JSON, la distance, le côté approche, le cap, le corridor latéral et l'altitude admissibles. Le départ directement en approche reste configurable pour le curriculum. Le LOC et le glide nécessitent un maintien confirmé et une hystérésis ; aucune capture à l'arrière de la piste ou hors secteur. À faible hauteur, la vitesse cible diminue et la pente cible devient nulle pour l'arrondi. Les volets ont des positions JSON par phase ; ils ne constituent pas une action discrète supplémentaire.
+Le scénario livré démarre directement en approche (`initial.approach: true`) pour donner la priorité au LOC/glide. La position, le cap, l'attitude et la vitesse restent randomisés. Pour exercer d'abord l'hippodrome, sélectionner `initial.approach: false` ; `requiredLaps: 1` demande alors un tour qualifié avant la transition irréversible, avec les conditions de distance, côté approche, cap, écart latéral et altitude.
+
+Le flightplan hippodrome est lié à la piste courante. Son endpoint actif est choisi sur le segment 3D le plus proche au reset. Hors corridor ou après dépassement d'une porte ratée, la cible est réacquise sur un segment proche et la progression du tour est invalidée. Une reprise de guidage ne valide ni porte ni tour fictif. Les portes restent ordonnées et non superposées ; un avion immobile n'accumule aucun progrès.
+
+BlueAgent utilise 26 waypoints : 3 par ligne droite et 10 par demi-tour, avec un ralliement par projection/anticipation puis un suivi séquentiel. Flight3D utilise une implémentation 3D distincte : `2 * (straightSamples + turnSamples)`, soit 40 points avec 4 et 16 dans le JSON livré. Dans les deux cas, le waypoint actif reste fixe entre deux passages ; ce n'est pas un point qui parcourt librement le circuit. Flight3D recalcule en plus les positions avec le mouvement de la piste. Les composants BlueAgent ne sont pas modifiés.
+
+Le LOC et le glide nécessitent un maintien confirmé et une hystérésis ; aucune capture à l'arrière de la piste ou hors secteur. Hors signal, le guidage géométrique secondaire vise un point d'interception à `-switchDistanceMeters` sur le glide, plutôt qu'un poser depuis l'arrière. À faible hauteur, la vitesse cible diminue et la pente cible devient nulle pour l'arrondi. Les volets ont des positions JSON par phase ; ils ne constituent pas une action discrète supplémentaire.
 
 ## Observation, actions et PPO
 
 L'observation contient **56 valeurs normalisées dans [−1, 1]**, dont la liste ordonnée est `ObservationNames` : vecteur vers le guidage courant, géométrie piste, hauteur, vitesse calibrée, vecteur vitesse, attitude et vitesses angulaires, pente, erreurs LOC/glide et validité du signal, consignes, train réel, contact roues, phase, temps restant implicite, événements mémorisés, progression des tours et maintiens de capture, état cinématique de la surface. Les échelles sont explicites dans le JSON. Une observation terminale issue d'un FDM non fini est neutralisée ; la transition devient un crash.
+
+L'acteur et le critic reçoivent le même vecteur ; le correctif de shaping ne change pas ses dimensions.
+
+| Groupe | Nombre | Contenu |
+|---|---:|---|
+| Guidage | 6 | Cible devant/droite/haut, sinus/cosinus de l'erreur de direction, écart à la trajectoire |
+| Piste | 4 | Position longitudinale, écart latéral, distance au seuil, hauteur |
+| Vol | 15 | Vitesse air, vitesse N/E/U, roulis/tangage/cap relatif en sinus/cosinus, vitesses angulaires, pente en sinus/cosinus |
+| ILS et consignes | 7 | Erreurs LOC/glide, validité, vitesse et pente cibles, durées de maintien LOC/glide |
+| Atterrissage | 6 | Train réel, contact roues, toucher mémorisé, distance du toucher, piste restante, maintien à l'arrêt |
+| Mission | 9 | Trois phases, temps écoulé, deux captures mémorisées, progression des portes, tours terminés, qualification du tour |
+| Piste mobile | 9 | Vitesse N/E/U, normale du pont, vitesses de rotation |
+
+Hors signal ILS valide, les deux erreurs ILS de l'observation valent zéro et le flag de validité vaut zéro. Le vecteur de guidage géométrique et les coordonnées de la piste restent disponibles.
 
 L'acteur produit cinq moyennes, cinq log-écarts-types et un logit Bernoulli. Les commandes continues sont profondeur, ailerons, direction, gaz symétriques et freinage symétrique. Les échantillons gaussiens latents sont transformés par `tanh` ; gaz et freinage sont ensuite convertis vers [0, 1]. Le train est un tirage binaire réel, pas une gaussienne seuillée.
 
@@ -104,9 +124,25 @@ Un crash ou un arrêt réussi est terminal. La limite de temps est une troncatur
 
 Les dix canaux propres à FlightControl3D sont `Path`, `Localizer`, `Glide`, `Speed`, `Slope`, `EnterLocalizer`, `EnterGlide`, `Touchdown`, `Stop`, `Crash`. Aucune modification des canaux Blue MAPPO n'est effectuée.
 
-Les shapings sont des qualités triangulaires `max(0, 1 − abs(erreur)/tolérance)`, pondérées par le temps physique écoulé. Les captures sont payées une seule fois par épisode. Les seuils, tolérances et poids sont dans le JSON.
+Les guidages `Path`, `Localizer` et `Glide` utilisent une qualité lisse `Q(e) = tolérance / (tolérance + abs(e))`. Elle reste strictement positive pour une erreur finie, même loin de la tolérance de capture. Leur contribution est `poids * [dt * Q_après * progrès + convergenceSeconds * (Q_après − Q_avant)]`.
 
-Le suivi d'hippodrome reprend le principe de waypoints ordonnés de BlueAgent, avec une implémentation 3D distincte liée à la piste mobile. `Path` récompense l'avancement sur le segment dans le corridor qualifié de 350 m. Il ne fournit pas de shaping de convergence depuis l'extérieur ; le tour complet autorise l'approche mais ne rapporte pas de bonus dédié. Ces récompenses ne sont pas modifiées par l'évolution de l'interface.
+La différence signée récompense le rapprochement et pénalise l'éloignement. Elle n'est pas clippée : une amélioration lente suivie d'une régression rapide ne doit pas créer de bonus net. Le facteur de temps vaut 10 secondes dans le JSON. La comparaison avant/après utilise la même phase, le même waypoint et les deux repères successifs de la piste, sans gain artificiel dû au seul mouvement rigide du pont.
+
+En approche, le progrès est l'avancement longitudinal relatif à la piste, normalisé par la vitesse cible et borné entre −1 et +1. Un déplacement qui s'éloigne du seuil ne peut rapporter de contribution LOC/glide positive, même si l'erreur angulaire diminue avec la distance. Une géométrie stationnaire ne reçoit pas de maintien ILS répété. La qualité ILS est nulle hors signal ; la perte et la reprise du secteur entrent dans la différence signée. `Path` fournit alors un guidage secondaire vers le point d'interception.
+
+En patrouille, le maintien `Path` exige toujours un avancement qualifié dans le corridor de 350 m ; son terme de convergence reste actif depuis l'extérieur. Le tour complet ne rapporte aucun nouveau bonus dédié. Les canaux `Speed` et `Slope` conservent la qualité triangulaire `max(0, 1 − abs(erreur)/tolérance)` pondérée par le temps physique. Les captures restent payées une seule fois par épisode après maintien confirmé.
+
+| Canal | Poids livré | Amplitude et rôle |
+|---|---:|---|
+| Localizer | 0,05 | Maintien maximal +0,05 par seconde ; différence de qualité au plus 0,5 en valeur absolue par transition |
+| Glide | 0,05 | Même amplitude que LOC, évaluée indépendamment |
+| Path | 0,002 | 25 fois moins pondéré que chaque axe ILS ; convergence élémentaire au plus 0,02 |
+| Speed / Slope | 0,002 chacun | Soutien au pilotage, plafonné à +0,002 par seconde et par canal |
+| EnterLocalizer / EnterGlide | +2 chacun | Événement unique confirmé |
+| Touchdown / Stop | +100 chacun | Poser sûr puis arrêt confirmé |
+| Crash | −100 | Échec terminal |
+
+En approche ILS continue, les plafonds cumulés sur les 900 secondes autorisées donnent au plus 93,6 de maintien et soutien, 1 de convergence nette et 4 de captures, soit 98,6 avant le poser. Les récompenses de réussite restent donc dominantes dans cette comparaison non actualisée ; cela ne garantit pas la convergence d'une politique PPO.
 
 Le toucher nécessite un contact physique des roues, un train suffisamment sorti, une position sur la piste et une vitesse, un taux de descente et une attitude acceptables. La première abscisse de toucher provient du point physique de roue JSBSim ; les coordonnées des trois trains sont contrôlées dans le rectangle de piste. La vitesse verticale avant impact est vérifiée pour éviter que le solveur de contact ne masque un poser dur. Les vitesses et attitudes de sécurité sont relatives à la piste mobile. Un contact structurel ou un poser sans train provoque un crash sans récompense de toucher. La télémétrie garde aussi l'impact non valide : position signée, erreur latérale, vitesse verticale/horizontale et position réelle du train.
 
@@ -142,7 +178,11 @@ Les régressions déterministes couvrent géométrie, captures uniques, transiti
 
 La révision d'interface ajoute les références ILS sur quatre caps avec inclinaison et mouvement, la pente relative distincte du tangage, le transport des tolérances vers le snapshot et la proximité des 1 000 départs avec le circuit. Un test ImGui sans fenêtre vérifie les deux cases par clics simulés, les valeurs consigne/mesure et l'absence des compteurs d'apprentissage dans les instruments. Localement, les 14 CTest headless passent en Debug et Release ; le test ImGui est aussi exécuté séparément. La compilation complète du desktop reste vérifiée par la CI VS2022 de la PR.
 
-La reprise est couverte par comparaison octet pour octet des checkpoints avant/après prolongation et relance, conservation du collector actif, refus d'un `latest` corrompu, migration des seuls intervalles horizontaux et conservation du BEST antérieur. Le test desktop ECS vérifie le vrai worker en aperçu sans physique, un bloc complet, Stop/Play vers le bloc suivant et une nouvelle instance reprenant l'update sauvegardé. Le test Windows des raccourcis recharge les `.lnk` par COM et contrôle cible et répertoire de travail. Le rendu interactif et le double-clic Explorer restent des vérifications distinctes sur la machine cible.
+La reprise est couverte par comparaison octet pour octet des checkpoints avant/après prolongation et relance, conservation du collector actif, refus d'un `latest` corrompu, migration des intervalles horizontaux, des rewards et de la phase initiale, et conservation du BEST antérieur. Les modifications de géométrie ou vitesse initiale non autorisées restent refusées. Le test desktop ECS vérifie le vrai worker en aperçu sans physique, un bloc complet, Stop/Play vers le bloc suivant et une nouvelle instance reprenant l'update sauvegardé. Le test Windows des raccourcis recharge les `.lnk` par COM et contrôle cible et répertoire de travail. Le rendu interactif et le double-clic Explorer restent des vérifications distinctes sur la machine cible.
+
+Les régressions spécifiques de shaping vérifient le rapprochement hors des anciennes tolérances, le signe inverse en éloignement, l'absence de gain stationnaire ou sur excursion fermée, l'indépendance de la subdivision physique pour la convergence, la progression vers le seuil et le refus du sens inverse, les amplitudes JSON, le guidage hors secteur, la réacquisition d'une porte manquée sans faux tour et le mouvement de piste. La matrice headless contient désormais 15 CTest.
+
+Correctif LOC/glide du 11 novembre : GCC 14 headless, builds Debug et Release et 15/15 CTest dans chaque configuration. Le smoke CLI réel exécute un update, sauvegarde `latest` et termine 20 épisodes de validation indépendante ; ce candidat presque vierge obtient 0 succès et ne remplace aucun BEST. Les résultats de la CI Windows au commit livré restent à contrôler séparément.
 
 Validation locale au premier état relu : GCC 14, Debug et Release, CTest ; smoke d'un update puis deux épisodes indépendants. L'échec des deux épisodes d'évaluation de ce modèle presque vierge ne démontre aucune convergence. La CI Windows du desktop et les quatre configurations headless Windows/Linux doivent être vérifiées avant de déclarer la livraison validée. Le lancement des raccourcis par l'explorateur Windows doit encore être confirmé sur la machine cible.
 

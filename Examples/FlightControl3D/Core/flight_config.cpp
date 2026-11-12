@@ -113,7 +113,7 @@ Config LoadConfig(std::filesystem::path const& path)
     config.normalization = {Number(n,"distance"), Number(n,"altitude"), Number(n,"speed"), Number(n,"rate"),
         Number(n,"path"), Number(n,"localizerDegrees"), Number(n,"glideDegrees")};
     auto const& w = root.at("reward");
-    Keys(w, {"weights", "pathTolerance", "localizerToleranceDegrees", "glideToleranceDegrees", "speedTolerance", "slopeToleranceDegrees"});
+    Keys(w, {"weights", "pathTolerance", "localizerToleranceDegrees", "glideToleranceDegrees", "speedTolerance", "slopeToleranceDegrees", "convergenceSeconds"});
     auto const& weights = w.at("weights");
     Require(weights.is_object() && weights.size() == RewardCount, "reward channel mismatch");
     for (std::size_t channel = 0; channel < RewardCount; ++channel)
@@ -123,6 +123,7 @@ Config LoadConfig(std::filesystem::path const& path)
     config.reward.glideToleranceDegrees = Number(w,"glideToleranceDegrees");
     config.reward.speedTolerance = Number(w,"speedTolerance");
     config.reward.slopeToleranceDegrees = Number(w,"slopeToleranceDegrees");
+    config.reward.convergenceSeconds = Number(w,"convergenceSeconds");
     auto const& t = root.at("training");
     Keys(t, {"seed", "rolloutSteps", "minibatch", "epochs", "maxUpdates", "checkpointEvery", "hiddenWidth", "actorRate", "criticRate", "gamma", "lambda",
         "clip", "entropy", "valueWeight", "minLogStd", "maxLogStd", "initialLogStd", "maxGradientNorm", "adamBeta1", "adamBeta2", "adamEpsilon",
@@ -152,6 +153,7 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics.erase("training");
     semantics.erase("evaluation");
     semantics["distribution"] = {training.minLogStd,training.maxLogStd};
+    semantics["rewardVersion"] = 2;
     config.checkpointSignature = semantics.dump();
     Validate(config);
     return config;
@@ -163,11 +165,22 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
     auto previous=Json::parse(stored,nullptr,false),next=Json::parse(current,nullptr,false);
     if(!previous.is_object() || !next.is_object() || !previous.contains("initial") || !next.contains("initial")
         || !previous["initial"].is_object() || !next["initial"].is_object()) return false;
+    for(auto const* signature : {&previous,&next})
+    {
+        if(!signature->contains("reward") || !(*signature)["reward"].is_object()
+            || !(*signature)["initial"].contains("approach") || !(*signature)["initial"]["approach"].is_boolean()) return false;
+        if(signature->contains("rewardVersion") && (*signature)["rewardVersion"]!=2) return false;
+    }
     for(char const* name : {"distanceMeters","bearingDegrees"})
     {
         if(!previous["initial"].contains(name) || !next["initial"].contains(name)) return false;
         previous["initial"].erase(name); next["initial"].erase(name);
     }
+    // These changes keep the observation/action contract. Old scores are never
+    // reused: production compares the complete, unmodified signature instead.
+    previous["initial"].erase("approach"); next["initial"].erase("approach");
+    previous.erase("reward"); next.erase("reward");
+    previous.erase("rewardVersion"); next.erase("rewardVersion");
     return previous==next;
 }
 
@@ -238,6 +251,7 @@ void Validate(Config const& c)
     auto const& w = c.reward;
     Require(w.pathTolerance > 0 && w.localizerToleranceDegrees > 0 && w.glideToleranceDegrees > 0
         && w.speedTolerance > 0 && w.slopeToleranceDegrees > 0, "reward tolerances");
+    Require(std::isfinite(w.convergenceSeconds) && w.convergenceSeconds >= 0, "finite non-negative convergence time scale");
     for (double weight : w.weights) Require(std::isfinite(weight), "finite reward weights");
     Require(w.weights[static_cast<std::size_t>(Reward::Crash)] <= 0, "crash weight must be non-positive");
     auto const& t = c.training;

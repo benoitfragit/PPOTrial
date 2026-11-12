@@ -13,6 +13,8 @@ struct FlightPlan final
 Vec3 FromRunway(Runway const& runway, double along, double cross, double up) noexcept;
 std::array<double, 2> ToRunway(Runway const& runway, Vec3 const& point) noexcept;
 FlightPlan MakeFlightPlan(Config const& config) noexcept;
+/** Endpoint of the closest 3D segment, used for initial rally and missed-gate recovery. */
+std::size_t ClosestPatrolWaypoint(FlightPlan const& plan,Vec3 position) noexcept;
 Guidance Guide(Config const& config, FlightPlan const& plan,
     MissionState const& mission, AircraftState const& aircraft) noexcept;
 /** Called after each FDM substep; landing limits also inspect the pre-impact state. */

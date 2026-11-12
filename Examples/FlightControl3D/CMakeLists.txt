@@ -60,7 +60,7 @@ target_compile_definitions(FlightControlHeadless PRIVATE
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     enable_testing()
-    foreach(test_name IN ITEMS core simulator learner session)
+    foreach(test_name IN ITEMS core reward simulator learner session)
         add_executable(FlightControl_${test_name}_tests tests/${test_name}_tests.cpp)
         target_link_libraries(FlightControl_${test_name}_tests PRIVATE FlightControlRuntime)
         target_compile_definitions(FlightControl_${test_name}_tests PRIVATE
