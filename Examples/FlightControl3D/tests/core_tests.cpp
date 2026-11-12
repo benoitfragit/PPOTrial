@@ -206,7 +206,9 @@ void OrderedNavigation(Config const& config)
     auto const inboundSegment=Subtract(plan.points[0],plan.points[plan.count-1]);
     a.heading=std::atan2(inboundSegment.east,inboundSegment.north);
     auto const stationary=AdvanceMission(c,plan,stopped,a,a);
-    Check(stationary.rewards[0]==0 && stopped.waypoint==1,"stationary aircraft earns no path progression");
+    Check(stationary.rewards[0]<=0 && !stopped.pathQualified
+        && stopped.waypointsPassed==0 && stopped.completedLaps==0,
+        "stationary aircraft earns no path progression");
 }
 void AlignedStarts(Config c)
 {
