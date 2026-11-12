@@ -62,7 +62,8 @@ void Geometry(Config const& c)
     AdvanceMission(c,plan,s,a,far);
     Check(s.phase==Phase::Approach && s.capturedLocalizer && s.capturedGlide,
         "a transient ILS loss cannot cancel the approach");
-    for(std::size_t step=1;step<captureSteps;++step) AdvanceMission(c,plan,s,far,far);
+    for(std::size_t step=1;step<captureSteps && !s.approachRecoveryPending;++step)
+        AdvanceMission(c,plan,s,far,far);
     Check(s.phase==Phase::Approach && s.approachRecoveryPending
         && !s.capturedLocalizer && !s.capturedGlide && !Guide(c,plan,s,far).targetValid,
         "confirmed ILS loss first keeps a point-free approach recovery grace period");
@@ -343,19 +344,21 @@ void CapturePriority(Config const& c)
     AdvanceMission(c,plan,glideLoss,onBeam,aboveGlide);
     Check(glideLoss.phase==Phase::Approach && glideLoss.capturedLocalizer && glideLoss.capturedGlide,
         "a transient glide deviation cannot cancel the approach");
-    for(std::size_t step=1;step<holdSteps;++step)
+    for(std::size_t step=1;step<holdSteps && !glideLoss.approachRecoveryPending;++step)
         AdvanceMission(c,plan,glideLoss,aboveGlide,aboveGlide);
     Check(glideLoss.phase==Phase::Approach && glideLoss.approachRecoveryPending
-        && !glideLoss.capturedLocalizer && !glideLoss.capturedGlide
+        && glideLoss.approachRecoveryRequiresGlide && glideLoss.capturedLocalizer
+        && !glideLoss.capturedGlide
         && !Guide(c,plan,glideLoss,aboveGlide).targetValid,
         "confirmed glide loss keeps a short point-free approach recovery window");
     auto recoveredBeforeHipp=glideLoss;
     for(std::size_t step=0;step<holdSteps;++step)
         AdvanceMission(c,plan,recoveredBeforeHipp,onBeam,onBeam);
     Check(recoveredBeforeHipp.phase==Phase::Approach && recoveredBeforeHipp.capturedLocalizer
+        && recoveredBeforeHipp.capturedGlide
         && !recoveredBeforeHipp.approachRecoveryPending
         && !Guide(c,plan,recoveredBeforeHipp,onBeam).targetValid,
-        "fresh LOC capture during the grace period prevents a HIPP reactivation");
+        "fresh glide capture during the grace period prevents a HIPP reactivation");
     for(std::size_t step=0;step<holdSteps;++step)
         AdvanceMission(c,plan,glideLoss,aboveGlide,aboveGlide);
     Check(glideLoss.phase==Phase::Patrol && !glideLoss.approachRecoveryPending,
@@ -367,7 +370,7 @@ void CapturePriority(Config const& c)
     AdvanceMission(c,plan,inbound,onBeam,outsideBeam);
     Check(inbound.capturedLocalizer && inbound.capturedGlide,
         "a transient ILS dropout does not release either capture");
-    for(std::size_t step=1;step<holdSteps;++step)
+    for(std::size_t step=1;step<holdSteps && !inbound.approachRecoveryPending;++step)
         AdvanceMission(c,plan,inbound,outsideBeam,outsideBeam);
     Check(inbound.phase==Phase::Approach && inbound.approachRecoveryPending
         && !inbound.capturedLocalizer && !inbound.capturedGlide

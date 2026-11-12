@@ -280,18 +280,24 @@ CaptureTransition UpdateCapture(bool eligible,double error,double tolerance,Conf
 }
 /**
  * @brief Clears ILS captures while retaining approach-only guidance for a grace period.
- * @param state Mission state whose captures are invalidated.
+ * @param state Mission state whose lost capture chain is invalidated.
+ * @param requireGlide True when LOC remains captured and GLIDE must be reacquired.
  */
-void BeginApproachRecovery(MissionState& state) noexcept
+void BeginApproachRecovery(MissionState& state,bool requireGlide) noexcept
 {
-    state.localizerHoldSeconds=0;
     state.glideHoldSeconds=0;
     state.localizerLossSeconds=0;
     state.glideLossSeconds=0;
     state.approachRecoverySeconds=0;
-    state.capturedLocalizer=false;
     state.capturedGlide=false;
     state.approachRecoveryPending=true;
+    state.approachRecoveryRequiresGlide=requireGlide;
+    if(!requireGlide)
+    {
+        state.localizerHoldSeconds=0;
+        state.localizerLossSeconds=0;
+        state.capturedLocalizer=false;
+    }
 }
 /**
  * @brief Returns navigation to racetrack reacquisition after the recovery grace period.
@@ -310,6 +316,7 @@ void ReturnToPatrol(FlightPlan const& plan,MissionState& state,AircraftState con
     state.capturedLocalizer=false;
     state.capturedGlide=false;
     state.approachRecoveryPending=false;
+    state.approachRecoveryRequiresGlide=false;
     state.rallyCorridorLatched=false;
     state.pathQualified=false;
     state.waypointsPassed=0;
@@ -521,18 +528,24 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
     {
         s.localizerHoldSeconds=0;s.glideHoldSeconds=0;
         s.localizerLossSeconds=0;s.glideLossSeconds=0;
+        s.approachRecoverySeconds=0;
+        s.approachRecoveryPending=false;
+        s.approachRecoveryRequiresGlide=false;
     }
     // A confirmed beam loss first leaves a short approach-only grace period.
-    // This prevents an immediate HIPP/APPROACH point and reward toggle. A fresh
-    // confirmed LOC cancels recovery; otherwise the racetrack returns later.
+    // This prevents an immediate HIPP/APPROACH point and reward toggle. The
+    // lost beam must be recaptured; otherwise the racetrack returns later.
     if(s.phase==Phase::Approach && (lostLocalizer || lostGlide))
-        BeginApproachRecovery(s);
+        BeginApproachRecovery(s,lostGlide && !lostLocalizer);
     else if(s.phase==Phase::Approach && s.approachRecoveryPending)
     {
-        if(s.capturedLocalizer)
+        bool const recovered=s.capturedLocalizer
+            && (!s.approachRecoveryRequiresGlide || s.capturedGlide);
+        if(recovered)
         {
             s.approachRecoverySeconds=0;
             s.approachRecoveryPending=false;
+            s.approachRecoveryRequiresGlide=false;
         }
         else
         {
@@ -547,6 +560,7 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         s.phase=Phase::Approach;
         s.approachRecoverySeconds=0;
         s.approachRecoveryPending=false;
+        s.approachRecoveryRequiresGlide=false;
     }
     g = Guide(c,plan,s,after);
     if(contact && !s.contactAttempted && IsFinite(after))
@@ -623,6 +637,9 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         {
             s.touchedDown = true;
             s.phase = Phase::Rollout;
+            s.approachRecoverySeconds=0;
+            s.approachRecoveryPending=false;
+            s.approachRecoveryRequiresGlide=false;
             add(Reward::Touchdown,1);
         }
         if (s.phase == Phase::Rollout)

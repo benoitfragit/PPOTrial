@@ -82,8 +82,10 @@ struct MissionState final
     bool pathQualified{};
     /** @brief Active captures; sustained pre-threshold loss returns to patrol and clears both. */
     bool capturedLocalizer{}, capturedGlide{};
-    /** @brief True while approach-only guidance gets a short LOC-recapture grace period. */
+    /** @brief True while approach-only guidance gets a short beam-recapture grace period. */
     bool approachRecoveryPending{};
+    /** @brief True when the grace period must restore GLIDE as well as retain LOC. */
+    bool approachRecoveryRequiresGlide{};
     /** @brief Preserve the existing one-shot entry bonuses across later reacquisitions. */
     bool rewardedLocalizerCapture{},rewardedGlideCapture{};
     bool touchedDown{};

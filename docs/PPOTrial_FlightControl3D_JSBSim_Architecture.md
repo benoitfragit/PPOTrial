@@ -294,10 +294,11 @@ capture LOC, GLIDE vaut donc exactement zéro. Dès le passage en APPROACH, le c
 ne concurrence les deux faisceaux.
 
 `guidanceVersion=10` invalide tout point géométrique pendant APPROACH, y compris
-entre les captures LOC et GLIDE. Après une perte confirmée, les captures sont
-libérées mais APPROACH reste seul actif pendant une grâce supplémentaire égale à
-`captureHoldSeconds`. Une recapture LOC pendant cette grâce annule le retour HIPP ;
-sinon le ralliement hippodrome redevient actif à son expiration. Les 56 observations,
+entre les captures LOC et GLIDE. Après une perte confirmée, la chaîne perdue est
+libérée mais APPROACH reste seul actif pendant une grâce supplémentaire égale à
+`captureHoldSeconds`. Une perte LOC exige sa recapture ; une perte GLIDE conserve
+le LOC et exige la recapture GLIDE. Sans cette recapture, le ralliement hippodrome
+redevient actif à l'expiration. Les 56 observations,
 les dimensions du réseau et le format du checkpoint ne changent pas. Les checkpoints
 V9/reward V5 conservent donc leurs poids, critic, moments Adam, âges et RNG comme
 warm start ; seul le BEST doit être revalidé sur le nouveau contrat.

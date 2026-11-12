@@ -36,7 +36,8 @@ trois épisodes contient les trois placements dans un ordre pseudo-aléatoire.
 L'avion vise l'hippodrome tant que le LOC n'est pas confirmé ; une capture avec
 cap compatible bascule en phase approche. Une perte LOC ou GLIDE durable avant
 le seuil ouvre d'abord une courte grâce sans point de guidage ; le LOC peut y être
-recapturé sans basculement visuel. Sans recapture, l'hippodrome revient ensuite.
+recapturé sans basculement visuel, ou le GLIDE si le LOC est resté capturé. Sans
+la recapture requise, l'hippodrome revient ensuite.
 Sur l'hippodrome, le mode RALLY utilise une projection anticipée devant l'avion.
 Après confirmation du corridor, FOLLOW emploie la séquence fixe de 26 portes du
 procédé BlueAgent ; une porte manquée invalide immédiatement la séquence et rend
