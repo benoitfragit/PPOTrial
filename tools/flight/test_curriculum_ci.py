@@ -77,7 +77,7 @@ class CurriculumTests(unittest.TestCase):
 
     def test_missing_resume_checkpoint_is_rejected_before_training(self):
         self.checkpoint.unlink()
-        (self.output / "curriculum_stage.txt").write_text("glide\\n")
+        (self.output / "curriculum_stage.txt").write_text("glide\n")
         result = self.execute()
         self.assertEqual(result.returncode, 1)
         self.assertIn("Missing checkpoint for saved FlightControl3D curriculum stage", result.stderr)
