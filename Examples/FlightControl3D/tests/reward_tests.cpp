@@ -62,9 +62,11 @@ void Convergence(Config const& c)
         && Channel(ApproachStep(locOnly,far,closer),Reward::Localizer)>0,
         "LOC gate disables glide shaping only");
     MissionState acquisition{};acquisition.phase=Phase::Approach;
-    auto const ungated=AdvanceMission(c,MakeFlightPlan(c),acquisition,far,closer);
-    Check(Channel(ungated,Reward::Slope)!=0,
-        "slope shaping is active before LOC capture");
+    auto improvedSpeed=closer;
+    improvedSpeed.airspeed+=1;
+    auto const ungated=AdvanceMission(c,MakeFlightPlan(c),acquisition,far,improvedSpeed);
+    Check(Channel(ungated,Reward::Speed)!=0,
+        "speed shaping is active before LOC capture");
     auto const outside=At(c,-c.mission.ilsRangeMeters-1,0,700);
     auto const inside=At(c,-c.mission.ilsRangeMeters+1,0,700);
     Check(Channel(ApproachStep(c,outside,inside),Reward::Glide)==0,

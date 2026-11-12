@@ -340,7 +340,8 @@ void Validate(Config const& c)
         && t.locReminderProbability<=1 && std::isfinite(t.glideOffsetMeters)
         && t.glideOffsetMeters>0 && t.glideOffsetMeters<1000
         && std::isfinite(t.gateHoldSeconds) && t.gateHoldSeconds>=m.physicsDt
-        && t.gateHoldSeconds<=m.maxSeconds, "curriculum settings");
+        && (t.curriculumStage==CurriculumStage::Joint || t.gateHoldSeconds<=m.maxSeconds),
+        "curriculum settings");
     Require(t.ilsCaptureScale>=1.0
         && m.localizerCaptureDegrees*t.ilsCaptureScale<m.ilsSectorDegrees
         && m.glideCaptureDegrees*t.ilsCaptureScale<m.glideDegrees,
