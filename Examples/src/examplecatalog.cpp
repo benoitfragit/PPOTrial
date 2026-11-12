@@ -7,6 +7,9 @@
 #include "examplecatalog.hpp"
 #include "airspaceexample.hpp"
 #include "bluedefenseexample.hpp"
+#ifdef PPO_WITH_FLIGHT_CONTROL
+#include "flight_example.hpp"
+#endif
 
 namespace ppo::app {
 
@@ -19,7 +22,12 @@ ExampleCatalog CreateExampleCatalog()
     return ExampleCatalog{ppo::examples::airspace::Definition(),
                           ppo::examples::bluedefense::Definition(),
                           ppo::examples::bluedefense::InferenceDefinition(),
-                          ppo::examples::bluedefense::EvaluationDefinition()};
+                          ppo::examples::bluedefense::EvaluationDefinition()
+#ifdef PPO_WITH_FLIGHT_CONTROL
+                          , ppo::examples::flight::Definition()
+                          , ppo::examples::flight::InferenceDefinition()
+#endif
+                          };
 }
 
 } // namespace ppo::app

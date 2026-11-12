@@ -10,6 +10,9 @@
 #include "airspacecomponents.hpp"
 #include "camera_follow.hpp"
 #include "tactical_role.hpp"
+#ifdef PPO_WITH_FLIGHT_CONTROL
+#include "flight_view.hpp"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -895,7 +898,7 @@ void DrawPatrolReferenceLabels(
     Camera3D const& camera, int const width, int const height,
     float const worldScale)
 {
-    if (!overlay.Visible() || width <= 0 || height <= 0)
+    if (!overlay.Valid() || width <= 0 || height <= 0)
         return;
 
     Vector3 const cameraForward =
@@ -1090,7 +1093,7 @@ void DrawPatrolReferences3D(
     ppo::model::sPatrolReferenceOverlay const& overlay,
     float const scale, bool const reducedDetail)
 {
-    if (!overlay.Visible())
+    if (!overlay.Valid())
         return;
 
     for (std::size_t roleIndex = 0U;
@@ -3178,6 +3181,13 @@ EnvironmentRenderer::RenderTacticalScene(
     Camera3D const& camera, entt::entity const focusEntity,
     bool const reducedDetail)
 {
+#ifdef PPO_WITH_FLIGHT_CONTROL
+    if (snapshot.ctx().contains<ppo::examples::flight::FlightSnapshot>())
+    {
+        ppo::examples::flight::DrawFlightScene(snapshot.ctx().get<ppo::examples::flight::FlightSnapshot>(),target);
+        return;
+    }
+#endif
     BeginTextureMode(target);
     ClearBackground(Color{ 10, 16, 22, 255 });
 
@@ -3808,7 +3818,7 @@ EnvironmentRenderer::DrawMinimapWindow(entt::registry const& snapshot)
     {
         auto const& overlay =
             snapshot.ctx().get<ppo::model::sPatrolReferenceOverlay>();
-        if (overlay.Visible())
+        if (overlay.Valid())
         {
             for (std::size_t roleIndex = 0U;
                  roleIndex < overlay.m_activeReferenceCount; ++roleIndex)
@@ -4367,6 +4377,10 @@ EnvironmentRenderer::Run(void)
         if (m_showInspection)
             DrawInspectorWindow(snapshot);
         DrawAgentsWindow(snapshot);
+#ifdef PPO_WITH_FLIGHT_CONTROL
+        if (snapshot.ctx().contains<ppo::examples::flight::FlightSnapshot>())
+            ppo::examples::flight::DrawFlightInstruments(snapshot.ctx().get<ppo::examples::flight::FlightSnapshot>());
+#endif
     });
 
     rlImGuiEnd();

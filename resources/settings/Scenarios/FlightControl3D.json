@@ -1,0 +1,51 @@
+{
+  "formatVersion": 1,
+  "aircraft": "c310",
+  "runway": {
+    "latitudeDegrees": 45.0, "longitudeDegrees": 2.0, "elevationMeters": 0.0,
+    "headingDegrees": 90.0, "lengthMeters": 2400.0, "widthMeters": 45.0, "thresholdHeightMeters": 15.0
+  },
+  "runwayRandomization": {
+    "northMeters": [-2000.0, 2000.0], "eastMeters": [-2000.0, 2000.0], "headingOffsetDegrees": [-35.0, 35.0],
+    "deckHeightMeters": [14.0, 16.0], "speedMps": [0.0, 3.0], "heaveAmplitudeMeters": [0.0, 0.8],
+    "wavePeriodSeconds": [8.0, 14.0], "pitchAmplitudeDegrees": [0.0, 0.25], "rollAmplitudeDegrees": [0.0, 0.4],
+    "phaseDegrees": [0.0, 360.0], "seaHeightMeters": 0.0
+  },
+  "mission": {
+    "physicsDt": 0.01, "actionSubsteps": 10, "maxSeconds": 900.0,
+    "maxDistanceMeters": 30000.0, "maxAltitudeMeters": 5000.0,
+    "switchDistanceMeters": 5000.0, "ilsRangeMeters": 15000.0, "ilsSectorDegrees": 35.0,
+    "glideDegrees": 3.0, "localizerCaptureDegrees": 2.5, "glideCaptureDegrees": 0.7,
+    "patrolSpeed": 65.0, "approachSpeed": 48.0, "flareSpeed": 41.0, "flareHeightMeters": 20.0,
+    "maxTouchdownSink": 3.0, "maxTouchdownSpeed": 55.0, "maxTouchdownRollDegrees": 8.0,
+    "minTouchdownPitchDegrees": -3.0, "maxTouchdownPitchDegrees": 12.0, "maxTouchdownHeadingDegrees": 15.0,
+    "gearDownMinimum": 0.99, "contactHeightMeters": 0.3, "stoppedSpeed": 1.0, "stoppedHoldSeconds": 2.0,
+    "racetrackCenterAlong": -8000.0, "racetrackCenterCross": 0.0, "racetrackHalfStraight": 2000.0,
+    "racetrackRadius": 1500.0, "patrolAltitude": 600.0, "waypointRadius": 220.0,
+    "turnSamples": 16, "straightSamples": 4
+  },
+  "initial": {
+    "approach": false, "gearDown": false, "distanceMeters": [7000.0, 14000.0], "bearingDegrees": [-180.0, 180.0],
+    "heightMeters": [400.0, 1000.0], "speedMps": [55.0, 80.0], "pitchDegrees": [-4.0, 8.0],
+    "headingOffsetDegrees": [-180.0, 180.0], "rollDegrees": [-15.0, 15.0], "slopeDegrees": [-3.0, 3.0],
+    "throttle": 0.65, "flap": 0.0, "propeller": 1.0
+  },
+  "normalization": {
+    "distance": 30000.0, "altitude": 5000.0, "speed": 150.0, "rate": 2.0,
+    "path": 3000.0, "localizerDegrees": 35.0, "glideDegrees": 10.0
+  },
+  "reward": {
+    "weights": { "Path": 0.02, "Localizer": 0.05, "Glide": 0.05, "Speed": 0.02, "Slope": 0.02,
+      "EnterLocalizer": 2.0, "EnterGlide": 2.0, "Touchdown": 100.0, "Stop": 100.0, "Crash": -100.0 },
+    "pathTolerance": 500.0, "localizerToleranceDegrees": 5.0, "glideToleranceDegrees": 2.0,
+    "speedTolerance": 15.0, "slopeToleranceDegrees": 5.0
+  },
+  "evaluation": { "seed": 4342, "episodes": 20 },
+  "training": {
+    "seed": 42, "rolloutSteps": 2048, "minibatch": 64, "epochs": 4, "maxUpdates": 10000, "checkpointEvery": 10, "hiddenWidth": 64,
+    "actorRate": 0.0003, "criticRate": 0.0003, "gamma": 0.99, "lambda": 0.95, "clip": 0.2,
+    "entropy": 0.001, "valueWeight": 0.5, "minLogStd": -5.0, "maxLogStd": 0.5, "initialLogStd": -1.0,
+    "maxGradientNorm": 0.5, "adamBeta1": 0.9, "adamBeta2": 0.999, "adamEpsilon": 1e-8,
+    "resume": false, "checkpointDirectory": "model/FlightControl3D"
+  }
+}

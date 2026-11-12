@@ -30,6 +30,22 @@ add_dependencies(${PROJECT_NAME} GenericEntities
 # The launcher uses raylib/rlImGui directly before the simulation window opens.
 target_link_libraries(${PROJECT_NAME} PRIVATE raylib rlImGui imgui)
 
+if (PPO_BUILD_FLIGHT_CONTROL)
+    add_executable(FlightControl3D
+        "${CMAKE_SOURCE_DIR}/Examples/FlightControl3D/Runtime/flight_desktop.cpp")
+    target_link_libraries(FlightControl3D PRIVATE
+        PPOFlightControlExample AirspaceRenderer GenericSerializer GenericEnv)
+    add_custom_command(TARGET FlightControl3D POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_BINARY_DIR}/libtorch/lib" "$<TARGET_FILE_DIR:FlightControl3D>")
+    if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
+        add_test(NAME FlightControlDedicatedBootstrap
+            COMMAND $<TARGET_FILE:FlightControl3D> --check-example)
+        set_tests_properties(FlightControlDedicatedBootstrap PROPERTIES
+            PASS_REGULAR_EXPRESSION "Bootstrapped dedicated FlightControl3D")
+    endif()
+endif()
+
 # Copier les DLL automatiquement
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -52,6 +68,12 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         COMMAND $<TARGET_FILE:${PROJECT_NAME}> --example blue-defense --check-example)
     set_tests_properties(BlueDefenseExampleBootstrap PROPERTIES
         PASS_REGULAR_EXPRESSION "Bootstrapped example: blue-defense")
+    if (PPO_BUILD_FLIGHT_CONTROL)
+        add_test(NAME FlightControlExampleBootstrap
+            COMMAND $<TARGET_FILE:${PROJECT_NAME}> --example flight-control-3d --check-example)
+        set_tests_properties(FlightControlExampleBootstrap PROPERTIES
+            PASS_REGULAR_EXPRESSION "Bootstrapped example: flight-control-3d")
+    endif()
 
     add_test(NAME BlueDefenseInferenceExampleBootstrap
         COMMAND $<TARGET_FILE:${PROJECT_NAME}>

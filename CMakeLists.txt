@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.18)
 project(TopPPO LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -11,6 +11,7 @@ option(PPO_BUILD_DESKTOP "Build existing LibTorch desktop application" ON)
 # Tests are opt-in for local development; CI workflows enable them explicitly.
 option(PPO_BUILD_CORE_TESTS "Build dependency-free RL core tests" OFF)
 option(PPO_BUILD_CHECKPOINT_TESTS "Verify existing policy checkpoints without training" OFF)
+option(PPO_BUILD_FLIGHT_CONTROL "Build the native JSBSim FlightControl3D example" ${PPO_BUILD_DESKTOP})
 
 if (PPO_BUILD_CORE_TESTS)
     enable_testing()
@@ -23,6 +24,9 @@ endif()
 
 # Core contracts deliberately compile independently of Torch, EnTT and graphics.
 if (NOT PPO_BUILD_DESKTOP)
+    if (PPO_BUILD_FLIGHT_CONTROL)
+        add_subdirectory(Examples/FlightControl3D)
+    endif()
     if (PPO_BUILD_CORE_TESTS)
         add_subdirectory(Examples/BlueDefense/tests BlueDefenseCoreTests)
     endif()

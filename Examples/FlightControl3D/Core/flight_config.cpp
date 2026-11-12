@@ -1,0 +1,229 @@
+#include "flight_config.hpp"
+#include <nlohmann/json.hpp>
+#include <fstream>
+#include <stdexcept>
+
+namespace ppo::examples::flight {
+namespace {
+using Json = nlohmann::json;
+
+void Require(bool condition, char const* message)
+{
+    if (!condition) throw std::invalid_argument(std::string{"FlightControl3D: "} + message);
+}
+
+void Keys(Json const& object, std::initializer_list<char const*> names)
+{
+    Require(object.is_object() && object.size() == names.size(), "unexpected or missing JSON fields");
+    for (auto const* name : names) Require(object.contains(name), name);
+}
+
+double Number(Json const& object, char const* key)
+{
+    auto const& value = object.at(key);
+    Require(value.is_number() && !value.is_boolean(), key);
+    double const result = value.get<double>();
+    Require(std::isfinite(result), key);
+    return result;
+}
+
+std::size_t Integer(Json const& object, char const* key, std::size_t limit)
+{
+    auto const& value = object.at(key);
+    Require(value.is_number_unsigned() || value.is_number_integer(), key);
+    auto const result = value.get<std::int64_t>();
+    Require(result >= 0 && static_cast<std::uint64_t>(result) <= limit, key);
+    return static_cast<std::size_t>(result);
+}
+
+bool Boolean(Json const& object, char const* key)
+{
+    Require(object.at(key).is_boolean(), key);
+    return object.at(key).get<bool>();
+}
+Range Bounds(Json const& object, char const* key)
+{
+    auto const& value=object.at(key);
+    Require(value.is_array() && value.size()==2 && value[0].is_number() && value[1].is_number(),key);
+    Range const range{value[0].get<double>(),value[1].get<double>()};
+    Require(std::isfinite(range.minimum) && std::isfinite(range.maximum) && range.minimum<=range.maximum,key);
+    return range;
+}
+} // namespace
+
+Config LoadConfig(std::filesystem::path const& path)
+{
+    std::ifstream stream(path);
+    Require(static_cast<bool>(stream), "cannot open configuration");
+    Json root;
+    stream >> root;
+    Keys(root, {"formatVersion", "aircraft", "runway", "runwayRandomization", "mission", "initial", "normalization", "reward", "training", "evaluation"});
+    Require(Integer(root, "formatVersion", 1) == 1, "unsupported formatVersion");
+    Config config{};
+    config.aircraft = root.at("aircraft").get<std::string>();
+    auto const& r = root.at("runway");
+    Keys(r, {"latitudeDegrees", "longitudeDegrees", "elevationMeters", "headingDegrees", "lengthMeters", "widthMeters", "thresholdHeightMeters"});
+    config.runway = {Number(r,"latitudeDegrees"), Number(r,"longitudeDegrees"), Number(r,"elevationMeters"),
+        Number(r,"headingDegrees"), Number(r,"lengthMeters"), Number(r,"widthMeters"), Number(r,"thresholdHeightMeters")};
+    auto const& d=root.at("runwayRandomization");
+    Keys(d,{"northMeters","eastMeters","headingOffsetDegrees","deckHeightMeters","speedMps","heaveAmplitudeMeters",
+        "wavePeriodSeconds","pitchAmplitudeDegrees","rollAmplitudeDegrees","phaseDegrees","seaHeightMeters"});
+    config.runwayRandomization={Bounds(d,"northMeters"),Bounds(d,"eastMeters"),Bounds(d,"headingOffsetDegrees"),Bounds(d,"deckHeightMeters"),
+        Bounds(d,"speedMps"),Bounds(d,"heaveAmplitudeMeters"),Bounds(d,"wavePeriodSeconds"),Bounds(d,"pitchAmplitudeDegrees"),
+        Bounds(d,"rollAmplitudeDegrees"),Bounds(d,"phaseDegrees"),Number(d,"seaHeightMeters")};
+    auto const& m = root.at("mission");
+    Keys(m, {"physicsDt", "actionSubsteps", "maxSeconds", "maxDistanceMeters", "maxAltitudeMeters",
+        "switchDistanceMeters", "ilsRangeMeters", "ilsSectorDegrees", "glideDegrees",
+        "localizerCaptureDegrees", "glideCaptureDegrees", "patrolSpeed", "approachSpeed", "flareSpeed", "flareHeightMeters",
+        "maxTouchdownSink", "maxTouchdownSpeed", "maxTouchdownRollDegrees", "maxTouchdownPitchDegrees", "minTouchdownPitchDegrees", "maxTouchdownHeadingDegrees",
+        "gearDownMinimum", "contactHeightMeters", "stoppedSpeed", "stoppedHoldSeconds", "racetrackCenterAlong", "racetrackCenterCross",
+        "racetrackHalfStraight", "racetrackRadius", "patrolAltitude", "waypointRadius", "turnSamples", "straightSamples"});
+    auto& mission = config.mission;
+#define READ_M(field) mission.field = Number(m, #field)
+    READ_M(physicsDt); READ_M(maxSeconds); READ_M(maxDistanceMeters); READ_M(maxAltitudeMeters);
+    READ_M(switchDistanceMeters); READ_M(ilsRangeMeters); READ_M(ilsSectorDegrees); READ_M(glideDegrees);
+    READ_M(localizerCaptureDegrees); READ_M(glideCaptureDegrees); READ_M(patrolSpeed); READ_M(approachSpeed);
+    READ_M(flareSpeed); READ_M(flareHeightMeters); READ_M(maxTouchdownSink); READ_M(maxTouchdownSpeed);
+    READ_M(maxTouchdownRollDegrees); READ_M(maxTouchdownPitchDegrees); READ_M(minTouchdownPitchDegrees); READ_M(maxTouchdownHeadingDegrees);
+    READ_M(gearDownMinimum); READ_M(contactHeightMeters); READ_M(stoppedSpeed); READ_M(stoppedHoldSeconds);
+    READ_M(racetrackCenterAlong); READ_M(racetrackCenterCross); READ_M(racetrackHalfStraight);
+    READ_M(racetrackRadius); READ_M(patrolAltitude); READ_M(waypointRadius);
+#undef READ_M
+    mission.actionSubsteps = Integer(m, "actionSubsteps", 100);
+    mission.turnSamples = Integer(m, "turnSamples", MaximumWaypoints);
+    mission.straightSamples = Integer(m, "straightSamples", MaximumWaypoints);
+    auto const& i = root.at("initial");
+    Keys(i, {"approach", "gearDown", "distanceMeters", "bearingDegrees", "heightMeters", "speedMps", "headingOffsetDegrees",
+        "rollDegrees", "pitchDegrees", "slopeDegrees", "throttle", "flap", "propeller"});
+    auto& initial = config.initial;
+    initial.approach = Boolean(i, "approach"); initial.gearDown = Boolean(i, "gearDown");
+    initial.distanceMeters=Bounds(i,"distanceMeters"); initial.bearingDegrees=Bounds(i,"bearingDegrees");
+    initial.heightMeters=Bounds(i,"heightMeters"); initial.speedMps=Bounds(i,"speedMps");
+    initial.headingOffsetDegrees=Bounds(i,"headingOffsetDegrees"); initial.rollDegrees=Bounds(i,"rollDegrees");
+    initial.pitchDegrees=Bounds(i,"pitchDegrees"); initial.slopeDegrees=Bounds(i,"slopeDegrees");
+    initial.throttle=Number(i,"throttle"); initial.flap=Number(i,"flap"); initial.propeller=Number(i,"propeller");
+    auto const& n = root.at("normalization");
+    Keys(n, {"distance", "altitude", "speed", "rate", "path", "localizerDegrees", "glideDegrees"});
+    config.normalization = {Number(n,"distance"), Number(n,"altitude"), Number(n,"speed"), Number(n,"rate"),
+        Number(n,"path"), Number(n,"localizerDegrees"), Number(n,"glideDegrees")};
+    auto const& w = root.at("reward");
+    Keys(w, {"weights", "pathTolerance", "localizerToleranceDegrees", "glideToleranceDegrees", "speedTolerance", "slopeToleranceDegrees"});
+    auto const& weights = w.at("weights");
+    Require(weights.is_object() && weights.size() == RewardCount, "reward channel mismatch");
+    for (std::size_t channel = 0; channel < RewardCount; ++channel)
+        config.reward.weights[channel] = Number(weights, RewardNames[channel]);
+    config.reward.pathTolerance = Number(w,"pathTolerance");
+    config.reward.localizerToleranceDegrees = Number(w,"localizerToleranceDegrees");
+    config.reward.glideToleranceDegrees = Number(w,"glideToleranceDegrees");
+    config.reward.speedTolerance = Number(w,"speedTolerance");
+    config.reward.slopeToleranceDegrees = Number(w,"slopeToleranceDegrees");
+    auto const& t = root.at("training");
+    Keys(t, {"seed", "rolloutSteps", "minibatch", "epochs", "maxUpdates", "checkpointEvery", "hiddenWidth", "actorRate", "criticRate", "gamma", "lambda",
+        "clip", "entropy", "valueWeight", "minLogStd", "maxLogStd", "initialLogStd", "maxGradientNorm", "adamBeta1", "adamBeta2", "adamEpsilon",
+        "resume", "checkpointDirectory"});
+    auto& training = config.training;
+    training.seed = static_cast<std::uint32_t>(Integer(t,"seed", UINT32_MAX));
+    training.rolloutSteps = Integer(t,"rolloutSteps", 65536);
+    training.minibatch = Integer(t,"minibatch", 65536);
+    training.epochs = Integer(t,"epochs", 100);
+    training.maxUpdates = Integer(t,"maxUpdates", 100000000);
+    training.checkpointEvery = Integer(t,"checkpointEvery", 100000000);
+    training.hiddenWidth = Integer(t,"hiddenWidth", 128);
+#define READ_T(field) training.field = Number(t, #field)
+    READ_T(actorRate); READ_T(criticRate); READ_T(gamma); READ_T(lambda); READ_T(clip); READ_T(entropy);
+    READ_T(valueWeight); READ_T(minLogStd); READ_T(maxLogStd); READ_T(initialLogStd); READ_T(maxGradientNorm);
+    READ_T(adamBeta1); READ_T(adamBeta2); READ_T(adamEpsilon);
+#undef READ_T
+    training.resume = Boolean(t,"resume");
+    training.checkpointDirectory = t.at("checkpointDirectory").get<std::string>();
+    auto const& e = root.at("evaluation");
+    Keys(e,{"seed","episodes"});
+    config.evaluation.seed=static_cast<std::uint32_t>(Integer(e,"seed",UINT32_MAX));
+    config.evaluation.episodes=Integer(e,"episodes",1000000);
+    auto semantics = root;
+    semantics.erase("training");
+    semantics.erase("evaluation");
+    semantics["distribution"] = {training.minLogStd,training.maxLogStd};
+    config.checkpointSignature = semantics.dump();
+    Validate(config);
+    return config;
+}
+
+void Validate(Config const& c)
+{
+    auto const& i=c.initial;
+    auto const& d=c.runwayRandomization;
+    std::array<Range,18> const ranges{i.distanceMeters,i.bearingDegrees,i.heightMeters,i.speedMps,i.headingOffsetDegrees,
+        i.rollDegrees,i.pitchDegrees,i.slopeDegrees,d.northMeters,d.eastMeters,d.headingOffsetDegrees,d.deckHeightMeters,
+        d.speedMps,d.heaveAmplitudeMeters,d.wavePeriodSeconds,d.pitchAmplitudeDegrees,d.rollAmplitudeDegrees,d.phaseDegrees};
+    for(auto range:ranges) Require(std::isfinite(range.minimum) && std::isfinite(range.maximum) && range.minimum<=range.maximum,"ordered finite randomization ranges");
+    Require(c.aircraft == "c310", "this adapter supports the pinned c310 model");
+    auto const& r = c.runway;
+    Require(std::abs(r.latitudeDegrees) < 85 && std::abs(r.longitudeDegrees) <= 180, "runway geodetic coordinates");
+    Require(r.headingDegrees >= 0 && r.headingDegrees < 360 && r.lengthMeters > 0 && r.widthMeters > 0
+        && r.widthMeters < r.lengthMeters && r.thresholdHeightMeters >= 0, "runway geometry");
+    auto const& m = c.mission;
+    Require(m.physicsDt >= 0.001 && m.physicsDt <= 0.02 && m.actionSubsteps > 0 && c.StepSeconds() <= 0.5, "integration timestep");
+    Require(m.maxSeconds > c.StepSeconds() && m.maxSeconds <= 86400 && m.maxDistanceMeters > r.lengthMeters
+        && m.maxAltitudeMeters > m.patrolAltitude, "episode limits");
+    Require(m.switchDistanceMeters > 0 && m.ilsRangeMeters >= m.switchDistanceMeters && m.ilsRangeMeters < m.maxDistanceMeters
+        && m.ilsSectorDegrees > 0 && m.ilsSectorDegrees < 90 && m.glideDegrees > 0 && m.glideDegrees < 10, "ILS envelope");
+    Require(m.localizerCaptureDegrees > 0 && m.localizerCaptureDegrees < m.ilsSectorDegrees
+        && m.glideCaptureDegrees > 0 && m.glideCaptureDegrees < m.glideDegrees, "ILS capture tolerances");
+    Require(m.patrolSpeed > 0 && m.approachSpeed > m.flareSpeed && m.flareSpeed > m.stoppedSpeed
+        && m.flareHeightMeters > r.thresholdHeightMeters && m.stoppedSpeed >= 0, "target speeds and flare");
+    Require(m.maxTouchdownSink > 0 && m.maxTouchdownSpeed >= m.flareSpeed && m.maxTouchdownRollDegrees > 0
+        && m.minTouchdownPitchDegrees < m.maxTouchdownPitchDegrees && m.maxTouchdownPitchDegrees < 90
+        && m.maxTouchdownHeadingDegrees>0 && m.maxTouchdownHeadingDegrees<90
+        && m.gearDownMinimum > 0 && m.gearDownMinimum <= 1 && m.contactHeightMeters > 0 && m.stoppedHoldSeconds > 0, "landing limits");
+    Require(m.racetrackHalfStraight > 0 && m.racetrackRadius > 0 && m.patrolAltitude > m.flareHeightMeters
+        && m.waypointRadius > 0 && m.turnSamples >= 4 && m.straightSamples >= 1
+        && 2*(m.turnSamples + m.straightSamples) <= MaximumWaypoints, "racetrack geometry/capacity");
+    Require(std::hypot(m.racetrackCenterAlong, m.racetrackCenterCross) + m.racetrackHalfStraight + m.racetrackRadius
+        < m.maxDistanceMeters, "racetrack outside episode bounds");
+    Require(i.distanceMeters.minimum>r.lengthMeters && i.distanceMeters.maximum<m.maxDistanceMeters
+        && i.heightMeters.minimum>m.flareHeightMeters && i.heightMeters.maximum<m.maxAltitudeMeters
+        && i.speedMps.minimum>m.flareSpeed && i.speedMps.maximum<=c.normalization.speed,
+        "bounded airborne spawn distance/height/speed");
+    Require(i.bearingDegrees.minimum>=-180 && i.bearingDegrees.maximum<=180
+        && i.headingOffsetDegrees.minimum>=-180 && i.headingOffsetDegrees.maximum<=180
+        && i.rollDegrees.minimum>=-30 && i.rollDegrees.maximum<=30 && i.pitchDegrees.minimum>=-15 && i.pitchDegrees.maximum<=15
+        && i.slopeDegrees.minimum>=-10 && i.slopeDegrees.maximum<=10,"reasonable spawn attitude/course");
+    Require(i.throttle >= 0 && i.throttle <= 1 && i.flap >= 0 && i.flap <= 1 && i.propeller >= 0 && i.propeller <= 1, "initial controls");
+    Require(d.heaveAmplitudeMeters.minimum>=0 && d.heaveAmplitudeMeters.maximum<=5 && d.wavePeriodSeconds.minimum>=3
+        && d.wavePeriodSeconds.maximum<=60 && d.pitchAmplitudeDegrees.minimum>=0 && d.pitchAmplitudeDegrees.maximum<=2
+        && d.rollAmplitudeDegrees.minimum>=0 && d.rollAmplitudeDegrees.maximum<=2
+        && d.speedMps.minimum>=0 && d.speedMps.maximum<=15,"reasonable runway motion/houle");
+    Require(d.headingOffsetDegrees.minimum>=-180 && d.headingOffsetDegrees.maximum<=180
+        && std::max(std::abs(d.northMeters.minimum),std::abs(d.northMeters.maximum))<=m.maxDistanceMeters
+        && std::max(std::abs(d.eastMeters.minimum),std::abs(d.eastMeters.maximum))<=m.maxDistanceMeters,
+        "bounded runway spawn position/course");
+    double const maximumTilt=std::sin(d.pitchAmplitudeDegrees.maximum*DegreesToRadians)+std::sin(d.rollAmplitudeDegrees.maximum*DegreesToRadians);
+    Require(i.heightMeters.minimum-i.distanceMeters.maximum*maximumTilt+d.deckHeightMeters.minimum-d.heaveAmplitudeMeters.maximum>d.seaHeightMeters,
+        "all randomized aircraft starts must remain above the sea");
+    Require(d.deckHeightMeters.minimum-d.heaveAmplitudeMeters.maximum-r.lengthMeters*std::sin(d.pitchAmplitudeDegrees.maximum*DegreesToRadians)/2
+        > d.seaHeightMeters,"deck must remain above sea");
+    auto const& n = c.normalization;
+    Require(n.distance > 0 && n.altitude > 0 && n.speed > 0 && n.rate > 0 && n.path > 0
+        && n.localizerDegrees > 0 && n.glideDegrees > 0, "normalization scales");
+    auto const& w = c.reward;
+    Require(w.pathTolerance > 0 && w.localizerToleranceDegrees > 0 && w.glideToleranceDegrees > 0
+        && w.speedTolerance > 0 && w.slopeToleranceDegrees > 0, "reward tolerances");
+    for (double weight : w.weights) Require(std::isfinite(weight), "finite reward weights");
+    Require(w.weights[static_cast<std::size_t>(Reward::Crash)] <= 0, "crash weight must be non-positive");
+    auto const& t = c.training;
+    Require(t.rolloutSteps >= 2 && t.minibatch > 0 && t.minibatch <= t.rolloutSteps && t.rolloutSteps % t.minibatch == 0
+        && t.epochs > 0 && t.maxUpdates > 0 && t.checkpointEvery > 0, "training capacities");
+    Require(t.hiddenWidth == 32 || t.hiddenWidth == 64 || t.hiddenWidth == 128, "hiddenWidth must be 32, 64 or 128");
+    Require(t.actorRate > 0 && t.criticRate > 0 && t.gamma > 0 && t.gamma <= 1 && t.lambda >= 0 && t.lambda <= 1
+        && t.clip > 0 && t.clip < 1 && t.entropy >= 0 && t.valueWeight > 0 && t.maxGradientNorm > 0, "PPO hyperparameters");
+    Require(t.minLogStd >= -10 && t.maxLogStd <= 2 && t.minLogStd < t.initialLogStd && t.initialLogStd < t.maxLogStd,
+        "Gaussian log standard deviations");
+    Require(t.adamBeta1 >= 0 && t.adamBeta1 < 1 && t.adamBeta2 >= 0 && t.adamBeta2 < 1 && t.adamEpsilon > 0,
+        "Adam hyperparameters");
+    Require(c.evaluation.episodes>0 && c.evaluation.seed!=t.seed,"independent evaluation seed and positive episode count");
+    auto const directory = std::filesystem::path(t.checkpointDirectory);
+    Require(!directory.empty() && !directory.is_absolute(), "checkpointDirectory must be relative");
+    for (auto const& component : directory) Require(component != "..", "checkpointDirectory traversal");
+}
+} // namespace ppo::examples::flight

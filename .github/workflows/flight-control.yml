@@ -1,0 +1,35 @@
+name: FlightControl3D JSBSim
+on:
+  pull_request:
+    paths:
+      - 'Examples/FlightControl3D/**'
+      - 'resources/settings/Scenarios/FlightControl3D.json'
+      - 'CMakeLists.txt'
+      - '.github/workflows/flight-control.yml'
+  workflow_dispatch:
+jobs:
+  flight:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
+        configuration: [Debug, Release]
+        include:
+          - configuration: Debug
+            build_dir: build/debug
+          - configuration: Release
+            build_dir: build/release
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure native CPU example
+        run: >-
+          cmake -S . -B ${{ matrix.build_dir }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.configuration }}
+          -DPPO_BUILD_DESKTOP=OFF -DPPO_BUILD_CORE_TESTS=ON
+          -DPPO_BUILD_FLIGHT_CONTROL=ON
+      - name: Build
+        run: cmake --build ${{ matrix.build_dir }} --config ${{ matrix.configuration }} --parallel 2
+      - name: Deterministic CTest including real JSBSim and RLtools
+        run: ctest --test-dir ${{ matrix.build_dir }} -C ${{ matrix.configuration }} --output-on-failure

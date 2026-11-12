@@ -1,5 +1,8 @@
 add_subdirectory(Airspace)
 add_subdirectory(BlueDefense)
+if (PPO_BUILD_FLIGHT_CONTROL)
+    add_subdirectory(FlightControl3D)
+endif()
 
 # Explicit composition of compiled examples, separate from Main and the core.
 add_library(PPOExampleCatalog STATIC
@@ -10,6 +13,12 @@ target_compile_features(PPOExampleCatalog PUBLIC cxx_std_17)
 target_include_directories(PPOExampleCatalog PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/data")
 target_link_libraries(PPOExampleCatalog PUBLIC PPOAirspaceExample PPOBlueDefenseExample)
+if (PPO_BUILD_FLIGHT_CONTROL)
+    target_link_libraries(PPOExampleCatalog PUBLIC PPOFlightControlExample)
+    target_compile_definitions(PPOExampleCatalog PRIVATE PPO_WITH_FLIGHT_CONTROL=1)
+    target_link_libraries(AirspaceRenderer PRIVATE FlightControlRenderer)
+    target_compile_definitions(AirspaceRenderer PRIVATE PPO_WITH_FLIGHT_CONTROL=1)
+endif()
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     # Contract-only test: no LibTorch, renderer or concrete example needed.
