@@ -1,0 +1,216 @@
+name: FlightControl3D Curriculum Training
+
+on:
+  # Before merge, adding the 'flight-curriculum' label to PR #83 starts training.
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: 'Curriculum gate (progressive resumes and advances automatically)'
+        required: true
+        type: choice
+        default: progressive
+        options:
+          - progressive
+          - loc
+          - glide
+          - joint
+      additional_updates:
+        description: "Additional PPO updates to train"
+        required: true
+        type: number
+        default: 10
+      resume_run_id:
+        description: "Optional previous FlightControl3D training run ID"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: flight-control-training-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  train:
+    if: ${{ github.event_name != 'pull_request' || github.event.label.name == 'flight-curriculum' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Checkout exact training sources
+        uses: actions/checkout@v4
+
+      - name: Configure Release headless runtime
+        run: >-
+          cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release
+          -DPPO_BUILD_DESKTOP=OFF -DPPO_BUILD_CORE_TESTS=ON
+          -DPPO_BUILD_CHECKPOINT_TESTS=OFF -DPPO_BUILD_FLIGHT_CONTROL=ON
+
+      - name: Build headless and deterministic curriculum regressions
+        run: >-
+          cmake --build build/release --config Release
+          --target FlightControlHeadless FlightControl_core_tests
+          FlightControl_reward_tests FlightControl_simulator_tests
+          FlightControl_session_tests --parallel 2
+
+      - name: Verify reward, random starts and checkpoint validation
+        run: >-
+          ctest --test-dir build/release -C Release --output-on-failure
+          -R '^FlightControl_(core|reward|simulator|session)_tests$'
+
+      - name: Restore previous training artifact
+        if: ${{ inputs.resume_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: flight-control-training
+          run-id: ${{ inputs.resume_run_id }}
+          github-token: ${{ github.token }}
+          path: build/flight-training
+
+      - name: Seed from the committed checkpoint
+        if: ${{ inputs.resume_run_id == '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_checkpoint="resources/model/FlightControl3D/latest/flight_hybrid_v1.txt"
+          test -s "$source_checkpoint"
+          mkdir -p build/flight-training/latest
+          cp "$source_checkpoint" build/flight-training/latest/flight_hybrid_v1.txt
+
+      - name: Validate checkpoint and compute target update
+        id: budget
+        shell: bash
+        env:
+          ADDITIONAL_UPDATES: ${{ inputs.additional_updates || '10' }}
+        run: |
+          set -euo pipefail
+          checkpoint="build/flight-training/latest/flight_hybrid_v1.txt"
+          test -s "$checkpoint"
+          read -r magic observations actions width current_update < "$checkpoint"
+          if [[ "$magic" != "PPO_FLIGHT_HYBRID_V1" ||
+                "$observations" != "56" || "$actions" != "5" || "$width" != "128" ]]; then
+            echo "Unexpected FlightControl3D checkpoint header" >&2
+            exit 1
+          fi
+          if [[ ! "$current_update" =~ ^[0-9]+$ || ! "$ADDITIONAL_UPDATES" =~ ^[0-9]+$ ]]; then
+            echo "Checkpoint and additional update counters must be integers" >&2
+            exit 1
+          fi
+          if (( current_update > 100000000 || ADDITIONAL_UPDATES < 1 || ADDITIONAL_UPDATES > 100000000 )); then
+            echo "additional_updates must be an integer in [1,100000000]" >&2
+            exit 1
+          fi
+          target_update=$((current_update + ADDITIONAL_UPDATES))
+          if (( target_update > 100000000 )); then
+            echo "Target update exceeds the FlightControlHeadless limit" >&2
+            exit 1
+          fi
+          echo "start_update=$current_update" >> "$GITHUB_OUTPUT"
+          echo "target_update=$target_update" >> "$GITHUB_OUTPUT"
+          echo "Training from update $current_update through update $target_update"
+
+      - name: Train FlightControl3D
+        shell: bash
+        env:
+          REQUESTED_STAGE: ${{ inputs.stage || 'progressive' }}
+          ADDITIONAL_UPDATES: ${{ inputs.additional_updates || '10' }}
+        run: |
+          set -euo pipefail
+          checkpoint="build/flight-training/latest/flight_hybrid_v1.txt"
+          progress="build/flight-training/curriculum_stage.txt"
+          stage="$REQUESTED_STAGE"
+          if [[ "$stage" == "progressive" ]]; then
+            stage="loc"
+            if [[ -s "$progress" ]]; then read -r stage < "$progress"; fi
+          fi
+          if [[ "$stage" != "loc" && "$stage" != "glide" && "$stage" != "joint" ]]; then
+            echo "Invalid or completed curriculum stage: $stage" >&2
+            exit 1
+          fi
+          # A passing gate advances within this run; an unsuccessful gate can
+          # resume on the next run without overwriting BEST or discarding latest.
+          for gate_index in 1 2 3; do
+            # Persist the gate before the long runner to resume after an interrupted run.
+            echo "$stage" > "$progress"
+            read -r magic observations actions width current_update < "$checkpoint"
+            if [[ "$magic" != "PPO_FLIGHT_HYBRID_V1" || ! "$current_update" =~ ^[0-9]+$ ]]; then
+              echo "Invalid checkpoint between curriculum stages" >&2
+              exit 1
+            fi
+            target_update=$((current_update + ADDITIONAL_UPDATES))
+            if (( target_update > 100000000 )); then
+              echo "Curriculum update budget overflow" >&2
+              exit 1
+            fi
+            log="build/flight-training/gate_${stage}_${target_update}.log"
+            echo "Training gate $stage: update $current_update -> $target_update"
+            build/release/Examples/FlightControl3D/FlightControlHeadless \
+              --config resources/settings/Scenarios/FlightControl3D.json \
+              --output build/flight-training --updates "$target_update" --stage "$stage" | tee "$log"
+            cp build/flight-training/training.csv "build/flight-training/training_${stage}_${target_update}.csv"
+            gate_result="$(grep '^\[FLIGHT_GATE\]' "$log" | tail -n 1 || true)"
+            if [[ -z "$gate_result" ]]; then
+              echo "Missing final independent gate evaluation" >&2
+              exit 1
+            fi
+            echo "$gate_result" >> "$GITHUB_STEP_SUMMARY"
+            echo "$gate_result"
+            if [[ "$REQUESTED_STAGE" != "progressive" || "$gate_result" != *"passed=true"* ]]; then
+              break
+            fi
+            if [[ "$stage" == "loc" ]]; then
+              stage="glide"
+            elif [[ "$stage" == "glide" ]]; then
+              stage="joint"
+            else
+              stage="done"
+              break
+            fi
+          done
+          echo "$stage" > "$progress"
+          {
+            echo "- Curriculum next stage: $stage"
+            echo "- Mode: $REQUESTED_STAGE"
+            echo "- Resume using this workflow run ID as resume_run_id"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Validate trained checkpoint
+        shell: bash
+        env:
+          EXPECTED_UPDATE: ${{ steps.budget.outputs.target_update }}
+        run: |
+          set -euo pipefail
+          checkpoint="build/flight-training/latest/flight_hybrid_v1.txt"
+          test -s "$checkpoint"
+          read -r magic observations actions width completed_update < "$checkpoint"
+          if [[ "$magic" != "PPO_FLIGHT_HYBRID_V1" || ! "$completed_update" =~ ^[0-9]+$ || "$completed_update" -lt "$EXPECTED_UPDATE" ]]; then
+            echo "Training did not produce the requested checkpoint update" >&2
+            exit 1
+          fi
+          test -s build/flight-training/training.csv
+          {
+            echo "### FlightControl3D training"
+            echo "- Start update: ${{ steps.budget.outputs.start_update }}"
+            echo "- Completed update: $completed_update"
+            echo '- Checkpoint: `latest/flight_hybrid_v1.txt`'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish resumable checkpoint and telemetry
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flight-control-training
+          path: |
+            build/flight-training/latest/flight_hybrid_v1.txt
+            build/flight-training/latest/flight_hybrid_v1.txt.previous
+            build/flight-training/best/**
+            build/flight-training/training.csv
+            build/flight-training/training_*.csv
+            build/flight-training/curriculum_stage.txt
+            build/flight-training/gate_*.log
+          if-no-files-found: warn
+          retention-days: 30

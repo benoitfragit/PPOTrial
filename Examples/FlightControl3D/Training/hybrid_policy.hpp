@@ -1,0 +1,108 @@
+#pragma once
+
+#include "flight_config.hpp"
+#include <algorithm>
+#include <limits>
+#include <random>
+#include <stdexcept>
+
+namespace ppo::examples::flight {
+
+using PolicyVector = std::array<double, PolicyOutputs>;
+struct PolicyAction final
+{
+    std::array<double, ContinuousActions> raw{};
+    bool gearDown{};
+    double logProbability{};
+};
+
+inline double Softplus(double x) noexcept { return std::max(x,0.0)+std::log1p(std::exp(-std::abs(x))); }
+inline double Sigmoid(double x) noexcept
+{
+    double const e = std::exp(-std::abs(x));
+    return x >= 0 ? 1/(1+e) : e/(1+e);
+}
+
+/** Density of the latent Gaussian sample and Bernoulli gear, not of a clipped action. */
+inline double LogProbability(PolicyVector const& output, PolicyAction const& action, TrainingSettings const& t) noexcept
+{
+    double logp = action.gearDown ? -Softplus(-output.back()) : -Softplus(output.back());
+    for (std::size_t i=0; i<ContinuousActions; ++i)
+    {
+        double const logStd = std::clamp(output[ContinuousActions+i],t.minLogStd,t.maxLogStd);
+        double const z = (action.raw[i]-output[i])*std::exp(-logStd);
+        logp -= 0.5*z*z + logStd + 0.5*std::log(2*Pi);
+    }
+    return logp;
+}
+
+/** Analytic entropy of the latent Gaussian x Bernoulli policy. */
+inline double Entropy(PolicyVector const& output, TrainingSettings const& t) noexcept
+{
+    double const p = Sigmoid(output.back());
+    double entropy = Softplus(output.back())-p*output.back();
+    for (std::size_t i=0; i<ContinuousActions; ++i)
+        entropy += 0.5*std::log(2*Pi*std::exp(1.0)) + std::clamp(output[ContinuousActions+i],t.minLogStd,t.maxLogStd);
+    return entropy;
+}
+
+inline Controls ToControls(PolicyAction const& action) noexcept
+{
+    return {std::tanh(action.raw[0]),std::tanh(action.raw[1]),std::tanh(action.raw[2]),
+        (std::tanh(action.raw[3])+1)/2, (std::tanh(action.raw[4])+1)/2,action.gearDown};
+}
+
+template<typename Engine>
+PolicyAction Sample(PolicyVector const& output, TrainingSettings const& t, Engine& rng, bool deterministic)
+{
+    for (double value : output)
+        if (!std::isfinite(value)) throw std::runtime_error("FlightControl3D: non-finite actor output");
+    PolicyAction action{};
+    for (std::size_t i=0; i<ContinuousActions; ++i)
+    {
+        std::normal_distribution<double> distribution(output[i],std::exp(std::clamp(output[ContinuousActions+i],t.minLogStd,t.maxLogStd)));
+        action.raw[i] = deterministic ? output[i] : distribution(rng);
+    }
+    std::bernoulli_distribution gear(Sigmoid(output.back()));
+    action.gearDown = deterministic ? output.back() >= 0 : gear(rng);
+    action.logProbability = LogProbability(output,action,t);
+    return action;
+}
+
+struct PolicyLoss final { double loss{}, entropy{}, ratio{}; PolicyVector derivative{}; };
+
+/** Exact clipped PPO surrogate derivative, including Bernoulli and log-std entropy. */
+inline PolicyLoss ClippedLoss(PolicyVector const& output, PolicyAction const& action,
+    double advantage, TrainingSettings const& t) noexcept
+{
+    PolicyLoss result{};
+    double const logRatio = LogProbability(output,action,t)-action.logProbability;
+    // Limit only exponential overflow; outside this range fail-stop is handled by the learner.
+    result.ratio = std::exp(std::clamp(logRatio,-80.0,80.0));
+    double const clipped = std::clamp(result.ratio,1-t.clip,1+t.clip);
+    result.entropy = Entropy(output,t);
+    result.loss = -std::min(result.ratio*advantage,clipped*advantage)-t.entropy*result.entropy;
+    bool const active = (advantage >= 0 ? result.ratio <= 1+t.clip : result.ratio >= 1-t.clip)
+        && logRatio > -80 && logRatio < 80;
+    double const dlogp = active ? -advantage*result.ratio : 0;
+    for (std::size_t i=0; i<ContinuousActions; ++i)
+    {
+        double const rawLogStd = output[ContinuousActions+i];
+        double const invVariance = std::exp(-2*std::clamp(rawLogStd,t.minLogStd,t.maxLogStd));
+        double const difference = action.raw[i]-output[i];
+        result.derivative[i] = dlogp*difference*invVariance;
+        if (rawLogStd > t.minLogStd && rawLogStd < t.maxLogStd)
+            result.derivative[ContinuousActions+i] = dlogp*(difference*difference*invVariance-1)-t.entropy;
+    }
+    double const p = Sigmoid(output.back());
+    result.derivative.back() = dlogp*(static_cast<double>(action.gearDown)-p) + t.entropy*output.back()*p*(1-p);
+    return result;
+}
+
+/** GAE: bootstrap on time limits, but never carry advantage across a reset. */
+inline double AdvantageDelta(double reward, double value, double nextValue, bool terminated, double gamma) noexcept
+{
+    return reward + (terminated ? 0 : gamma*nextValue)-value;
+}
+
+} // namespace ppo::examples::flight

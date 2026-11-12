@@ -26,6 +26,66 @@ Sans `--example`, l'application affiche le sélecteur graphique. Avec
 | `airspace` | Environnement historique d'agents LibTorch | `Scenarios/Playground.json` |
 | `blue-defense` | Entraînement MAPPO P/N contre RLMission | `Scenarios/BlueDefense.json` |
 | `blue-defense-inference` | Inférence déterministe avec l'acteur promu `prod` | `Scenarios/BlueDefense.json` |
+| `flight-control-3d` | Pilotage PPO du C310 JSBSim, hippodrome secondaire et approche ILS prioritaire | `Scenarios/FlightControl3D.json` |
+| `flight-control-3d-inference` | Évaluation du BEST FlightControl3D validé | `Scenarios/FlightControl3D.json` |
+
+FlightControl3D répartit les resets entre un départ exactement établi sur le
+LOC/glide et deux interceptions symétriques à gauche et à droite. Un ordonnanceur
+équilibré évite les séries répétitives : avec la part `1/3` livrée, chaque bloc de
+trois épisodes contient les trois placements dans un ordre pseudo-aléatoire.
+L'avion vise l'hippodrome tant que le LOC n'est pas confirmé ; une capture avec
+cap compatible bascule en phase approche. Une perte LOC ou GLIDE durable avant
+le seuil ouvre d'abord une courte grâce sans point de guidage ; le LOC peut y être
+recapturé sans basculement visuel, ou le GLIDE si le LOC est resté capturé. Sans
+la recapture requise, l'hippodrome revient ensuite.
+Sur l'hippodrome, le mode RALLY utilise une projection anticipée devant l'avion.
+Après confirmation du corridor, FOLLOW emploie la séquence fixe de 26 portes du
+procédé BlueAgent ; une porte manquée invalide immédiatement la séquence et rend
+la priorité au ralliement, sans laisser l'avion orbiter autour d'un point périmé.
+Après franchissement du seuil avec LOC et GLIDE capturés, l'approche reste engagée
+jusqu'au toucher. Aucun point au seuil ne concurrence alors les erreurs ILS.
+Le multiplicateur `training.ilsCaptureScale` élargit temporairement les tolérances
+de capture pendant l'apprentissage seulement. L'évaluation et l'inférence gardent
+les angles réalistes de `mission`, et modifier ce multiplicateur permet de reprendre
+le checkpoint `latest` sans réinitialiser les poids ni Adam.
+Le shaping LOC et son observation signée `sin(erreur_LOC)` restent denses sur
+tout le demi-plan avant jusqu'à la limite terminale de 18 km, y compris avant
+capture et au-delà de la portée radio. Le signe distingue directement la gauche
+de la droite et la magnitude ne sature plus à la limite du secteur radio. En
+APPROACH, le shaping GLIDE est lui aussi disponible avant
+capture dans la portée ILS ; en HIPP, il reste subordonné au LOC. Le LOC livré
+pèse `0.30`, contre `0.01` pour chacun des guidages secondaires `Speed` et
+`Slope`. Ces deux canaux secondaires valent strictement zéro avant la capture
+LOC confirmée et dès sa perte : l'agent ne peut donc pas les récolter au loin.
+Son potentiel correctif signé est multiplié par `5`, tandis que son maintien
+récurrent est limité à `0.25` de l'amplitude générique afin de privilégier la
+correction latérale sans rendre le vol simplement aligné plus rentable que le poser.
+Sa qualité mélange à parts égales une erreur angulaire linéaire et un cap
+d'interception intérieur de gain `2`, borné à `60°`.
+Le signal apparaît ainsi dès que la trajectoire commence le bon virage, avant
+qu'un déplacement latéral important soit visible. L'acteur et le critic livrés
+utilisent deux couches de largeur `128`. Chaque update écrit aussi les moyennes
+pondérées des dix canaux dans une ligne `[FLIGHT_UPDATE]` du journal.
+En APPROACH, le point et le reward hippodrome sont coupés ; le signal
+affiché et la capture conservent néanmoins leur géométrie physique stricte.
+Une distance supérieure à 18 km du seuil termine immédiatement l'épisode comme
+un crash pénalisé, au lieu de laisser voler l'agent sans shaping ILS jusqu'au timeout.
+Le checkpoint complet `resources/model/FlightControl3D/latest/flight_hybrid_v1.txt`
+peut être commité comme point de départ : la CI le charge réellement lorsqu'il
+est présent et vérifie une reprise à la frontière d'un update PPO. La sauvegarde
+`.previous` reste locale.
+Le workflow de tests **FlightControl3D JSBSim** est relancé automatiquement par
+les mises à jour de la pull request ; sa matrice couvre Linux et Windows en Debug
+et Release. L'entraînement distant est séparé : **FlightControl3D Training (manual)**
+ne possède que `workflow_dispatch`. Depuis GitHub Actions, **Run workflow** choisit
+le nombre d'updates supplémentaires et, facultativement, l'identifiant d'un run
+précédent à reprendre. Le checkpoint complet et `training.csv` sont publiés dans
+l'artefact `flight-control-training` pendant 30 jours.
+L'IHM distingue signal visible, captures actives et durées d'épisode en secondes
+simulées, avec un grand badge `HIPP` ou `APPROACH`, la vitesse, la pente et
+`GEAR` lorsque le train est physiquement sorti sur la caméra. La conception
+détaillée est décrite dans
+[l'architecture FlightControl3D](docs/PPOTrial_FlightControl3D_JSBSim_Architecture.md).
 
 Les deux modes BlueDefense utilisent **exactement la même scène**, la même
 physique et le même contrôleur ECS `GeneralizedPatrolMappoAgent`. La section
