@@ -42,15 +42,14 @@ int main(int argc, char** argv)
         }
         auto config=LoadConfig(configPath);
         if (updates) config.training.maxUpdates=*updates;
-        if (episodes) config.evaluation.episodes=*episodes;
         if ((training && episodes) || (!training && updates)) throw std::invalid_argument("--updates is for training; --episodes is for evaluation");
         if (output.empty()) output=std::filesystem::absolute(configPath).parent_path().parent_path().parent_path()/config.training.checkpointDirectory;
-        FlightSession session(config,training,output/"flight_hybrid_v1.txt");
+        FlightSession session(config,training,output,episodes);
         std::filesystem::create_directories(output);
         std::ofstream telemetry(output/(training ? "training.csv" : "evaluation.csv"));
         if (!telemetry) throw std::runtime_error("Cannot write FlightControl3D telemetry");
-        telemetry<<"episode,updates,outcome,touchdown_m,stop_m,ground_roll_m,touchdowns,stops,crashes,timeouts\n";
-        std::uint64_t previousEpisodes=0,previousUpdates=session.Snapshot().learning.updates;
+        telemetry<<"episode,updates,outcome,touchdown_m,stop_m,ground_roll_m,touchdowns,stops,crashes,timeouts,first_wheel_contact,valid_touchdown,touchdown_cross_m,touchdown_sink_mps,touchdown_speed_mps,gear_position\n";
+        std::uint64_t previousEpisodes=0,previousUpdates=session.Snapshot().learning.updates,previousValidations=0;
         while (!session.Finished())
         {
             session.Tick(); auto const state=session.Snapshot();
@@ -58,10 +57,12 @@ int main(int argc, char** argv)
             {
                 auto const& mission=state.lastEpisode;
                 telemetry<<state.episodes<<','<<state.learning.updates<<','<<static_cast<int>(mission.outcome)<<',';
-                if (mission.touchedDown) telemetry<<mission.touchdownFromThreshold;
+                if (mission.contactAttempted) telemetry<<mission.touchdownFromThreshold;
                 telemetry<<',';
                 if (mission.outcome==Outcome::Stopped) telemetry<<mission.stopFromThreshold;
-                telemetry<<','<<mission.groundRoll<<','<<state.touchdowns<<','<<state.stops<<','<<state.crashes<<','<<state.timeouts<<'\n';
+                telemetry<<','<<mission.groundRoll<<','<<state.touchdowns<<','<<state.stops<<','<<state.crashes<<','<<state.timeouts
+                    <<','<<mission.firstWheelContact<<','<<mission.touchedDown<<','<<mission.touchdownCrossMeters<<','<<mission.touchdownSinkMps
+                    <<','<<mission.touchdownSpeedMps<<','<<mission.touchdownGearPosition<<'\n';
                 telemetry.flush(); previousEpisodes=state.episodes;
             }
             if (state.learning.updates!=previousUpdates)
@@ -69,6 +70,12 @@ int main(int argc, char** argv)
                 std::cout<<"[FLIGHT] updates="<<state.learning.updates<<" episodes="<<state.episodes
                     <<" touchdowns="<<state.touchdowns<<" stops="<<state.stops<<" loss="<<state.learning.policyLoss<<std::endl;
                 previousUpdates=state.learning.updates;
+            }
+            if(state.validationCampaigns!=previousValidations)
+            {
+                std::cout<<"[FLIGHT_VALIDATION] update="<<state.lastValidation.update<<" episodes="<<state.lastValidation.episodes
+                    <<" success="<<state.lastValidation.SuccessRate()<<" best="<<(state.hasBest ? state.bestScore : -1)<<std::endl;
+                previousValidations=state.validationCampaigns;
             }
         }
         auto const state=session.Snapshot();

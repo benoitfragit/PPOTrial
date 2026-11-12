@@ -39,3 +39,6 @@ jobs:
         run: cmake --build ${{ matrix.build_dir }} --config ${{ matrix.configuration }} --parallel 2
       - name: CTest ${{ matrix.configuration }}
         run: ctest --test-dir ${{ matrix.build_dir }} -C ${{ matrix.configuration }} --output-on-failure
+      - name: Dedicated FlightControl3D root launcher
+        shell: cmd
+        run: Lancer_FlightControl3D_${{ matrix.configuration }}.bat --check-example

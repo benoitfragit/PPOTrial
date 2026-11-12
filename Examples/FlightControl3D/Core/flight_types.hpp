@@ -12,10 +12,11 @@ inline constexpr double FeetToMeters = 0.3048;
 inline constexpr double DegreesToRadians = Pi / 180.0;
 inline constexpr std::size_t ContinuousActions = 5; // elevator, aileron, rudder, throttle, brake
 inline constexpr std::size_t PolicyOutputs = 2 * ContinuousActions + 1;
-inline constexpr std::size_t ObservationSize = 51;
+inline constexpr std::size_t ObservationSize = 56;
 inline constexpr std::size_t MaximumWaypoints = 128;
 
 struct Vec3 final { double north{}, east{}, up{}; };
+struct WheelContact final { Vec3 point{};bool onGround{}; };
 
 /** SI snapshot: geodetic local tangent frame at the runway threshold. */
 struct AircraftState final
@@ -24,12 +25,15 @@ struct AircraftState final
     double airspeed{}, roll{}, pitch{}, heading{};
     double rollRate{}, pitchRate{}, yawRate{}, gearPosition{};
     bool weightOnWheels{}, structuralContact{}, finite{true};
+    std::array<WheelContact,3> wheels{};
+    bool wheelDataValid{};
 };
 
 struct Controls final
 {
     double elevator{}, aileron{}, rudder{}, throttle{}, brake{};
     bool gearDown{};
+    double flap{};
 };
 
 enum class Phase : std::uint8_t { Patrol, Approach, Rollout };
@@ -61,7 +65,12 @@ struct MissionState final
     std::size_t waypoint{1};
     std::uint64_t steps{};
     double stoppedSeconds{};
+    double localizerHoldSeconds{},glideHoldSeconds{};
+    std::size_t waypointsPassed{},completedLaps{};
+    bool pathQualified{};
     bool capturedLocalizer{}, capturedGlide{}, touchedDown{};
+    bool contactAttempted{},firstWheelContact{};
+    double touchdownCrossMeters{},touchdownSinkMps{},touchdownSpeedMps{},touchdownGearPosition{};
     double touchdownFromThreshold{}, stopFromThreshold{}, groundRoll{};
 };
 
@@ -89,6 +98,8 @@ inline bool IsFinite(AircraftState const& state) noexcept
         std::hypot(state.position.north, state.position.east), state.velocity.up};
     for (double const value : values)
         if (!std::isfinite(value)) return false;
+    if(state.wheelDataValid) for(auto const& wheel:state.wheels)
+        if(!std::isfinite(wheel.point.north) || !std::isfinite(wheel.point.east) || !std::isfinite(wheel.point.up)) return false;
     return state.finite;
 }
 

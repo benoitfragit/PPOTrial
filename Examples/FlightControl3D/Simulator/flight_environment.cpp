@@ -36,11 +36,13 @@ StepResult FlightEnvironment::Step(Controls const& action)
 {
     if (mission_.outcome != Outcome::Flying) throw std::logic_error("FlightControl3D: reset required after episode boundary");
     StepResult total{};
+    auto controls=action;
+    controls.flap=mission_.phase==Phase::Patrol ? config_.initial.flap : mission_.phase==Phase::Approach ? config_.initial.approachFlap : config_.initial.rolloutFlap;
     for (std::size_t substep=0; substep<config_.mission.actionSubsteps; ++substep)
     {
         auto const previous = aircraft_;
         auto const previousRunway=episodeConfig_.runway;
-        aircraft_ = fdm_.Advance(action);
+        aircraft_ = fdm_.Advance(controls);
         episodeConfig_.runway=RunwayAt(motion_,static_cast<double>(mission_.steps+1)*config_.mission.physicsDt);
         plan_=MakeFlightPlan(episodeConfig_);
         auto const step = AdvanceMission(episodeConfig_,plan_,mission_,previous,aircraft_,&previousRunway);

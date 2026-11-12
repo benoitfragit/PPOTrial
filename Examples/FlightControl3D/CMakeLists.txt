@@ -47,7 +47,7 @@ target_include_directories(FlightControlSimulator PUBLIC "${CMAKE_CURRENT_SOURCE
 target_compile_definitions(FlightControlSimulator PRIVATE PPO_JSBSIM_DATA_ROOT="${PPO_JSBSIM_DATA_ROOT}")
 target_link_libraries(FlightControlSimulator PUBLIC FlightControlCore PRIVATE libJSBSim)
 
-add_library(FlightControlLearner STATIC Training/flight_learner.cpp)
+add_library(FlightControlLearner STATIC Training/flight_learner.cpp Training/flight_model_store.cpp)
 target_link_libraries(FlightControlLearner PUBLIC FlightControlCore PRIVATE RLtools::Core)
 
 add_library(FlightControlRuntime STATIC Runtime/flight_session.cpp)
@@ -67,6 +67,8 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
             PPO_FLIGHT_CONFIG="${CMAKE_SOURCE_DIR}/resources/settings/Scenarios/FlightControl3D.json")
         add_test(NAME FlightControl_${test_name}_tests COMMAND FlightControl_${test_name}_tests)
     endforeach()
+    target_sources(FlightControl_learner_tests PRIVATE tests/other_rltools_backend.cpp)
+    target_link_libraries(FlightControl_learner_tests PRIVATE RLtools::Core)
 endif()
 
 if (PPO_BUILD_DESKTOP)

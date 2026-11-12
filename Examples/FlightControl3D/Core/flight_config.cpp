@@ -1,6 +1,7 @@
 #include "flight_config.hpp"
 #include <nlohmann/json.hpp>
 #include <fstream>
+#include <algorithm>
 #include <stdexcept>
 
 namespace ppo::examples::flight {
@@ -74,7 +75,8 @@ Config LoadConfig(std::filesystem::path const& path)
     auto const& m = root.at("mission");
     Keys(m, {"physicsDt", "actionSubsteps", "maxSeconds", "maxDistanceMeters", "maxAltitudeMeters",
         "switchDistanceMeters", "ilsRangeMeters", "ilsSectorDegrees", "glideDegrees",
-        "localizerCaptureDegrees", "glideCaptureDegrees", "patrolSpeed", "approachSpeed", "flareSpeed", "flareHeightMeters",
+        "localizerCaptureDegrees", "glideCaptureDegrees", "captureHoldSeconds", "captureHysteresis", "requiredLaps", "pathCorridorMeters", "maximumWaypointStepMeters",
+        "approachHeadingToleranceDegrees", "approachCrossToleranceMeters", "approachAltitudeToleranceMeters", "patrolSpeed", "approachSpeed", "flareSpeed", "flareHeightMeters",
         "maxTouchdownSink", "maxTouchdownSpeed", "maxTouchdownRollDegrees", "maxTouchdownPitchDegrees", "minTouchdownPitchDegrees", "maxTouchdownHeadingDegrees",
         "gearDownMinimum", "contactHeightMeters", "stoppedSpeed", "stoppedHoldSeconds", "racetrackCenterAlong", "racetrackCenterCross",
         "racetrackHalfStraight", "racetrackRadius", "patrolAltitude", "waypointRadius", "turnSamples", "straightSamples"});
@@ -83,6 +85,8 @@ Config LoadConfig(std::filesystem::path const& path)
     READ_M(physicsDt); READ_M(maxSeconds); READ_M(maxDistanceMeters); READ_M(maxAltitudeMeters);
     READ_M(switchDistanceMeters); READ_M(ilsRangeMeters); READ_M(ilsSectorDegrees); READ_M(glideDegrees);
     READ_M(localizerCaptureDegrees); READ_M(glideCaptureDegrees); READ_M(patrolSpeed); READ_M(approachSpeed);
+    READ_M(captureHoldSeconds);READ_M(captureHysteresis);READ_M(pathCorridorMeters);READ_M(maximumWaypointStepMeters);
+    READ_M(approachHeadingToleranceDegrees);READ_M(approachCrossToleranceMeters);READ_M(approachAltitudeToleranceMeters);
     READ_M(flareSpeed); READ_M(flareHeightMeters); READ_M(maxTouchdownSink); READ_M(maxTouchdownSpeed);
     READ_M(maxTouchdownRollDegrees); READ_M(maxTouchdownPitchDegrees); READ_M(minTouchdownPitchDegrees); READ_M(maxTouchdownHeadingDegrees);
     READ_M(gearDownMinimum); READ_M(contactHeightMeters); READ_M(stoppedSpeed); READ_M(stoppedHoldSeconds);
@@ -92,9 +96,10 @@ Config LoadConfig(std::filesystem::path const& path)
     mission.actionSubsteps = Integer(m, "actionSubsteps", 100);
     mission.turnSamples = Integer(m, "turnSamples", MaximumWaypoints);
     mission.straightSamples = Integer(m, "straightSamples", MaximumWaypoints);
+    mission.requiredLaps=Integer(m,"requiredLaps",100);
     auto const& i = root.at("initial");
     Keys(i, {"approach", "gearDown", "distanceMeters", "bearingDegrees", "heightMeters", "speedMps", "headingOffsetDegrees",
-        "rollDegrees", "pitchDegrees", "slopeDegrees", "throttle", "flap", "propeller"});
+        "rollDegrees", "pitchDegrees", "slopeDegrees", "throttle", "flap", "approachFlap", "rolloutFlap", "propeller"});
     auto& initial = config.initial;
     initial.approach = Boolean(i, "approach"); initial.gearDown = Boolean(i, "gearDown");
     initial.distanceMeters=Bounds(i,"distanceMeters"); initial.bearingDegrees=Bounds(i,"bearingDegrees");
@@ -102,6 +107,7 @@ Config LoadConfig(std::filesystem::path const& path)
     initial.headingOffsetDegrees=Bounds(i,"headingOffsetDegrees"); initial.rollDegrees=Bounds(i,"rollDegrees");
     initial.pitchDegrees=Bounds(i,"pitchDegrees"); initial.slopeDegrees=Bounds(i,"slopeDegrees");
     initial.throttle=Number(i,"throttle"); initial.flap=Number(i,"flap"); initial.propeller=Number(i,"propeller");
+    initial.approachFlap=Number(i,"approachFlap");initial.rolloutFlap=Number(i,"rolloutFlap");
     auto const& n = root.at("normalization");
     Keys(n, {"distance", "altitude", "speed", "rate", "path", "localizerDegrees", "glideDegrees"});
     config.normalization = {Number(n,"distance"), Number(n,"altitude"), Number(n,"speed"), Number(n,"rate"),
@@ -137,9 +143,11 @@ Config LoadConfig(std::filesystem::path const& path)
     training.resume = Boolean(t,"resume");
     training.checkpointDirectory = t.at("checkpointDirectory").get<std::string>();
     auto const& e = root.at("evaluation");
-    Keys(e,{"seed","episodes"});
+    Keys(e,{"seed","episodes","everyUpdates","minimumSuccessRate"});
     config.evaluation.seed=static_cast<std::uint32_t>(Integer(e,"seed",UINT32_MAX));
     config.evaluation.episodes=Integer(e,"episodes",1000000);
+    config.evaluation.everyUpdates=Integer(e,"everyUpdates",100000000);
+    config.evaluation.minimumSuccessRate=Number(e,"minimumSuccessRate");
     auto semantics = root;
     semantics.erase("training");
     semantics.erase("evaluation");
@@ -170,6 +178,9 @@ void Validate(Config const& c)
         && m.ilsSectorDegrees > 0 && m.ilsSectorDegrees < 90 && m.glideDegrees > 0 && m.glideDegrees < 10, "ILS envelope");
     Require(m.localizerCaptureDegrees > 0 && m.localizerCaptureDegrees < m.ilsSectorDegrees
         && m.glideCaptureDegrees > 0 && m.glideCaptureDegrees < m.glideDegrees, "ILS capture tolerances");
+    Require(m.captureHoldSeconds>=m.physicsDt && m.captureHysteresis>=1 && m.pathCorridorMeters>0
+        && m.maximumWaypointStepMeters>0 && m.approachHeadingToleranceDegrees>0 && m.approachHeadingToleranceDegrees<90
+        && m.approachCrossToleranceMeters>0 && m.approachAltitudeToleranceMeters>0,"navigation and capture confirmation");
     Require(m.patrolSpeed > 0 && m.approachSpeed > m.flareSpeed && m.flareSpeed > m.stoppedSpeed
         && m.flareHeightMeters > r.thresholdHeightMeters && m.stoppedSpeed >= 0, "target speeds and flare");
     Require(m.maxTouchdownSink > 0 && m.maxTouchdownSpeed >= m.flareSpeed && m.maxTouchdownRollDegrees > 0
@@ -179,6 +190,9 @@ void Validate(Config const& c)
     Require(m.racetrackHalfStraight > 0 && m.racetrackRadius > 0 && m.patrolAltitude > m.flareHeightMeters
         && m.waypointRadius > 0 && m.turnSamples >= 4 && m.straightSamples >= 1
         && 2*(m.turnSamples + m.straightSamples) <= MaximumWaypoints, "racetrack geometry/capacity");
+    double const minimumSegment=std::min(2*m.racetrackHalfStraight/static_cast<double>(m.straightSamples),
+        2*m.racetrackRadius*std::sin(Pi/(2*static_cast<double>(m.turnSamples))));
+    Require(2*m.waypointRadius<minimumSegment && m.maximumWaypointStepMeters<minimumSegment,"non-overlapping sequential waypoint gates");
     Require(std::hypot(m.racetrackCenterAlong, m.racetrackCenterCross) + m.racetrackHalfStraight + m.racetrackRadius
         < m.maxDistanceMeters, "racetrack outside episode bounds");
     Require(i.distanceMeters.minimum>r.lengthMeters && i.distanceMeters.maximum<m.maxDistanceMeters
@@ -189,7 +203,8 @@ void Validate(Config const& c)
         && i.headingOffsetDegrees.minimum>=-180 && i.headingOffsetDegrees.maximum<=180
         && i.rollDegrees.minimum>=-30 && i.rollDegrees.maximum<=30 && i.pitchDegrees.minimum>=-15 && i.pitchDegrees.maximum<=15
         && i.slopeDegrees.minimum>=-10 && i.slopeDegrees.maximum<=10,"reasonable spawn attitude/course");
-    Require(i.throttle >= 0 && i.throttle <= 1 && i.flap >= 0 && i.flap <= 1 && i.propeller >= 0 && i.propeller <= 1, "initial controls");
+    Require(i.throttle >= 0 && i.throttle <= 1 && i.flap >= 0 && i.flap <= 1 && i.approachFlap>=0 && i.approachFlap<=1
+        && i.rolloutFlap>=0 && i.rolloutFlap<=1 && i.propeller >= 0 && i.propeller <= 1, "initial and phase controls");
     Require(d.heaveAmplitudeMeters.minimum>=0 && d.heaveAmplitudeMeters.maximum<=5 && d.wavePeriodSeconds.minimum>=3
         && d.wavePeriodSeconds.maximum<=60 && d.pitchAmplitudeDegrees.minimum>=0 && d.pitchAmplitudeDegrees.maximum<=2
         && d.rollAmplitudeDegrees.minimum>=0 && d.rollAmplitudeDegrees.maximum<=2
@@ -221,7 +236,9 @@ void Validate(Config const& c)
         "Gaussian log standard deviations");
     Require(t.adamBeta1 >= 0 && t.adamBeta1 < 1 && t.adamBeta2 >= 0 && t.adamBeta2 < 1 && t.adamEpsilon > 0,
         "Adam hyperparameters");
-    Require(c.evaluation.episodes>0 && c.evaluation.seed!=t.seed,"independent evaluation seed and positive episode count");
+    Require(c.evaluation.episodes>0 && c.evaluation.seed!=t.seed && c.evaluation.everyUpdates>0
+        && c.evaluation.minimumSuccessRate>=0 && c.evaluation.minimumSuccessRate<=1,
+        "independent evaluation seed, budget and success threshold");
     auto const directory = std::filesystem::path(t.checkpointDirectory);
     Require(!directory.empty() && !directory.is_absolute(), "checkpointDirectory must be relative");
     for (auto const& component : directory) Require(component != "..", "checkpointDirectory traversal");

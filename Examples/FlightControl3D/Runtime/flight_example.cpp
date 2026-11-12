@@ -57,7 +57,16 @@ public:
         auto const state=session_->Snapshot();
         ppo::model::sAgentStateSnaphot result{};
         result.m_name="FlightControl3D hybrid PPO"; result.m_id=id_;
-        result.m_common.m_training=state.training && !state.finished && !failed_;
+        result.m_common.m_training=state.training && !state.finished && !state.validating && !failed_;
+        result.m_common.m_evaluationinprogress=state.validating;
+        result.m_common.m_completedEvaluations=state.validationCampaigns;
+        result.m_common.m_notation=static_cast<float>(state.bestScore);
+        result.m_common.m_hasLatestEvaluation=state.validationCampaigns>0;
+        result.m_common.m_latestEvaluationNotation=static_cast<float>(state.lastValidation.Score());
+        result.m_common.m_latestEvaluationSuccessRate=static_cast<float>(state.lastValidation.SuccessRate());
+        result.m_common.m_latestEvaluationTestCount=static_cast<unsigned int>(config_.evaluation.episodes);
+        result.m_common.m_evaluationTestsFinished=static_cast<unsigned int>(state.validation.episodes);
+        result.m_common.m_evaluationprogress=static_cast<float>(state.validation.episodes)/static_cast<float>(config_.evaluation.episodes);
         result.m_common.m_done=state.lastStep.terminated || state.lastStep.truncated;
         result.m_common.m_version=static_cast<unsigned int>(state.learning.updates);
         result.m_common.m_step=static_cast<long long>(session_->Learner().Collected());
@@ -100,8 +109,8 @@ bool Load(std::filesystem::path const& path,ppo::model::Environment& env,bool tr
     try
     {
         auto const config=LoadConfig(path);
-        auto const checkpoint=path.parent_path().parent_path().parent_path()/config.training.checkpointDirectory/"flight_hybrid_v1.txt";
-        auto session=std::make_shared<FlightSession>(config,training,checkpoint);
+        auto const directory=path.parent_path().parent_path().parent_path()/config.training.checkpointDirectory;
+        auto session=std::make_shared<FlightSession>(config,training,directory);
         auto entity=env.CreateEntity<AircraftEntity>();
         auto agent=env.CreateAgent<FlightAgent>(session,entity,config);
         agent->SetNewState();

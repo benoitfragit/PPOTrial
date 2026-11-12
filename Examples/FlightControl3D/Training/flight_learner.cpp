@@ -1,4 +1,7 @@
 #include "flight_learner.hpp"
+// Upstream CPU headers define non-inline symbols. Use its supported namespace
+// wrapper so this backend can coexist with BlueDefense in the same executable.
+#define RL_TOOLS_NAMESPACE_WRAPPER ppo_flight_backend
 #include <rl_tools/operations/cpu_mux.h>
 #include <rl_tools/nn/operations_cpu_mux.h>
 #include <rl_tools/nn_models/mlp/operations_generic.h>
@@ -10,7 +13,7 @@
 #include <vector>
 
 namespace ppo::examples::flight {
-namespace rlt = rl_tools;
+namespace rlt = ppo_flight_backend::rl_tools;
 
 void ComputeAdvantages(Transition* transitions, std::size_t count, TrainingSettings const& t) noexcept
 {
@@ -161,6 +164,23 @@ class Learner final : public FlightLearner::Impl
         VisitLayers(net,layer);
     }
 public:
+    template<typename Net> static void ValidateNetwork(Net const& net)
+    {
+        auto matrix=[](auto const& m,bool nonnegative)
+        {
+            using M=std::decay_t<decltype(m)>;
+            for(Index i=0;i<M::ROWS;++i) for(Index j=0;j<M::COLS;++j)
+            {
+                float const value=rlt::get(m,i,j);
+                if(!std::isfinite(value) || (nonnegative && value<0))
+                    throw std::runtime_error("FlightControl3D: invalid model parameter or Adam moment");
+            }
+        };
+        auto parameter=[&](auto const& p)
+        { matrix(p.parameters,false);matrix(p.gradient_first_order_moment,false);matrix(p.gradient_second_order_moment,true); };
+        auto layer=[&](auto const& l) { parameter(l.weights);parameter(l.biases); };
+        VisitLayers(net,layer);
+    }
     explicit Learner(Config const& c) : Impl(c)
     {
         rlt::init_weights(device_,actor_,rng); rlt::init_weights(device_,critic_,rng);
@@ -242,6 +262,7 @@ public:
                     }
                     ClipGradients(actor_); ClipGradients(critic_);
                     rlt::step(device_,actorOptimizer_,actor_); rlt::step(device_,criticOptimizer_,critic_);
+                    ValidateNetwork(actor_);ValidateNetwork(critic_);
                 }
             }
             if (!std::isfinite(stats.policyLoss) || !std::isfinite(stats.valueLoss)) throw std::runtime_error("FlightControl3D: invalid training diagnostics");
@@ -252,6 +273,7 @@ public:
     void Write(std::ostream& stream) const override
     {
         Check();
+        ValidateNetwork(actor_);ValidateNetwork(critic_);
         stream << "PPO_FLIGHT_HYBRID_V1 " << ObservationSize << ' ' << ContinuousActions << ' ' << Width << ' ' << stats.updates << '\n';
         stream << std::quoted(config.checkpointSignature) << '\n' << std::setprecision(std::numeric_limits<float>::max_digits10);
         stream << actorOptimizer_.age << ' ' << criticOptimizer_.age << '\n' << rng << '\n';
@@ -278,6 +300,7 @@ public:
         rlt::copy(device_,device_,actor_,*candidateActor);
         rlt::copy(device_,device_,critic_,*candidateCritic);
         ReadNetwork(stream,*candidateActor); ReadNetwork(stream,*candidateCritic);
+        ValidateNetwork(*candidateActor);ValidateNetwork(*candidateCritic);
         stream >> std::ws;
         if (!stream.eof()) throw std::runtime_error("FlightControl3D: trailing checkpoint data");
         rlt::copy(device_,device_,*candidateActor,actor_);

@@ -112,11 +112,18 @@ struct JsbsimAircraft::Impl final
         a.rollRate = value[10]; a.pitchRate = value[11]; a.yawRate = value[12]; a.gearPosition = value[13];
         a.weightOnWheels = value[14] != 0 || value[15] != 0 || value[16] != 0;
         auto const ground = fdm.GetGroundReactions();
+        std::size_t wheelIndex=0;
         for (int i=0; i<ground->GetNumGearUnits(); ++i)
         {
             auto const contact = ground->GetGearUnit(i);
             if (!contact->IsBogey() && contact->GetWOW()) a.structuralContact = true;
+            if(contact->IsBogey() && wheelIndex<a.wheels.size())
+            {
+                auto const wheelLocation=propagate->GetLocation().LocalToLocation(contact->GetLocalGear());
+                a.wheels[wheelIndex++]={FromNed(reference.LocationToLocal(wheelLocation)),contact->GetWOW()};
+            }
         }
+        a.wheelDataValid=wheelIndex==a.wheels.size();
         a.finite = IsFinite(a);
         return a;
     }
@@ -158,7 +165,7 @@ AircraftState JsbsimAircraft::Reset(AircraftState const& initial)
 
 AircraftState JsbsimAircraft::Advance(Controls const& controls)
 {
-    std::array<double,5> const values{controls.elevator,controls.aileron,controls.rudder,controls.throttle,controls.brake};
+    std::array<double,6> const values{controls.elevator,controls.aileron,controls.rudder,controls.throttle,controls.brake,controls.flap};
     for (double value : values) if (!std::isfinite(value)) throw std::invalid_argument("FlightControl3D: invalid flight control");
     auto& p = *impl_;
     auto* const fcs = p.fdm.GetFCS().get();
@@ -166,6 +173,7 @@ AircraftState JsbsimAircraft::Advance(Controls const& controls)
     fcs->SetDaCmd(std::clamp(controls.aileron,-1.0,1.0));
     fcs->SetDrCmd(std::clamp(controls.rudder,-1.0,1.0));
     fcs->SetThrottleCmd(-1,std::clamp(controls.throttle,0.0,1.0));
+    fcs->SetDfCmd(std::clamp(controls.flap,0.0,1.0));
     fcs->SetLBrake(std::clamp(controls.brake,0.0,1.0));
     fcs->SetRBrake(std::clamp(controls.brake,0.0,1.0));
     fcs->SetCBrake(std::clamp(controls.brake,0.0,1.0));

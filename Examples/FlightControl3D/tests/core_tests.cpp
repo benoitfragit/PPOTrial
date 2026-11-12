@@ -26,13 +26,17 @@ void Geometry(Config const& c)
         Check(Near(xy[0],-1234) && Near(xy[1],57),"runway rotation/inverse");
     }
     MissionState s{};
+    s.completedLaps=c.mission.requiredLaps;
     auto a=Approach(c);
     auto const first=AdvanceMission(c,plan,s,a,a);
     Check(s.phase==Phase::Approach && !first.terminated,"approach switch");
     auto const g=Guide(c,plan,s,a);
     Check(g.ilsValid && Near(g.localizer,0) && Near(g.glideError,0),"on LOC/glide");
-    Check(s.capturedLocalizer && s.capturedGlide,"capture events");
-    Check(first.rewards[static_cast<std::size_t>(Reward::EnterLocalizer)]>0,"first capture bonus");
+    Check(!s.capturedLocalizer && !s.capturedGlide,"captures require a stable hold");
+    double captures=first.rewards[5]+first.rewards[6];
+    for(std::size_t i=0;i<static_cast<std::size_t>(std::ceil(c.mission.captureHoldSeconds/c.mission.physicsDt))+1;++i)
+    { auto const stable=AdvanceMission(c,plan,s,a,a);captures+=stable.rewards[5]+stable.rewards[6]; }
+    Check(s.capturedLocalizer && s.capturedGlide && Near(captures,c.reward.weights[5]+c.reward.weights[6]),"confirmed one-shot capture events");
     auto const again=AdvanceMission(c,plan,s,a,a);
     Check(again.rewards[5]==0 && again.rewards[6]==0,"captures must be one-shot");
     auto far=Approach(c,-c.mission.ilsRangeMeters-1);
@@ -73,6 +77,14 @@ void Landing(Config c)
     }
     Check(roll.terminated && s.outcome==Outcome::Stopped && Near(s.stopFromThreshold,600),"confirmed stop location");
     Check(roll.rewards[8]==c.reward.weights[8],"stop reward");
+    MissionState wheelTest{};wheelTest.phase=Phase::Approach;
+    auto precise=after;precise.wheelDataValid=true;
+    for(auto& wheel:precise.wheels) wheel={FromRunway(c.runway,302,0,0),true};
+    AdvanceMission(c,plan,wheelTest,before,precise);
+    Check(Near(wheelTest.touchdownFromThreshold,302),"touchdown is measured at the first physical wheel contact");
+    wheelTest={};wheelTest.phase=Phase::Approach;
+    precise.wheels[0].point=FromRunway(c.runway,302,c.runway.widthMeters,0);
+    Check(AdvanceMission(c,plan,wheelTest,before,precise).terminated && !wheelTest.touchedDown,"all physical wheels must remain inside runway");
     for (int test=0; test<7; ++test)
     {
         auto b=before, a=after;
@@ -115,6 +127,34 @@ void Configuration()
         { std::ofstream stream(path); stream<<json; }
         Rejects([&] { LoadConfig(path); },"invalid JSON accepted");
     }
+}
+void OrderedNavigation(Config const& config)
+{
+    auto c=config;
+    auto const plan=MakeFlightPlan(c);
+    MissionState notArmed{};
+    auto const near=Approach(c,-1000);
+    AdvanceMission(c,plan,notArmed,near,near);
+    Check(notArmed.phase==Phase::Patrol,"distance alone cannot skip prescribed racetrack laps");
+    MissionState flight{};
+    AircraftState a{};a.position=plan.points[0];a.airspeed=c.mission.patrolSpeed;
+    for(std::size_t step=0;step<10000 && flight.completedLaps==0;++step)
+    {
+        auto const target=plan.points[flight.waypoint];auto const difference=Subtract(target,a.position);
+        double const length=std::sqrt(Dot(difference,difference));
+        auto next=a;
+        next.position=Add(a.position,Scale(difference,std::min(10.0,length)/length));
+        next.heading=std::atan2(difference.east,difference.north);
+        AdvanceMission(c,plan,flight,a,next);a=next;
+    }
+    Check(flight.completedLaps==1,"one complete ordered physical circuit qualifies landing return");
+    MissionState shortcut{};shortcut.pathQualified=true;shortcut.waypointsPassed=3;
+    auto before=a,after=a;before.position=plan.points[0];after.position=plan.points[3];
+    AdvanceMission(c,plan,shortcut,before,after);
+    Check(!shortcut.pathQualified && shortcut.waypointsPassed==0 && shortcut.completedLaps==0,"teleport/shortcut invalidates lap progress");
+    MissionState stopped{};a.position=plan.points[0];
+    auto const stationary=AdvanceMission(c,plan,stopped,a,a);
+    Check(stationary.rewards[0]==0 && stopped.waypoint==1,"stationary aircraft earns no path progression");
 }
 void RandomizationAndMotion(Config const& c)
 {
@@ -164,7 +204,7 @@ void RandomizationAndMotion(Config const& c)
 }
 int main()
 {
-    try { auto const c=LoadConfig(PPO_FLIGHT_CONFIG); Geometry(c); Landing(c); Configuration(); RandomizationAndMotion(c); }
+    try { auto const c=LoadConfig(PPO_FLIGHT_CONFIG); Geometry(c); Landing(c); Configuration(); OrderedNavigation(c); RandomizationAndMotion(c); }
     catch(std::exception const& e) { std::cerr<<e.what()<<'\n'; return 1; }
     std::cout<<"Flight mission/configuration regressions passed\n";
 }

@@ -1,6 +1,6 @@
 # FlightControl3D — pilotage JSBSim et PPO hybride
 
-Date : 11 novembre 2026. Projet : PPOTrial. Issue : #82. Branche : `feat/jsbsim-flight-control`.
+Date : 11 novembre 2026. Projet : PPOTrial. Issue : #82. PR : [#83](https://github.com/benoitfragit/PPOTrial/pull/83). Branche : `feat/jsbsim-flight-control`.
 
 ## Livraison et lancement local
 
@@ -25,7 +25,7 @@ cmake --build build/release --config Release --target FlightControl3D
 
 L'option CMake `PPO_BUILD_FLIGHT_CONTROL` vaut ON par défaut pour le desktop. Si un ancien cache l'a désactivée, la réactiver explicitement. CMake 3.18 minimum est requis par JSBSim. Les archives LibTorch Debug et Release doivent continuer à correspondre à la configuration du dépôt.
 
-Le programme démarre en pause ; Play lance l'apprentissage. `--auto-run` démarre immédiatement. `--inference` charge le checkpoint FlightControl3D et lance une évaluation déterministe à graines distinctes. `--config FICHIER` sélectionne une autre configuration complète. `--check-example` vérifie le bootstrap sans fenêtre ni entraînement.
+Le programme démarre en pause ; Play lance l'apprentissage. `--auto-run` démarre immédiatement. `--inference` charge exclusivement le BEST validé et lance une évaluation déterministe à graines distinctes. Sans BEST validé, le lancement d'inférence échoue explicitement. `--config FICHIER` sélectionne une autre configuration complète. `--check-example` vérifie le bootstrap sans fenêtre ni entraînement.
 
 ## Découpage
 
@@ -42,7 +42,7 @@ Le programme démarre en pause ; Play lance l'apprentissage. `--auto-run` démar
 | `Runtime/flight_example.*` | Adaptateur ECS et snapshots ; aucune intégration 2D de l'avion |
 | `Renderer/flight_view.*` | Caméra avion/vue d'ensemble, piste et instruments |
 
-JSBSim **1.3.3** est figé par FetchContent au commit `66f7fafc07fe13e7ede9db20873030fed2881713`. Les données nécessaires au Cessna 310 et sa licence sont copiées dans `build/<configuration>/resources/FlightControl3D/jsbsim`. Le C310 possède un train rétractable avec une course physique de cinq secondes, contrairement au C172 initialement évoqué. Le backend RLtools reste à la révision déjà utilisée dans PPOTrial.
+JSBSim **1.3.3** est figé par FetchContent au commit `66f7fafc07fe13e7ede9db20873030fed2881713`. Les données nécessaires au Cessna 310 et le fichier COPYING de JSBSim sont copiés dans `build/<configuration>/resources/FlightControl3D/jsbsim`. La bibliothèque déclare LGPL ; l'en-tête du modèle C310 déclare séparément GPL, et ses notices originales sont conservées. Le C310 possède un train rétractable avec une course physique de cinq secondes, contrairement au C172 initialement évoqué. Le backend RLtools reste à la révision déjà utilisée dans PPOTrial et utilise le namespace isolé officiellement prévu par l'amont : ses symboles CPU peuvent ainsi coexister avec ceux de BlueDefense dans le même exécutable.
 
 ## Épisodes aléatoires et houle
 
@@ -60,11 +60,11 @@ La position de la piste varie de ±2 km sur les deux axes ; son orientation vari
 
 Le callback `FGGroundCallback` fournit réellement à JSBSim la surface finie, sa normale et sa vitesse au point de contact. Le pont bouge dans la physique, le guidage et le rendu. Hors de son rectangle, le contact correspond au plan de la mer. Il s'agit d'une surface rigide cinématique avec mouvements sinusoïdaux ; aucun modèle hydrodynamique de navire n'est revendiqué.
 
-Le flightplan hippodrome est référencé à la piste courante. Le prochain waypoint est choisi près du départ aléatoire. La transition vers l'approche est irréversible lorsque la distance configurée est franchie du côté approche. Le LOC et le glide ne produisent pas de capture à l'arrière de la piste ou hors du secteur de service. À faible hauteur, la vitesse cible diminue et la pente cible devient nulle pour l'arrondi.
+Le flightplan hippodrome est référencé à la piste courante. Le prochain waypoint est choisi près du départ aléatoire. Les portes sont ordonnées, non superposées, franchies dans le sens de la trajectoire ; une excursion hors corridor ou un saut invalide la progression du tour. Un avion immobile ne gagne aucun progrès. La transition irréversible vers l'approche demande le nombre de tours JSON, la distance, le côté approche, le cap, le corridor latéral et l'altitude admissibles. Le départ directement en approche reste configurable pour le curriculum. Le LOC et le glide nécessitent un maintien confirmé et une hystérésis ; aucune capture à l'arrière de la piste ou hors secteur. À faible hauteur, la vitesse cible diminue et la pente cible devient nulle pour l'arrondi. Les volets ont des positions JSON par phase ; ils ne constituent pas une action discrète supplémentaire.
 
 ## Observation, actions et PPO
 
-L'observation contient **51 valeurs normalisées dans [−1, 1]**, dont la liste ordonnée est `ObservationNames` : vecteur vers le guidage courant, géométrie piste, hauteur, vitesse calibrée, vecteur vitesse, attitude et vitesses angulaires, pente, erreurs LOC/glide et validité du signal, consignes, train réel, contact roues, phase, temps restant implicite, événements mémorisés et état cinématique de la surface. Les échelles sont explicites dans le JSON. Une observation terminale issue d'un FDM non fini est neutralisée ; la transition devient un crash.
+L'observation contient **56 valeurs normalisées dans [−1, 1]**, dont la liste ordonnée est `ObservationNames` : vecteur vers le guidage courant, géométrie piste, hauteur, vitesse calibrée, vecteur vitesse, attitude et vitesses angulaires, pente, erreurs LOC/glide et validité du signal, consignes, train réel, contact roues, phase, temps restant implicite, événements mémorisés, progression des tours et maintiens de capture, état cinématique de la surface. Les échelles sont explicites dans le JSON. Une observation terminale issue d'un FDM non fini est neutralisée ; la transition devient un crash.
 
 L'acteur produit cinq moyennes, cinq log-écarts-types et un logit Bernoulli. Les commandes continues sont profondeur, ailerons, direction, gaz symétriques et freinage symétrique. Les échantillons gaussiens latents sont transformés par `tanh` ; gaz et freinage sont ensuite convertis vers [0, 1]. Le train est un tirage binaire réel, pas une gaussienne seuillée.
 
@@ -80,7 +80,7 @@ Les dix canaux propres à FlightControl3D sont `Path`, `Localizer`, `Glide`, `Sp
 
 Les shapings sont des qualités triangulaires `max(0, 1 − abs(erreur)/tolérance)`, pondérées par le temps physique écoulé. Les captures sont payées une seule fois par épisode. Les seuils, tolérances et poids sont dans le JSON.
 
-Le toucher nécessite un contact physique des roues, un train suffisamment sorti, une position sur la piste et une vitesse, un taux de descente et une attitude acceptables. La vitesse verticale avant impact est vérifiée pour éviter que le solveur de contact ne masque un poser dur. Les vitesses et attitudes de sécurité sont relatives à la piste mobile. Un contact structurel ou un poser sans train provoque un crash sans récompense de toucher.
+Le toucher nécessite un contact physique des roues, un train suffisamment sorti, une position sur la piste et une vitesse, un taux de descente et une attitude acceptables. La première abscisse de toucher provient du point physique de roue JSBSim ; les coordonnées des trois trains sont contrôlées dans le rectangle de piste. La vitesse verticale avant impact est vérifiée pour éviter que le solveur de contact ne masque un poser dur. Les vitesses et attitudes de sécurité sont relatives à la piste mobile. Un contact structurel ou un poser sans train provoque un crash sans récompense de toucher. La télémétrie garde aussi l'impact non valide : position signée, erreur latérale, vitesse verticale/horizontale et position réelle du train.
 
 Le toucher ouvre la phase de roulage et rapporte le bonus demandé. L'épisode se poursuit jusqu'à un arrêt confirmé pendant la durée réglée. Une sortie latérale ou un dépassement du bout de piste reste un échec. La télémétrie distingue distance du premier toucher depuis le seuil, abscisse d'arrêt depuis le seuil et longueur parcourue sur le pont après le toucher. L'arrêt est relatif à la surface, pas à la Terre.
 
@@ -96,9 +96,17 @@ ctest --test-dir build/release -C Release --output-on-failure
 
 Utiliser les répertoires `build/debug` et `build/release` correspondant à la configuration souhaitée ; ne pas reconfigurer un cache desktop existant en headless pour un simple lancement graphique.
 
-`FlightControlHeadless --updates 1 --output CHEMIN_TEST` exécute un court smoke d'apprentissage. `--evaluate --episodes 20 --output CHEMIN_TEST` recharge le checkpoint pour l'évaluer. `--config` sélectionne un autre JSON. L'évaluation n'écrit jamais le checkpoint.
+`FlightControlHeadless --updates 1 --output CHEMIN_TEST` exécute un court smoke d'apprentissage suivi de sa validation. `--evaluate --episodes 20 --output CHEMIN_TEST` recharge uniquement le BEST validé pour l'évaluer. Un modèle presque vierge ne fournit normalement aucun BEST admissible. `--config` sélectionne un autre JSON. L'évaluation n'écrit jamais les checkpoints.
 
 Le checkpoint `flight_hybrid_v1.txt` contient acteur, critic, moments Adam, âges des optimiseurs, RNG et compteur d'updates. Son en-tête vérifie dimensions, largeur et signature sémantique de la configuration. La lecture est transactionnelle et les matrices RLtools sont copiées avec leurs opérations dédiées, jamais par une copie C++ de leurs pointeurs internes. Une sauvegarde valide remplace le fichier en conservant `.previous`. La reprise commence un nouvel épisode ; elle ne prétend pas restaurer l'état du FDM en plein vol.
+
+### Politique BEST et validation
+
+L'entraînement écrit `model/FlightControl3D/latest/flight_hybrid_v1.txt`. Tous les dix updates et à la fin du budget, le candidat est figé et évalué sur un environnement séparé, avec 20 épisodes et la graine 4342, distincte de l'entraînement. Paramètres et fréquence sont dans `evaluation` du JSON. La validation n'ajoute aucun échantillon au rollout et ne modifie ni Adam ni le RNG de l'entraînement ; le dernier état physique d'entraînement reste en attente.
+
+La réussite exige un poser sûr puis l'arrêt confirmé sur la piste. Par défaut, le seuil est **92 %**, donc au moins **19 succès sur 20**. Un candidat ne devient production qu'après la campagne complète et le franchissement de ce seuil. Le score est le pourcentage de réussites ; à score identique, une abscisse moyenne d'arrêt plus courte départage les candidats. Un candidat identique, moins bon, incomplet ou sous le seuil conserve le BEST précédent.
+
+Chaque génération admise est conservée sous `best/flight_<update>_<checksum>.txt`. Le pointeur transactionnel `best/current.json` contient score, compteurs, graine, contrat, update et checksum d'intégrité FNV-1a64 du fichier. Une incohérence est rejetée ; aucun retour silencieux vers `latest`. La sauvegarde d'entraînement et une évaluation de production ne remplacent jamais le BEST. Reprendre un budget déjà consommé termine sa validation avant de considérer la session finie.
 
 ## Vérification et limites
 

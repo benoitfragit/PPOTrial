@@ -26,6 +26,9 @@ struct MissionSettings final
     std::size_t actionSubsteps{};
     double switchDistanceMeters{}, ilsRangeMeters{}, ilsSectorDegrees{}, glideDegrees{};
     double localizerCaptureDegrees{}, glideCaptureDegrees{};
+    double captureHoldSeconds{},captureHysteresis{},pathCorridorMeters{},maximumWaypointStepMeters{};
+    double approachHeadingToleranceDegrees{},approachCrossToleranceMeters{},approachAltitudeToleranceMeters{};
+    std::size_t requiredLaps{};
     double patrolSpeed{}, approachSpeed{}, flareSpeed{}, flareHeightMeters{};
     double maxTouchdownSink{}, maxTouchdownSpeed{}, maxTouchdownRollDegrees{};
     double maxTouchdownPitchDegrees{}, minTouchdownPitchDegrees{}, maxTouchdownHeadingDegrees{};
@@ -39,7 +42,7 @@ struct InitialSettings final
     bool approach{}, gearDown{};
     Range distanceMeters{}, bearingDegrees{}, heightMeters{}, speedMps{}, headingOffsetDegrees{};
     Range rollDegrees{}, pitchDegrees{}, slopeDegrees{};
-    double throttle{}, flap{}, propeller{};
+    double throttle{}, flap{}, approachFlap{},rolloutFlap{},propeller{};
 };
 struct Normalization final
 {
@@ -61,7 +64,12 @@ struct TrainingSettings final
     bool resume{};
     std::string checkpointDirectory;
 };
-struct EvaluationSettings final { std::uint32_t seed{}; std::size_t episodes{}; };
+struct EvaluationSettings final
+{
+    std::uint32_t seed{};
+    std::size_t episodes{}, everyUpdates{};
+    double minimumSuccessRate{};
+};
 struct Config final
 {
     Runway runway{};

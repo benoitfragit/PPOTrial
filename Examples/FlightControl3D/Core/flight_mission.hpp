@@ -30,6 +30,7 @@ inline constexpr std::array<char const*, ObservationSize> ObservationNames{
     "gear_position", "weight_on_wheels", "patrol", "approach", "rollout", "elapsed",
     "localizer_captured", "glide_captured", "touchdown", "touchdown_distance", "remaining_runway", "stopped_hold",
     "deck_velocity_north", "deck_velocity_east", "deck_velocity_up", "deck_normal_north", "deck_normal_east", "deck_normal_up",
-    "deck_angular_north", "deck_angular_east", "deck_angular_up"};
+    "deck_angular_north", "deck_angular_east", "deck_angular_up",
+    "lap_progress", "completed_laps", "path_qualified", "localizer_hold", "glide_hold"};
 
 } // namespace ppo::examples::flight

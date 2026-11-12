@@ -108,6 +108,10 @@ void DrawFlightInstruments(FlightSnapshot const& s)
         static_cast<unsigned long long>(s.episodes),static_cast<unsigned long long>(s.touchdowns),static_cast<unsigned long long>(s.stops),
         static_cast<unsigned long long>(s.crashes),static_cast<unsigned long long>(s.timeouts));
     ImGui::Text("Updates %llu | Actor loss %.4f | Value loss %.4f",static_cast<unsigned long long>(s.learning.updates),s.learning.policyLoss,s.learning.valueLoss);
+    if(s.validating) ImGui::Text("Validating frozen candidate: %llu completed episodes",static_cast<unsigned long long>(s.validation.episodes));
+    if(s.hasBest) ImGui::Text("Validated BEST: %.1f%% successful stops",s.bestScore);
+    else ImGui::TextUnformatted("No validated BEST yet");
+    if(s.validationCampaigns) ImGui::Text("Latest validation: %.1f%% successful stops",100*s.lastValidation.SuccessRate());
     ImGui::End();
 }
 } // namespace ppo::examples::flight

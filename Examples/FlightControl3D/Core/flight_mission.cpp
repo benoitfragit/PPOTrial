@@ -18,6 +18,42 @@ double Quality(double error, double tolerance) noexcept
 {
     return std::max(0.0, 1.0-std::abs(error)/tolerance);
 }
+double SegmentDistance(Vec3 point,Vec3 start,Vec3 end) noexcept
+{
+    auto const direction=Subtract(end,start);
+    double const square=Dot(direction,direction);
+    double const fraction=square>0 ? std::clamp(Dot(Subtract(point,start),direction)/square,0.0,1.0) : 0;
+    return Distance(point,Add(start,Scale(direction,fraction)));
+}
+double AdvancePatrol(Config const& c,FlightPlan const& plan,MissionState& s,
+    AircraftState const& before,AircraftState const& after,Runway const& previousDeck) noexcept
+{
+    if(s.phase!=Phase::Patrol || plan.count<2) return 0;
+    auto const start=DeckCoordinates(c.runway,plan.points[(s.waypoint+plan.count-1)%plan.count]);
+    auto const end=DeckCoordinates(c.runway,plan.points[s.waypoint%plan.count]);
+    auto const old=DeckCoordinates(previousDeck,before.position),current=DeckCoordinates(c.runway,after.position);
+    auto const movement=Subtract(current,old),segment=Subtract(end,start);
+    double const length=std::sqrt(Dot(segment,segment));
+    bool const qualified=length>0 && std::sqrt(Dot(movement,movement))<=c.mission.maximumWaypointStepMeters
+        && SegmentDistance(old,start,end)<=c.mission.pathCorridorMeters && SegmentDistance(current,start,end)<=c.mission.pathCorridorMeters;
+    if(!qualified) { s.pathQualified=false;s.waypointsPassed=0;return 0; }
+    double const progress=Dot(movement,segment)/length;
+    if(progress>0 && SegmentDistance(end,old,current)<=c.mission.waypointRadius)
+    {
+        if(s.pathQualified) ++s.waypointsPassed;
+        else { s.pathQualified=true;s.waypointsPassed=0; }
+        if(s.waypointsPassed>=plan.count) { ++s.completedLaps;s.waypointsPassed=0; }
+        s.waypoint=(s.waypoint+1)%plan.count;
+    }
+    return std::max(progress,0.0);
+}
+bool Capture(double error,double tolerance,Config const& c,double& hold,bool& captured) noexcept
+{
+    if(std::abs(error)<=tolerance) hold+=c.mission.physicsDt;
+    else if(std::abs(error)>tolerance*c.mission.captureHysteresis) hold=0;
+    if(!captured && hold>=c.mission.captureHoldSeconds) { captured=true;return true; }
+    return false;
+}
 float Unit(double value) noexcept
 {
     return std::isfinite(value) ? static_cast<float>(std::clamp(value, -1.0, 1.0)) : 0.F;
@@ -25,6 +61,22 @@ float Unit(double value) noexcept
 bool OnRunway(Config const& c, Guidance const& g) noexcept
 {
     return g.along >= 0 && g.along <= c.runway.lengthMeters && std::abs(g.cross) <= c.runway.widthMeters/2;
+}
+bool WheelsInside(Config const& c,AircraftState const& a) noexcept
+{
+    if(!a.wheelDataValid) return true;
+    for(auto const& wheel:a.wheels)
+    {
+        auto const local=DeckCoordinates(c.runway,wheel.point);
+        if(local.north<0 || local.north>c.runway.lengthMeters || std::abs(local.east)>c.runway.widthMeters/2) return false;
+    }
+    return true;
+}
+bool AllWheelsDown(AircraftState const& a) noexcept
+{
+    if(!a.wheelDataValid) return a.weightOnWheels;
+    for(auto const& wheel:a.wheels) if(!wheel.onGround) return false;
+    return true;
 }
 std::array<double,3> RelativeAttitude(Runway const& deck,AircraftState const& a) noexcept
 {
@@ -134,19 +186,34 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
     }
     ++s.steps;
     auto g = Guide(c,plan,s,after);
-    if (s.phase == Phase::Patrol && g.distance <= c.mission.switchDistanceMeters && g.along < 0)
-        s.phase = Phase::Approach;
-    if (s.phase == Phase::Patrol && plan.count > 1 && Distance(after.position,plan.points[s.waypoint%plan.count]) <= c.mission.waypointRadius)
-        s.waypoint = (s.waypoint+1)%plan.count;
-    g = Guide(c,plan,s,after);
     auto const& previousDeck=previousRunway ? *previousRunway : c.runway;
+    double const pathProgress=AdvancePatrol(c,plan,s,before,after,previousDeck);
+    double const glideHeight=c.runway.thresholdHeightMeters-g.along*std::tan(c.mission.glideDegrees*DegreesToRadians);
+    if (s.phase == Phase::Patrol && s.completedLaps>=c.mission.requiredLaps && g.distance <= c.mission.switchDistanceMeters && g.along < 0
+        && std::abs(g.cross)<=c.mission.approachCrossToleranceMeters
+        && std::abs(g.height-glideHeight)<=c.mission.approachAltitudeToleranceMeters
+        && std::abs(WrapAngle(after.heading-c.runway.headingDegrees*DegreesToRadians))<=c.mission.approachHeadingToleranceDegrees*DegreesToRadians)
+        s.phase = Phase::Approach;
+    g = Guide(c,plan,s,after);
     bool const contact = after.weightOnWheels || after.structuralContact || g.height <= c.mission.contactHeightMeters;
+    if(contact && !s.contactAttempted && IsFinite(after))
+    {
+        s.contactAttempted=true;s.firstWheelContact=after.weightOnWheels;
+        auto point=after.position;
+        if(after.wheelDataValid) for(auto const& wheel:after.wheels) if(wheel.onGround) { point=wheel.point;break; }
+        auto const local=DeckCoordinates(c.runway,point);
+        s.touchdownFromThreshold=local.north;s.touchdownCrossMeters=local.east;
+        auto const preVelocity=RelativeVelocity(previousDeck,before);
+        s.touchdownSinkMps=std::max(-preVelocity.up,-g.relativeVelocity.up);
+        s.touchdownSpeedMps=std::hypot(g.relativeVelocity.north,g.relativeVelocity.east);
+        s.touchdownGearPosition=after.gearPosition;
+    }
     bool crash = !IsFinite(before) || !IsFinite(after) || g.distance > c.mission.maxDistanceMeters
         || g.height > c.mission.maxAltitudeMeters;
     if (contact)
-        crash = crash || s.phase == Phase::Patrol || !OnRunway(c,g)
+        crash = crash || s.phase == Phase::Patrol || !OnRunway(c,g) || !WheelsInside(c,after)
             || !LandingSafe(c,previousDeck,before,after) || !after.weightOnWheels;
-    if (s.phase == Phase::Rollout && !OnRunway(c,g)) crash = true;
+    if (s.phase == Phase::Rollout && (!OnRunway(c,g) || !WheelsInside(c,after))) crash = true;
     if (crash)
     {
         s.outcome = Outcome::Crash;
@@ -161,16 +228,15 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         };
         double const dt = c.mission.physicsDt;
         if (s.phase == Phase::Patrol)
-            add(Reward::Path,dt*Quality(g.pathDistance,c.reward.pathTolerance));
+            add(Reward::Path,dt*Quality(g.pathDistance,c.reward.pathTolerance)*std::clamp(pathProgress/(c.mission.patrolSpeed*dt),0.0,1.0));
         if (s.phase == Phase::Approach && g.ilsValid)
         {
             add(Reward::Localizer,dt*Quality(g.localizer,c.reward.localizerToleranceDegrees*DegreesToRadians));
             add(Reward::Glide,dt*Quality(g.glideError,c.reward.glideToleranceDegrees*DegreesToRadians));
-            if (!s.capturedLocalizer && std::abs(g.localizer) <= c.mission.localizerCaptureDegrees*DegreesToRadians)
-            { s.capturedLocalizer = true; add(Reward::EnterLocalizer,1); }
-            if (!s.capturedGlide && std::abs(g.glideError) <= c.mission.glideCaptureDegrees*DegreesToRadians)
-            { s.capturedGlide = true; add(Reward::EnterGlide,1); }
+            if(Capture(g.localizer,c.mission.localizerCaptureDegrees*DegreesToRadians,c,s.localizerHoldSeconds,s.capturedLocalizer)) add(Reward::EnterLocalizer,1);
+            if(Capture(g.glideError,c.mission.glideCaptureDegrees*DegreesToRadians,c,s.glideHoldSeconds,s.capturedGlide)) add(Reward::EnterGlide,1);
         }
+        else { s.localizerHoldSeconds=0;s.glideHoldSeconds=0; }
         if (s.phase != Phase::Rollout)
         {
             add(Reward::Speed,dt*Quality(after.airspeed-g.targetSpeed,c.reward.speedTolerance));
@@ -180,7 +246,6 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         if (contact && !s.touchedDown)
         {
             s.touchedDown = true;
-            s.touchdownFromThreshold = g.along;
             s.phase = Phase::Rollout;
             add(Reward::Touchdown,1);
         }
@@ -188,7 +253,7 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         {
             auto const previousPosition=DeckCoordinates(previousDeck,before.position);
             s.groundRoll += std::hypot(g.along-previousPosition.north,g.cross-previousPosition.east);
-            bool const stopped = after.weightOnWheels && std::hypot(g.relativeVelocity.north,g.relativeVelocity.east) <= c.mission.stoppedSpeed;
+            bool const stopped = AllWheelsDown(after) && std::hypot(g.relativeVelocity.north,g.relativeVelocity.east) <= c.mission.stoppedSpeed;
             s.stoppedSeconds = stopped ? s.stoppedSeconds+dt : 0;
             if (s.stoppedSeconds >= c.mission.stoppedHoldSeconds)
             {
@@ -231,6 +296,9 @@ Observation Observe(Config const& c, FlightPlan const& plan, MissionState const&
         Unit(s.touchedDown), Unit(s.touchdownFromThreshold/n.distance), Unit((c.runway.lengthMeters-g.along)/n.distance),
         Unit(s.stoppedSeconds/c.mission.stoppedHoldSeconds),Unit(deckVelocity.north/n.speed),Unit(deckVelocity.east/n.speed),Unit(deckVelocity.up/n.speed),
         Unit(normal.north),Unit(normal.east),Unit(normal.up),Unit(c.runway.angularVelocity.north/n.rate),
-        Unit(c.runway.angularVelocity.east/n.rate),Unit(c.runway.angularVelocity.up/n.rate)};
+        Unit(c.runway.angularVelocity.east/n.rate),Unit(c.runway.angularVelocity.up/n.rate),
+        Unit(plan.count ? static_cast<double>(s.waypointsPassed)/static_cast<double>(plan.count) : 0),
+        Unit(c.mission.requiredLaps ? static_cast<double>(s.completedLaps)/static_cast<double>(c.mission.requiredLaps) : 1),Unit(s.pathQualified),
+        Unit(s.localizerHoldSeconds/c.mission.captureHoldSeconds),Unit(s.glideHoldSeconds/c.mission.captureHoldSeconds)};
 }
 } // namespace ppo::examples::flight
