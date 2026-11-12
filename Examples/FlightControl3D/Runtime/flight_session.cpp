@@ -154,7 +154,8 @@ void FlightSession::TickValidation()
     if(stage!=CurriculumStage::Joint && evaluation.Mission().outcome==Outcome::Flying)
     {
         auto const active=evaluation.Settings().training.curriculumStage;
-        bool const qualified=CaptureGateQualified(config_,active,
+        // Validate heading in this episode's randomized moving-runway frame.
+        bool const qualified=CaptureGateQualified(evaluation.Settings(),active,
             evaluation.Mission(),evaluation.Aircraft(),evaluation.CurrentGuidance());
         validationHoldSeconds_=qualified ? validationHoldSeconds_+config_.StepSeconds() : 0;
         if(validationHoldSeconds_>=config_.training.gateHoldSeconds)

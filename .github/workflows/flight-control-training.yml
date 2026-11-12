@@ -134,6 +134,8 @@ jobs:
           # A passing gate advances within this run; an unsuccessful gate can
           # resume on the next run without overwriting BEST or discarding latest.
           for gate_index in 1 2 3; do
+            # Persist the gate before the long runner to resume after an interrupted run.
+            echo "$stage" > "$progress"
             read -r magic observations actions width current_update < "$checkpoint"
             if [[ "$magic" != "PPO_FLIGHT_HYBRID_V1" || ! "$current_update" =~ ^[0-9]+$ ]]; then
               echo "Invalid checkpoint between curriculum stages" >&2

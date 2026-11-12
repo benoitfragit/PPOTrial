@@ -32,6 +32,8 @@ Le paramétrage est dans training.curriculum du JSON (stage, locReminderProbabil
 - Gate Joint : distributions complètes habituelles, les deux canaux de reward actifs, puis atterrissage et arrêt.
 
 Les validations utilisent le seed d'évaluation indépendant et la tolérance de capture stricte.
+Les erreurs de cap sont évaluées par rapport à la piste réellement tirée dans
+l'épisode (orientation aléatoire et mobile), et non au cap nominal du JSON.
 La capture seule ne suffit pas : le cap de fuselage est contrôlé à ±5° du cap piste,
 la route relative à ±5°, la vitesse à ±15 m/s de la consigne (paramètre existant),
 et en Gate Glide la pente de trajectoire est contrôlée à ±1,5° de la descente visée.

@@ -898,7 +898,7 @@ void DrawPatrolReferenceLabels(
     Camera3D const& camera, int const width, int const height,
     float const worldScale)
 {
-    if (!overlay.Valid() || width <= 0 || height <= 0)
+    if (!overlay.Visible() || width <= 0 || height <= 0)
         return;
 
     Vector3 const cameraForward =
@@ -1093,7 +1093,7 @@ void DrawPatrolReferences3D(
     ppo::model::sPatrolReferenceOverlay const& overlay,
     float const scale, bool const reducedDetail)
 {
-    if (!overlay.Valid())
+    if (!overlay.Visible())
         return;
 
     for (std::size_t roleIndex = 0U;
@@ -3896,7 +3896,7 @@ EnvironmentRenderer::DrawMinimapWindow(entt::registry const& snapshot)
     {
         auto const& overlay =
             snapshot.ctx().get<ppo::model::sPatrolReferenceOverlay>();
-        if (overlay.Valid())
+        if (overlay.Visible())
         {
             for (std::size_t roleIndex = 0U;
                  roleIndex < overlay.m_activeReferenceCount; ++roleIndex)

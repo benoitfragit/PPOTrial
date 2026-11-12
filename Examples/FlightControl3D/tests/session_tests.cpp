@@ -245,6 +245,12 @@ int main()
         Check(CaptureGateQualified(c,CurriculumStage::Loc,capture,aligned,guidance)
             && CaptureGateQualified(c,CurriculumStage::Glide,capture,aligned,guidance),
             "ideal stabilized LOC and Glide qualify for their gates");
+        auto rotated=c;rotated.runway.headingDegrees+=25;
+        auto rotatedAircraft=aligned;
+        rotatedAircraft.heading=rotated.runway.headingDegrees*DegreesToRadians;
+        Check(CaptureGateQualified(rotated,CurriculumStage::Loc,capture,rotatedAircraft,guidance)
+            && !CaptureGateQualified(c,CurriculumStage::Loc,capture,rotatedAircraft,guidance),
+            "gate heading uses the actual randomized runway rather than default JSON heading");
         aligned.heading+=20*DegreesToRadians;
         Check(!CaptureGateQualified(c,CurriculumStage::Loc,capture,aligned,guidance),
             "radio capture with wrong runway heading cannot clear LOC gate");
