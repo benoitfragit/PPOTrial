@@ -35,7 +35,7 @@ Le JSON livré active `training.resume: true` et `checkpointEvery: 1`. En entra�
 
 Le desktop traite `maxUpdates` comme un budget supplémentaire à partir du modèle chargé. Par exemple, un `latest` à l'update 120 et un budget de 10 000 donnent une fin de bloc à 10 120. Après validation finale, un nouveau Play prolonge le budget en conservant le même learner. Le renderer diffère Stop/join et Play hors du verrou de snapshot, puis le callback ECS `Init` prolonge la session terminée. Le headless conserve son budget total existant. L'UI affiche la source du modèle et la limite du bloc courant ; le journal contient `[FLIGHT_SESSION] Resumed latest` et l'update chargé.
 
-La reprise d'entraînement conserve les poids, Adam et le RNG lors d'un changement des intervalles horizontaux, de l'orientation d'interception, de `initial.approach`, du guidage compatible déclaré ou des réglages de reward. `rewardVersion: 3` et `guidanceVersion: 2` séparent les contrats de shaping et de guidage. Un ancien checkpoint sans `guidanceVersion` peut amorcer l'entraînement, mais son BEST n'est jamais réutilisé sans une nouvelle validation. Les changements de géométrie de piste, de physique ou d'autres observations restent incompatibles. Un BEST antérieur est conservé avec ses générations et son contrôle d'intégrité ; l'inférence exige un BEST validé sur le contrat exact.
+La reprise d'entraînement conserve les poids, Adam et le RNG lors d'un changement des intervalles horizontaux, de l'orientation d'interception, de `initial.approach`, du guidage compatible déclaré ou des réglages de reward. `rewardVersion: 3` et `guidanceVersion: 3` séparent les contrats de shaping et de guidage. Les checkpoints de guidage V2 et ceux sans `guidanceVersion` peuvent amorcer l'entraînement, mais leur BEST n'est jamais réutilisé sans une nouvelle validation. Les changements de géométrie de piste, de physique ou d'autres observations restent incompatibles. Un BEST antérieur est conservé avec ses générations et son contrôle d'intégrité ; l'inférence exige un BEST validé sur le contrat exact.
 
 ## Interface FlightControl3D
 
@@ -90,13 +90,13 @@ La position de la piste varie de ±2 km sur les deux axes ; son orientation vari
 
 Le callback `FGGroundCallback` fournit réellement à JSBSim la surface finie, sa normale et sa vitesse au point de contact. Le pont bouge dans la physique, le guidage et le rendu. Hors de son rectangle, le contact correspond au plan de la mer. Il s'agit d'une surface rigide cinématique avec mouvements sinusoïdaux ; aucun modèle hydrodynamique de navire n'est revendiqué.
 
-Le scénario livré démarre en phase hippodrome (`initial.approach: false`), qui joue le rôle de guidage secondaire. Une capture LOC maintenue pendant `captureHoldSeconds`, dans le secteur avant et avec un cap compatible, provoque immédiatement la transition irréversible vers l'approche, même sans tour terminé. Sinon, `requiredLaps: 1` conserve la voie de repli historique : un tour physique qualifié autorise la transition lorsque distance, côté approche, cap, écart latéral et altitude sont compatibles.
+Le scénario livré démarre en phase hippodrome (`initial.approach: false`), qui joue le rôle de guidage secondaire. Une capture LOC maintenue pendant `captureHoldSeconds`, dans le secteur avant et avec un cap compatible, provoque immédiatement la transition irréversible vers l'approche, même sans tour terminé. Terminer le nombre de tours configuré ne change jamais à lui seul la phase ou le point de guidage : sans capture LOC confirmée, l'hippodrome reste la référence active.
 
 Le flightplan hippodrome est lié à la piste courante. Pendant le ralliement, la position est projetée sur le segment 3D le plus proche et la cible est avancée de `patrolSpeed × patrolLookaheadSeconds` sur le circuit. Après acquisition, les portes séquentielles restent fixes et autoritaires pour la validation du tour. Hors corridor ou après une porte ratée, le ralliement anticipé reprend et toute progression incomplète est invalidée. Une réacquisition ne valide ni porte ni tour fictif ; un avion immobile n'accumule aucun progrès.
 
 Comme BlueAgent, Flight3D sépare désormais un ralliement par projection/anticipation d'un suivi séquentiel physiquement validé. Flight3D conserve son implémentation 3D distincte et `2 × (straightSamples + turnSamples)`, soit 40 portes avec 4 et 16 dans le JSON livré, recalculées avec le mouvement de la piste. Le point anticipé ne remplace pas les portes de validation. Les composants BlueAgent et RLMission ne sont pas modifiés.
 
-Le LOC et le glide nécessitent un maintien confirmé et une hystérésis ; aucune capture à l'arrière de la piste, hors secteur, au contact du sol ou avec un cap incompatible. La capture LOC a priorité sur l'hippodrome. Le glide ne peut être confirmé qu'après le LOC. En phase approche hors signal, le guidage géométrique vise un point d'interception à `-switchDistanceMeters` sur le glide, plutôt qu'un poser depuis l'arrière. À faible hauteur, la vitesse cible diminue et la pente cible devient nulle pour l'arrondi.
+Le LOC et le glide nécessitent un maintien confirmé et une hystérésis ; aucune capture à l'arrière de la piste, hors secteur, au contact du sol ou avec un cap incompatible. Seule la capture LOC confirmée remplace l'hippodrome et ouvre la phase approche. Le glide ne peut être confirmé qu'après le LOC. En phase approche hors signal, le guidage géométrique vise un point d'interception à `-switchDistanceMeters` sur le glide, plutôt qu'un poser depuis l'arrière. À faible hauteur, la vitesse cible diminue et la pente cible devient nulle pour l'arrondi.
 
 ## Observation, actions et PPO
 
@@ -216,9 +216,25 @@ capture LOC compatible avec le cap et la capture GLIDE postérieure. La source d
 point de guidage est transportée dans le snapshot uniquement pour le rendu ; les
 56 observations et les dix canaux de reward conservent leurs dimensions. Les
 tests déterministes couvrent les côtés gauche/droit, le départ LOC/glide, le refus
-d'une capture perpendiculaire, la priorité LOC et les durées affichées.
+d'une capture perpendiculaire, le maintien de l'hippodrome après un tour sans
+capture, la priorité LOC et les durées affichées.
 
 Validation locale demandée pour ce correctif : compilation de la seule cible
 `FlightControl3D` en Release dans `build/release`, réussie. Aucun CTest, test
 unitaire, build Debug ou campagne de convergence n'a été exécuté, conformément à
 la consigne explicite ; ces vérifications restent donc non validées.
+
+## Capture LOC strictement autoritaire (11 novembre 2026)
+
+Le contrat `guidanceVersion=3` supprime la transition historique déclenchée par
+la seule combinaison d'un tour terminé et d'une large fenêtre d'approche. La
+phase, le point de guidage et le shaping restent ceux de l'hippodrome tant que le
+LOC n'a pas satisfait sa géométrie, son cap compatible et son maintien de
+capture. Après cette confirmation seulement, l'approche devient irréversible et
+le maintien GLIDE peut commencer. Les checkpoints V2 restent utilisables comme
+warm start, mais leur BEST doit être revalidé sur ce nouveau contrat.
+
+Validation locale : compilation Release réussie de `FlightControl3D` et des
+exécutables `FlightControl_core_tests`, `FlightControl_reward_tests` et
+`FlightControl_session_tests`. Aucun de ces tests n'a été exécuté et aucun build
+Debug n'a été lancé, conformément à la consigne.

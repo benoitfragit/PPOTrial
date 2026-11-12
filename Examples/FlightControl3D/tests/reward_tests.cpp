@@ -122,7 +122,9 @@ void SecondaryGuidance(Config const& c)
         "rally from a waypoint targets the following segment endpoint");
     Check(ClosestPatrolWaypoint({}, {})==0,"empty flightplan recovery is bounded");
     MissionState rally{};
-    auto const rallyGuidance=Guide(c,plan,rally,plan.points[0]);
+    AircraftState rallyAircraft{};
+    rallyAircraft.position=plan.points[0];
+    auto const rallyGuidance=Guide(c,plan,rally,rallyAircraft);
     Check(rallyGuidance.mode==GuidanceMode::Patrol && rallyGuidance.pathDistance==0
         && std::hypot(rallyGuidance.target.north-plan.points[0].north,
             rallyGuidance.target.east-plan.points[0].east)>0,

@@ -346,14 +346,9 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         else s.glideHoldSeconds=0;
     }
     else { s.localizerHoldSeconds=0;s.glideHoldSeconds=0; }
-    double const glideHeight=c.runway.thresholdHeightMeters-g.along*std::tan(c.mission.glideDegrees*DegreesToRadians);
-    if(s.phase==Phase::Patrol)
-    {
-        bool const completedPatrol=s.completedLaps>=c.mission.requiredLaps && g.distance<=c.mission.switchDistanceMeters
-            && g.along<0 && std::abs(g.cross)<=c.mission.approachCrossToleranceMeters
-            && std::abs(g.height-glideHeight)<=c.mission.approachAltitudeToleranceMeters && headingCompatible;
-        if(s.capturedLocalizer || completedPatrol) s.phase=Phase::Approach;
-    }
+    // A completed racetrack never implies ILS capture.  Patrol remains the
+    // active reference until the localizer hold above has been confirmed.
+    if(s.phase==Phase::Patrol && s.capturedLocalizer) s.phase=Phase::Approach;
     g = Guide(c,plan,s,after);
     if(contact && !s.contactAttempted && IsFinite(after))
     {

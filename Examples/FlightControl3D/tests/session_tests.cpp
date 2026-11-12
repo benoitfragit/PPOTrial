@@ -102,6 +102,11 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
         "previous reward V2 remains usable as a training warm start");
     signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown shaping contract is rejected");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature["guidanceVersion"]=2;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "guidance V2 remains usable as a training warm start");
+    signature["guidanceVersion"]=999;
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown guidance contract is rejected");
 }
 int main()
 {

@@ -30,7 +30,7 @@ void Geometry(Config const& c)
     s.completedLaps=c.mission.requiredLaps;
     auto a=Approach(c);
     auto const first=AdvanceMission(c,plan,s,a,a);
-    Check(s.phase==Phase::Approach && !first.terminated,"approach switch");
+    Check(s.phase==Phase::Patrol && !first.terminated,"LOC hold precedes the approach switch");
     auto const g=Guide(c,plan,s,a);
     Check(g.ilsValid && Near(g.localizer,0) && Near(g.glideError,0),"on LOC/glide");
     Check(!s.capturedLocalizer && !s.capturedGlide,"captures require a stable hold");
@@ -239,6 +239,14 @@ void CapturePriority(Config const& c)
     for(std::size_t step=0;step<holdSteps;++step) AdvanceMission(c,plan,crossing,perpendicular,perpendicular);
     Check(crossing.phase==Phase::Patrol && !crossing.capturedLocalizer,
         "crossing the localizer with an incompatible heading cannot capture it");
+
+    MissionState completedPatrol{};
+    completedPatrol.completedLaps=c.mission.requiredLaps;
+    auto const outsideCapture=Approach(c,-6000,1000);
+    AdvanceMission(c,plan,completedPatrol,outsideCapture,outsideCapture);
+    Check(completedPatrol.phase==Phase::Patrol && !completedPatrol.capturedLocalizer
+        && Guide(c,plan,completedPatrol,outsideCapture).mode==GuidanceMode::Patrol,
+        "a completed racetrack cannot switch guidance before confirmed LOC capture");
 
     MissionState inbound{};
     double localizerReward{},glideReward{};
