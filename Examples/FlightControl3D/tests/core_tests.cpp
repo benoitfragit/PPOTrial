@@ -149,7 +149,7 @@ void Configuration()
 {
     std::ifstream source(PPO_FLIGHT_CONFIG); nlohmann::json valid; source>>valid;
     TemporaryDirectory temporary("flight-config-"); auto const path=temporary.path/"config.json";
-    for (int test=0; test<29; ++test)
+    for (int test=0; test<32; ++test)
     {
         auto json=valid;
         if (test==0) json["normalization"]["speed"]=0;
@@ -182,6 +182,9 @@ void Configuration()
         if (test==26) json["training"]["curriculum"]["stage"]="invalid";
         if (test==27) json["training"]["curriculum"]["locReminderProbability"]=-0.1;
         if (test==28) json["training"]["curriculum"]["glideOffsetMeters"]=1e7;
+        if (test==29) json["training"]["curriculum"]["gateHeadingDegrees"]=0;
+        if (test==30) json["training"]["curriculum"]["gateRouteDegrees"]=50;
+        if (test==31) json["training"]["curriculum"]["gateSlopeDegrees"]=10;
         { std::ofstream stream(path); stream<<json; }
         Rejects([&] { LoadConfig(path); },"invalid JSON accepted");
     }

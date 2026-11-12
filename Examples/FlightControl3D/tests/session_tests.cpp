@@ -232,6 +232,34 @@ int main()
         for(std::size_t i=0;i<1000 && !training.Finished();++i) training.Tick();
         Check(training.Finished() && training.Snapshot().validationCampaigns==1 && training.Snapshot().lastValidation.episodes==2,"complete independent candidate validation");
         Check(!store.BestMetrics() && !training.Snapshot().hasBest,"failed candidate is never promoted as BEST");
+        MissionState capture{};capture.phase=Phase::Approach;
+        capture.capturedLocalizer=true;capture.capturedGlide=true;
+        AircraftState aligned{};
+        aligned.airspeed=c.mission.approachSpeed;
+        aligned.heading=c.runway.headingDegrees*DegreesToRadians;
+        Guidance guidance{};
+        guidance.targetSpeed=c.mission.approachSpeed;
+        guidance.targetSlope=-c.mission.glideDegrees*DegreesToRadians;
+        guidance.relativeVelocity={c.mission.approachSpeed,0,
+            -c.mission.approachSpeed*std::tan(c.mission.glideDegrees*DegreesToRadians)};
+        Check(CaptureGateQualified(c,CurriculumStage::Loc,capture,aligned,guidance)
+            && CaptureGateQualified(c,CurriculumStage::Glide,capture,aligned,guidance),
+            "ideal stabilized LOC and Glide qualify for their gates");
+        aligned.heading+=20*DegreesToRadians;
+        Check(!CaptureGateQualified(c,CurriculumStage::Loc,capture,aligned,guidance),
+            "radio capture with wrong runway heading cannot clear LOC gate");
+        aligned.heading=c.runway.headingDegrees*DegreesToRadians;
+        guidance.relativeVelocity.east=20;
+        Check(!CaptureGateQualified(c,CurriculumStage::Loc,capture,aligned,guidance),
+            "radio capture with lateral ground track cannot clear LOC gate");
+        guidance.relativeVelocity.east=0;guidance.relativeVelocity.up=5;
+        Check(!CaptureGateQualified(c,CurriculumStage::Glide,capture,aligned,guidance)
+            && CaptureGateQualified(c,CurriculumStage::Loc,capture,aligned,guidance),
+            "climbing on Glide is a regression even with correct LOC");
+        guidance.relativeVelocity.up=-c.mission.approachSpeed*std::tan(c.mission.glideDegrees*DegreesToRadians);
+        capture.capturedGlide=false;
+        Check(!CaptureGateQualified(c,CurriculumStage::Glide,capture,aligned,guidance),
+            "unconfirmed glide cannot pass Glide gate");
         // A capture-only curriculum gate must never mint a landing BEST.
         auto gateConfig=c;gateConfig.training.curriculumStage=CurriculumStage::Loc;
         gateConfig.training.gateHoldSeconds=0.1;gateConfig.training.resume=false;

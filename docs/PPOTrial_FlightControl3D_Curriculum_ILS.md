@@ -31,7 +31,12 @@ Le paramétrage est dans training.curriculum du JSON (stage, locReminderProbabil
 - Gate Glide : 70 % d'épisodes démarrant sur le LOC mais ±(0,25..1)*glideOffsetMeters au-dessus ou au-dessous du plan ; 30 % d'épisodes de rappel LOC avec les mêmes règles que Gate 1. LOC reste récompensé à chaque épisode.
 - Gate Joint : distributions complètes habituelles, les deux canaux de reward actifs, puis atterrissage et arrêt.
 
-Les validations utilisent le seed d'évaluation indépendant et la tolérance de capture stricte. LOC et Glide exigent le maintien confirmé du/des faisceaux pendant gateHoldSeconds ; les rappels LOC sont évalués comme LOC. Le succès pédagogique est >=92 % sur 20 épisodes, donc >=19/20. L'évaluation de la gate Joint conserve le contrat strict >=19/20 arrêts sûrs, seul critère de promotion du BEST. Les gates pédagogiques ne promeuvent pas de BEST ; latest est le seul point de passage. Le dernier verdict de validation apparaît sous la forme [FLIGHT_GATE] stage=... successes=... episodes=... passed=true/false.
+Les validations utilisent le seed d'évaluation indépendant et la tolérance de capture stricte.
+La capture seule ne suffit pas : le cap de fuselage est contrôlé à ±5° du cap piste,
+la route relative à ±5°, la vitesse à ±15 m/s de la consigne (paramètre existant),
+et en Gate Glide la pente de trajectoire est contrôlée à ±1,5° de la descente visée.
+Les trois tolérances angulaires sont configurables par gateHeadingDegrees, gateRouteDegrees
+et gateSlopeDegrees ; un crash annule la réussite pédagogique de l'épisode. LOC et Glide exigent le maintien confirmé du/des faisceaux pendant gateHoldSeconds ; les rappels LOC sont évalués comme LOC. Le succès pédagogique est >=92 % sur 20 épisodes, donc >=19/20. L'évaluation de la gate Joint conserve le contrat strict >=19/20 arrêts sûrs, seul critère de promotion du BEST. Les gates pédagogiques ne promeuvent pas de BEST ; latest est le seul point de passage. Le dernier verdict de validation apparaît sous la forme [FLIGHT_GATE] stage=... successes=... episodes=... passed=true/false.
 
 ## Lancement GitHub CI
 
