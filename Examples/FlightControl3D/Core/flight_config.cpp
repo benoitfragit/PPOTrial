@@ -114,7 +114,7 @@ Config LoadConfig(std::filesystem::path const& path)
     config.normalization = {Number(n,"distance"), Number(n,"altitude"), Number(n,"speed"), Number(n,"rate"),
         Number(n,"path"), Number(n,"localizerDegrees"), Number(n,"glideDegrees")};
     auto const& w = root.at("reward");
-    Keys(w, {"weights", "pathTolerance", "localizerToleranceDegrees", "glideToleranceDegrees", "speedTolerance", "slopeToleranceDegrees", "convergenceSeconds"});
+    Keys(w, {"weights", "pathTolerance", "localizerToleranceDegrees", "glideToleranceDegrees", "speedTolerance", "slopeToleranceDegrees", "convergenceSeconds", "ilsDecaySeconds"});
     auto const& weights = w.at("weights");
     Require(weights.is_object() && weights.size() == RewardCount, "reward channel mismatch");
     for (std::size_t channel = 0; channel < RewardCount; ++channel)
@@ -125,6 +125,7 @@ Config LoadConfig(std::filesystem::path const& path)
     config.reward.speedTolerance = Number(w,"speedTolerance");
     config.reward.slopeToleranceDegrees = Number(w,"slopeToleranceDegrees");
     config.reward.convergenceSeconds = Number(w,"convergenceSeconds");
+    config.reward.ilsDecaySeconds = Number(w,"ilsDecaySeconds");
     auto const& t = root.at("training");
     Keys(t, {"seed", "rolloutSteps", "minibatch", "epochs", "maxUpdates", "checkpointEvery", "hiddenWidth", "actorRate", "criticRate", "gamma", "lambda",
         "clip", "entropy", "valueWeight", "minLogStd", "maxLogStd", "initialLogStd", "maxGradientNorm", "adamBeta1", "adamBeta2", "adamEpsilon",
@@ -154,7 +155,7 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics.erase("training");
     semantics.erase("evaluation");
     semantics["distribution"] = {training.minLogStd,training.maxLogStd};
-    semantics["rewardVersion"] = 2;
+    semantics["rewardVersion"] = 3;
     config.checkpointSignature = semantics.dump();
     Validate(config);
     return config;
@@ -170,7 +171,8 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
     {
         if(!signature->contains("reward") || !(*signature)["reward"].is_object()
             || !(*signature)["initial"].contains("approach") || !(*signature)["initial"]["approach"].is_boolean()) return false;
-        if(signature->contains("rewardVersion") && (*signature)["rewardVersion"]!=2) return false;
+        if(signature->contains("rewardVersion") && (*signature)["rewardVersion"]!=2
+            && (*signature)["rewardVersion"]!=3) return false;
     }
     for(char const* name : {"distanceMeters","bearingDegrees"})
     {
@@ -256,6 +258,7 @@ void Validate(Config const& c)
     Require(w.pathTolerance > 0 && w.localizerToleranceDegrees > 0 && w.glideToleranceDegrees > 0
         && w.speedTolerance > 0 && w.slopeToleranceDegrees > 0, "reward tolerances");
     Require(std::isfinite(w.convergenceSeconds) && w.convergenceSeconds >= 0, "finite non-negative convergence time scale");
+    Require(std::isfinite(w.ilsDecaySeconds) && w.ilsDecaySeconds > 0, "positive finite ILS decay time scale");
     for (double weight : w.weights) Require(std::isfinite(weight), "finite reward weights");
     Require(w.weights[static_cast<std::size_t>(Reward::Crash)] <= 0, "crash weight must be non-positive");
     auto const& t = c.training;

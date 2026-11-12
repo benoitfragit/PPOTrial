@@ -288,6 +288,8 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         if (s.phase == Phase::Approach)
         {
             double const progress=std::clamp((g.along-previousGuidance.along)/(g.targetSpeed*dt),-1.0,1.0);
+            // Strong initial ILS shaping; decay bounds the lifetime reward budget.
+            double const ilsScale=std::exp(-static_cast<double>(s.steps-1)*dt/c.reward.ilsDecaySeconds);
             for(auto const channel : {Reward::Localizer,Reward::Glide})
             {
                 bool const localizer=channel==Reward::Localizer;
@@ -298,7 +300,7 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
                 double const value=GuidanceReward(c,previousQuality,quality,progress);
                 // Angular errors can shrink merely by flying away from the
                 // threshold; that must never earn a positive ILS reward.
-                add(channel,progress<0 ? std::min(value,0.0) : value);
+                add(channel,ilsScale*(progress<0 ? std::min(value,0.0) : value));
             }
             if(!g.ilsValid)
             {

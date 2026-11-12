@@ -74,19 +74,30 @@ void ProgressAndAmplitude(Config const& c)
         auto const weight=c.reward.weights[static_cast<std::size_t>(channel)];
         Check(Near(Channel(correct,channel),weight*c.mission.physicsDt,1e-10),"on-beam progress is time scaled");
         Check(Channel(wrong,channel)<0,"following the beams away from the runway is penalized");
-        Check(weight>=25*c.reward.weights[static_cast<std::size_t>(Reward::Path)],"ILS outweighs the secondary path");
+        Check(weight>=100*c.reward.weights[static_cast<std::size_t>(Reward::Path)],"ILS strongly outweighs the secondary path");
     }
+    // Late approaches should still receive guidance, with a decayed magnitude.
+    MissionState late{};late.phase=Phase::Approach;
+    late.steps=static_cast<std::uint64_t>(std::round(c.reward.ilsDecaySeconds/c.mission.physicsDt));
+    auto const delayed=AdvanceMission(c,MakeFlightPlan(c),late,before,forward);
+    double const decay=std::exp(-static_cast<double>(late.steps-1)*c.mission.physicsDt/c.reward.ilsDecaySeconds);
+    for(auto const channel : {Reward::Localizer,Reward::Glide})
+        Check(Near(Channel(delayed,channel),Channel(correct,channel)*decay,1e-10),
+            "ILS reward follows configured elapsed-time decay");
     // Angular errors can improve simply because range increases near the threshold.
     auto const offset=At(c,-100,30,40),receding=At(c,-100-advance,30,40);
     auto const retreat=ApproachStep(c,offset,receding);
     Check(Channel(retreat,Reward::Localizer)<=0 && Channel(retreat,Reward::Glide)<=0,
         "artificial angular improvement while retreating cannot earn reward");
 
-    double const maximumRate=c.reward.weights[1]+c.reward.weights[2]+c.reward.weights[3]+c.reward.weights[4];
-    double const maximumPotential=(c.reward.weights[1]+c.reward.weights[2])*c.reward.convergenceSeconds;
+    // With continuous in-sector ILS, the potential telescopes under a
+    // non-increasing exponential scale (even if the aircraft oscillates).
+    double const ilsWeights=c.reward.weights[1]+c.reward.weights[2];
+    double const maximumIls=ilsWeights*(c.reward.ilsDecaySeconds+c.mission.physicsDt+c.reward.convergenceSeconds);
+    double const maximumSecondary=(c.reward.weights[3]+c.reward.weights[4])*c.mission.maxSeconds;
     double const captures=c.reward.weights[5]+c.reward.weights[6];
-    Check(maximumRate*c.mission.maxSeconds+maximumPotential+captures<c.reward.weights[7],
-        "default full-duration ILS shaping budget remains below a safe touchdown bonus");
+    Check(maximumIls+maximumSecondary+captures<c.reward.weights[7],
+        "continuous ILS shaping plus captures remains below touchdown bonus");
     Check(c.initial.approach && c.reward.weights[7]==100 && c.reward.weights[8]==100 && c.reward.weights[9]==-100,
         "default mission prioritizes approach and preserves outcome amplitudes");
 }
@@ -137,6 +148,10 @@ void MovingFrame(Config c)
     c.reward.convergenceSeconds=-1;Rejects([&] {Validate(c);},"negative convergence scale rejected");
     c.reward.convergenceSeconds=std::numeric_limits<double>::infinity();
     Rejects([&] {Validate(c);},"non-finite convergence scale rejected");
+    c.reward.convergenceSeconds=10;
+    c.reward.ilsDecaySeconds=0;Rejects([&] {Validate(c);},"zero ILS decay rejected");
+    c.reward.ilsDecaySeconds=std::numeric_limits<double>::infinity();
+    Rejects([&] {Validate(c);},"non-finite ILS decay rejected");
 }
 }
 int main()

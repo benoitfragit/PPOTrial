@@ -38,10 +38,10 @@
     "path": 3000.0, "localizerDegrees": 35.0, "glideDegrees": 10.0
   },
   "reward": {
-    "weights": { "Path": 0.002, "Localizer": 0.05, "Glide": 0.05, "Speed": 0.002, "Slope": 0.002,
+    "weights": { "Path": 0.002, "Localizer": 0.25, "Glide": 0.25, "Speed": 0.002, "Slope": 0.002,
       "EnterLocalizer": 2.0, "EnterGlide": 2.0, "Touchdown": 100.0, "Stop": 100.0, "Crash": -100.0 },
     "pathTolerance": 500.0, "localizerToleranceDegrees": 5.0, "glideToleranceDegrees": 2.0,
-    "speedTolerance": 15.0, "slopeToleranceDegrees": 5.0, "convergenceSeconds": 10.0
+    "speedTolerance": 15.0, "slopeToleranceDegrees": 5.0, "convergenceSeconds": 20.0, "ilsDecaySeconds": 140.0
   },
   "evaluation": { "seed": 4342, "episodes": 20, "everyUpdates": 10, "minimumSuccessRate": 0.92 },
   "training": {

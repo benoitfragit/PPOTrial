@@ -54,7 +54,7 @@ struct RewardSettings final
     std::array<double, RewardCount> weights{};
     double pathTolerance{}, localizerToleranceDegrees{}, glideToleranceDegrees{};
     double speedTolerance{}, slopeToleranceDegrees{};
-    double convergenceSeconds{};
+    double convergenceSeconds{}, ilsDecaySeconds{};
 };
 struct TrainingSettings final
 {

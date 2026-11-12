@@ -52,6 +52,7 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     if(change==TrainingContractChange::Rewards)
     {
         signature.erase("rewardVersion");signature["reward"].erase("convergenceSeconds");
+        signature["reward"].erase("ilsDecaySeconds");
         signature["reward"]["weights"]["Path"]=0.02;signature["reward"]["weights"]["Speed"]=0.02;
         signature["reward"]["weights"]["Slope"]=0.02;signature["initial"]["approach"]=false;
     }
@@ -89,6 +90,10 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
         && !CompatibleTrainingSignature("broken",c.checkpointSignature),"other observation/physics changes remain incompatible");
     signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("reward");
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"missing reward contract is not a warm start");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=2;
+    signature["reward"].erase("ilsDecaySeconds");
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "previous reward V2 remains usable as a training warm start");
     signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown shaping contract is rejected");
 }

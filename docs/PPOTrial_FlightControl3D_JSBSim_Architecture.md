@@ -193,3 +193,17 @@ Correctif LOC/glide du 11 novembre : GCC 14 headless, builds Debug et Release et
 Validation locale au premier état relu : GCC 14, Debug et Release, CTest ; smoke d'un update puis deux épisodes indépendants. L'échec des deux épisodes d'évaluation de ce modèle presque vierge ne démontre aucune convergence. La CI Windows du desktop et les quatre configurations headless Windows/Linux doivent être vérifiées avant de déclarer la livraison validée. Le lancement des raccourcis par l'explorateur Windows doit encore être confirmé sur la machine cible.
 
 Sources amont : [JSBSim 1.3.3](https://github.com/JSBSim-Team/jsbsim/tree/66f7fafc07fe13e7ede9db20873030fed2881713), [modèle C310](https://github.com/JSBSim-Team/jsbsim/blob/66f7fafc07fe13e7ede9db20873030fed2881713/aircraft/c310/c310.xml), [contrat FGGroundCallback](https://github.com/JSBSim-Team/jsbsim/blob/66f7fafc07fe13e7ede9db20873030fed2881713/src/input_output/FGGroundCallback.h).
+
+## Renforcement du shaping LOC / glide (11 novembre 2026)
+
+Le profil de reward JSBSim augmente le feedback ILS sans changer la physique, l'actor, le critic, les observations, les actions hybrides, ni les composants BlueAgent/RLMission.
+
+- Poids `Localizer=0.25` et `Glide=0.25`, contre 0.05 : pour une progression parfaite sur les deux axes, **+0.05 par action de 100 ms** au début au lieu de +0.01.
+- `convergenceSeconds=20` contre 10 : la contribution de réduction signée d'erreur est initialement dix fois plus intense (poids x5, durée x2). Une régression reste pénalisée; aucun reward positif pour un éloignement du seuil.
+- `ilsDecaySeconds=140` : facteur de décroissance `exp(-elapsed/140)` du LOC et glide, appliqué aux progrès comme au potentiel de convergence. Il reste configurable dans le JSON.
+- La borne théorique de maintien continu **dans le secteur ILS**, y compris les variations du potentiel, est d'environ 80.005 sur toute la durée d'épisode; vitesse + pente au plus 3.6, captures 4, soit moins de 88 avant le bonus de poser +100. Cette borne ne couvre pas les phases d'interception géométrique hors ILS et ne garantit pas la convergence PPO.
+- `Path/Speed/Slope=0.002` restent secondaires; capture LOC et glide +2, toucher +100, arrêt +100, crash -100 inchangés. Le mode hippodrome et le point de guidage visuel ne sont pas modifiés dans ce correctif.
+- `rewardVersion=3` distingue la nouvelle sémantique pour BEST; les modèles latest de version précédente restent compatibles pour amorcer l'entraînement, mais BEST exige une nouvelle validation 20 épisodes (92 %).
+- Tests de régression : amplitude initiale, suivi du temps, sorties de secteur, trajectoire stationnaire, aller-retour sans gain net au même temps, et validation JSON des paramètres invalides.
+
+**Validation :** revue du diff et vérifications numériques des bornes ; compilation C++ et CI à confirmer avant fusion. Le comportement appris doit être évalué séparément.
