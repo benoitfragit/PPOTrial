@@ -74,12 +74,16 @@ struct MissionState final
     double localizerHoldSeconds{},glideHoldSeconds{};
     /** @brief Continuous time outside each beam's release envelope. */
     double localizerLossSeconds{},glideLossSeconds{};
+    /** @brief Delay before racetrack guidance returns after a confirmed ILS loss. */
+    double approachRecoverySeconds{};
     std::size_t waypointsPassed{},completedLaps{};
     /** @brief First in-corridor RALLY sample, confirmed on the next sample. */
     bool rallyCorridorLatched{};
     bool pathQualified{};
     /** @brief Active captures; sustained pre-threshold loss returns to patrol and clears both. */
     bool capturedLocalizer{}, capturedGlide{};
+    /** @brief True while approach-only guidance gets a short LOC-recapture grace period. */
+    bool approachRecoveryPending{};
     /** @brief Preserve the existing one-shot entry bonuses across later reacquisitions. */
     bool rewardedLocalizerCapture{},rewardedGlideCapture{};
     bool touchedDown{};

@@ -35,7 +35,8 @@ LOC/glide et deux interceptions symétriques à gauche et à droite. Un ordonnan
 trois épisodes contient les trois placements dans un ordre pseudo-aléatoire.
 L'avion vise l'hippodrome tant que le LOC n'est pas confirmé ; une capture avec
 cap compatible bascule en phase approche. Une perte LOC ou GLIDE durable avant
-le seuil renvoie l'avion vers l'hippodrome ; une nouvelle capture réactive l'approche.
+le seuil ouvre d'abord une courte grâce sans point de guidage ; le LOC peut y être
+recapturé sans basculement visuel. Sans recapture, l'hippodrome revient ensuite.
 Sur l'hippodrome, le mode RALLY utilise une projection anticipée devant l'avion.
 Après confirmation du corridor, FOLLOW emploie la séquence fixe de 26 portes du
 procédé BlueAgent ; une porte manquée invalide immédiatement la séquence et rend
@@ -46,9 +47,10 @@ Le multiplicateur `training.ilsCaptureScale` élargit temporairement les toléra
 de capture pendant l'apprentissage seulement. L'évaluation et l'inférence gardent
 les angles réalistes de `mission`, et modifier ce multiplicateur permet de reprendre
 le checkpoint `latest` sans réinitialiser les poids ni Adam.
-Le shaping LOC/GLIDE reste dense avant le seuil dans toute la portée ILS, y
-compris avant capture et hors secteur radio ; le signal affiché et la capture
-conservent néanmoins leur géométrie physique stricte.
+Le shaping LOC reste dense avant le seuil dans toute la portée ILS, y compris
+avant capture et hors secteur radio. Le shaping GLIDE ne s'active qu'après capture
+du LOC. En APPROACH, le point et le reward hippodrome sont coupés ; le signal
+affiché et la capture conservent néanmoins leur géométrie physique stricte.
 Le checkpoint complet `resources/model/FlightControl3D/latest/flight_hybrid_v1.txt`
 peut être commité comme point de départ : la CI le charge réellement lorsqu'il
 est présent et vérifie une reprise à la frontière d'un update PPO. La sauvegarde

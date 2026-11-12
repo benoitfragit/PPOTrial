@@ -63,8 +63,12 @@ void Geometry(Config const& c)
     Check(s.phase==Phase::Approach && s.capturedLocalizer && s.capturedGlide,
         "a transient ILS loss cannot cancel the approach");
     for(std::size_t step=1;step<captureSteps;++step) AdvanceMission(c,plan,s,far,far);
+    Check(s.phase==Phase::Approach && s.approachRecoveryPending
+        && !s.capturedLocalizer && !s.capturedGlide && !Guide(c,plan,s,far).targetValid,
+        "confirmed ILS loss first keeps a point-free approach recovery grace period");
+    for(std::size_t step=0;step<captureSteps;++step) AdvanceMission(c,plan,s,far,far);
     Check(s.phase==Phase::Patrol && !s.capturedLocalizer && !s.capturedGlide,
-        "a confirmed ILS loss returns guidance to the racetrack");
+        "an unrecovered ILS loss eventually returns guidance to the racetrack");
     MissionState back{}; back.phase=Phase::Approach;
     auto behind=Approach(c,1000);
     behind.position.up=100;
@@ -188,7 +192,9 @@ void OrderedNavigation(Config const& config)
         double const length=std::sqrt(Dot(difference,difference));
         auto next=a;
         next.position=Add(a.position,Scale(difference,std::min(10.0,length)/length));
-        next.heading=std::atan2(difference.east,difference.north);
+        // Keep this path-validation fixture outside the approach capture gate;
+        // the real aligned inbound branch intentionally gives LOC priority.
+        next.heading=std::atan2(difference.east,difference.north)+Pi/2;
         AdvanceMission(c,plan,flight,a,next);a=next;
     }
     Check(flight.completedLaps==1,"one complete ordered physical circuit qualifies landing return");
@@ -306,8 +312,9 @@ void CapturePriority(Config const& c)
     }
     Check(inbound.phase==Phase::Approach && inbound.capturedLocalizer && !inbound.capturedGlide
         && Guide(c,plan,inbound,onBeam).mode==GuidanceMode::Localizer
+        && !Guide(c,plan,inbound,onBeam).targetValid
         && Near(localizerReward,c.reward.weights[static_cast<std::size_t>(Reward::EnterLocalizer)]) && glideReward==0,
-        "confirmed LOC capture overrides the secondary racetrack before a completed lap");
+        "confirmed LOC capture removes all point guidance before a completed lap");
     for(std::size_t step=0;step<holdSteps;++step)
     {
         auto const result=AdvanceMission(c,plan,inbound,onBeam,onBeam);
@@ -334,8 +341,21 @@ void CapturePriority(Config const& c)
         "a transient glide deviation cannot cancel the approach");
     for(std::size_t step=1;step<holdSteps;++step)
         AdvanceMission(c,plan,glideLoss,aboveGlide,aboveGlide);
-    Check(glideLoss.phase==Phase::Patrol && !glideLoss.capturedLocalizer && !glideLoss.capturedGlide,
-        "confirmed glide loss returns to the racetrack and requires a fresh LOC capture");
+    Check(glideLoss.phase==Phase::Approach && glideLoss.approachRecoveryPending
+        && !glideLoss.capturedLocalizer && !glideLoss.capturedGlide
+        && !Guide(c,plan,glideLoss,aboveGlide).targetValid,
+        "confirmed glide loss keeps a short point-free approach recovery window");
+    auto recoveredBeforeHipp=glideLoss;
+    for(std::size_t step=0;step<holdSteps;++step)
+        AdvanceMission(c,plan,recoveredBeforeHipp,onBeam,onBeam);
+    Check(recoveredBeforeHipp.phase==Phase::Approach && recoveredBeforeHipp.capturedLocalizer
+        && !recoveredBeforeHipp.approachRecoveryPending
+        && !Guide(c,plan,recoveredBeforeHipp,onBeam).targetValid,
+        "fresh LOC capture during the grace period prevents a HIPP reactivation");
+    for(std::size_t step=0;step<holdSteps;++step)
+        AdvanceMission(c,plan,glideLoss,aboveGlide,aboveGlide);
+    Check(glideLoss.phase==Phase::Patrol && !glideLoss.approachRecoveryPending,
+        "unrecovered glide loss eventually returns to the racetrack");
 
     auto const outsideBeam=Approach(c,-6000,5000);
     inbound.pathQualified=true;
@@ -345,10 +365,16 @@ void CapturePriority(Config const& c)
         "a transient ILS dropout does not release either capture");
     for(std::size_t step=1;step<holdSteps;++step)
         AdvanceMission(c,plan,inbound,outsideBeam,outsideBeam);
+    Check(inbound.phase==Phase::Approach && inbound.approachRecoveryPending
+        && !inbound.capturedLocalizer && !inbound.capturedGlide
+        && !Guide(c,plan,inbound,outsideBeam).targetValid,
+        "sustained LOC loss does not immediately reactivate racetrack guidance");
+    for(std::size_t step=0;step<holdSteps;++step)
+        AdvanceMission(c,plan,inbound,outsideBeam,outsideBeam);
     Check(inbound.phase==Phase::Patrol && !inbound.capturedLocalizer && !inbound.capturedGlide
         && !inbound.pathQualified && inbound.waypointsPassed==0
         && Guide(c,plan,inbound,outsideBeam).mode==GuidanceMode::Patrol,
-        "sustained LOC loss returns to racetrack reacquisition and clears partial lap credit");
+        "unrecovered LOC loss returns to racetrack reacquisition and clears partial lap credit");
 
     double repeatedCaptureReward{};
     for(std::size_t step=0;step<holdSteps;++step)
@@ -357,10 +383,9 @@ void CapturePriority(Config const& c)
         repeatedCaptureReward+=result.rewards[static_cast<std::size_t>(Reward::EnterLocalizer)]
             +result.rewards[static_cast<std::size_t>(Reward::EnterGlide)];
     }
-    auto const localizerTarget=DeckCoordinates(c.runway,Guide(c,plan,inbound,onBeam).target);
     Check(inbound.capturedLocalizer && !inbound.capturedGlide
-        && Near(localizerTarget.north,-c.mission.switchDistanceMeters),
-        "LOC reacquisition alone cannot point guidance at the runway");
+        && !Guide(c,plan,inbound,onBeam).targetValid,
+        "LOC reacquisition cannot reactivate a runway or racetrack point");
     for(std::size_t step=0;step<holdSteps;++step)
     {
         auto const result=AdvanceMission(c,plan,inbound,onBeam,onBeam);

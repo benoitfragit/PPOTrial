@@ -35,7 +35,7 @@ Le JSON livré active `training.resume: true` et `checkpointEvery: 1`. En entra�
 
 Le desktop traite `maxUpdates` comme un budget supplémentaire à partir du modèle chargé. Par exemple, un `latest` à l'update 120 et un budget de 10 000 donnent une fin de bloc à 10 120. Après validation finale, un nouveau Play prolonge le budget en conservant le même learner. Le renderer diffère Stop/join et Play hors du verrou de snapshot, puis le callback ECS `Init` prolonge la session terminée. Le headless conserve son budget total existant. L'UI affiche la source du modèle et la limite du bloc courant ; le journal contient `[FLIGHT_SESSION] Resumed latest` et l'update chargé.
 
-La reprise d'entraînement conserve les poids, Adam et le RNG lors d'un changement des intervalles horizontaux, de l'orientation d'interception, de `initial.approach`, du guidage compatible déclaré ou des réglages de reward. `rewardVersion: 5`, `guidanceVersion: 9` et `spawnVersion: 2` séparent les contrats de shaping, de guidage et d'ordonnancement initial. Les checkpoints de guidage V2 à V8 et de reward V2 à V4, les placements aléatoires antérieurs et les signatures sans ces versions peuvent amorcer l'entraînement, mais leur BEST n'est jamais réutilisé sans une nouvelle validation. Les changements de géométrie de piste, de physique ou d'autres observations restent incompatibles. Un BEST antérieur est conservé avec ses générations et son contrôle d'intégrité ; l'inférence exige un BEST validé sur le contrat exact.
+La reprise d'entraînement conserve les poids, Adam et le RNG lors d'un changement des intervalles horizontaux, de l'orientation d'interception, de `initial.approach`, du guidage compatible déclaré ou des réglages de reward. `rewardVersion: 6`, `guidanceVersion: 10` et `spawnVersion: 2` séparent les contrats de shaping, de guidage et d'ordonnancement initial. Les checkpoints de guidage V2 à V9 et de reward V2 à V5, les placements aléatoires antérieurs et les signatures sans ces versions peuvent amorcer l'entraînement, mais leur BEST n'est jamais réutilisé sans une nouvelle validation. Les changements de géométrie de piste, de physique ou d'autres observations restent incompatibles. Un BEST antérieur est conservé avec ses générations et son contrôle d'intégrité ; l'inférence exige un BEST validé sur le contrat exact.
 
 ## Interface FlightControl3D
 
@@ -134,14 +134,14 @@ Les guidages `Localizer` et `Glide` utilisent une qualité lisse `Q(e) = toléra
 
 La différence signée récompense le rapprochement et pénalise l'éloignement. Elle n'est pas clippée : une amélioration lente suivie d'une régression rapide ne doit pas créer de bonus net. Le facteur de temps vaut 20 secondes dans le JSON. La comparaison avant/après utilise la même phase, le même waypoint et les deux repères successifs de la piste, sans gain artificiel dû au seul mouvement rigide du pont.
 
-Avant le seuil, le shaping LOC/GLIDE est dense dans toute la portée ILS, y compris hors du secteur radio, et agit dès la phase HIPP. Cette géométrie privilégiée ne modifie ni `ilsValid`, ni les observations radio, ni l'UI, ni les captures : le vrai signal conserve son secteur configuré. Le progrès est l'avancement longitudinal relatif à la piste, normalisé par la vitesse cible et borné entre −1 et +1. Un déplacement qui s'éloigne du seuil ne peut rapporter de contribution LOC/glide positive, même si l'erreur angulaire diminue avec la distance. Une géométrie stationnaire ne reçoit pas de maintien répété. Hors de la portée avant, le shaping ILS reste nul. `Path` conserve le guidage hippodrome ou le point d'interception secondaire.
+Avant le seuil, le shaping LOC est dense dans toute la portée ILS, y compris hors du secteur radio, et agit dès la phase HIPP. Le shaping GLIDE devient dense seulement après capture du LOC. Cette géométrie privilégiée ne modifie ni `ilsValid`, ni les observations radio, ni l'UI, ni les captures : le vrai signal conserve son secteur configuré. Le progrès est l'avancement longitudinal relatif à la piste, normalisé par la vitesse cible et borné entre −1 et +1. Un déplacement qui s'éloigne du seuil ne peut rapporter de contribution LOC/glide positive, même si l'erreur angulaire diminue avec la distance. Une géométrie stationnaire ne reçoit pas de maintien répété. Hors de la portée avant, le shaping ILS reste nul. `Path` et son point restent strictement réservés à HIPP ; ils sont nuls et invalides pendant toute la phase APPROACH.
 
 En patrouille, `Path` reprend le shaping borné de BlueAgent : coût rationnel composé à 50 % de l'écart à la courbe, 30 % de l'écart de vitesse et 20 % de l'écart de cap, amélioration signée, progression physique projetée et pénalité de coût courant. Le résultat est borné dans `[-1, 1]` avant le poids existant `0,002`. Stationner, reculer, s'écarter ou tourner autour d'une porte ne rapporte rien de positif. Le tour complet ne rapporte aucun nouveau bonus dédié. Les canaux `Speed` et `Slope` conservent la qualité triangulaire `max(0, 1 − abs(erreur)/tolérance)` pondérée par le temps physique. Les captures restent payées une seule fois par épisode après maintien confirmé.
 
 | Canal | Poids livré | Amplitude et rôle |
 |---|---:|---|
 | Localizer | 0,25 | Maintien maximal +0,25 par seconde ; potentiel signé au plus 5 en valeur absolue par transition |
-| Glide | 0,25 | Même amplitude que LOC, évaluée indépendamment |
+| Glide | 0,25 | Même amplitude que LOC, activée après capture LOC |
 | Path | 0,002 | 125 fois moins pondéré que chaque axe ILS ; convergence élémentaire au plus 0,04 |
 | Speed / Slope | 0,002 chacun | Soutien au pilotage, plafonné à +0,002 par seconde et par canal |
 | EnterLocalizer / EnterGlide | +2 chacun | Événement unique confirmé |
@@ -282,6 +282,25 @@ Le contrat `guidanceVersion=5` neutralise aussi la cible géométrique pendant
 `targetValid` reste faux : aucun consommateur ne peut donc tracer une ligne vers
 le seuil, même s'il oublie de vérifier le drapeau. Après l'hippodrome, la seule
 ligne autorisée est désormais celle de réinterception LOC/GLIDE.
+
+Validation locale : ni compilation ni test exécuté, conformément à la consigne.
+
+## Priorité LOC puis GLIDE sans point concurrent V6/V10 (11 novembre 2026)
+
+`rewardVersion=6` conserve le signal LOC dense de V5 dans toute la portée avant,
+mais conditionne désormais le signal GLIDE dense à `capturedLocalizer`. Avant la
+capture LOC, GLIDE vaut donc exactement zéro. Dès le passage en APPROACH, le canal
+`Path` vaut également zéro : ni reward hippodrome ni reward de point d'interception
+ne concurrence les deux faisceaux.
+
+`guidanceVersion=10` invalide tout point géométrique pendant APPROACH, y compris
+entre les captures LOC et GLIDE. Après une perte confirmée, les captures sont
+libérées mais APPROACH reste seul actif pendant une grâce supplémentaire égale à
+`captureHoldSeconds`. Une recapture LOC pendant cette grâce annule le retour HIPP ;
+sinon le ralliement hippodrome redevient actif à son expiration. Les 56 observations,
+les dimensions du réseau et le format du checkpoint ne changent pas. Les checkpoints
+V9/reward V5 conservent donc leurs poids, critic, moments Adam, âges et RNG comme
+warm start ; seul le BEST doit être revalidé sur le nouveau contrat.
 
 Validation locale : ni compilation ni test exécuté, conformément à la consigne.
 

@@ -279,7 +279,22 @@ CaptureTransition UpdateCapture(bool eligible,double error,double tolerance,Conf
     return {};
 }
 /**
- * @brief Returns navigation to racetrack reacquisition after a confirmed ILS loss.
+ * @brief Clears ILS captures while retaining approach-only guidance for a grace period.
+ * @param state Mission state whose captures are invalidated.
+ */
+void BeginApproachRecovery(MissionState& state) noexcept
+{
+    state.localizerHoldSeconds=0;
+    state.glideHoldSeconds=0;
+    state.localizerLossSeconds=0;
+    state.glideLossSeconds=0;
+    state.approachRecoverySeconds=0;
+    state.capturedLocalizer=false;
+    state.capturedGlide=false;
+    state.approachRecoveryPending=true;
+}
+/**
+ * @brief Returns navigation to racetrack reacquisition after the recovery grace period.
  * @param plan Bounded closed racetrack used to select the closest re-entry segment.
  * @param state Mission state whose captures and partial lap are invalidated.
  * @param aircraft Current aircraft state used for the racetrack projection seed.
@@ -291,8 +306,10 @@ void ReturnToPatrol(FlightPlan const& plan,MissionState& state,AircraftState con
     state.glideHoldSeconds=0;
     state.localizerLossSeconds=0;
     state.glideLossSeconds=0;
+    state.approachRecoverySeconds=0;
     state.capturedLocalizer=false;
     state.capturedGlide=false;
+    state.approachRecoveryPending=false;
     state.rallyCorridorLatched=false;
     state.pathQualified=false;
     state.waypointsPassed=0;
@@ -430,24 +447,14 @@ Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& miss
             : mission.capturedGlide ? GuidanceMode::Glide : GuidanceMode::Localizer;
         g.targetSpeed = mission.phase == Phase::Rollout ? 0 : (flare ? c.mission.flareSpeed : c.mission.approachSpeed);
         g.targetSlope = flare || mission.phase == Phase::Rollout ? 0 : -slope;
-        // Captured approach, flare and rollout do not own a geometric point.
+        // Approach, flare and rollout do not own a geometric point. Once LOC
+        // takes priority, only beam errors guide the policy; the racetrack and
+        // the former fixed intercept point must disappear together.
         // Keep the stored value at the aircraft as a defensive no-op for any
         // consumer that does not inspect targetValid.
         g.target = a.position;
         g.pathDistance = std::hypot(g.cross, g.height-(c.runway.thresholdHeightMeters-std::min(g.along,0.0)*std::tan(slope)));
         g.targetValid=false;
-        if(mission.phase == Phase::Approach
-            && (!mission.capturedLocalizer || !mission.capturedGlide))
-        {
-            // Until both beams are stably captured, keep one fixed front-side
-            // intercept. A target derived from the aircraft along coordinate
-            // would drift toward the threshold and jump after an overflight.
-            double const targetAlong=-c.mission.switchDistanceMeters;
-            g.target = FromRunway(c.runway,targetAlong,0,
-                c.runway.thresholdHeightMeters-targetAlong*std::tan(slope));
-            g.pathDistance = Distance(a.position,g.target);
-            g.targetValid=true;
-        }
     }
     g.courseError = g.targetValid
         ? WrapAngle(std::atan2(g.target.east-a.position.east,g.target.north-a.position.north)-a.heading) : 0;
@@ -515,12 +522,32 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         s.localizerHoldSeconds=0;s.glideHoldSeconds=0;
         s.localizerLossSeconds=0;s.glideLossSeconds=0;
     }
-    // A confirmed beam loss abandons the intercept and re-enters the racetrack
-    // through its projection/look-ahead guidance. Both captures are released
-    // so that a fresh confirmed LOC then GLIDE restores approach priority.
+    // A confirmed beam loss first leaves a short approach-only grace period.
+    // This prevents an immediate HIPP/APPROACH point and reward toggle. A fresh
+    // confirmed LOC cancels recovery; otherwise the racetrack returns later.
     if(s.phase==Phase::Approach && (lostLocalizer || lostGlide))
-        ReturnToPatrol(plan,s,after);
-    else if(s.phase==Phase::Patrol && s.capturedLocalizer) s.phase=Phase::Approach;
+        BeginApproachRecovery(s);
+    else if(s.phase==Phase::Approach && s.approachRecoveryPending)
+    {
+        if(s.capturedLocalizer)
+        {
+            s.approachRecoverySeconds=0;
+            s.approachRecoveryPending=false;
+        }
+        else
+        {
+            s.approachRecoverySeconds=std::min(
+                s.approachRecoverySeconds+c.mission.physicsDt,c.mission.captureHoldSeconds);
+            if(s.approachRecoverySeconds>=c.mission.captureHoldSeconds)
+                ReturnToPatrol(plan,s,after);
+        }
+    }
+    else if(s.phase==Phase::Patrol && s.capturedLocalizer)
+    {
+        s.phase=Phase::Approach;
+        s.approachRecoverySeconds=0;
+        s.approachRecoveryPending=false;
+    }
     g = Guide(c,plan,s,after);
     if(contact && !s.contactAttempted && IsFinite(after))
     {
@@ -567,9 +594,13 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
             {
                 bool const localizer=channel==Reward::Localizer;
                 double const tolerance=(localizer ? c.reward.localizerToleranceDegrees : c.reward.glideToleranceDegrees)*DegreesToRadians;
-                double const previousQuality=IlsShapingEnvelope(c,previousGuidance)
+                // LOC is the acquisition signal. GLIDE becomes dense only once
+                // LOC is captured, so it cannot pull the aircraft vertically
+                // while lateral alignment is still being acquired.
+                bool const enabled=localizer || s.capturedLocalizer;
+                double const previousQuality=enabled && IlsShapingEnvelope(c,previousGuidance)
                     ? GuidanceQuality(localizer ? previousGuidance.localizer : previousGuidance.glideError,tolerance) : 0;
-                double const quality=IlsShapingEnvelope(c,g)
+                double const quality=enabled && IlsShapingEnvelope(c,g)
                     ? GuidanceQuality(localizer ? g.localizer : g.glideError,tolerance) : 0;
                 double const value=GuidanceReward(c,previousQuality,quality,progress,ilsScale);
                 // Angular errors can shrink merely by flying away from the
@@ -579,14 +610,6 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         }
         if (s.phase == Phase::Approach)
         {
-            if(!s.capturedLocalizer || !s.capturedGlide)
-            {
-                double const previousDistance=previousGuidance.pathDistance;
-                double const progressToIntercept=std::clamp((previousDistance-g.pathDistance)
-                    /(c.mission.approachSpeed*dt),-1.0,1.0);
-                add(Reward::Path,GuidanceReward(c,GuidanceQuality(previousDistance,c.reward.pathTolerance),
-                    GuidanceQuality(g.pathDistance,c.reward.pathTolerance),progressToIntercept));
-            }
             if(enteredLocalizer) add(Reward::EnterLocalizer,1);
             if(enteredGlide) add(Reward::EnterGlide,1);
         }

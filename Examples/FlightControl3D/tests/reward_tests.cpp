@@ -13,7 +13,9 @@ AircraftState At(Config const& c,double along,double cross,double height)
 }
 StepResult ApproachStep(Config const& c,AircraftState const& before,AircraftState const& after)
 {
-    MissionState mission{};mission.phase=Phase::Approach;
+    MissionState mission{};
+    mission.phase=Phase::Approach;
+    mission.capturedLocalizer=true;
     return AdvanceMission(c,MakeFlightPlan(c),mission,before,after);
 }
 double Channel(StepResult const& step,Reward reward)
@@ -46,16 +48,16 @@ void Convergence(Config const& c)
     auto const plan=MakeFlightPlan(c);
     auto const patrolImprovement=AdvanceMission(c,plan,patrol,far,closer);
     Check(patrol.phase==Phase::Patrol && Channel(patrolImprovement,Reward::Localizer)>0
-        && Channel(patrolImprovement,Reward::Glide)>0
+        && Channel(patrolImprovement,Reward::Glide)==0
         && Channel(patrolImprovement,Reward::EnterLocalizer)==0
         && Channel(patrolImprovement,Reward::EnterGlide)==0,
-        "visible raw ILS shapes LOC and glide before capture while patrol remains active");
+        "dense LOC guides acquisition while glide stays silent before LOC capture");
     auto const outside=At(c,-4000,5000,700),outsideCloser=At(c,-4000,4999.8,699.98);
     MissionState outsidePatrol{};
     auto const denseShaping=AdvanceMission(c,plan,outsidePatrol,outside,outsideCloser);
     Check(!Guide(c,plan,outsidePatrol,outsideCloser).ilsValid
-        && Channel(denseShaping,Reward::Localizer)>0 && Channel(denseShaping,Reward::Glide)>0,
-        "dense shaping guides acquisition outside the physical signal sector");
+        && Channel(denseShaping,Reward::Localizer)>0 && Channel(denseShaping,Reward::Glide)==0,
+        "dense LOC guides acquisition outside the physical signal sector without premature glide shaping");
     auto const beyondRange=At(c,-16000,0,1000),nearerBeyondRange=At(c,-15999.8,0,1000);
     MissionState beyondRangePatrol{};
     auto const noGeometry=AdvanceMission(c,plan,beyondRangePatrol,beyondRange,nearerBeyondRange);
@@ -186,18 +188,17 @@ void SecondaryGuidance(Config const& c)
 
     auto const outside=At(c,-4000,5000,600),intercepting=At(c,-4000,4999.8,599.8);
     auto const fallback=ApproachStep(c,outside,intercepting);
-    Check(Channel(fallback,Reward::Path)>0 && Channel(fallback,Reward::Localizer)>0
+    Check(Channel(fallback,Reward::Path)==0 && Channel(fallback,Reward::Localizer)>0
         && Channel(fallback,Reward::Glide)>0,
-        "outside the radio sector, dense ILS shaping complements the geometric intercept path");
+        "approach uses only dense LOC/glide shaping without a competing path reward");
     MissionState approach{};approach.phase=Phase::Approach;
-    auto const target=DeckCoordinates(c.runway,Guide(c,plan,approach,outside).target);
     auto const afterThreshold=At(c,1000,5000,600);
-    auto const overflightTarget=DeckCoordinates(c.runway,Guide(c,plan,approach,afterThreshold).target);
-    Check(Near(target.north,-c.mission.switchDistanceMeters) && Near(target.east,0)
-        && target.up>c.runway.thresholdHeightMeters
-        && Near(overflightTarget.north,target.north) && Near(overflightTarget.east,target.east)
-        && Near(overflightTarget.up,target.up),
-        "uncaptured approach target stays at the fixed LOC/glide entry before and after overflight");
+    auto const acquisition=Guide(c,plan,approach,outside);
+    auto const overflight=Guide(c,plan,approach,afterThreshold);
+    Check(!acquisition.targetValid && !overflight.targetValid
+        && acquisition.target.north==outside.position.north
+        && overflight.target.north==afterThreshold.position.north,
+        "approach has no racetrack, intercept or runway point before or after overflight");
 }
 void MovingFrame(Config c)
 {

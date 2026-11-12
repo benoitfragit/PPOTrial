@@ -157,8 +157,8 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics.erase("training");
     semantics.erase("evaluation");
     semantics["distribution"] = {training.minLogStd,training.maxLogStd};
-    semantics["rewardVersion"] = 5;
-    semantics["guidanceVersion"] = 9;
+    semantics["rewardVersion"] = 6;
+    semantics["guidanceVersion"] = 10;
     semantics["spawnVersion"] = 2;
     config.checkpointSignature = semantics.dump();
     Validate(config);
@@ -177,12 +177,12 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
             || !(*signature)["initial"].contains("approach") || !(*signature)["initial"]["approach"].is_boolean()) return false;
         if(signature->contains("rewardVersion") && (*signature)["rewardVersion"]!=2
             && (*signature)["rewardVersion"]!=3 && (*signature)["rewardVersion"]!=4
-            && (*signature)["rewardVersion"]!=5) return false;
+            && (*signature)["rewardVersion"]!=5 && (*signature)["rewardVersion"]!=6) return false;
         if(signature->contains("guidanceVersion") && (*signature)["guidanceVersion"]!=2
             && (*signature)["guidanceVersion"]!=3 && (*signature)["guidanceVersion"]!=4
             && (*signature)["guidanceVersion"]!=5 && (*signature)["guidanceVersion"]!=6
             && (*signature)["guidanceVersion"]!=7 && (*signature)["guidanceVersion"]!=8
-            && (*signature)["guidanceVersion"]!=9) return false;
+            && (*signature)["guidanceVersion"]!=9 && (*signature)["guidanceVersion"]!=10) return false;
         if(signature->contains("spawnVersion") && (*signature)["spawnVersion"]!=2) return false;
     }
     for(char const* name : {"distanceMeters","bearingDegrees","headingOffsetDegrees"})
