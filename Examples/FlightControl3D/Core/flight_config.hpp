@@ -73,6 +73,7 @@ struct TrainingSettings final
     double ilsCaptureScale{1.0};
     CurriculumStage curriculumStage{CurriculumStage::Joint};
     double locReminderProbability{0.30}, glideOffsetMeters{120.0}, gateHoldSeconds{2.0};
+    double gateHeadingDegrees{5.0}, gateRouteDegrees{5.0}, gateSlopeDegrees{1.5};
     double actorRate{}, criticRate{}, gamma{}, lambda{}, clip{}, entropy{}, valueWeight{};
     double minLogStd{}, maxLogStd{}, initialLogStd{}, maxGradientNorm{};
     double adamBeta1{}, adamBeta2{}, adamEpsilon{};

@@ -144,7 +144,8 @@ Config LoadConfig(std::filesystem::path const& path)
 #define READ_T(field) training.field = Number(t, #field)
     READ_T(ilsCaptureScale);
     auto const& curriculum=t.at("curriculum");
-    Keys(curriculum, {"stage","locReminderProbability","glideOffsetMeters","gateHoldSeconds"});
+    Keys(curriculum, {"stage","locReminderProbability","glideOffsetMeters","gateHoldSeconds",
+        "gateHeadingDegrees","gateRouteDegrees","gateSlopeDegrees"});
     Require(curriculum.at("stage").is_string(),"curriculum stage");
     auto const stage=curriculum.at("stage").get<std::string>();
     Require(stage=="loc" || stage=="glide" || stage=="joint","curriculum stage");
@@ -153,6 +154,9 @@ Config LoadConfig(std::filesystem::path const& path)
     training.locReminderProbability=Number(curriculum,"locReminderProbability");
     training.glideOffsetMeters=Number(curriculum,"glideOffsetMeters");
     training.gateHoldSeconds=Number(curriculum,"gateHoldSeconds");
+    training.gateHeadingDegrees=Number(curriculum,"gateHeadingDegrees");
+    training.gateRouteDegrees=Number(curriculum,"gateRouteDegrees");
+    training.gateSlopeDegrees=Number(curriculum,"gateSlopeDegrees");
     READ_T(actorRate); READ_T(criticRate); READ_T(gamma); READ_T(lambda); READ_T(clip); READ_T(entropy);
     READ_T(valueWeight); READ_T(minLogStd); READ_T(maxLogStd); READ_T(initialLogStd); READ_T(maxGradientNorm);
     READ_T(adamBeta1); READ_T(adamBeta2); READ_T(adamEpsilon);
@@ -340,7 +344,10 @@ void Validate(Config const& c)
         && t.locReminderProbability<=1 && std::isfinite(t.glideOffsetMeters)
         && t.glideOffsetMeters>0 && t.glideOffsetMeters<minimumGlideHeight-m.flareHeightMeters
         && std::isfinite(t.gateHoldSeconds) && t.gateHoldSeconds>=m.physicsDt
-        && (t.curriculumStage==CurriculumStage::Joint || t.gateHoldSeconds<=m.maxSeconds),
+        && (t.curriculumStage==CurriculumStage::Joint || t.gateHoldSeconds<=m.maxSeconds)
+        && std::isfinite(t.gateHeadingDegrees) && t.gateHeadingDegrees>0 && t.gateHeadingDegrees<=20
+        && std::isfinite(t.gateRouteDegrees) && t.gateRouteDegrees>0 && t.gateRouteDegrees<=20
+        && std::isfinite(t.gateSlopeDegrees) && t.gateSlopeDegrees>0 && t.gateSlopeDegrees<=5,
         "curriculum settings");
     Require(t.ilsCaptureScale>=1.0
         && m.localizerCaptureDegrees*t.ilsCaptureScale<m.ilsSectorDegrees

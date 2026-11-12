@@ -36,6 +36,10 @@ struct FlightSnapshot final
     std::size_t gateSuccesses{},gateEvaluated{};
 };
 
+/** True when a captured beam is also stable in heading, route and slope. */
+bool CaptureGateQualified(Config const&,CurriculumStage,MissionState const&,
+    AircraftState const&,Guidance const&) noexcept;
+
 /** Shared orchestration for the current desktop framework and CPU headless runner. */
 class FlightSession final
 {

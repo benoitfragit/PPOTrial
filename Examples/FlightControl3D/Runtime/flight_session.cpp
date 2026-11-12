@@ -31,6 +31,25 @@ void LogUpdate(LearningStats const& stats)
         std::cout<<' '<<RewardNames[channel]<<'='<<stats.meanRewards[channel];
     std::cout<<std::endl;
 }
+} // namespace
+bool CaptureGateQualified(Config const& c,CurriculumStage stage,
+    MissionState const& mission,AircraftState const& aircraft,Guidance const& guidance) noexcept
+{
+    if(stage==CurriculumStage::Joint || mission.phase!=Phase::Approach
+        || mission.outcome!=Outcome::Flying || !mission.capturedLocalizer)
+        return false;
+    double const headingError=WrapAngle(aircraft.heading-c.runway.headingDegrees*DegreesToRadians);
+    double const routeError=std::atan2(guidance.relativeVelocity.east,guidance.relativeVelocity.north);
+    if(std::abs(headingError)>c.training.gateHeadingDegrees*DegreesToRadians
+        || std::abs(routeError)>c.training.gateRouteDegrees*DegreesToRadians
+        || std::abs(aircraft.airspeed-guidance.targetSpeed)>c.reward.speedTolerance)
+        return false;
+    if(stage==CurriculumStage::Loc) return true;
+    double const slope=std::atan2(guidance.relativeVelocity.up,
+        std::hypot(guidance.relativeVelocity.north,guidance.relativeVelocity.east));
+    return mission.capturedGlide
+        && std::abs(guidance.glideError)<=c.mission.glideCaptureDegrees*DegreesToRadians
+        && std::abs(slope-guidance.targetSlope)<=c.training.gateSlopeDegrees*DegreesToRadians;
 }
 FlightSession::FlightSession(Config config, bool training, std::filesystem::path modelDirectory,
     std::optional<std::size_t> inferenceEpisodes,TrainingBudget budget)
@@ -134,17 +153,17 @@ void FlightSession::TickValidation()
     auto const stage=config_.training.curriculumStage;
     if(stage!=CurriculumStage::Joint && evaluation.Mission().outcome==Outcome::Flying)
     {
-        auto const& mission=evaluation.Mission();
         auto const active=evaluation.Settings().training.curriculumStage;
-        bool const captured=mission.capturedLocalizer
-            && (active==CurriculumStage::Loc || mission.capturedGlide);
-        validationHoldSeconds_=captured ? validationHoldSeconds_+config_.StepSeconds() : 0;
+        bool const qualified=CaptureGateQualified(config_,active,
+            evaluation.Mission(),evaluation.Aircraft(),evaluation.CurrentGuidance());
+        validationHoldSeconds_=qualified ? validationHoldSeconds_+config_.StepSeconds() : 0;
         if(validationHoldSeconds_>=config_.training.gateHoldSeconds)
             validationEpisodeSucceeded_=true;
     }
     if(lastStep_.terminated || lastStep_.truncated)
     {
-        if(stage!=CurriculumStage::Joint && validationEpisodeSucceeded_) ++validationGateSuccesses_;
+        if(stage!=CurriculumStage::Joint && validationEpisodeSucceeded_
+            && evaluation.Mission().outcome!=Outcome::Crash) ++validationGateSuccesses_;
         validation_.Record(evaluation.Mission());
         if(validation_.episodes<config_.evaluation.episodes) validationPendingReset_=true;
         else
