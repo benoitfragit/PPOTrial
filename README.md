@@ -36,8 +36,15 @@ trois épisodes contient les trois placements dans un ordre pseudo-aléatoire.
 L'avion vise l'hippodrome tant que le LOC n'est pas confirmé ; une capture avec
 cap compatible bascule en phase approche. Une perte LOC ou GLIDE durable avant
 le seuil renvoie l'avion vers l'hippodrome ; une nouvelle capture réactive l'approche.
+Sur l'hippodrome, le point de contrôle reste toujours une projection anticipée
+devant l'avion ; les portes ordonnées servent uniquement à valider le tour et ne
+peuvent plus devenir une cible fixe autour de laquelle l'avion orbite.
 Après franchissement du seuil avec LOC et GLIDE capturés, l'approche reste engagée
 jusqu'au toucher. Aucun point au seuil ne concurrence alors les erreurs ILS.
+Le multiplicateur `training.ilsCaptureScale` élargit temporairement les tolérances
+de capture pendant l'apprentissage seulement. L'évaluation et l'inférence gardent
+les angles réalistes de `mission`, et modifier ce multiplicateur permet de reprendre
+le checkpoint `latest` sans réinitialiser les poids ni Adam.
 L'IHM distingue signal visible, captures actives et durées d'épisode en secondes
 simulées, avec un grand badge `HIPP` ou `APPROACH`, la vitesse, la pente et
 `GEAR` lorsque le train est physiquement sorti sur la caméra. La conception

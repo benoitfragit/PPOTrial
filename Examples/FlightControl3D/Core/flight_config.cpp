@@ -129,7 +129,7 @@ Config LoadConfig(std::filesystem::path const& path)
     auto const& t = root.at("training");
     Keys(t, {"seed", "rolloutSteps", "minibatch", "epochs", "maxUpdates", "checkpointEvery", "hiddenWidth", "actorRate", "criticRate", "gamma", "lambda",
         "clip", "entropy", "valueWeight", "minLogStd", "maxLogStd", "initialLogStd", "maxGradientNorm", "adamBeta1", "adamBeta2", "adamEpsilon",
-        "resume", "checkpointDirectory"});
+        "ilsCaptureScale", "resume", "checkpointDirectory"});
     auto& training = config.training;
     training.seed = static_cast<std::uint32_t>(Integer(t,"seed", UINT32_MAX));
     training.rolloutSteps = Integer(t,"rolloutSteps", 65536);
@@ -139,6 +139,7 @@ Config LoadConfig(std::filesystem::path const& path)
     training.checkpointEvery = Integer(t,"checkpointEvery", 100000000);
     training.hiddenWidth = Integer(t,"hiddenWidth", 128);
 #define READ_T(field) training.field = Number(t, #field)
+    READ_T(ilsCaptureScale);
     READ_T(actorRate); READ_T(criticRate); READ_T(gamma); READ_T(lambda); READ_T(clip); READ_T(entropy);
     READ_T(valueWeight); READ_T(minLogStd); READ_T(maxLogStd); READ_T(initialLogStd); READ_T(maxGradientNorm);
     READ_T(adamBeta1); READ_T(adamBeta2); READ_T(adamEpsilon);
@@ -156,7 +157,7 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics.erase("evaluation");
     semantics["distribution"] = {training.minLogStd,training.maxLogStd};
     semantics["rewardVersion"] = 3;
-    semantics["guidanceVersion"] = 7;
+    semantics["guidanceVersion"] = 8;
     semantics["spawnVersion"] = 2;
     config.checkpointSignature = semantics.dump();
     Validate(config);
@@ -178,7 +179,7 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
         if(signature->contains("guidanceVersion") && (*signature)["guidanceVersion"]!=2
             && (*signature)["guidanceVersion"]!=3 && (*signature)["guidanceVersion"]!=4
             && (*signature)["guidanceVersion"]!=5 && (*signature)["guidanceVersion"]!=6
-            && (*signature)["guidanceVersion"]!=7) return false;
+            && (*signature)["guidanceVersion"]!=7 && (*signature)["guidanceVersion"]!=8) return false;
         if(signature->contains("spawnVersion") && (*signature)["spawnVersion"]!=2) return false;
     }
     for(char const* name : {"distanceMeters","bearingDegrees","headingOffsetDegrees"})
@@ -297,6 +298,10 @@ void Validate(Config const& c)
         "Gaussian log standard deviations");
     Require(t.adamBeta1 >= 0 && t.adamBeta1 < 1 && t.adamBeta2 >= 0 && t.adamBeta2 < 1 && t.adamEpsilon > 0,
         "Adam hyperparameters");
+    Require(t.ilsCaptureScale>=1.0
+        && m.localizerCaptureDegrees*t.ilsCaptureScale<m.ilsSectorDegrees
+        && m.glideCaptureDegrees*t.ilsCaptureScale<m.glideDegrees,
+        "training ILS capture scale");
     Require(c.evaluation.episodes>0 && c.evaluation.seed!=t.seed && c.evaluation.everyUpdates>0
         && c.evaluation.minimumSuccessRate>=0 && c.evaluation.minimumSuccessRate<=1,
         "independent evaluation seed, budget and success threshold");

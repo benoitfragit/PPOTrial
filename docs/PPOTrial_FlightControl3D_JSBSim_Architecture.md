@@ -35,7 +35,7 @@ Le JSON livré active `training.resume: true` et `checkpointEvery: 1`. En entra�
 
 Le desktop traite `maxUpdates` comme un budget supplémentaire à partir du modèle chargé. Par exemple, un `latest` à l'update 120 et un budget de 10 000 donnent une fin de bloc à 10 120. Après validation finale, un nouveau Play prolonge le budget en conservant le même learner. Le renderer diffère Stop/join et Play hors du verrou de snapshot, puis le callback ECS `Init` prolonge la session terminée. Le headless conserve son budget total existant. L'UI affiche la source du modèle et la limite du bloc courant ; le journal contient `[FLIGHT_SESSION] Resumed latest` et l'update chargé.
 
-La reprise d'entraînement conserve les poids, Adam et le RNG lors d'un changement des intervalles horizontaux, de l'orientation d'interception, de `initial.approach`, du guidage compatible déclaré ou des réglages de reward. `rewardVersion: 3`, `guidanceVersion: 7` et `spawnVersion: 2` séparent les contrats de shaping, de guidage et d'ordonnancement initial. Les checkpoints de guidage V2 à V6, les placements aléatoires antérieurs et les signatures sans ces versions peuvent amorcer l'entraînement, mais leur BEST n'est jamais réutilisé sans une nouvelle validation. Les changements de géométrie de piste, de physique ou d'autres observations restent incompatibles. Un BEST antérieur est conservé avec ses générations et son contrôle d'intégrité ; l'inférence exige un BEST validé sur le contrat exact.
+La reprise d'entraînement conserve les poids, Adam et le RNG lors d'un changement des intervalles horizontaux, de l'orientation d'interception, de `initial.approach`, du guidage compatible déclaré ou des réglages de reward. `rewardVersion: 3`, `guidanceVersion: 8` et `spawnVersion: 2` séparent les contrats de shaping, de guidage et d'ordonnancement initial. Les checkpoints de guidage V2 à V7, les placements aléatoires antérieurs et les signatures sans ces versions peuvent amorcer l'entraînement, mais leur BEST n'est jamais réutilisé sans une nouvelle validation. Les changements de géométrie de piste, de physique ou d'autres observations restent incompatibles. Un BEST antérieur est conservé avec ses générations et son contrôle d'intégrité ; l'inférence exige un BEST validé sur le contrat exact.
 
 ## Interface FlightControl3D
 
@@ -274,6 +274,42 @@ Le contrat `guidanceVersion=5` neutralise aussi la cible géométrique pendant
 `targetValid` reste faux : aucun consommateur ne peut donc tracer une ligne vers
 le seuil, même s'il oublie de vérifier le drapeau. Après l'hippodrome, la seule
 ligne autorisée est désormais celle de réinterception LOC/GLIDE.
+
+Validation locale : ni compilation ni test exécuté, conformément à la consigne.
+
+## Guidage hippodrome sans point périmé (11 novembre 2026)
+
+Le contrat `guidanceVersion=8` sépare désormais complètement le point de contrôle
+et les portes de validation du tour. En phase HIPP, le point présenté à la
+politique et au rendu est toujours obtenu par projection sur le segment le plus
+proche, puis anticipation de `patrolSpeed × patrolLookaheadSeconds` dans le sens
+du circuit. C'est le principe de projection/preview employé par le guidage de
+ralliement BlueAgent.
+
+Les portes ordonnées restent autoritaires pour refuser raccourcis, marche arrière
+et tours incomplets, mais elles ne deviennent plus des cibles de pilotage fixes.
+Un passage manqué ne peut donc plus maintenir la ligne de guidage sur un point de
+100 m déjà dépassé et provoquer une orbite autour de celui-ci. Les checkpoints
+de guidage V2 à V7 restent utilisables comme warm start ; le BEST doit être
+revalidé sur V8.
+
+Validation locale : ni compilation ni test exécuté, conformément à la consigne.
+
+## Tolérance ILS temporaire d'entraînement (11 novembre 2026)
+
+`training.ilsCaptureScale` multiplie uniquement les tolérances de capture LOC et
+GLIDE de l'environnement qui collecte les rollouts. La valeur livrée `1.5` donne
+donc `LOC ±3,75°` et `GLIDE ±1,05°` pendant l'entraînement. Les valeurs nominales
+`±2,5°` et `±0,7°` restent utilisées sans modification par les campagnes de
+validation et par l'inférence. Le rendu affiche l'enveloppe réellement active et
+revient automatiquement à l'enveloppe nominale pendant une validation.
+
+Le réglage appartient à la section `training`, exclue de la signature sémantique
+du modèle. Il peut être ramené progressivement à `1.0` et le checkpoint `latest`
+reprend alors acteur, critic et moments Adam sans repartir de zéro. Le validateur
+refuse un facteur inférieur à `1` ou assez grand pour dépasser le secteur LOC ou
+la pente nominale du glide. Les rewards, observations et bonus de capture ne sont
+pas modifiés.
 
 Validation locale : ni compilation ni test exécuté, conformément à la consigne.
 

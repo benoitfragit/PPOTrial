@@ -322,23 +322,15 @@ Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& miss
     if (mission.phase == Phase::Patrol && plan.count > 1)
     {
         g.mode=GuidanceMode::Patrol;
-        if(!mission.pathQualified)
-        {
-            auto const projection=ProjectOnPlan(plan,a.position);
-            g.target=LookAheadOnPlan(plan,projection,c.mission.patrolSpeed*c.mission.patrolLookaheadSeconds);
-            g.pathDistance=projection.distance;
-        }
-        else
-        {
-            std::size_t const next = mission.waypoint % plan.count;
-            g.target = plan.points[next];
-            auto const& previous = plan.points[(next+plan.count-1)%plan.count];
-            double const dn = g.target.north-previous.north, de = g.target.east-previous.east;
-            double const lengthSquared = dn*dn+de*de;
-            double const t = lengthSquared > 0 ? std::clamp(((a.position.north-previous.north)*dn
-                +(a.position.east-previous.east)*de)/lengthSquared, 0.0, 1.0) : 0;
-            g.pathDistance = Distance(a.position, {previous.north+t*dn, previous.east+t*de, previous.up+t*(g.target.up-previous.up)});
-        }
+        // Guidance and lap validation are deliberately separate.  Always use
+        // the Blue-patrol projection/preview principle for control; the fixed
+        // ordered gates below only validate physical circuit completion.  A
+        // missed 100 m gate can therefore never leave the actor orbiting a
+        // stale point behind or below the aircraft.
+        auto const projection=ProjectOnPlan(plan,a.position);
+        g.target=LookAheadOnPlan(plan,projection,
+            c.mission.patrolSpeed*c.mission.patrolLookaheadSeconds);
+        g.pathDistance=projection.distance;
         g.targetValid=true;
     }
     else

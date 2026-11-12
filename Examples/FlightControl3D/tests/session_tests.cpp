@@ -118,6 +118,9 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     signature["guidanceVersion"]=6;
     Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
         "guidance V6 remains usable as a training warm start");
+    signature["guidanceVersion"]=7;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "guidance V7 remains usable as a training warm start");
     signature["guidanceVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown guidance contract is rejected");
     signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("spawnVersion");
@@ -141,12 +144,15 @@ int main()
         FlightModelStore store(c,directory.path);auto const checkpoint=store.Latest();
         FlightSession training(c,true,directory.path);
         auto const display=training.Snapshot();
-        Check(display.localizerCaptureDegrees==c.mission.localizerCaptureDegrees
-            && display.glideCaptureDegrees==c.mission.glideCaptureDegrees
+        Check(display.localizerCaptureDegrees==c.mission.localizerCaptureDegrees*c.training.ilsCaptureScale
+            && display.glideCaptureDegrees==c.mission.glideCaptureDegrees*c.training.ilsCaptureScale
             && display.gearDownMinimum==c.mission.gearDownMinimum,
-            "render snapshot carries configured ILS angles and the physical gear threshold");
+            "training snapshot carries widened ILS angles and the physical gear threshold");
         for(std::size_t i=0;i<16;++i) training.Tick();
         Check(!training.Finished() && training.Snapshot().validating && training.Snapshot().learning.updates==1,"final update requires completed validation");
+        Check(training.Snapshot().localizerCaptureDegrees==c.mission.localizerCaptureDegrees
+            && training.Snapshot().glideCaptureDegrees==c.mission.glideCaptureDegrees,
+            "validation restores the nominal ILS capture tolerances");
         auto const original=ReadFile(checkpoint);
         Check(!original.empty(),"completed training checkpoint exists");
         for(std::size_t i=0;i<1000 && !training.Finished();++i) training.Tick();

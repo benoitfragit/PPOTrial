@@ -136,7 +136,7 @@ void Configuration()
 {
     std::ifstream source(PPO_FLIGHT_CONFIG); nlohmann::json valid; source>>valid;
     TemporaryDirectory temporary("flight-config-"); auto const path=temporary.path/"config.json";
-    for (int test=0; test<16; ++test)
+    for (int test=0; test<19; ++test)
     {
         auto json=valid;
         if (test==0) json["normalization"]["speed"]=0;
@@ -156,11 +156,15 @@ void Configuration()
         if (test==14) json["initial"]["distanceMeters"]={5000,
             json["mission"]["ilsRangeMeters"].get<double>()+1};
         if (test==15) json["mission"]["racetrackCenterCross"]=0;
+        if (test==16) json["training"]["ilsCaptureScale"]=0.99;
+        if (test==17) json["training"]["ilsCaptureScale"]=100.0;
+        if (test==18) json["training"].erase("ilsCaptureScale");
         { std::ofstream stream(path); stream<<json; }
         Rejects([&] { LoadConfig(path); },"invalid JSON accepted");
     }
     auto c=LoadConfig(PPO_FLIGHT_CONFIG);
     Check(Near(c.initial.runwayAlignedProbability,1.0/3.0),"balanced LOC/glide-start probability");
+    Check(Near(c.training.ilsCaptureScale,1.5),"training-only ILS capture scale");
     for(double probability : {std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity()})
     {
         c.initial.runwayAlignedProbability=probability;

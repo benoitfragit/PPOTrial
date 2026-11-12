@@ -129,6 +129,14 @@ void SecondaryGuidance(Config const& c)
         && std::hypot(rallyGuidance.target.north-plan.points[0].north,
             rallyGuidance.target.east-plan.points[0].east)>0,
         "rally guidance projects onto the racetrack and anticipates forward like Blue patrol");
+    rally.pathQualified=true;rally.waypoint=1;
+    auto const followGuidance=Guide(c,plan,rally,rallyAircraft);
+    Check(Near(followGuidance.target.north,rallyGuidance.target.north)
+        && Near(followGuidance.target.east,rallyGuidance.target.east)
+        && std::hypot(followGuidance.target.north-plan.points[rally.waypoint].north,
+            followGuidance.target.east-plan.points[rally.waypoint].east,
+            followGuidance.target.up-plan.points[rally.waypoint].up)>0,
+        "validated patrol keeps projection-preview guidance instead of orbiting a stale gate");
     MissionState patrol{};
     auto const midpoint=Scale(Add(plan.points[0],plan.points[1]),0.5);
     auto before=At(c,0,0,600);before.position=Add(midpoint,Scale(RunwayRight(c.runway),-1500));

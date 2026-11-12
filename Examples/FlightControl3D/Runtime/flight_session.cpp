@@ -10,11 +10,20 @@ std::uint64_t AdditionalUpdateLimit(std::uint64_t updates,std::size_t additional
         throw std::overflow_error("FlightControl3D: training update budget overflow");
     return updates+additional;
 }
+Config EnvironmentConfig(Config config,bool training)
+{
+    if(!training) return config;
+    config.mission.localizerCaptureDegrees*=config.training.ilsCaptureScale;
+    config.mission.glideCaptureDegrees*=config.training.ilsCaptureScale;
+    config.training.ilsCaptureScale=1.0;
+    return config;
+}
 }
 FlightSession::FlightSession(Config config, bool training, std::filesystem::path modelDirectory,
     std::optional<std::size_t> inferenceEpisodes,TrainingBudget budget)
     : config_(std::move(config)),training_(training),models_(config_,std::move(modelDirectory)),
-      environment_(config_,DefaultDataRoot(),training ? config_.training.seed : config_.evaluation.seed),learner_(config_)
+      environment_(EnvironmentConfig(config_,training_),DefaultDataRoot(),
+          training ? config_.training.seed : config_.evaluation.seed),learner_(config_)
 {
     if(inferenceEpisodes && (training_ || *inferenceEpisodes==0 || *inferenceEpisodes>1000000))
         throw std::invalid_argument("FlightControl3D: invalid inference episode budget");
@@ -80,8 +89,8 @@ FlightSnapshot FlightSession::Snapshot() const noexcept
     state.lastEpisodeSeconds=static_cast<double>(state.lastEpisode.steps)*config_.mission.physicsDt;
     state.validation=validation_;state.lastValidation=lastValidation_;state.validationCampaigns=validationCampaigns_;
     state.validating=static_cast<bool>(validationEnvironment_);state.hasBest=best_.has_value();state.bestScore=best_ ? best_->Score() : 0;
-    state.localizerCaptureDegrees=config_.mission.localizerCaptureDegrees;
-    state.glideCaptureDegrees=config_.mission.glideCaptureDegrees;
+    state.localizerCaptureDegrees=active.Settings().mission.localizerCaptureDegrees;
+    state.glideCaptureDegrees=active.Settings().mission.glideCaptureDegrees;
     state.trainingUpdateLimit=trainingUpdateLimit_;state.resumed=resumed_;
     return state;
 }

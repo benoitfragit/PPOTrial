@@ -63,6 +63,8 @@ struct TrainingSettings final
 {
     std::uint32_t seed{};
     std::size_t rolloutSteps{}, minibatch{}, epochs{}, maxUpdates{}, checkpointEvery{}, hiddenWidth{};
+    /** @brief Training-only multiplier for LOC and glide capture tolerances. */
+    double ilsCaptureScale{1.0};
     double actorRate{}, criticRate{}, gamma{}, lambda{}, clip{}, entropy{}, valueWeight{};
     double minLogStd{}, maxLogStd{}, initialLogStd{}, maxGradientNorm{};
     double adamBeta1{}, adamBeta2{}, adamEpsilon{};
