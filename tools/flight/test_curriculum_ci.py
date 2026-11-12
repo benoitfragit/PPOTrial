@@ -19,6 +19,7 @@ stage = args[args.index("--stage") + 1]
 target = int(args[args.index("--updates") + 1])
 with (output / "calls.txt").open("a") as f: f.write(f"{stage} {target}\\n")
 checkpoint = output / "latest" / "flight_hybrid_v1.txt"
+checkpoint.parent.mkdir(parents=True, exist_ok=True)
 checkpoint.write_text(f"PPO_FLIGHT_HYBRID_V1 56 5 128 {target}\\n")
 (output / "training.csv").write_text("episode,updates\\n1,1\\n")
 threshold = json.loads(os.environ["PASS_AT"])[stage]
@@ -63,6 +64,24 @@ class CurriculumTests(unittest.TestCase):
         self.assertEqual((self.output / "calls.txt").read_text().splitlines(),
                          ["loc 10", "loc 20", "loc 30", "glide 40", "glide 50", "joint 60", "joint 70"])
         self.assertEqual(len(list(self.output.glob("training_*.csv"))), 7)
+
+    def test_fresh_v2_curriculum_starts_without_a_checkpoint(self):
+        self.checkpoint.unlink()
+        self.checkpoint.parent.rmdir()
+        result = self.execute()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.output / "calls.txt").read_text().splitlines(),
+                         ["loc 10", "loc 20", "loc 30", "glide 40", "glide 50", "joint 60", "joint 70"])
+        self.assertEqual(self.checkpoint.read_text().split()[4], "70")
+        self.assertEqual((self.output / "curriculum_status.txt").read_text().strip(), "completed")
+
+    def test_missing_resume_checkpoint_is_rejected_before_training(self):
+        self.checkpoint.unlink()
+        (self.output / "curriculum_stage.txt").write_text("glide\\n")
+        result = self.execute()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Missing checkpoint for saved FlightControl3D curriculum stage", result.stderr)
+        self.assertFalse((self.output / "calls.txt").exists())
 
     def test_budget_limit_is_not_a_false_success_and_can_resume(self):
         first = self.execute(max_updates=20)
