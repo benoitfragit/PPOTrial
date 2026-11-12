@@ -38,6 +38,12 @@ struct Controls final
 
 enum class Phase : std::uint8_t { Patrol, Approach, Rollout };
 enum class Outcome : std::uint8_t { Flying, Stopped, Crash, Timeout };
+/** One policy, three independent training scenarios. The desktop defaults to Joint. */
+enum class CurriculumStage : std::uint8_t { Loc, Glide, Joint };
+inline constexpr char const* StageName(CurriculumStage stage) noexcept
+{
+    return stage==CurriculumStage::Loc ? "loc" : stage==CurriculumStage::Glide ? "glide" : "joint";
+}
 /** @brief Active navigation reference exposed to the policy snapshot and renderer. */
 enum class GuidanceMode : std::uint8_t { Patrol, Localizer, Glide, Flare, Rollout };
 

@@ -50,6 +50,15 @@ double LocalizerQuality(Config const& c,Guidance const& guidance) noexcept
     double const course=LinearQuality(WrapAngle(actualCourse-desiredCourse),maximumIntercept);
     return (1.0-c.reward.localizerCourseBlend)*geometric+c.reward.localizerCourseBlend*course;
 }
+double GlideQuality(Config const& c,Guidance const& guidance) noexcept
+{
+    double const geometric=GuidanceQuality(guidance.glideError,c.reward.glideToleranceDegrees*DegreesToRadians);
+    double const slope=std::atan2(guidance.relativeVelocity.up,
+        std::hypot(guidance.relativeVelocity.north,guidance.relativeVelocity.east));
+    double const vertical=GuidanceQuality(slope-guidance.targetSlope,
+        c.reward.slopeToleranceDegrees*DegreesToRadians);
+    return 0.5*(geometric+vertical);
+}
 /**
  * @brief Reports whether geometric LOC shaping is available before the runway.
  * @param c Valid flight-control configuration.
@@ -75,23 +84,10 @@ bool GlideShapingEnvelope(Config const& c,Guidance const& guidance) noexcept
     return guidance.along<0 && guidance.height>0
         && guidance.distance<=c.mission.ilsRangeMeters;
 }
-/**
- * @brief Combines decaying guidance maintenance with a signed corrective potential.
- * @param c Valid flight-control configuration.
- * @param previousQuality Guidance quality before the physics step.
- * @param quality Guidance quality after the physics step.
- * @param progress Bounded positive or negative progress multiplier.
- * @param sustainScale Scale applied only to the recurring maintenance term.
- * @param convergenceScale Scale applied only to the signed quality difference.
- * @return Unweighted reward contribution for one physics step.
- */
-double GuidanceReward(Config const& c,double previousQuality,double quality,double progress,
-    double sustainScale=1.0,double convergenceScale=1.0) noexcept
+/** Improvement in a bounded physical guidance quality; stationary motion pays zero. */
+double QualityImprovement(double before,double after) noexcept
 {
-    // The signed difference cancels on a closed error excursion. Do not clip it:
-    // clipping would allow slow improvement / fast retreat to farm convergence.
-    return c.mission.physicsDt*sustainScale*quality*progress
-        +c.reward.convergenceSeconds*convergenceScale*(quality-previousQuality);
+    return after-before;
 }
 AircraftState InCurrentDeckFrame(Runway const& previous,Runway const& current,AircraftState state) noexcept
 {
@@ -657,62 +653,47 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
             add(Reward::Path,PatrolTrackingReward(c,plan,referenceBefore,after,pathProgress));
         if (s.phase != Phase::Rollout)
         {
-            double const progress=std::clamp((g.along-previousGuidance.along)/(g.targetSpeed*dt),-1.0,1.0);
-            // Decay only progress; the signed error potential must cancel across delayed reversals.
-            double const ilsScale=std::exp(-static_cast<double>(s.steps-1)*dt/c.reward.ilsDecaySeconds);
+            bool const retreat=g.along<previousGuidance.along;
             for(auto const channel : {Reward::Localizer,Reward::Glide})
             {
                 bool const localizer=channel==Reward::Localizer;
-                double const tolerance=(localizer ? c.reward.localizerToleranceDegrees : c.reward.glideToleranceDegrees)*DegreesToRadians;
-                // Initial approach supplies both geometric beam errors before
-                // radio capture; patrol acquisition remains LOC-led.
-                bool const enabled=localizer || s.phase==Phase::Approach || s.capturedLocalizer;
-                bool const previousInEnvelope=enabled && (localizer
+                bool const enabled=localizer || ((s.phase==Phase::Approach || s.capturedLocalizer)
+                    && c.training.curriculumStage!=CurriculumStage::Loc);
+                bool const previousValid=enabled && (localizer
                     ? LocalizerShapingEnvelope(c,previousGuidance)
                     : GlideShapingEnvelope(c,previousGuidance));
-                bool const currentInEnvelope=enabled && (localizer
+                bool const currentValid=enabled && (localizer
                     ? LocalizerShapingEnvelope(c,g) : GlideShapingEnvelope(c,g));
-                double const previousQuality=previousInEnvelope
+                double const before=previousValid
                     ? (localizer ? LocalizerQuality(c,previousGuidance)
-                        : GuidanceQuality(previousGuidance.glideError,tolerance)) : 0;
-                double const quality=currentInEnvelope
-                    ? (localizer ? LocalizerQuality(c,g) : GuidanceQuality(g.glideError,tolerance)) : 0;
-                // Entering or leaving the finite shaping envelope is not an
-                // angular correction and must not create a potential spike.
-                double const correctivePreviousQuality=previousInEnvelope && currentInEnvelope
-                    ? previousQuality : quality;
-                double const sustainScale=ilsScale*(localizer ? c.reward.localizerSustainScale : 1.0);
-                double const convergenceScale=localizer ? c.reward.localizerConvergenceScale : 1.0;
-                double const value=GuidanceReward(c,correctivePreviousQuality,quality,progress,
-                    sustainScale,convergenceScale);
-                // Angular errors can shrink merely by flying away from the
-                // threshold; that must never earn a positive ILS reward.
-                add(channel,progress<0 ? std::min(value,0.0) : value);
+                        : GlideQuality(c,previousGuidance)) : 0;
+                double const quality=currentValid
+                    ? (localizer ? LocalizerQuality(c,g) : GlideQuality(c,g)) : 0;
+                // Do not create fictitious progress at the envelope boundary.
+                double const improvement=previousValid && currentValid
+                    ? QualityImprovement(before,quality) : 0;
+                add(channel,retreat ? std::min(improvement,0.0) : improvement);
             }
         }
         if (s.phase == Phase::Approach)
         {
             if(enteredLocalizer) add(Reward::EnterLocalizer,1);
-            if(enteredGlide) add(Reward::EnterGlide,1);
+            if(enteredGlide && c.training.curriculumStage!=CurriculumStage::Loc) add(Reward::EnterGlide,1);
         }
-        if (s.phase != Phase::Rollout && s.capturedLocalizer)
+        if (s.phase == Phase::Approach)
         {
-            // Speed and slope are secondary final-approach objectives. Keeping
-            // them silent until confirmed LOC capture prevents reward farming
-            // far from the approach. A confirmed LOC loss cuts them at once.
-            // Their potential still cancels on an out-and-back.
-            double const guidanceScale=std::exp(-static_cast<double>(s.steps-1)*dt/c.reward.ilsDecaySeconds);
-            double const airspeedProgress=std::clamp(after.airspeed/g.targetSpeed,0.0,1.0);
-            double const previousSpeedQuality=GuidanceQuality(referenceBefore.airspeed-previousGuidance.targetSpeed,c.reward.speedTolerance);
-            double const speedQuality=GuidanceQuality(after.airspeed-g.targetSpeed,c.reward.speedTolerance);
-            add(Reward::Speed,GuidanceReward(c,previousSpeedQuality,speedQuality,airspeedProgress,guidanceScale));
-            double const previousSlope=std::atan2(previousGuidance.relativeVelocity.up,
+            // Safety guidance must exist before LOC capture, including Gate 1.
+            double const priorSpeed=GuidanceQuality(referenceBefore.airspeed-previousGuidance.targetSpeed,c.reward.speedTolerance);
+            double const speed=GuidanceQuality(after.airspeed-g.targetSpeed,c.reward.speedTolerance);
+            add(Reward::Speed,QualityImprovement(priorSpeed,speed));
+            double const priorSlope=std::atan2(previousGuidance.relativeVelocity.up,
                 std::hypot(previousGuidance.relativeVelocity.north,previousGuidance.relativeVelocity.east));
-            double const slope=std::atan2(g.relativeVelocity.up,std::hypot(g.relativeVelocity.north,g.relativeVelocity.east));
-            double const tolerance=c.reward.slopeToleranceDegrees*DegreesToRadians;
-            double const previousSlopeQuality=GuidanceQuality(previousSlope-previousGuidance.targetSlope,tolerance);
-            double const slopeQuality=GuidanceQuality(slope-g.targetSlope,tolerance);
-            add(Reward::Slope,GuidanceReward(c,previousSlopeQuality,slopeQuality,airspeedProgress,guidanceScale));
+            double const slope=std::atan2(g.relativeVelocity.up,
+                std::hypot(g.relativeVelocity.north,g.relativeVelocity.east));
+            double const tol=c.reward.slopeToleranceDegrees*DegreesToRadians;
+            add(Reward::Slope,QualityImprovement(
+                GuidanceQuality(priorSlope-previousGuidance.targetSlope,tol),
+                GuidanceQuality(slope-g.targetSlope,tol)));
         }
         if (contact && !s.touchedDown)
         {

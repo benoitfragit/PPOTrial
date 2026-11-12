@@ -173,8 +173,8 @@ void Configuration()
         if (test==17) json["training"]["ilsCaptureScale"]=100.0;
         if (test==18) json["training"].erase("ilsCaptureScale");
         if (test==19) json["mission"]["patrolHeadingToleranceDegrees"]=0;
-        if (test==20) json["reward"].erase("localizerConvergenceScale");
-        if (test==21) json["reward"].erase("localizerSustainScale");
+        if (test==20) json["reward"].erase("glideToleranceDegrees");
+        if (test==21) json["reward"].erase("slopeToleranceDegrees");
         if (test==22) json["reward"].erase("localizerCourseBlend");
         if (test==23) json["reward"].erase("localizerInterceptGain");
         if (test==24) json["reward"].erase("localizerInterceptLimitDegrees");

@@ -116,8 +116,7 @@ Config LoadConfig(std::filesystem::path const& path)
         Number(n,"path"), Number(n,"glideDegrees")};
     auto const& w = root.at("reward");
     Keys(w, {"weights", "pathTolerance", "localizerToleranceDegrees", "glideToleranceDegrees", "speedTolerance", "slopeToleranceDegrees",
-        "localizerConvergenceScale", "localizerSustainScale", "localizerCourseBlend", "localizerInterceptGain",
-        "localizerInterceptLimitDegrees", "convergenceSeconds", "ilsDecaySeconds"});
+        "localizerCourseBlend", "localizerInterceptGain", "localizerInterceptLimitDegrees"});
     auto const& weights = w.at("weights");
     Require(weights.is_object() && weights.size() == RewardCount, "reward channel mismatch");
     for (std::size_t channel = 0; channel < RewardCount; ++channel)
@@ -127,17 +126,13 @@ Config LoadConfig(std::filesystem::path const& path)
     config.reward.glideToleranceDegrees = Number(w,"glideToleranceDegrees");
     config.reward.speedTolerance = Number(w,"speedTolerance");
     config.reward.slopeToleranceDegrees = Number(w,"slopeToleranceDegrees");
-    config.reward.localizerConvergenceScale = Number(w,"localizerConvergenceScale");
-    config.reward.localizerSustainScale = Number(w,"localizerSustainScale");
     config.reward.localizerCourseBlend = Number(w,"localizerCourseBlend");
     config.reward.localizerInterceptGain = Number(w,"localizerInterceptGain");
     config.reward.localizerInterceptLimitDegrees = Number(w,"localizerInterceptLimitDegrees");
-    config.reward.convergenceSeconds = Number(w,"convergenceSeconds");
-    config.reward.ilsDecaySeconds = Number(w,"ilsDecaySeconds");
     auto const& t = root.at("training");
     Keys(t, {"seed", "rolloutSteps", "minibatch", "epochs", "maxUpdates", "checkpointEvery", "hiddenWidth", "actorRate", "criticRate", "gamma", "lambda",
         "clip", "entropy", "valueWeight", "minLogStd", "maxLogStd", "initialLogStd", "maxGradientNorm", "adamBeta1", "adamBeta2", "adamEpsilon",
-        "ilsCaptureScale", "resume", "checkpointDirectory"});
+        "ilsCaptureScale", "curriculum", "resume", "checkpointDirectory"});
     auto& training = config.training;
     training.seed = static_cast<std::uint32_t>(Integer(t,"seed", UINT32_MAX));
     training.rolloutSteps = Integer(t,"rolloutSteps", 65536);
@@ -148,6 +143,16 @@ Config LoadConfig(std::filesystem::path const& path)
     training.hiddenWidth = Integer(t,"hiddenWidth", 128);
 #define READ_T(field) training.field = Number(t, #field)
     READ_T(ilsCaptureScale);
+    auto const& curriculum=t.at("curriculum");
+    Keys(curriculum, {"stage","locReminderProbability","glideOffsetMeters","gateHoldSeconds"});
+    Require(curriculum.at("stage").is_string(),"curriculum stage");
+    auto const stage=curriculum.at("stage").get<std::string>();
+    Require(stage=="loc" || stage=="glide" || stage=="joint","curriculum stage");
+    training.curriculumStage=stage=="loc" ? CurriculumStage::Loc
+        : stage=="glide" ? CurriculumStage::Glide : CurriculumStage::Joint;
+    training.locReminderProbability=Number(curriculum,"locReminderProbability");
+    training.glideOffsetMeters=Number(curriculum,"glideOffsetMeters");
+    training.gateHoldSeconds=Number(curriculum,"gateHoldSeconds");
     READ_T(actorRate); READ_T(criticRate); READ_T(gamma); READ_T(lambda); READ_T(clip); READ_T(entropy);
     READ_T(valueWeight); READ_T(minLogStd); READ_T(maxLogStd); READ_T(initialLogStd); READ_T(maxGradientNorm);
     READ_T(adamBeta1); READ_T(adamBeta2); READ_T(adamEpsilon);
@@ -164,7 +169,7 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics.erase("training");
     semantics.erase("evaluation");
     semantics["distribution"] = {training.minLogStd,training.maxLogStd};
-    semantics["rewardVersion"] = 10;
+    semantics["rewardVersion"] = 11;
     semantics["guidanceVersion"] = 13;
     semantics["spawnVersion"] = 2;
     config.checkpointSignature = semantics.dump();
@@ -186,7 +191,8 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
             && (*signature)["rewardVersion"]!=3 && (*signature)["rewardVersion"]!=4
             && (*signature)["rewardVersion"]!=5 && (*signature)["rewardVersion"]!=6
             && (*signature)["rewardVersion"]!=7 && (*signature)["rewardVersion"]!=8
-            && (*signature)["rewardVersion"]!=9 && (*signature)["rewardVersion"]!=10) return false;
+            && (*signature)["rewardVersion"]!=9 && (*signature)["rewardVersion"]!=10
+            && (*signature)["rewardVersion"]!=11) return false;
         if(signature->contains("guidanceVersion") && (*signature)["guidanceVersion"]!=2
             && (*signature)["guidanceVersion"]!=3 && (*signature)["guidanceVersion"]!=4
             && (*signature)["guidanceVersion"]!=5 && (*signature)["guidanceVersion"]!=6
@@ -311,10 +317,6 @@ void Validate(Config const& c)
     auto const& w = c.reward;
     Require(w.pathTolerance > 0 && w.localizerToleranceDegrees > 0 && w.glideToleranceDegrees > 0
         && w.speedTolerance > 0 && w.slopeToleranceDegrees > 0, "reward tolerances");
-    Require(std::isfinite(w.localizerConvergenceScale) && w.localizerConvergenceScale > 0,
-        "positive finite localizer convergence scale");
-    Require(std::isfinite(w.localizerSustainScale) && w.localizerSustainScale >= 0
-        && w.localizerSustainScale <= 1, "localizer sustain scale within [0,1]");
     Require(std::isfinite(w.localizerCourseBlend) && w.localizerCourseBlend >= 0
         && w.localizerCourseBlend <= 1, "localizer course blend within [0,1]");
     Require(std::isfinite(w.localizerInterceptGain) && w.localizerInterceptGain >= 1
@@ -322,8 +324,6 @@ void Validate(Config const& c)
     Require(std::isfinite(w.localizerInterceptLimitDegrees)
         && w.localizerInterceptLimitDegrees > i.bearingDegrees.maximum+maximumHeadingJitter
         && w.localizerInterceptLimitDegrees < 90, "localizer intercept limit must cover initial bearings");
-    Require(std::isfinite(w.convergenceSeconds) && w.convergenceSeconds >= 0, "finite non-negative convergence time scale");
-    Require(std::isfinite(w.ilsDecaySeconds) && w.ilsDecaySeconds > 0, "positive finite ILS decay time scale");
     for (double weight : w.weights) Require(std::isfinite(weight), "finite reward weights");
     Require(w.weights[static_cast<std::size_t>(Reward::Crash)] <= 0, "crash weight must be non-positive");
     auto const& t = c.training;
@@ -336,6 +336,11 @@ void Validate(Config const& c)
         "Gaussian log standard deviations");
     Require(t.adamBeta1 >= 0 && t.adamBeta1 < 1 && t.adamBeta2 >= 0 && t.adamBeta2 < 1 && t.adamEpsilon > 0,
         "Adam hyperparameters");
+    Require(std::isfinite(t.locReminderProbability) && t.locReminderProbability>=0
+        && t.locReminderProbability<=1 && std::isfinite(t.glideOffsetMeters)
+        && t.glideOffsetMeters>0 && t.glideOffsetMeters<1000
+        && std::isfinite(t.gateHoldSeconds) && t.gateHoldSeconds>=m.physicsDt
+        && t.gateHoldSeconds<=m.maxSeconds, "curriculum settings");
     Require(t.ilsCaptureScale>=1.0
         && m.localizerCaptureDegrees*t.ilsCaptureScale<m.ilsSectorDegrees
         && m.glideCaptureDegrees*t.ilsCaptureScale<m.glideDegrees,

@@ -58,17 +58,12 @@ struct RewardSettings final
     std::array<double, RewardCount> weights{};
     double pathTolerance{}, localizerToleranceDegrees{}, glideToleranceDegrees{};
     double speedTolerance{}, slopeToleranceDegrees{};
-    /** @brief Multiplier applied only to the signed LOC quality improvement. */
-    double localizerConvergenceScale{};
-    /** @brief Multiplier applied only to recurring aligned LOC progress. */
-    double localizerSustainScale{};
     /** @brief Fraction of LOC quality supplied by the bounded intercept-course quality. */
     double localizerCourseBlend{};
     /** @brief Gain from signed LOC angle to the desired intercept course. */
     double localizerInterceptGain{};
     /** @brief Absolute bound for the desired LOC intercept course, in degrees. */
     double localizerInterceptLimitDegrees{};
-    double convergenceSeconds{}, ilsDecaySeconds{};
 };
 struct TrainingSettings final
 {
@@ -76,6 +71,8 @@ struct TrainingSettings final
     std::size_t rolloutSteps{}, minibatch{}, epochs{}, maxUpdates{}, checkpointEvery{}, hiddenWidth{};
     /** @brief Training-only multiplier for LOC and glide capture tolerances. */
     double ilsCaptureScale{1.0};
+    CurriculumStage curriculumStage{CurriculumStage::Joint};
+    double locReminderProbability{0.30}, glideOffsetMeters{120.0}, gateHoldSeconds{2.0};
     double actorRate{}, criticRate{}, gamma{}, lambda{}, clip{}, entropy{}, valueWeight{};
     double minLogStd{}, maxLogStd{}, initialLogStd{}, maxGradientNorm{};
     double adamBeta1{}, adamBeta2{}, adamEpsilon{};
