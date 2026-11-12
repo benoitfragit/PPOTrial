@@ -106,31 +106,54 @@ FlightSnapshot FlightSession::Snapshot() const noexcept
     state.localizerCaptureDegrees=active.Settings().mission.localizerCaptureDegrees;
     state.glideCaptureDegrees=active.Settings().mission.glideCaptureDegrees;
     state.trainingUpdateLimit=trainingUpdateLimit_;state.resumed=resumed_;
+    state.curriculumStage=config_.training.curriculumStage;
+    state.gateSuccesses=lastGateSuccesses_;state.gateEvaluated=lastGateEvaluated_;
     return state;
 }
 void FlightSession::StartValidation()
 {
     validation_={};validation_.update=learner_.Stats().updates;
     validationPendingReset_=false;lastStep_={};controls_={};
+    validationHoldSeconds_=0;validationEpisodeSucceeded_=false;
+    validationGateSuccesses_=0;
     validationEnvironment_=std::make_unique<FlightEnvironment>(config_,DefaultDataRoot(),config_.evaluation.seed);
     validationEnvironment_->Reset();
 }
 void FlightSession::TickValidation()
 {
     auto& evaluation=*validationEnvironment_;
-    if(validationPendingReset_) { evaluation.Reset();validationPendingReset_=false; }
+    if(validationPendingReset_)
+    {
+        evaluation.Reset();validationPendingReset_=false;
+        validationHoldSeconds_=0;validationEpisodeSucceeded_=false;
+    }
     auto const action=learner_.Choose(evaluation.ObservationNow(),true);
     controls_=ToControls(action);
     lastStep_=evaluation.Step(controls_);
     // No Record/Optimize here: training rollout, optimizer and RNG remain frozen.
+    auto const stage=config_.training.curriculumStage;
+    if(stage!=CurriculumStage::Joint && evaluation.Mission().outcome==Outcome::Flying)
+    {
+        auto const& mission=evaluation.Mission();
+        auto const active=evaluation.Settings().training.curriculumStage;
+        bool const captured=mission.capturedLocalizer
+            && (active==CurriculumStage::Loc || mission.capturedGlide);
+        validationHoldSeconds_=captured ? validationHoldSeconds_+config_.StepSeconds() : 0;
+        if(validationHoldSeconds_>=config_.training.gateHoldSeconds)
+            validationEpisodeSucceeded_=true;
+    }
     if(lastStep_.terminated || lastStep_.truncated)
     {
+        if(stage!=CurriculumStage::Joint && validationEpisodeSucceeded_) ++validationGateSuccesses_;
         validation_.Record(evaluation.Mission());
         if(validation_.episodes<config_.evaluation.episodes) validationPendingReset_=true;
         else
         {
-            models_.Promote(learner_,validation_);
+            // Intermediate capture gates never promote a landing BEST.
+            if(stage==CurriculumStage::Joint) models_.Promote(learner_,validation_);
             best_=models_.BestMetrics(true);lastValidation_=validation_;++validationCampaigns_;
+            lastGateSuccesses_=stage==CurriculumStage::Joint ? validation_.stops : validationGateSuccesses_;
+            lastGateEvaluated_=validation_.episodes;
             validationEnvironment_.reset();
             lastStep_={};controls_={};
             finished_=learner_.Stats().updates>=trainingUpdateLimit_;

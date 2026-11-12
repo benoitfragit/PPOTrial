@@ -23,24 +23,34 @@ int main(int argc, char** argv)
         std::filesystem::path configPath(PPO_FLIGHT_CONFIG),output;
         bool training=true;
         std::optional<std::size_t> updates,episodes;
+        std::optional<CurriculumStage> stage;
         for (int i=1;i<argc;++i)
         {
             std::string_view option(argv[i]);
             if (option=="--evaluate") { training=false; continue; }
             if (option=="--help")
             {
-                std::cout<<"FlightControlHeadless [--config FILE] [--output DIRECTORY] [--updates N] [--evaluate --episodes N]\n";
+                std::cout<<"FlightControlHeadless [--config FILE] [--output DIRECTORY] [--updates N] [--stage loc|glide|joint] [--evaluate --episodes N]\n";
                 return 0;
             }
-            if (option!="--config" && option!="--output" && option!="--updates" && option!="--episodes")
+            if (option!="--config" && option!="--output" && option!="--updates" && option!="--episodes" && option!="--stage")
                 throw std::invalid_argument("Unknown option");
             if (++i==argc) throw std::invalid_argument("Missing option value");
             if (option=="--config") configPath=argv[i];
             else if (option=="--output") output=argv[i];
             else if (option=="--updates") updates=Positive(argv[i]);
+            else if (option=="--stage")
+            {
+                std::string_view value(argv[i]);
+                if(value=="loc") stage=CurriculumStage::Loc;
+                else if(value=="glide") stage=CurriculumStage::Glide;
+                else if(value=="joint") stage=CurriculumStage::Joint;
+                else throw std::invalid_argument("Expected curriculum stage loc, glide or joint");
+            }
             else episodes=Positive(argv[i]);
         }
         auto config=LoadConfig(configPath);
+        if(stage) config.training.curriculumStage=*stage;
         if (updates) config.training.maxUpdates=*updates;
         if ((training && episodes) || (!training && updates)) throw std::invalid_argument("--updates is for training; --episodes is for evaluation");
         if (output.empty()) output=std::filesystem::absolute(configPath).parent_path().parent_path().parent_path()/config.training.checkpointDirectory;
@@ -79,6 +89,14 @@ int main(int argc, char** argv)
             }
         }
         auto const state=session.Snapshot();
+        if(training && state.gateEvaluated>0)
+        {
+            bool const passed=state.gateSuccesses>=static_cast<std::size_t>(
+                std::ceil(config.evaluation.minimumSuccessRate*static_cast<double>(state.gateEvaluated)));
+            std::cout<<"[FLIGHT_GATE] stage="<<StageName(config.training.curriculumStage)
+                <<" successes="<<state.gateSuccesses<<" episodes="<<state.gateEvaluated
+                <<" passed="<<(passed ? "true" : "false")<<std::endl;
+        }
         std::cout<<"[FLIGHT] completed episodes="<<state.episodes<<" touchdowns="<<state.touchdowns<<" stops="<<state.stops
             <<" crashes="<<state.crashes<<" timeouts="<<state.timeouts<<'\n';
     }

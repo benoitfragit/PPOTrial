@@ -90,6 +90,35 @@ int main()
         Check(std::abs(env.Aircraft().rollRate-neutral.rollRate)>1e-4 && std::abs(env.Aircraft().pitchRate-neutral.pitchRate)>1e-4,"aileron/elevator affect actual FDM");
         Check(std::isfinite(baseline.reward),"real transition reward");
         InterceptActionReward(c);
+        // Curriculum starts must keep LEFT/RIGHT balanced and GLIDE above/below.
+        auto locConfig=c;locConfig.training.curriculumStage=CurriculumStage::Loc;
+        FlightEnvironment locEnv(locConfig,DefaultDataRoot(),761U);
+        bool seenLeft=false,seenRight=false;
+        for(int e=0;e<20;++e)
+        {
+            locEnv.Reset();
+            auto const g=locEnv.CurrentGuidance();
+            seenLeft|=g.cross<0;seenRight|=g.cross>0;
+            Check(locEnv.Settings().training.curriculumStage==CurriculumStage::Loc,"LOC gate active");
+        }
+        Check(seenLeft && seenRight,"LOC gate explores both sides of runway");
+        auto glideConfig=c;glideConfig.training.curriculumStage=CurriculumStage::Glide;
+        glideConfig.training.locReminderProbability=0;
+        FlightEnvironment glideEnv(glideConfig,DefaultDataRoot(),762U);
+        bool high=false,low=false;
+        for(int e=0;e<20;++e)
+        {
+            glideEnv.Reset();
+            auto const g=glideEnv.CurrentGuidance();
+            high|=g.glideError>0;low|=g.glideError<0;
+            Check(std::abs(g.cross)<0.1,"glide gate begins on LOC axis");
+        }
+        Check(high && low,"glide gate samples both sides of descending plane");
+        glideConfig.training.locReminderProbability=1;
+        FlightEnvironment reminderEnv(glideConfig,DefaultDataRoot(),763U);
+        reminderEnv.Reset();
+        Check(reminderEnv.Settings().training.curriculumStage==CurriculumStage::Loc,
+            "gate 2 can replay true LOC-only episodes");
         c.mission.maxSeconds=0.2; c.mission.actionSubsteps=1;
         FlightEnvironment shortEpisode(c); shortEpisode.Reset();
         StepResult last{};

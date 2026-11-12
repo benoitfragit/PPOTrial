@@ -32,6 +32,8 @@ struct FlightSnapshot final
     double localizerCaptureDegrees{},glideCaptureDegrees{};
     std::uint64_t trainingUpdateLimit{};
     bool resumed{};
+    CurriculumStage curriculumStage{CurriculumStage::Joint};
+    std::size_t gateSuccesses{},gateEvaluated{};
 };
 
 /** Shared orchestration for the current desktop framework and CPU headless runner. */
@@ -67,6 +69,9 @@ private:
     std::uint64_t validationCampaigns_{};
     std::size_t inferenceEpisodeLimit_{};
     bool validationPendingReset_{};
+    double validationHoldSeconds_{};
+    bool validationEpisodeSucceeded_{};
+    std::size_t validationGateSuccesses_{},lastGateSuccesses_{},lastGateEvaluated_{};
     void StartValidation();
     void TickValidation();
 };
