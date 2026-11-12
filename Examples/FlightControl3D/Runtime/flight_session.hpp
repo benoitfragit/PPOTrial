@@ -23,6 +23,7 @@ struct FlightSnapshot final
     std::uint64_t validationCampaigns{};
     double bestScore{};
     bool validating{},hasBest{};
+    double localizerCaptureDegrees{},glideCaptureDegrees{};
 };
 
 /** Shared orchestration for the current desktop framework and CPU headless runner. */

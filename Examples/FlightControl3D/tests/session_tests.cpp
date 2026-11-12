@@ -20,6 +20,9 @@ int main()
         TemporaryDirectory directory("flight-session-");
         FlightModelStore store(c,directory.path);auto const checkpoint=store.Latest();
         FlightSession training(c,true,directory.path);
+        auto const display=training.Snapshot();
+        Check(display.localizerCaptureDegrees==c.mission.localizerCaptureDegrees
+            && display.glideCaptureDegrees==c.mission.glideCaptureDegrees,"render snapshot carries configured ILS envelope angles");
         for(std::size_t i=0;i<16;++i) training.Tick();
         Check(!training.Finished() && training.Snapshot().validating && training.Snapshot().learning.updates==1,"final update requires completed validation");
         auto const original=ReadFile(checkpoint);

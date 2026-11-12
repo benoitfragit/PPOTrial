@@ -28,7 +28,8 @@ int main(int argc,char** argv)
     if(!check) renderer=&ppo::renderer::EnvironmentRenderer::GetInstance(std::string(example.windowTitle));
     serializer.Load();
     if(check) { std::cout<<"Bootstrapped dedicated FlightControl3D\n"; return 0; }
-    renderer->SetEnvironment(environment);
+    renderer->SetEnvironment(environment,ppo::renderer::EnvironmentRenderer::View::FlightControl3D);
+    environment.Start(); // Publish the initial preview while remaining paused.
     if(autoRun) environment.Play();
     while(renderer->Run()) {}
     environment.Stop();

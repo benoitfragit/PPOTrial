@@ -2040,9 +2040,13 @@ EnvironmentRenderer::ApplyTheme(void)
 * @param env Environment to observe and control.
 */
 void
-EnvironmentRenderer::SetEnvironment(ppo::model::Environment& env) noexcept
+EnvironmentRenderer::SetEnvironment(ppo::model::Environment& env, View view) noexcept
 {
     p_environment = &env;
+    bool const flightView = view == View::FlightControl3D;
+    if (m_flightControlView != flightView)
+        m_layoutInitialized = false;
+    m_flightControlView = flightView;
 
     p_environment->ReadSnapshot([&](entt::registry const& snapshot)
     {
@@ -2174,9 +2178,12 @@ EnvironmentRenderer::BuildDockspace(void)
         if (ImGui::BeginMenu("Panels"))
         {
             ImGui::MenuItem("Simulation", nullptr, &m_showSimulation);
-            ImGui::MenuItem("Minimap", nullptr, &m_showMinimap);
-            ImGui::MenuItem("Entities", nullptr, &m_showEntities);
-            ImGui::MenuItem("Entity details", nullptr, &m_showInspection);
+            if (!m_flightControlView)
+            {
+                ImGui::MenuItem("Minimap", nullptr, &m_showMinimap);
+                ImGui::MenuItem("Entities", nullptr, &m_showEntities);
+                ImGui::MenuItem("Entity details", nullptr, &m_showInspection);
+            }
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();
@@ -2210,9 +2217,15 @@ EnvironmentRenderer::BuildDefaultLayout(ImGuiID dockspaceId)
     ImGuiID dockSidebar = ImGui::DockBuilderSplitNode(
         dockMain, ImGuiDir_Right, 0.31F, nullptr, &dockMain);
     ImGuiID dockControls = ImGui::DockBuilderSplitNode(
-        dockSidebar, ImGuiDir_Down, 0.22F, nullptr, &dockSidebar);
+        dockSidebar, ImGuiDir_Down, m_flightControlView ? 0.30F : 0.22F, nullptr, &dockSidebar);
 
     ImGui::DockBuilderDockWindow("3D Tactical View", dockMain);
+    if (m_flightControlView)
+    {
+        ImGuiID const dockInstruments = ImGui::DockBuilderSplitNode(
+            dockSidebar, ImGuiDir_Up, 0.50F, nullptr, &dockSidebar);
+        ImGui::DockBuilderDockWindow("FlightControl3D", dockInstruments);
+    }
     ImGui::DockBuilderDockWindow("Learning", dockSidebar);
     ImGui::DockBuilderDockWindow("Simulation", dockControls);
     // Optional windows share a tabbed dock, never crowd the default view.
@@ -2730,6 +2743,13 @@ EnvironmentRenderer::DrawSimulationControls(entt::registry const& snapshot)
                 agent->m_started = false;
     }
 
+#ifdef PPO_WITH_FLIGHT_CONTROL
+    if (m_flightControlView)
+    {
+        ppo::examples::flight::DrawFlightDisplayControls();
+        return;
+    }
+#endif
     if (!ImGui::CollapsingHeader("World and display settings"))
         return;
 
@@ -2857,6 +2877,11 @@ EnvironmentRenderer::DrawTrainingControls(std::shared_ptr<AgentController> const
         return;
 
     agent->m_rollout = static_cast<int>(state.m_common.m_maxStep);
+    if (m_flightControlView)
+    {
+        ImGui::Text("Rollout buffer: %d aircraft steps", agent->m_rollout);
+        return;
+    }
     if (state.m_name == "Blue generalized shared MAPPO")
     {
         ImGui::Text("Rollout buffer: %d team steps", agent->m_rollout);
@@ -2891,6 +2916,19 @@ EnvironmentRenderer::DrawRewardControls(std::shared_ptr<AgentController> const& 
 
     agent->m_clamp = state.m_common.m_rewardClamp;
     agent->m_scalings = state.m_scalings;
+
+    if (m_flightControlView)
+    {
+        for (std::size_t i = 0; i < state.m_scalings.size(); ++i)
+        {
+            char const* const name = i < state.m_rewardnames.size()
+                ? state.m_rewardnames[i].c_str() : "Reward";
+            ImGui::Text("%s: weight %+.3f", name, state.m_scalings[i]);
+            if (i < state.m_rewards.size())
+                ImGui::TextDisabled("  current %+.4f", state.m_rewards[i]);
+        }
+        return;
+    }
 
     if (ImGui::SliderFloat("Reward clamp", &agent->m_clamp, 0.5F, 100.F))
     {
@@ -3058,12 +3096,17 @@ EnvironmentRenderer::DrawLearningProgress(std::shared_ptr<AgentController> const
     {
         ImGui::TextUnformatted("Evaluating model");
         ImGui::ProgressBar(std::clamp(common.m_evaluationprogress, 0.F, 1.F), ImVec2(-1.F, 0.F));
-        ImGui::Text("Tests completed: %u  |  Step-limit timeouts: %u",
-                    common.m_evaluationTestsFinished, common.m_evaluationTimeoutTests);
-        ImGui::Text("Simulation steps: %llu  |  %.0f steps/s",
-                    common.m_evaluationStepsExecuted, common.m_evaluationStepsPerSecond);
-        ImGui::Text("Elapsed: %.1f s", common.m_evaluationElapsedSeconds);
-        ImGui::TextDisabled("Timeout = configured step limit reached, not necessarily a failed task.");
+        if (m_flightControlView)
+            ImGui::Text("Episodes completed: %u", common.m_evaluationTestsFinished);
+        else
+        {
+            ImGui::Text("Tests completed: %u  |  Step-limit timeouts: %u",
+                        common.m_evaluationTestsFinished, common.m_evaluationTimeoutTests);
+            ImGui::Text("Simulation steps: %llu  |  %.0f steps/s",
+                        common.m_evaluationStepsExecuted, common.m_evaluationStepsPerSecond);
+            ImGui::Text("Elapsed: %.1f s", common.m_evaluationElapsedSeconds);
+            ImGui::TextDisabled("Timeout = configured step limit reached, not necessarily a failed task.");
+        }
     }
 
     auto const& scores = agent->m_evaluationScores.Samples();
@@ -3076,10 +3119,14 @@ EnvironmentRenderer::DrawLearningProgress(std::shared_ptr<AgentController> const
 
     ImGui::SeparatorText("Model evaluation");
     ImGui::Text("LATEST  %.2f", common.m_latestEvaluationNotation);
-    ImGui::Text("BEST    %.2f", common.m_notation);
+    if (!m_flightControlView)
+        ImGui::Text("BEST    %.2f", common.m_notation);
     ImGui::Text("SUCCESS %.1f%%", 100.F * common.m_latestEvaluationSuccessRate);
-    ImGui::Text("SURVIVAL %.1f%%", 100.F * common.m_latestEvaluationSurvivalRate);
-    ImGui::Text("TIMEOUT  %.1f%%", 100.F * common.m_latestEvaluationTimeoutRate);
+    if (!m_flightControlView)
+    {
+        ImGui::Text("SURVIVAL %.1f%%", 100.F * common.m_latestEvaluationSurvivalRate);
+        ImGui::Text("TIMEOUT  %.1f%%", 100.F * common.m_latestEvaluationTimeoutRate);
+    }
     ImGui::TextDisabled("Campaign #%llu  -  %u test cases",
         static_cast<unsigned long long>(common.m_completedEvaluations),
         common.m_latestEvaluationTestCount);
@@ -3522,6 +3569,27 @@ EnvironmentRenderer::DrawTacticalWindow(entt::registry const& snapshot)
         ImGui::End();
         return;
     }
+
+#ifdef PPO_WITH_FLIGHT_CONTROL
+    if (m_flightControlView)
+    {
+        if (!snapshot.ctx().contains<ppo::examples::flight::FlightSnapshot>())
+        {
+            ImGui::TextUnformatted("Preparing FlightControl3D preview...");
+            ImGui::End();
+            return;
+        }
+        auto const& flight = snapshot.ctx().get<ppo::examples::flight::FlightSnapshot>();
+        ImGui::Text("Cessna 310 | FPS %d", GetFPS());
+        ReleaseMultipleCameraTextures();
+        ImVec2 const size = ImGui::GetContentRegionAvail();
+        EnsureTacticalTexture(static_cast<int>(size.x), static_cast<int>(size.y));
+        ppo::examples::flight::DrawFlightScene(flight, m_tacticalTexture);
+        rlImGuiImageRenderTextureFit(&m_tacticalTexture, true);
+        ImGui::End();
+        return;
+    }
+#endif
 
     if (m_selectedEntity != entt::null && snapshot.valid(m_selectedEntity) && snapshot.any_of<ppo::model::sEntityState>(m_selectedEntity))
     {
@@ -4263,6 +4331,24 @@ EnvironmentRenderer::DrawAgentsWindow(entt::registry const& snapshot)
 {
     ImGui::Begin("Learning");
 
+#ifdef PPO_WITH_FLIGHT_CONTROL
+    if (m_flightControlView && snapshot.ctx().contains<ppo::examples::flight::FlightSnapshot>())
+    {
+        auto const& flight = snapshot.ctx().get<ppo::examples::flight::FlightSnapshot>();
+        ImGui::Text("%s%s", flight.training ? "Hybrid PPO training" : "Independent evaluation",
+            flight.failed ? " | Error" : flight.finished ? " | Complete" : "");
+        ImGui::Text("Episodes %llu | Touchdowns %llu | Stops %llu",
+            static_cast<unsigned long long>(flight.episodes),static_cast<unsigned long long>(flight.touchdowns),
+            static_cast<unsigned long long>(flight.stops));
+        ImGui::Text("Crashes %llu | Timeouts %llu",static_cast<unsigned long long>(flight.crashes),
+            static_cast<unsigned long long>(flight.timeouts));
+        if (flight.hasBest)
+            ImGui::Text("Validated BEST: %.1f%% successful stops",flight.bestScore);
+        else
+            ImGui::TextDisabled("No validated BEST yet");
+    }
+#endif
+
     auto const view = snapshot.view<ppo::model::sAgentStateSnaphot>();
     if (view.begin() == view.end())
         ImGui::TextDisabled("No training agent found.");
@@ -4288,9 +4374,10 @@ EnvironmentRenderer::DrawAgentsWindow(entt::registry const& snapshot)
                     DrawLearningProgress(agent, state);
                     ImGui::EndTabItem();
                 }
-                if (ImGui::BeginTabItem("Rewards & Settings"))
+                if (ImGui::BeginTabItem(m_flightControlView ? "Rewards" : "Rewards & Settings"))
                 {
-                    ImGui::TextWrapped("Changes apply to the active training agent.");
+                    if (!m_flightControlView)
+                        ImGui::TextWrapped("Changes apply to the active training agent.");
                     DrawRewardControls(agent, state);
                     ImGui::SeparatorText("Rollout");
                     DrawTrainingControls(agent, state);
@@ -4361,7 +4448,7 @@ EnvironmentRenderer::Run(void)
             if (ImGui::Begin("Simulation", &m_showSimulation))
             {
                 DrawSimulationControls(snapshot);
-                if (ImGui::CollapsingHeader("Scene details"))
+                if (!m_flightControlView && ImGui::CollapsingHeader("Scene details"))
                     DrawStatusBar(snapshot);
                 if (p_pinnedPlot != nullptr && ImGui::CollapsingHeader("Pinned diagnostics"))
                     DrawOneAgentPlot(*p_pinnedPlot);
@@ -4370,11 +4457,11 @@ EnvironmentRenderer::Run(void)
         }
 
         DrawTacticalWindow(snapshot);
-        if (m_showMinimap)
+        if (!m_flightControlView && m_showMinimap)
             DrawMinimapWindow(snapshot);
-        if (m_showEntities)
+        if (!m_flightControlView && m_showEntities)
             DrawEntitiesWindow(snapshot);
-        if (m_showInspection)
+        if (!m_flightControlView && m_showInspection)
             DrawInspectorWindow(snapshot);
         DrawAgentsWindow(snapshot);
 #ifdef PPO_WITH_FLIGHT_CONTROL

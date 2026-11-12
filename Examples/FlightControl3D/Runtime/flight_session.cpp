@@ -57,6 +57,8 @@ FlightSnapshot FlightSession::Snapshot() const noexcept
         config_.mission.glideDegrees,config_.mission.ilsRangeMeters,config_.StepSeconds(),training_,finished_,false};
     state.validation=validation_;state.lastValidation=lastValidation_;state.validationCampaigns=validationCampaigns_;
     state.validating=static_cast<bool>(validationEnvironment_);state.hasBest=best_.has_value();state.bestScore=best_ ? best_->Score() : 0;
+    state.localizerCaptureDegrees=config_.mission.localizerCaptureDegrees;
+    state.glideCaptureDegrees=config_.mission.glideCaptureDegrees;
     return state;
 }
 void FlightSession::StartValidation()

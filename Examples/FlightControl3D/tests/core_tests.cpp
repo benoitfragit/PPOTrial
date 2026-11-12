@@ -1,4 +1,5 @@
 #include "test_support.hpp"
+#include "../Renderer/flight_display.hpp"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <limits>
@@ -169,6 +170,15 @@ void RandomizationAndMotion(Config const& c)
         auto const local=DeckCoordinates(runway,aircraft.position);
         double const distance=std::hypot(local.north,local.east);
         Check(distance>=c.initial.distanceMeters.minimum-1e-7 && distance<=c.initial.distanceMeters.maximum+1e-7,"random spawn distance bounds");
+        auto episode=c; episode.runway=runway;
+        auto const plan=MakeFlightPlan(episode);
+        double nearest=std::numeric_limits<double>::max();
+        for(std::size_t i=0;i<plan.count;++i)
+        {
+            auto const delta=Subtract(aircraft.position,plan.points[i]);
+            nearest=std::min(nearest,std::sqrt(Dot(delta,delta)));
+        }
+        Check(local.north<0 && nearest<2000,"default starts stay on approach side and near the racetrack");
         Check(local.up>=c.initial.heightMeters.minimum-1e-7 && local.up<=c.initial.heightMeters.maximum+1e-7,"random spawn height bounds");
         Check(aircraft.airspeed>=c.initial.speedMps.minimum && aircraft.airspeed<=c.initial.speedMps.maximum,"random spawn speed bounds");
         Check(aircraft.roll>=c.initial.rollDegrees.minimum*DegreesToRadians && aircraft.roll<=c.initial.rollDegrees.maximum*DegreesToRadians,"random roll bounds");
@@ -201,10 +211,52 @@ void RandomizationAndMotion(Config const& c)
     auto const result=AdvanceMission(moving,plan,s,a,a);
     Check(result.terminated && s.outcome==Outcome::Stopped,"stop is relative to moving runway");
 }
+void DisplayReferences(Config const& config)
+{
+    for(double heading : {0.0,90.0,181.0,359.0})
+    {
+        auto c=config;
+        c.runway.origin={1200,-700,18}; c.runway.headingDegrees=heading;
+        c.runway.pitch=0.2*DegreesToRadians; c.runway.roll=-0.4*DegreesToRadians;
+        c.runway.velocity={2,1,0.3}; c.runway.angularVelocity={0.0001,0.0002,0};
+        auto const display=MakeIlsDisplayGeometry(c.runway,c.mission.ilsRangeMeters,
+            c.mission.glideDegrees,c.mission.localizerCaptureDegrees,c.mission.glideCaptureDegrees);
+        auto const locOrigin=DeckCoordinates(c.runway,display.localizerOrigin);
+        auto const gsOrigin=DeckCoordinates(c.runway,display.glideOrigin);
+        Check(Near(locOrigin.north,0) && Near(locOrigin.east,0) && locOrigin.up>0 && locOrigin.up<1,
+            "LOC starts above threshold without deck depth fighting");
+        Check(Near(gsOrigin.north,0) && Near(gsOrigin.east,0) && Near(gsOrigin.up,c.runway.thresholdHeightMeters),
+            "GLIDE starts at configured threshold crossing height");
+        auto const left=DeckCoordinates(c.runway,display.localizerLeft);
+        auto const right=DeckCoordinates(c.runway,display.localizerRight);
+        Check(Near(left.north,-c.mission.ilsRangeMeters) && Near(right.north,left.north)
+            && Near(left.east,-right.east) && left.east<0,"LOC envelope is runway-aligned and symmetric");
+        Check(Near(std::atan2(right.east,-right.north)/DegreesToRadians,c.mission.localizerCaptureDegrees),
+            "LOC envelope follows configured capture angle");
+        MissionState approach{}; approach.phase=Phase::Approach;
+        AircraftState onGlide{}; onGlide.position=display.glideEnd; onGlide.pitch=8*DegreesToRadians;
+        onGlide.velocity=Add(DeckVelocity(c.runway,onGlide.position),
+            Add(Scale(RunwayForward(c.runway),100*std::cos(3*DegreesToRadians)),
+                Scale(RunwayNormal(c.runway),-100*std::sin(3*DegreesToRadians))));
+        auto const guidance=Guide(c,MakeFlightPlan(c),approach,onGlide);
+        Check(Near(guidance.localizer,0) && Near(guidance.glideError,0),"displayed centreline agrees with real ILS guidance");
+        Check(Near(DisplaySlopeDegrees(guidance),-3),"actual slope is deck-relative velocity, independent of aircraft pitch");
+        for(auto const& edge : {display.glideLow,display.glideHigh})
+        {
+            auto const point=DeckCoordinates(c.runway,edge);
+            double const angle=std::atan2(point.up-c.runway.thresholdHeightMeters,-point.north)/DegreesToRadians;
+            Check(Near(std::abs(angle-c.mission.glideDegrees),c.mission.glideCaptureDegrees),"glide envelope follows configured capture angle");
+        }
+    }
+    Guidance stopped{};
+    Check(Near(DisplaySlopeDegrees(stopped),0),"stationary slope stays finite");
+    stopped.relativeVelocity={0,100,100};
+    Check(Near(DisplaySlopeDegrees(stopped),45),"climb uses full horizontal speed and positive slope");
+}
 }
 int main()
 {
-    try { auto const c=LoadConfig(PPO_FLIGHT_CONFIG); Geometry(c); Landing(c); Configuration(); OrderedNavigation(c); RandomizationAndMotion(c); }
+    try { auto const c=LoadConfig(PPO_FLIGHT_CONFIG); Geometry(c); Landing(c); Configuration(); OrderedNavigation(c); RandomizationAndMotion(c); DisplayReferences(c); }
     catch(std::exception const& e) { std::cerr<<e.what()<<'\n'; return 1; }
     std::cout<<"Flight mission/configuration regressions passed\n";
 }

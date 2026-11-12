@@ -360,7 +360,12 @@ int main(int argc, char** argv)
         return 0;
     }
 
-    renderer->SetEnvironment(environment);
+    bool const flightView = requested == "flight-control-3d" || requested == "flight-control-3d-inference";
+    renderer->SetEnvironment(environment, flightView
+        ? ppo::renderer::EnvironmentRenderer::View::FlightControl3D
+        : ppo::renderer::EnvironmentRenderer::View::Tactical);
+    if (flightView)
+        environment.Start(); // Publish the FlightControl3D preview before Play.
     if (autoRun)
     {
         using Clock = std::chrono::steady_clock;

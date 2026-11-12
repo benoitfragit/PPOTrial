@@ -31,6 +31,7 @@ namespace ppo::renderer {
 class EnvironmentRenderer
 {
 public:
+    enum class View { Tactical, FlightControl3D };
     /**
     * @brief Returns the singleton renderer instance.
     * @param title Window title used on first construction.
@@ -51,8 +52,9 @@ public:
     /**
     * @brief Attaches the renderer to one simulation environment.
     * @param env Environment to visualize.
+    * @param view Initial display profile, including before the first snapshot.
     */
-    void SetEnvironment(ppo::model::Environment& env) noexcept;
+    void SetEnvironment(ppo::model::Environment& env, View view = View::Tactical) noexcept;
     /**
     * @brief Executes one UI frame.
     * @return False when the application should exit.
@@ -582,6 +584,8 @@ private:
     * @brief True once the docking layout has been initialized.
     */
     bool m_layoutInitialized{ false };
+    /** @brief Selects controls and docking for a native FlightControl3D snapshot. */
+    bool m_flightControlView{ false };
     /**
     * @brief True while the camera auto-attaches to the tracked entity.
     */

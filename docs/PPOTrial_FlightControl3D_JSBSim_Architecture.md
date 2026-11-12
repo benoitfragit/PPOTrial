@@ -27,6 +27,21 @@ L'option CMake `PPO_BUILD_FLIGHT_CONTROL` vaut ON par défaut pour le desktop. S
 
 Le programme démarre en pause ; Play lance l'apprentissage. `--auto-run` démarre immédiatement. `--inference` charge exclusivement le BEST validé et lance une évaluation déterministe à graines distinctes. Sans BEST validé, le lancement d'inférence échoue explicitement. `--config FICHIER` sélectionne une autre configuration complète. `--check-example` vérifie le bootstrap sans fenêtre ni entraînement.
 
+## Interface FlightControl3D
+
+Le profil graphique est sélectionné explicitement au lancement dédié ou depuis le catalogue, avant le premier snapshot. Le worker publie un aperçu en pause sans effectuer de pas d'apprentissage. La vue d'ensemble cadre l'avion, la piste, le circuit et les références ILS visibles.
+
+| Panneau | Informations et commandes |
+|---|---|
+| Vue 3D | Avion, piste, hippodrome et références LOC/GLIDE |
+| FlightControl3D, à droite | Tableau consigne/mesure : CAS en m/s et pente trajectoire en degrés ; distance, hauteur et écarts ILS ; détails avion et poser repliables |
+| Learning | Compteurs d'épisodes, entraînement PPO, validation, BEST et diagnostics ; poids affichés en lecture seule |
+| Simulation | Play/Pause/Stop, deux cases LOC et GLIDE indépendantes, sélection de caméra ; distance de poursuite uniquement pour cette caméra |
+
+Les commandes tactiques sans effet sur cet exemple et les informations dupliquées sont masquées. La pente affichée provient de la vitesse relative à la piste, avec le même calcul que le shaping `Slope` ; ce n'est pas le tangage. Les consignes sont celles du guidage courant, y compris pendant l'arrondi et le roulage.
+
+`Renderer/flight_display.hpp` calcule les références ILS sans dépendance graphique. LOC et GLIDE partent du seuil dans le repère courant de la piste, avec la hauteur de franchissement configurée pour GLIDE. Les enveloppes translucides représentent les tolérances de capture du JSON ; elles restent visibles lorsque le prolongement de la piste inclinée traverse le décor marin. Les cases ne modifient que l'affichage.
+
 ## Découpage
 
 | Couche | Responsabilité |
@@ -50,8 +65,9 @@ La configuration unique est `resources/settings/Scenarios/FlightControl3D.json`.
 
 | Paramètre avion | Plage initiale livrée |
 |---|---|
-| Distance horizontale dans le repère piste | 7 à 14 km |
-| Azimut autour de la piste / décalage de cap | −180 à +180° |
+| Distance horizontale dans le repère piste | 5 à 7,5 km |
+| Azimut de départ côté approche | −20 à +20° |
+| Décalage de cap | −180 à +180° |
 | Hauteur au-dessus du plan courant de la piste | 400 à 1 000 m |
 | Vitesse calibrée | 55 à 80 m/s |
 | Roulis / tangage / pente | ±15° / −4 à +8° / ±3° |
@@ -79,6 +95,8 @@ Un crash ou un arrêt réussi est terminal. La limite de temps est une troncatur
 Les dix canaux propres à FlightControl3D sont `Path`, `Localizer`, `Glide`, `Speed`, `Slope`, `EnterLocalizer`, `EnterGlide`, `Touchdown`, `Stop`, `Crash`. Aucune modification des canaux Blue MAPPO n'est effectuée.
 
 Les shapings sont des qualités triangulaires `max(0, 1 − abs(erreur)/tolérance)`, pondérées par le temps physique écoulé. Les captures sont payées une seule fois par épisode. Les seuils, tolérances et poids sont dans le JSON.
+
+Le suivi d'hippodrome reprend le principe de waypoints ordonnés de BlueAgent, avec une implémentation 3D distincte liée à la piste mobile. `Path` récompense l'avancement sur le segment dans le corridor qualifié de 350 m. Il ne fournit pas de shaping de convergence depuis l'extérieur ; le tour complet autorise l'approche mais ne rapporte pas de bonus dédié. Ces récompenses ne sont pas modifiées par l'évolution de l'interface.
 
 Le toucher nécessite un contact physique des roues, un train suffisamment sorti, une position sur la piste et une vitesse, un taux de descente et une attitude acceptables. La première abscisse de toucher provient du point physique de roue JSBSim ; les coordonnées des trois trains sont contrôlées dans le rectangle de piste. La vitesse verticale avant impact est vérifiée pour éviter que le solveur de contact ne masque un poser dur. Les vitesses et attitudes de sécurité sont relatives à la piste mobile. Un contact structurel ou un poser sans train provoque un crash sans récompense de toucher. La télémétrie garde aussi l'impact non valide : position signée, erreur latérale, vitesse verticale/horizontale et position réelle du train.
 
@@ -111,6 +129,8 @@ Chaque génération admise est conservée sous `best/flight_<update>_<checksum>.
 ## Vérification et limites
 
 Les régressions déterministes couvrent géométrie, captures uniques, transitions, crash train/impact/attitude, toucher, arrêt relatif, limites de temps, 1 000 tirages aléatoires, dérivée cinématique de la houle, callback réellement consulté par JSBSim, mouvement des commandes, contact des vraies roues, gradients hybrides par différences finies, mise à jour RLtools, reprise des moments/RNG et intégrité en évaluation.
+
+La révision d'interface ajoute les références ILS sur quatre caps avec inclinaison et mouvement, la pente relative distincte du tangage, le transport des tolérances vers le snapshot et la proximité des 1 000 départs avec le circuit. Un test ImGui sans fenêtre vérifie les deux cases par clics simulés, les valeurs consigne/mesure et l'absence des compteurs d'apprentissage dans les instruments. Localement, les 14 CTest headless passent en Debug et Release ; le test ImGui est aussi exécuté séparément. La compilation complète du desktop reste vérifiée par la CI VS2022 de la PR.
 
 Validation locale au premier état relu : GCC 14, Debug et Release, CTest ; smoke d'un update puis deux épisodes indépendants. L'échec des deux épisodes d'évaluation de ce modèle presque vierge ne démontre aucune convergence. La CI Windows du desktop et les quatre configurations headless Windows/Linux doivent être vérifiées avant de déclarer la livraison validée. Le lancement des raccourcis par l'explorateur Windows doit encore être confirmé sur la machine cible.
 
