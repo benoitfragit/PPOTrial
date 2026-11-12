@@ -154,8 +154,13 @@ void SecondaryGuidance(Config const& c)
         "outside ILS uses secondary geometric intercept guidance without claiming a signal");
     MissionState approach{};approach.phase=Phase::Approach;
     auto const target=DeckCoordinates(c.runway,Guide(c,plan,approach,outside).target);
-    Check(Near(target.north,-2000) && Near(target.east,0) && target.up>c.runway.thresholdHeightMeters,
-        "uncaptured approach target stays continuously ahead on the LOC/glide path");
+    auto const afterThreshold=At(c,1000,5000,600);
+    auto const overflightTarget=DeckCoordinates(c.runway,Guide(c,plan,approach,afterThreshold).target);
+    Check(Near(target.north,-c.mission.switchDistanceMeters) && Near(target.east,0)
+        && target.up>c.runway.thresholdHeightMeters
+        && Near(overflightTarget.north,target.north) && Near(overflightTarget.east,target.east)
+        && Near(overflightTarget.up,target.up),
+        "uncaptured approach target stays at the fixed LOC/glide entry before and after overflight");
 }
 void MovingFrame(Config c)
 {

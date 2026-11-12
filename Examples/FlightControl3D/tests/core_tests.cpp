@@ -316,8 +316,8 @@ void CapturePriority(Config const& c)
     auto const intercept=DeckCoordinates(c.runway,Guide(c,plan,inbound,outsideBeam).target);
     Check(inbound.phase==Phase::Approach && !inbound.capturedLocalizer && !inbound.capturedGlide
         && Guide(c,plan,inbound,outsideBeam).mode==GuidanceMode::Localizer
-        && Near(intercept.north,-3000) && Near(intercept.east,0),
-        "sustained beam loss keeps approach priority but returns to a continuous LOC/glide intercept");
+        && Near(intercept.north,-c.mission.switchDistanceMeters) && Near(intercept.east,0),
+        "sustained beam loss keeps approach priority but returns to the fixed LOC/glide intercept");
 
     double repeatedCaptureReward{};
     for(std::size_t step=0;step<holdSteps;++step)
@@ -327,7 +327,8 @@ void CapturePriority(Config const& c)
             +result.rewards[static_cast<std::size_t>(Reward::EnterGlide)];
     }
     auto const localizerTarget=DeckCoordinates(c.runway,Guide(c,plan,inbound,onBeam).target);
-    Check(inbound.capturedLocalizer && !inbound.capturedGlide && Near(localizerTarget.north,-3000),
+    Check(inbound.capturedLocalizer && !inbound.capturedGlide
+        && Near(localizerTarget.north,-c.mission.switchDistanceMeters),
         "LOC reacquisition alone cannot point guidance at the runway");
     for(std::size_t step=0;step<holdSteps;++step)
     {

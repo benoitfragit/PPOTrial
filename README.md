@@ -35,7 +35,7 @@ LOC/glide et deux interceptions symétriques à gauche et à droite. Un ordonnan
 trois épisodes contient les trois placements dans un ordre pseudo-aléatoire.
 L'avion vise l'hippodrome tant que le LOC n'est pas confirmé ; une capture avec
 cap compatible bascule irréversiblement en phase approche. Une perte durable
-réarme ensuite l'acquisition LOC puis GLIDE : le point de réinterception reste
+réarme ensuite l'acquisition LOC puis GLIDE : le point fixe de réinterception reste
 actif jusqu'aux deux captures, puis aucun point au seuil ne concurrence les
 erreurs ILS. L'IHM distingue signal visible, captures actives et durées
 d'épisode en secondes simulées. La conception détaillée est décrite dans

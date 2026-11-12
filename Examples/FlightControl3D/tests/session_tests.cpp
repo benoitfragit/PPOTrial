@@ -112,6 +112,9 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     signature["guidanceVersion"]=4;
     Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
         "guidance V4 remains usable as a training warm start");
+    signature["guidanceVersion"]=5;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "guidance V5 remains usable as a training warm start");
     signature["guidanceVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown guidance contract is rejected");
     signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("spawnVersion");

@@ -341,10 +341,10 @@ Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& miss
         if(mission.phase == Phase::Approach
             && (!mission.capturedLocalizer || !mission.capturedGlide))
         {
-            // Until both beams are stably captured, keep a continuous target
-            // halfway between the aircraft and threshold on the LOC/glide.
-            // Backside geometry uses the configured front-side intercept.
-            double const targetAlong=g.along<0 ? g.along/2 : -c.mission.switchDistanceMeters;
+            // Until both beams are stably captured, keep one fixed front-side
+            // intercept. A target derived from the aircraft along coordinate
+            // would drift toward the threshold and jump after an overflight.
+            double const targetAlong=-c.mission.switchDistanceMeters;
             g.target = FromRunway(c.runway,targetAlong,0,
                 c.runway.thresholdHeightMeters-targetAlong*std::tan(slope));
             g.pathDistance = Distance(a.position,g.target);
