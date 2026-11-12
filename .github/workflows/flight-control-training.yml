@@ -210,8 +210,5 @@ jobs:
             build/flight-training/training_*.csv
             build/flight-training/curriculum_stage.txt
             build/flight-training/gate_*.log
-            build/flight-training/training_*.csv
-            build/flight-training/curriculum_stage.txt
-            build/flight-training/gate_*.log
           if-no-files-found: warn
           retention-days: 30
