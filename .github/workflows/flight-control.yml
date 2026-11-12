@@ -1,12 +1,5 @@
 name: FlightControl3D JSBSim
 on:
-  pull_request:
-    paths:
-      - 'Examples/FlightControl3D/**'
-      - 'resources/settings/Scenarios/FlightControl3D.json'
-      - 'resources/model/FlightControl3D/latest/flight_hybrid_v1.txt'
-      - 'CMakeLists.txt'
-      - '.github/workflows/flight-control.yml'
   workflow_dispatch:
 jobs:
   flight:

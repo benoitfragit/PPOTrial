@@ -76,6 +76,8 @@ est présent et vérifie une reprise à la frontière d'un update PPO. La sauveg
 `.previous` reste locale.
 Le workflow **FlightControl3D JSBSim** peut aussi être relancé manuellement depuis
 GitHub Actions avec **Run workflow** ; sa matrice couvre Linux et Windows en Debug et Release.
+Les workflows FlightControl3D, Core et Desktop sont exclusivement manuels : un push
+ou une mise à jour de pull request ne lance aucun de ces trois contrôles.
 L'IHM distingue signal visible, captures actives et durées d'épisode en secondes
 simulées, avec un grand badge `HIPP` ou `APPROACH`, la vitesse, la pente et
 `GEAR` lorsque le train est physiquement sorti sur la caméra. La conception

@@ -187,9 +187,10 @@ commitable sous `resources/model`. Il contient acteur, critic, moments Adam,
 et les générations BEST restent locaux. Lorsqu'il est présent dans le dépôt,
 le test de session CI le charge par le même chemin que le desktop et exige une
 reprise propre à la frontière d'un update avec un budget additionnel. Le workflow
-FlightControl3D est également déclenché par toute modification de ce checkpoint.
-Il expose aussi `workflow_dispatch` : depuis l'onglet GitHub Actions, **Run workflow**
-relance manuellement toute la matrice Linux/Windows en Debug/Release.
+FlightControl3D expose uniquement `workflow_dispatch` : depuis l'onglet GitHub Actions,
+**Run workflow** relance manuellement toute la matrice Linux/Windows en Debug/Release.
+Les workflows Core et Desktop suivent la même politique manuelle ; un push ou une
+mise à jour de pull request ne déclenche aucun de ces trois contrôles.
 
 La réussite exige un poser sûr puis l'arrêt confirmé sur la piste. Par défaut, le seuil est **92 %**, donc au moins **19 succès sur 20**. Un candidat ne devient production qu'après la campagne complète et le franchissement de ce seuil. Le score est le pourcentage de réussites ; à score identique, une abscisse moyenne d'arrêt plus courte départage les candidats. Un candidat identique, moins bon, incomplet ou sous le seuil conserve le BEST précédent.
 
