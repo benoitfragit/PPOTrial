@@ -178,12 +178,6 @@ La case `Show patrol waypoints`, placée au même endroit, affiche `WP1` à
 waypoints sont verts et ceux déjà validés sont grisés. L'état de la case est
 persisté comme celui des références de patrouille.
 
-Le diagnostic HTML affiche les transitions RALLY → FOLLOW, leur durée de
-ralliement, le waypoint actif et une chronologie par épisode. Le pourcentage
-de tour correctement suivi vaut `100 × distance qualifiée / longueur du circuit`
-et reste distinct du nombre de waypoints validés. Les événements sont émis aux
-changements de mode ou de waypoint, sans journalisation à chaque pas.
-
 ### Curriculum 2v2 local avec IHM
 
 Le lanceur Windows [Lancer_MAPPO_2v2_Balanced_GUI.bat](Lancer_MAPPO_2v2_Balanced_GUI.bat)
@@ -217,12 +211,6 @@ Debug et Release, puis lancent CTest : démarrage de l'exemple,
 instanciation P/N, mouvement après Play, rôle leader, collisions,
 LiDAR, checkpoints et format de snapshot.
 
-Les runs d'entraînement distants peuvent être téléchargés, diagnostiqués et
-comparés avec l'interface Windows sans dépendance externe
-[Blue Training Diagnostics](tools/blue_training_diagnostics/README.md). Son
-lanceur double-clic produit des rapports HTML autonomes et des courbes SVG dans
-le dossier Téléchargements de l'utilisateur.
-
 Une CI verte vérifie la compilation et les contrats testés ; la
 **convergence** sur plusieurs seeds et compositions P/N nécessite
 une campagne de validation distincte.
@@ -243,6 +231,5 @@ des rewards avec guidage figé.
 - [Instructions pour les contributions](AGENTS.md)
 - [Entraînement distant MAPPO Windows Release / GitHub Actions](docs/remote-mappo-training.md)
 - [Architecture du séquenceur de dix waypoints](docs/architecture/blue-patrol-waypoint-sequencer.md)
-- [Téléchargement, diagnostic et comparaison des runs Blue](tools/blue_training_diagnostics/README.md)
 
 Le curriculum **V3 depuis zéro** et le contrat d’observation v10 sont décrits dans [docs/blue-mappo-v3.md](docs/blue-mappo-v3.md).
