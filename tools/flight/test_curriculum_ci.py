@@ -49,7 +49,7 @@ class CurriculumTests(unittest.TestCase):
         if os.name == "nt":
             # Windows CreateProcess cannot execute a Python shebang directly.
             self.launcher = root / "headless.cmd"
-            self.launcher.write_text(f'@echo off\\r\\n"{sys.executable}" "{self.fake}" %*\\r\\n')
+            self.launcher.write_text(f'@echo off\r\n"{sys.executable}" "{self.fake}" %*\r\n')
         self.summary = root / "summary.txt"
 
     def execute(self, max_updates=100, stage="progressive", interval=10, malformed=False):
