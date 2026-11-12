@@ -1,8 +1,21 @@
 name: FlightControl3D Training (manual)
 
 on:
+  # Before merge, adding the 'flight-curriculum' label to PR #83 starts training.
+  pull_request:
+    types: [labeled]
   workflow_dispatch:
     inputs:
+      stage:
+        description: 'Curriculum gate (progressive resumes and advances automatically)'
+        required: true
+        type: choice
+        default: progressive
+        options:
+          - progressive
+          - loc
+          - glide
+          - joint
       additional_updates:
         description: "Additional PPO updates to train"
         required: true
@@ -24,6 +37,7 @@ concurrency:
 
 jobs:
   train:
+    if: ${{ github.event_name != 'pull_request' || github.event.label.name == 'flight-curriculum' }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     steps:
@@ -62,7 +76,7 @@ jobs:
         id: budget
         shell: bash
         env:
-          ADDITIONAL_UPDATES: ${{ inputs.additional_updates }}
+          ADDITIONAL_UPDATES: ${{ inputs.additional_updates || '10' }}
         run: |
           set -euo pipefail
           checkpoint="build/flight-training/latest/flight_hybrid_v1.txt"
@@ -91,11 +105,67 @@ jobs:
           echo "Training from update $current_update through update $target_update"
 
       - name: Train FlightControl3D
-        run: >-
-          build/release/Examples/FlightControl3D/FlightControlHeadless
-          --config resources/settings/Scenarios/FlightControl3D.json
-          --output build/flight-training
-          --updates ${{ steps.budget.outputs.target_update }}
+        shell: bash
+        env:
+          REQUESTED_STAGE: ${{ inputs.stage || 'progressive' }}
+          ADDITIONAL_UPDATES: ${{ inputs.additional_updates || '10' }}
+        run: |
+          set -euo pipefail
+          checkpoint="build/flight-training/latest/flight_hybrid_v1.txt"
+          progress="build/flight-training/curriculum_stage.txt"
+          stage="$REQUESTED_STAGE"
+          if [[ "$stage" == "progressive" ]]; then
+            stage="loc"
+            if [[ -s "$progress" ]]; then read -r stage < "$progress"; fi
+          fi
+          if [[ "$stage" != "loc" && "$stage" != "glide" && "$stage" != "joint" ]]; then
+            echo "Invalid or completed curriculum stage: $stage" >&2
+            exit 1
+          fi
+          # A passing gate advances within this run; an unsuccessful gate can
+          # resume on the next run without overwriting BEST or discarding latest.
+          for gate_index in 1 2 3; do
+            read -r magic observations actions width current_update < "$checkpoint"
+            if [[ "$magic" != "PPO_FLIGHT_HYBRID_V1" || ! "$current_update" =~ ^[0-9]+$ ]]; then
+              echo "Invalid checkpoint between curriculum stages" >&2
+              exit 1
+            fi
+            target_update=$((current_update + ADDITIONAL_UPDATES))
+            if (( target_update > 100000000 )); then
+              echo "Curriculum update budget overflow" >&2
+              exit 1
+            fi
+            log="build/flight-training/gate_${stage}_${target_update}.log"
+            echo "Training gate $stage: update $current_update -> $target_update"
+            build/release/Examples/FlightControl3D/FlightControlHeadless \
+              --config resources/settings/Scenarios/FlightControl3D.json \
+              --output build/flight-training --updates "$target_update" --stage "$stage" | tee "$log"
+            cp build/flight-training/training.csv "build/flight-training/training_${stage}_${target_update}.csv"
+            gate_result="$(grep '^\[FLIGHT_GATE\]' "$log" | tail -n 1 || true)"
+            if [[ -z "$gate_result" ]]; then
+              echo "Missing final independent gate evaluation" >&2
+              exit 1
+            fi
+            echo "$gate_result" >> "$GITHUB_STEP_SUMMARY"
+            echo "$gate_result"
+            if [[ "$REQUESTED_STAGE" != "progressive" || "$gate_result" != *"passed=true"* ]]; then
+              break
+            fi
+            if [[ "$stage" == "loc" ]]; then
+              stage="glide"
+            elif [[ "$stage" == "glide" ]]; then
+              stage="joint"
+            else
+              stage="done"
+              break
+            fi
+          done
+          echo "$stage" > "$progress"
+          {
+            echo "- Curriculum next stage: `$stage`"
+            echo "- Mode: `$REQUESTED_STAGE`"
+            echo "- Resume using this workflow run ID as `resume_run_id`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Validate trained checkpoint
         shell: bash
@@ -106,7 +176,7 @@ jobs:
           checkpoint="build/flight-training/latest/flight_hybrid_v1.txt"
           test -s "$checkpoint"
           read -r magic observations actions width completed_update < "$checkpoint"
-          if [[ "$magic" != "PPO_FLIGHT_HYBRID_V1" || "$completed_update" != "$EXPECTED_UPDATE" ]]; then
+          if [[ "$magic" != "PPO_FLIGHT_HYBRID_V1" || ! "$completed_update" =~ ^[0-9]+$ || "$completed_update" -lt "$EXPECTED_UPDATE" ]]; then
             echo "Training did not produce the requested checkpoint update" >&2
             exit 1
           fi
@@ -128,5 +198,8 @@ jobs:
             build/flight-training/latest/flight_hybrid_v1.txt.previous
             build/flight-training/best/**
             build/flight-training/training.csv
+            build/flight-training/training_*.csv
+            build/flight-training/curriculum_stage.txt
+            build/flight-training/gate_*.log
           if-no-files-found: warn
           retention-days: 30
