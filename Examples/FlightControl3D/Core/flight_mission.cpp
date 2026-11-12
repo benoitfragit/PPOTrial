@@ -190,6 +190,25 @@ CaptureTransition UpdateCapture(bool eligible,double error,double tolerance,Conf
     }
     return {};
 }
+/**
+ * @brief Returns navigation to racetrack reacquisition after a confirmed ILS loss.
+ * @param plan Bounded closed racetrack used to select the closest re-entry segment.
+ * @param state Mission state whose captures and partial lap are invalidated.
+ * @param aircraft Current aircraft state used for the racetrack projection seed.
+ */
+void ReturnToPatrol(FlightPlan const& plan,MissionState& state,AircraftState const& aircraft) noexcept
+{
+    state.phase=Phase::Patrol;
+    state.localizerHoldSeconds=0;
+    state.glideHoldSeconds=0;
+    state.localizerLossSeconds=0;
+    state.glideLossSeconds=0;
+    state.capturedLocalizer=false;
+    state.capturedGlide=false;
+    state.pathQualified=false;
+    state.waypointsPassed=0;
+    state.waypoint=ClosestPatrolWaypoint(plan,aircraft.position);
+}
 float Unit(double value) noexcept
 {
     return std::isfinite(value) ? static_cast<float>(std::clamp(value, -1.0, 1.0)) : 0.F;
@@ -373,28 +392,43 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
     bool const contact = after.weightOnWheels || after.structuralContact || g.height <= c.mission.contactHeightMeters;
     double const headingError=WrapAngle(after.heading-c.runway.headingDegrees*DegreesToRadians);
     bool const headingCompatible=std::abs(headingError)<=c.mission.approachHeadingToleranceDegrees*DegreesToRadians;
-    bool enteredLocalizer{},enteredGlide{};
+    bool enteredLocalizer{},enteredGlide{},lostLocalizer{},lostGlide{};
     if(s.phase!=Phase::Rollout)
     {
-        bool const captureGeometry=g.ilsValid && headingCompatible && !contact && IsFinite(after);
-        auto const localizer=UpdateCapture(captureGeometry,g.localizer,
-            c.mission.localizerCaptureDegrees*DegreesToRadians,c,s.localizerHoldSeconds,
-            s.localizerLossSeconds,s.capturedLocalizer);
-        enteredLocalizer=localizer.entered && !s.rewardedLocalizerCapture;
-        if(localizer.entered) s.rewardedLocalizerCapture=true;
-        if(!localizer.lost && s.capturedLocalizer)
+        // Once both beams have carried the aircraft across the threshold, keep
+        // the final approach committed: the front-side ILS geometry naturally
+        // becomes invalid behind its origin and must not trigger a go-around.
+        bool const committedApproach=s.phase==Phase::Approach && s.capturedLocalizer
+            && s.capturedGlide && g.along>=0;
+        if(!committedApproach)
         {
-            auto const glide=UpdateCapture(captureGeometry,g.glideError,
-                c.mission.glideCaptureDegrees*DegreesToRadians,c,s.glideHoldSeconds,
-                s.glideLossSeconds,s.capturedGlide);
-            enteredGlide=glide.entered && !s.rewardedGlideCapture;
-            if(glide.entered) s.rewardedGlideCapture=true;
+            bool const captureGeometry=g.ilsValid && headingCompatible && !contact && IsFinite(after);
+            auto const localizer=UpdateCapture(captureGeometry,g.localizer,
+                c.mission.localizerCaptureDegrees*DegreesToRadians,c,s.localizerHoldSeconds,
+                s.localizerLossSeconds,s.capturedLocalizer);
+            enteredLocalizer=localizer.entered && !s.rewardedLocalizerCapture;
+            lostLocalizer=localizer.lost;
+            if(localizer.entered) s.rewardedLocalizerCapture=true;
+            if(!localizer.lost && s.capturedLocalizer)
+            {
+                auto const glide=UpdateCapture(captureGeometry,g.glideError,
+                    c.mission.glideCaptureDegrees*DegreesToRadians,c,s.glideHoldSeconds,
+                    s.glideLossSeconds,s.capturedGlide);
+                enteredGlide=glide.entered && !s.rewardedGlideCapture;
+                lostGlide=glide.lost;
+                if(glide.entered) s.rewardedGlideCapture=true;
+            }
+            else
+            {
+                s.glideHoldSeconds=0;
+                s.glideLossSeconds=0;
+                s.capturedGlide=false;
+            }
         }
         else
         {
-            s.glideHoldSeconds=0;
+            s.localizerLossSeconds=0;
             s.glideLossSeconds=0;
-            s.capturedGlide=false;
         }
     }
     else
@@ -402,9 +436,12 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         s.localizerHoldSeconds=0;s.glideHoldSeconds=0;
         s.localizerLossSeconds=0;s.glideLossSeconds=0;
     }
-    // A completed racetrack never implies ILS capture.  Patrol remains the
-    // active reference until the localizer hold above has been confirmed.
-    if(s.phase==Phase::Patrol && s.capturedLocalizer) s.phase=Phase::Approach;
+    // A confirmed beam loss abandons the intercept and re-enters the racetrack
+    // through its projection/look-ahead guidance. Both captures are released
+    // so that a fresh confirmed LOC then GLIDE restores approach priority.
+    if(s.phase==Phase::Approach && (lostLocalizer || lostGlide))
+        ReturnToPatrol(plan,s,after);
+    else if(s.phase==Phase::Patrol && s.capturedLocalizer) s.phase=Phase::Approach;
     g = Guide(c,plan,s,after);
     if(contact && !s.contactAttempted && IsFinite(after))
     {

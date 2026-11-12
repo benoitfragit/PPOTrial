@@ -34,11 +34,14 @@ LOC/glide et deux interceptions symétriques à gauche et à droite. Un ordonnan
 équilibré évite les séries répétitives : avec la part `1/3` livrée, chaque bloc de
 trois épisodes contient les trois placements dans un ordre pseudo-aléatoire.
 L'avion vise l'hippodrome tant que le LOC n'est pas confirmé ; une capture avec
-cap compatible bascule irréversiblement en phase approche. Une perte durable
-réarme ensuite l'acquisition LOC puis GLIDE : le point fixe de réinterception reste
-actif jusqu'aux deux captures, puis aucun point au seuil ne concurrence les
-erreurs ILS. L'IHM distingue signal visible, captures actives et durées
-d'épisode en secondes simulées. La conception détaillée est décrite dans
+cap compatible bascule en phase approche. Une perte LOC ou GLIDE durable avant
+le seuil renvoie l'avion vers l'hippodrome ; une nouvelle capture réactive l'approche.
+Après franchissement du seuil avec LOC et GLIDE capturés, l'approche reste engagée
+jusqu'au toucher. Aucun point au seuil ne concurrence alors les erreurs ILS.
+L'IHM distingue signal visible, captures actives et durées d'épisode en secondes
+simulées, avec un grand badge `HIPP` ou `APPROACH`, la vitesse, la pente et
+`GEAR` lorsque le train est physiquement sorti sur la caméra. La conception
+détaillée est décrite dans
 [l'architecture FlightControl3D](docs/PPOTrial_FlightControl3D_JSBSim_Architecture.md).
 
 Les deux modes BlueDefense utilisent **exactement la même scène**, la même

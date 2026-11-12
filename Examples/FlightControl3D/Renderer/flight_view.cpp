@@ -3,6 +3,8 @@
 #include <imgui.h>
 #include <rlgl.h>
 #include <algorithm>
+#include <cstdio>
+#include <string_view>
 
 namespace ppo::examples::flight {
 namespace {
@@ -57,6 +59,70 @@ Color GuidanceColor(GuidanceMode mode) noexcept
     if(mode==GuidanceMode::Localizer) return LocalizerColor;
     if(mode==GuidanceMode::Glide) return GlideColor;
     return {220,230,240,255};
+}
+/**
+ * @brief Returns the compact navigation phase shown over the camera.
+ * @param phase Current mission phase.
+ * @return Static uppercase phase label.
+ */
+constexpr char const* CameraPhaseName(Phase phase) noexcept
+{
+    if(phase==Phase::Patrol) return "HIPP";
+    if(phase==Phase::Approach) return "APPROACH";
+    return "ROLLOUT";
+}
+static_assert(std::string_view{CameraPhaseName(Phase::Patrol)}=="HIPP");
+static_assert(std::string_view{CameraPhaseName(Phase::Approach)}=="APPROACH");
+static_assert(std::string_view{CameraPhaseName(Phase::Rollout)}=="ROLLOUT");
+/**
+ * @brief Selects the camera badge color for a navigation phase.
+ * @param phase Current mission phase.
+ * @return Opaque Raylib color associated with the phase.
+ */
+Color CameraPhaseColor(Phase phase) noexcept
+{
+    if(phase==Phase::Patrol) return {65,158,220,255};
+    if(phase==Phase::Approach) return LocalizerColor;
+    return {220,230,240,255};
+}
+/**
+ * @brief Draws large navigation and aircraft readouts over the camera.
+ * @param state Value-only render snapshot supplying the physical measurements.
+ * @param target Camera render target defining the available pixel extent.
+ */
+void DrawCameraStatus(FlightSnapshot const& state,RenderTexture2D const& target)
+{
+    char const* const phase=CameraPhaseName(state.mission.phase);
+    char speed[32]{};
+    char slope[32]{};
+    std::snprintf(speed,sizeof(speed),"SPEED %.1f m/s",state.aircraft.airspeed);
+    std::snprintf(slope,sizeof(slope),"SLOPE %+.1f deg",DisplaySlopeDegrees(state.guidance));
+    bool const gearDown=state.gearDownMinimum>0
+        && state.aircraft.gearPosition>=state.gearDownMinimum;
+    int const fontSize=std::clamp(std::min(target.texture.width/14,target.texture.height/10),24,64);
+    int const padding=12;
+    int const margin=18;
+    int const lineSpacing=8;
+    int const lines=gearDown ? 4 : 3;
+    int const contentWidth=std::max({MeasureText(phase,fontSize),MeasureText(speed,fontSize),
+        MeasureText(slope,fontSize),gearDown ? MeasureText("GEAR",fontSize) : 0});
+    int const panelWidth=contentWidth+2*padding;
+    int const panelHeight=lines*fontSize+(lines-1)*lineSpacing+2*padding;
+    int const panelX=std::max(margin,target.texture.width-panelWidth-margin);
+    int const textX=panelX+padding;
+    int textY=margin+padding;
+    DrawRectangle(panelX,margin,panelWidth,panelHeight,{8,14,22,210});
+    DrawRectangleLines(panelX,margin,panelWidth,panelHeight,CameraPhaseColor(state.mission.phase));
+    DrawText(phase,textX,textY,fontSize,CameraPhaseColor(state.mission.phase));
+    textY+=fontSize+lineSpacing;
+    DrawText(speed,textX,textY,fontSize,WHITE);
+    textY+=fontSize+lineSpacing;
+    DrawText(slope,textX,textY,fontSize,WHITE);
+    if(gearDown)
+    {
+        textY+=fontSize+lineSpacing;
+        DrawText("GEAR",textX,textY,fontSize,GlideColor);
+    }
 }
 }
 void DrawFlightScene(FlightSnapshot const& s,RenderTexture2D const& target)
@@ -132,7 +198,9 @@ void DrawFlightScene(FlightSnapshot const& s,RenderTexture2D const& target)
     if(showLocalizer) DrawBeam(ils.localizerOrigin,ils.localizerEnd,ils.localizerLeft,ils.localizerRight,LocalizerColor);
     if(showGlide) DrawBeam(ils.glideOrigin,ils.glideEnd,ils.glideLow,ils.glideHigh,GlideColor);
     rlDrawRenderBatchActive(); rlEnableDepthMask(); rlEnableDepthTest();
-    EndMode3D(); EndTextureMode();
+    EndMode3D();
+    DrawCameraStatus(s,target);
+    EndTextureMode();
 }
 void DrawFlightDisplayControls()
 {

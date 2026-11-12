@@ -20,6 +20,8 @@ struct FlightSnapshot final
     LearningStats learning{};
     std::uint64_t episodes{}, touchdowns{}, stops{}, crashes{}, timeouts{};
     double glideDegrees{}, ilsRange{}, stepSeconds{};
+    /** @brief Physical extension threshold used by the camera GEAR indicator. */
+    double gearDownMinimum{};
     bool training{}, finished{}, failed{};
     /** @brief Current limit and last duration in simulated, not wall-clock, seconds. */
     double elapsedSeconds{},maximumEpisodeSeconds{},lastEpisodeSeconds{};

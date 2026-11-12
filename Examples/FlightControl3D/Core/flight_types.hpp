@@ -76,7 +76,7 @@ struct MissionState final
     double localizerLossSeconds{},glideLossSeconds{};
     std::size_t waypointsPassed{},completedLaps{};
     bool pathQualified{};
-    /** @brief Active captures; sustained beam loss clears them and requires reacquisition. */
+    /** @brief Active captures; sustained pre-threshold loss returns to patrol and clears both. */
     bool capturedLocalizer{}, capturedGlide{};
     /** @brief Preserve the existing one-shot entry bonuses across later reacquisitions. */
     bool rewardedLocalizerCapture{},rewardedGlideCapture{};

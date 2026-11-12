@@ -115,6 +115,9 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     signature["guidanceVersion"]=5;
     Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
         "guidance V5 remains usable as a training warm start");
+    signature["guidanceVersion"]=6;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "guidance V6 remains usable as a training warm start");
     signature["guidanceVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown guidance contract is rejected");
     signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("spawnVersion");
@@ -139,7 +142,9 @@ int main()
         FlightSession training(c,true,directory.path);
         auto const display=training.Snapshot();
         Check(display.localizerCaptureDegrees==c.mission.localizerCaptureDegrees
-            && display.glideCaptureDegrees==c.mission.glideCaptureDegrees,"render snapshot carries configured ILS envelope angles");
+            && display.glideCaptureDegrees==c.mission.glideCaptureDegrees
+            && display.gearDownMinimum==c.mission.gearDownMinimum,
+            "render snapshot carries configured ILS angles and the physical gear threshold");
         for(std::size_t i=0;i<16;++i) training.Tick();
         Check(!training.Finished() && training.Snapshot().validating && training.Snapshot().learning.updates==1,"final update requires completed validation");
         auto const original=ReadFile(checkpoint);

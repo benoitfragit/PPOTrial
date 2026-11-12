@@ -45,20 +45,26 @@ void Geometry(Config const& c)
     MissionState s{};
     s.completedLaps=c.mission.requiredLaps;
     auto a=Approach(c);
+    std::size_t const captureSteps=static_cast<std::size_t>(
+        std::ceil(c.mission.captureHoldSeconds/c.mission.physicsDt))+1;
     auto const first=AdvanceMission(c,plan,s,a,a);
     Check(s.phase==Phase::Patrol && !first.terminated,"LOC hold precedes the approach switch");
     auto const g=Guide(c,plan,s,a);
     Check(g.ilsValid && Near(g.localizer,0) && Near(g.glideError,0),"on LOC/glide");
     Check(!s.capturedLocalizer && !s.capturedGlide,"captures require a stable hold");
     double captures=first.rewards[5]+first.rewards[6];
-    for(std::size_t i=0;i<2*static_cast<std::size_t>(std::ceil(c.mission.captureHoldSeconds/c.mission.physicsDt))+2;++i)
+    for(std::size_t i=0;i<2*captureSteps+2;++i)
     { auto const stable=AdvanceMission(c,plan,s,a,a);captures+=stable.rewards[5]+stable.rewards[6]; }
     Check(s.capturedLocalizer && s.capturedGlide && Near(captures,c.reward.weights[5]+c.reward.weights[6]),"confirmed one-shot capture events");
     auto const again=AdvanceMission(c,plan,s,a,a);
     Check(again.rewards[5]==0 && again.rewards[6]==0,"captures must be one-shot");
     auto far=Approach(c,-c.mission.ilsRangeMeters-1);
     AdvanceMission(c,plan,s,a,far);
-    Check(s.phase==Phase::Approach,"approach cannot revert to patrol");
+    Check(s.phase==Phase::Approach && s.capturedLocalizer && s.capturedGlide,
+        "a transient ILS loss cannot cancel the approach");
+    for(std::size_t step=1;step<captureSteps;++step) AdvanceMission(c,plan,s,far,far);
+    Check(s.phase==Phase::Patrol && !s.capturedLocalizer && !s.capturedGlide,
+        "a confirmed ILS loss returns guidance to the racetrack");
     MissionState back{}; back.phase=Phase::Approach;
     auto behind=Approach(c,1000);
     behind.position.up=100;
@@ -307,17 +313,37 @@ void CapturePriority(Config const& c)
         && Near(glideReward,c.reward.weights[static_cast<std::size_t>(Reward::EnterGlide)]),
         "glide capture follows LOC capture and removes the competing threshold point");
 
+    auto committedApproach=inbound;
+    auto const pastThreshold=Approach(c,100);
+    for(std::size_t step=0;step<holdSteps;++step)
+        AdvanceMission(c,plan,committedApproach,pastThreshold,pastThreshold);
+    Check(committedApproach.phase==Phase::Approach && committedApproach.capturedLocalizer
+        && committedApproach.capturedGlide && !Guide(c,plan,committedApproach,pastThreshold).targetValid,
+        "an approach committed across the threshold keeps both captures until touchdown");
+
+    auto glideLoss=inbound;
+    auto aboveGlide=onBeam;
+    aboveGlide.position.up+=1000;
+    AdvanceMission(c,plan,glideLoss,onBeam,aboveGlide);
+    Check(glideLoss.phase==Phase::Approach && glideLoss.capturedLocalizer && glideLoss.capturedGlide,
+        "a transient glide deviation cannot cancel the approach");
+    for(std::size_t step=1;step<holdSteps;++step)
+        AdvanceMission(c,plan,glideLoss,aboveGlide,aboveGlide);
+    Check(glideLoss.phase==Phase::Patrol && !glideLoss.capturedLocalizer && !glideLoss.capturedGlide,
+        "confirmed glide loss returns to the racetrack and requires a fresh LOC capture");
+
     auto const outsideBeam=Approach(c,-6000,5000);
+    inbound.pathQualified=true;
+    inbound.waypointsPassed=5;
     AdvanceMission(c,plan,inbound,onBeam,outsideBeam);
     Check(inbound.capturedLocalizer && inbound.capturedGlide,
         "a transient ILS dropout does not release either capture");
     for(std::size_t step=1;step<holdSteps;++step)
         AdvanceMission(c,plan,inbound,outsideBeam,outsideBeam);
-    auto const intercept=DeckCoordinates(c.runway,Guide(c,plan,inbound,outsideBeam).target);
-    Check(inbound.phase==Phase::Approach && !inbound.capturedLocalizer && !inbound.capturedGlide
-        && Guide(c,plan,inbound,outsideBeam).mode==GuidanceMode::Localizer
-        && Near(intercept.north,-c.mission.switchDistanceMeters) && Near(intercept.east,0),
-        "sustained beam loss keeps approach priority but returns to the fixed LOC/glide intercept");
+    Check(inbound.phase==Phase::Patrol && !inbound.capturedLocalizer && !inbound.capturedGlide
+        && !inbound.pathQualified && inbound.waypointsPassed==0
+        && Guide(c,plan,inbound,outsideBeam).mode==GuidanceMode::Patrol,
+        "sustained LOC loss returns to racetrack reacquisition and clears partial lap credit");
 
     double repeatedCaptureReward{};
     for(std::size_t step=0;step<holdSteps;++step)
