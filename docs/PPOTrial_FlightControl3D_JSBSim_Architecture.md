@@ -186,12 +186,17 @@ commitable sous `resources/model`. Il contient acteur, critic, moments Adam,
 âges des optimiseurs, RNG et compteur d'updates ; `.previous`, les temporaires
 et les générations BEST restent locaux. Lorsqu'il est présent dans le dépôt,
 le test de session CI le charge par le même chemin que le desktop et exige une
-reprise propre à la frontière d'un update avec un budget additionnel. Le workflow
-FlightControl3D expose `workflow_dispatch` : depuis l'onglet GitHub Actions,
-**Run workflow** relance manuellement toute la matrice Linux/Windows en Debug/Release.
-Les workflows FlightControl3D, Core et Desktop restent aussi attachés aux événements
-d'ouverture, de réouverture et de passage en revue d'une pull request. L'événement
-`synchronize` est volontairement absent : un push ne relance donc pas ces contrôles.
+reprise propre à la frontière d'un update avec un budget additionnel. Les workflows
+de tests FlightControl3D, Core et Desktop conservent leurs déclenchements automatiques
+de pull request : un push modifiant les sources relance donc les contrôles concernés.
+
+L'entraînement distant utilise un workflow distinct, **FlightControl3D Training
+(manual)**, qui expose uniquement `workflow_dispatch`. Il compile le headless Release
+sur Ubuntu, reprend soit le checkpoint commité, soit l'artefact d'un `resume_run_id`,
+exécute le nombre demandé d'updates PPO supplémentaires, valide l'update obtenu puis
+publie pendant 30 jours l'artefact `flight-control-training` avec checkpoint complet,
+générations BEST éventuelles et télémétrie CSV. Aucun événement de PR ou de push ne
+peut démarrer ce workflow d'entraînement.
 
 La réussite exige un poser sûr puis l'arrêt confirmé sur la piste. Par défaut, le seuil est **92 %**, donc au moins **19 succès sur 20**. Un candidat ne devient production qu'après la campagne complète et le franchissement de ce seuil. Le score est le pourcentage de réussites ; à score identique, une abscisse moyenne d'arrêt plus courte départage les candidats. Un candidat identique, moins bon, incomplet ou sous le seuil conserve le BEST précédent.
 

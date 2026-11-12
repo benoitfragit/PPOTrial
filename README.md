@@ -74,11 +74,13 @@ Le checkpoint complet `resources/model/FlightControl3D/latest/flight_hybrid_v1.t
 peut être commité comme point de départ : la CI le charge réellement lorsqu'il
 est présent et vérifie une reprise à la frontière d'un update PPO. La sauvegarde
 `.previous` reste locale.
-Le workflow **FlightControl3D JSBSim** peut aussi être relancé manuellement depuis
-GitHub Actions avec **Run workflow** ; sa matrice couvre Linux et Windows en Debug et Release.
-Les workflows FlightControl3D, Core et Desktop restent exécutés à l'ouverture,
-la réouverture ou au passage en revue d'une pull request. Une mise à jour par push
-ne les relance pas automatiquement ; **Run workflow** permet de le faire manuellement.
+Le workflow de tests **FlightControl3D JSBSim** est relancé automatiquement par
+les mises à jour de la pull request ; sa matrice couvre Linux et Windows en Debug
+et Release. L'entraînement distant est séparé : **FlightControl3D Training (manual)**
+ne possède que `workflow_dispatch`. Depuis GitHub Actions, **Run workflow** choisit
+le nombre d'updates supplémentaires et, facultativement, l'identifiant d'un run
+précédent à reprendre. Le checkpoint complet et `training.csv` sont publiés dans
+l'artefact `flight-control-training` pendant 30 jours.
 L'IHM distingue signal visible, captures actives et durées d'épisode en secondes
 simulées, avec un grand badge `HIPP` ou `APPROACH`, la vitesse, la pente et
 `GEAR` lorsque le train est physiquement sorti sur la caméra. La conception

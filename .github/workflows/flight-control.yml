@@ -1,7 +1,6 @@
 name: FlightControl3D JSBSim
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review]
     paths:
       - 'Examples/FlightControl3D/**'
       - 'resources/settings/Scenarios/FlightControl3D.json'

@@ -1,9 +1,10 @@
 name: Core C++17 tests
 on:
-  # Keep PR validation without rerunning it on every synchronize/push event.
+  push:
+    branches:
+      - refactor/master-generic-rl-core-20261023
+  # Run generic RL core tests even for example-only changes.
   pull_request:
-    types: [opened, reopened, ready_for_review]
-  workflow_dispatch:
 jobs:
   core:
     strategy:
