@@ -42,15 +42,20 @@ class CurriculumTests(unittest.TestCase):
         self.checkpoint.write_text("PPO_FLIGHT_HYBRID_V1 56 5 128 0\n")
         self.config = root / "config.json"
         self.config.write_text(json.dumps({"evaluation": {"episodes": 20, "minimumSuccessRate": .92}}))
-        self.fake = root / "headless"
+        self.fake = root / ("headless.py" if os.name == "nt" else "headless")
         self.fake.write_text(FAKE_HEADLESS)
         self.fake.chmod(0o755)
+        self.launcher = self.fake
+        if os.name == "nt":
+            # Windows CreateProcess cannot execute a Python shebang directly.
+            self.launcher = root / "headless.cmd"
+            self.launcher.write_text(f'@echo off\\r\\n"{sys.executable}" "{self.fake}" %*\\r\\n')
         self.summary = root / "summary.txt"
 
     def execute(self, max_updates=100, stage="progressive", interval=10, malformed=False):
         env = {**os.environ, "PASS_AT": json.dumps({"loc": 30, "glide": 50, "joint": 70}),
                "GITHUB_STEP_SUMMARY": str(self.summary), "MALFORMED_GATE": str(int(malformed))}
-        return subprocess.run([sys.executable, str(RUNNER), "--executable", str(self.fake),
+        return subprocess.run([sys.executable, str(RUNNER), "--executable", str(self.launcher),
                                "--config", str(self.config), "--output", str(self.output),
                                "--stage", stage, "--updates-per-evaluation", str(interval),
                                "--max-additional-updates", str(max_updates),
