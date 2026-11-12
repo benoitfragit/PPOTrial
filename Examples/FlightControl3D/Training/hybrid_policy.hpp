@@ -46,10 +46,15 @@ inline double Entropy(PolicyVector const& output, TrainingSettings const& t) noe
     return entropy;
 }
 
-inline Controls ToControls(PolicyAction const& action) noexcept
+/** BlueAgent-style clipping of raw Gaussian actions; throttle zero holds the configured reference. */
+inline Controls ToControls(PolicyAction const& action, double neutralThrottle) noexcept
 {
-    return {std::tanh(action.raw[0]),std::tanh(action.raw[1]),std::tanh(action.raw[2]),
-        (std::tanh(action.raw[3])+1)/2, (std::tanh(action.raw[4])+1)/2,action.gearDown};
+    double const throttleCommand=std::clamp(action.raw[3],-1.0,1.0);
+    double const throttle=neutralThrottle+throttleCommand
+        *(throttleCommand>=0 ? 1.0-neutralThrottle : neutralThrottle);
+    return {std::clamp(action.raw[0],-1.0,1.0),std::clamp(action.raw[1],-1.0,1.0),
+        std::clamp(action.raw[2],-1.0,1.0),std::clamp(throttle,0.0,1.0),
+        std::clamp(action.raw[4],0.0,1.0),action.gearDown};
 }
 
 template<typename Engine>

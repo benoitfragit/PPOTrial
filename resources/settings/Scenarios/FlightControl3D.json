@@ -54,6 +54,6 @@
     "actorRate": 0.0003, "criticRate": 0.0003, "gamma": 0.99, "lambda": 0.95, "clip": 0.2,
     "entropy": 0.001, "valueWeight": 0.5, "minLogStd": -5.0, "maxLogStd": 0.5, "initialLogStd": -1.0,
     "maxGradientNorm": 0.5, "adamBeta1": 0.9, "adamBeta2": 0.999, "adamEpsilon": 1e-8,
-    "resume": true, "checkpointDirectory": "model/FlightControl3D"
+    "resume": true, "checkpointDirectory": "model/FlightControl3D/clamped_v2"
   }
 }

@@ -76,15 +76,8 @@ jobs:
           github-token: ${{ github.token }}
           path: build/flight-training
 
-      - name: Seed from the committed checkpoint
-        if: ${{ inputs.resume_run_id == '' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          source_checkpoint="resources/model/FlightControl3D/latest/flight_hybrid_v1.txt"
-          test -s "$source_checkpoint"
-          mkdir -p build/flight-training/latest
-          cp "$source_checkpoint" build/flight-training/latest/flight_hybrid_v1.txt
+      # A fresh clamped policy starts without the bundled tanh checkpoint.
+      # An explicit resume_run_id must supply a checkpoint with actionMappingVersion=2.
 
       - name: Regression-test curriculum retries and resumption
         run: python3 -m unittest discover -s tools/flight -p 'test_curriculum_ci.py' -v

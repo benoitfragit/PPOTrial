@@ -34,9 +34,24 @@ void Hybrid(Config const& c)
         output.back()=logit;
         Check(std::isfinite(LogProbability(output,a,c.training)) && std::isfinite(Entropy(output,c.training)),"stable extreme Bernoulli logits");
     }
+    // The environment clips raw Gaussian actions, just like BlueAgent.
     a.raw={-1000,1000,0,-1000,1000};
-    auto const controls=ToControls(a);
-    Check(controls.elevator==-1 && controls.aileron==1 && controls.throttle==0 && controls.brake==1,"bounded Gaussian transform");
+    auto const controls=ToControls(a,c.initial.throttle);
+    Check(controls.elevator==-1 && controls.aileron==1 && controls.rudder==0
+        && controls.throttle==0 && controls.brake==1,"clamped Gaussian controls");
+    a.raw={0.25,-0.5,0.75,0,0};
+    auto const neutral=ToControls(a,c.initial.throttle);
+    Check(Near(neutral.elevator,0.25) && Near(neutral.aileron,-0.5)
+        && Near(neutral.rudder,0.75) && Near(neutral.throttle,c.initial.throttle)
+        && neutral.brake==0,"linear flight controls and reference throttle");
+    a.raw[3]=-0.5;
+    Check(Near(ToControls(a,c.initial.throttle).throttle,c.initial.throttle*0.5),
+        "negative throttle commands span the range to idle");
+    a.raw[3]=0.5;
+    Check(Near(ToControls(a,c.initial.throttle).throttle,(1+c.initial.throttle)*0.5),
+        "positive throttle commands span the range to full");
+    a.raw[4]=0.5;
+    Check(Near(ToControls(a,c.initial.throttle).brake,0.5),"positive brake commands are linear");
     std::array<Transition,3> rows{};
     rows[0].reward=1; rows[0].value=2; rows[0].nextValue=3; rows[0].truncated=true;
     rows[1].reward=1000; rows[1].terminated=true;
@@ -57,7 +72,7 @@ void Training(Config c)
     for (std::size_t i=0;i<c.training.rolloutSteps;++i)
     {
         auto const action=learner.Choose(observation);
-        auto const result=environment.Step(ToControls(action));
+        auto const result=environment.Step(ToControls(action,c.initial.throttle));
         auto const next=environment.ObservationNow();
         learner.Record(observation,action,result,next);
         rewardSum+=result.reward;
