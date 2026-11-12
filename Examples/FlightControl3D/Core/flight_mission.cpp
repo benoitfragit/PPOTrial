@@ -23,11 +23,11 @@ double GuidanceQuality(double error, double tolerance) noexcept
     // A finite error outside the capture tolerance must still provide guidance.
     return tolerance/(tolerance+std::abs(error));
 }
-double GuidanceReward(Config const& c,double previousQuality,double quality,double progress) noexcept
+double GuidanceReward(Config const& c,double previousQuality,double quality,double progress,double sustainScale=1.0) noexcept
 {
     // The signed difference cancels on a closed error excursion. Do not clip it:
     // clipping would allow slow improvement / fast retreat to farm convergence.
-    return c.mission.physicsDt*quality*progress+c.reward.convergenceSeconds*(quality-previousQuality);
+    return c.mission.physicsDt*sustainScale*quality*progress+c.reward.convergenceSeconds*(quality-previousQuality);
 }
 AircraftState InCurrentDeckFrame(Runway const& previous,Runway const& current,AircraftState state) noexcept
 {
@@ -288,7 +288,7 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         if (s.phase == Phase::Approach)
         {
             double const progress=std::clamp((g.along-previousGuidance.along)/(g.targetSpeed*dt),-1.0,1.0);
-            // Strong initial ILS shaping; decay bounds the lifetime reward budget.
+            // Decay only progress; the signed error potential must cancel across delayed reversals.
             double const ilsScale=std::exp(-static_cast<double>(s.steps-1)*dt/c.reward.ilsDecaySeconds);
             for(auto const channel : {Reward::Localizer,Reward::Glide})
             {
@@ -297,10 +297,10 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
                 double const previousQuality=previousGuidance.ilsValid
                     ? GuidanceQuality(localizer ? previousGuidance.localizer : previousGuidance.glideError,tolerance) : 0;
                 double const quality=g.ilsValid ? GuidanceQuality(localizer ? g.localizer : g.glideError,tolerance) : 0;
-                double const value=GuidanceReward(c,previousQuality,quality,progress);
+                double const value=GuidanceReward(c,previousQuality,quality,progress,ilsScale);
                 // Angular errors can shrink merely by flying away from the
                 // threshold; that must never earn a positive ILS reward.
-                add(channel,ilsScale*(progress<0 ? std::min(value,0.0) : value));
+                add(channel,progress<0 ? std::min(value,0.0) : value);
             }
             if(!g.ilsValid)
             {

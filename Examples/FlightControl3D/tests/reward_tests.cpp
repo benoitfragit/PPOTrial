@@ -84,14 +84,28 @@ void ProgressAndAmplitude(Config const& c)
     for(auto const channel : {Reward::Localizer,Reward::Glide})
         Check(Near(Channel(delayed,channel),Channel(correct,channel)*decay,1e-10),
             "ILS reward follows configured elapsed-time decay");
+    // A closed ILS-error excursion must not earn convergence just because
+    // the return occurs after the progress reward has decayed.
+    auto const offBeam=At(c,-6000,2000,700),nearBeam=At(c,-6000,1000,500);
+    auto const earlyImprovement=ApproachStep(c,offBeam,nearBeam);
+    MissionState lateReversal{};lateReversal.phase=Phase::Approach;
+    lateReversal.steps=static_cast<std::uint64_t>(std::round(c.reward.ilsDecaySeconds/c.mission.physicsDt));
+    auto const reversed=AdvanceMission(c,MakeFlightPlan(c),lateReversal,nearBeam,offBeam);
+    for(auto const channel : {Reward::Localizer,Reward::Glide})
+    {
+        Check(Channel(earlyImprovement,channel)>0 && Channel(reversed,channel)<0,
+            "delayed reversal still penalizes LOC and glide regression");
+        Check(Near(Channel(earlyImprovement,channel)+Channel(reversed,channel),0,1e-12),
+            "time decay cannot create reward from a closed ILS error excursion");
+    }
     // Angular errors can improve simply because range increases near the threshold.
     auto const offset=At(c,-100,30,40),receding=At(c,-100-advance,30,40);
     auto const retreat=ApproachStep(c,offset,receding);
     Check(Channel(retreat,Reward::Localizer)<=0 && Channel(retreat,Reward::Glide)<=0,
         "artificial angular improvement while retreating cannot earn reward");
 
-    // With continuous in-sector ILS, the potential telescopes under a
-    // non-increasing exponential scale (even if the aircraft oscillates).
+    // With continuous in-sector ILS, only progress decays: signed convergence
+    // telescopes exactly, including delayed oscillations.
     double const ilsWeights=c.reward.weights[1]+c.reward.weights[2];
     double const maximumIls=ilsWeights*(c.reward.ilsDecaySeconds+c.mission.physicsDt+c.reward.convergenceSeconds);
     double const maximumSecondary=(c.reward.weights[3]+c.reward.weights[4])*c.mission.maxSeconds;
