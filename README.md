@@ -36,9 +36,10 @@ trois épisodes contient les trois placements dans un ordre pseudo-aléatoire.
 L'avion vise l'hippodrome tant que le LOC n'est pas confirmé ; une capture avec
 cap compatible bascule en phase approche. Une perte LOC ou GLIDE durable avant
 le seuil renvoie l'avion vers l'hippodrome ; une nouvelle capture réactive l'approche.
-Sur l'hippodrome, le point de contrôle reste toujours une projection anticipée
-devant l'avion ; les portes ordonnées servent uniquement à valider le tour et ne
-peuvent plus devenir une cible fixe autour de laquelle l'avion orbite.
+Sur l'hippodrome, le mode RALLY utilise une projection anticipée devant l'avion.
+Après confirmation du corridor, FOLLOW emploie la séquence fixe de 26 portes du
+procédé BlueAgent ; une porte manquée invalide immédiatement la séquence et rend
+la priorité au ralliement, sans laisser l'avion orbiter autour d'un point périmé.
 Après franchissement du seuil avec LOC et GLIDE capturés, l'approche reste engagée
 jusqu'au toucher. Aucun point au seuil ne concurrence alors les erreurs ILS.
 Le multiplicateur `training.ilsCaptureScale` élargit temporairement les tolérances

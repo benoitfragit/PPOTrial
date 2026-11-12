@@ -48,7 +48,16 @@ struct PlanProjection final
     Vec3 point{};
     std::size_t segmentEnd{};
     double distance{std::numeric_limits<double>::max()};
+    double arclength{};
 };
+
+double CircuitLength(FlightPlan const& plan) noexcept
+{
+    double result{};
+    for(std::size_t endIndex=0;endIndex<plan.count;++endIndex)
+        result+=Distance(plan.points[(endIndex+plan.count-1)%plan.count],plan.points[endIndex]);
+    return result;
+}
 
 /**
  * @brief Projects a position onto the closest segment of a closed flight plan.
@@ -60,20 +69,23 @@ PlanProjection ProjectOnPlan(FlightPlan const& plan,Vec3 const& position) noexce
 {
     PlanProjection best{};
     if(plan.count==0) { best.point=position;best.distance=0;return best; }
+    double arclength{};
     for(std::size_t endIndex=0;endIndex<plan.count;++endIndex)
     {
         auto const& start=plan.points[(endIndex+plan.count-1)%plan.count];
         auto const& end=plan.points[endIndex];
         auto const direction=Subtract(end,start);
         double const square=Dot(direction,direction);
+        double const length=std::sqrt(square);
         double const fraction=square>0
             ? std::clamp(Dot(Subtract(position,start),direction)/square,0.0,1.0) : 0;
         auto const point=Add(start,Scale(direction,fraction));
         double const distance=Distance(position,point);
         if(distance<best.distance)
         {
-            best={point,endIndex,distance};
+            best={point,endIndex,distance,arclength+fraction*length};
         }
+        arclength+=length;
     }
     return best;
 }
@@ -88,9 +100,7 @@ PlanProjection ProjectOnPlan(FlightPlan const& plan,Vec3 const& position) noexce
 Vec3 LookAheadOnPlan(FlightPlan const& plan,PlanProjection const& projection,double lookahead) noexcept
 {
     if(plan.count==0) return projection.point;
-    double circuit{};
-    for(std::size_t endIndex=0;endIndex<plan.count;++endIndex)
-        circuit+=Distance(plan.points[(endIndex+plan.count-1)%plan.count],plan.points[endIndex]);
+    double const circuit=CircuitLength(plan);
     if(circuit<=0) return projection.point;
     double remaining=std::fmod(std::max(lookahead,0.0),circuit);
     auto start=projection.point;
@@ -112,6 +122,38 @@ double AdvancePatrol(Config const& c,FlightPlan const& plan,MissionState& s,
     AircraftState const& before,AircraftState const& after,Runway const& previousDeck) noexcept
 {
     if(s.phase!=Phase::Patrol || plan.count<2) return 0;
+    auto const referenceBefore=InCurrentDeckFrame(previousDeck,c.runway,before);
+    auto const previousProjection=ProjectOnPlan(plan,referenceBefore.position);
+    auto const currentProjection=ProjectOnPlan(plan,after.position);
+    double const displacement=Distance(referenceBefore.position,after.position);
+    double const circuit=CircuitLength(plan);
+    double const projectedForward=circuit>0
+        ? std::remainder(currentProjection.arclength-previousProjection.arclength,circuit) : 0;
+    bool const plausible=displacement<=c.mission.maximumWaypointStepMeters
+        && projectedForward>=0 && projectedForward<=c.mission.maximumWaypointStepMeters;
+    double const physicalProgress=plausible ? projectedForward : 0;
+    if(!s.pathQualified)
+    {
+        bool const previouslyLatched=s.rallyCorridorLatched;
+        double const exitDistance=1.2*c.mission.pathCorridorMeters;
+        if(currentProjection.distance>exitDistance) s.rallyCorridorLatched=false;
+        else if(currentProjection.distance<=c.mission.pathCorridorMeters) s.rallyCorridorLatched=true;
+        if(previouslyLatched && s.rallyCorridorLatched && plausible)
+        {
+            s.pathQualified=true;
+            s.rallyCorridorLatched=false;
+            s.waypointsPassed=0;
+            s.waypoint=currentProjection.segmentEnd;
+            // Do not enter FOLLOW with a target already inside its passage
+            // zone. At an exact plan vertex the projection belongs to the
+            // segment that just ended; Blue-style guidance must instead expose
+            // the next fixed point, otherwise the actor can orbit in place.
+            if(Distance(currentProjection.point,plan.points[s.waypoint])
+                <=c.mission.waypointRadius)
+                s.waypoint=(s.waypoint+1)%plan.count;
+        }
+        return physicalProgress;
+    }
     auto const start=DeckCoordinates(c.runway,plan.points[(s.waypoint+plan.count-1)%plan.count]);
     auto const end=DeckCoordinates(c.runway,plan.points[s.waypoint%plan.count]);
     auto const old=DeckCoordinates(previousDeck,before.position),current=DeckCoordinates(c.runway,after.position);
@@ -121,15 +163,14 @@ double AdvancePatrol(Config const& c,FlightPlan const& plan,MissionState& s,
         && SegmentDistance(old,start,end)<=c.mission.pathCorridorMeters && SegmentDistance(current,start,end)<=c.mission.pathCorridorMeters;
     if(!qualified)
     {
-        s.pathQualified=false;s.waypointsPassed=0;
+        s.pathQualified=false;s.rallyCorridorLatched=false;s.waypointsPassed=0;
         s.waypoint=ClosestPatrolWaypoint(plan,after.position);
         return 0;
     }
     double const progress=Dot(movement,segment)/length;
     if(progress>0 && SegmentDistance(end,old,current)<=c.mission.waypointRadius)
     {
-        if(s.pathQualified) ++s.waypointsPassed;
-        else { s.pathQualified=true;s.waypointsPassed=0; }
+        ++s.waypointsPassed;
         if(s.waypointsPassed>=plan.count) { ++s.completedLaps;s.waypointsPassed=0; }
         s.waypoint=(s.waypoint+1)%plan.count;
     }
@@ -137,12 +178,51 @@ double AdvancePatrol(Config const& c,FlightPlan const& plan,MissionState& s,
     {
         // A missed gate must not leave the aircraft chasing a point behind it.
         // Reacquire guidance, but discard all credit for the incomplete lap.
-        s.pathQualified=false;s.waypointsPassed=0;
+        s.pathQualified=false;s.rallyCorridorLatched=false;s.waypointsPassed=0;
         auto const closest=ClosestPatrolWaypoint(plan,after.position);
         s.waypoint=closest==s.waypoint ? (s.waypoint+1)%plan.count : closest;
         return 0;
     }
-    return std::max(progress,0.0);
+    return physicalProgress;
+}
+
+struct PatrolError final
+{
+    double position{},speed{},heading{};
+    double Cost() const noexcept
+    {
+        auto const bounded=[](double value) noexcept {
+            return 1-1/(1+std::max(value,0.0));
+        };
+        return 0.5*bounded(position)+0.3*bounded(speed)+0.2*bounded(heading);
+    }
+};
+
+PatrolError PatrolTrackingError(Config const& c,FlightPlan const& plan,AircraftState const& aircraft) noexcept
+{
+    auto const projection=ProjectOnPlan(plan,aircraft.position);
+    auto const& start=plan.points[(projection.segmentEnd+plan.count-1)%plan.count];
+    auto const& end=plan.points[projection.segmentEnd];
+    double const trackHeading=std::atan2(end.east-start.east,end.north-start.north);
+    return {projection.distance/c.reward.pathTolerance,
+        std::abs(aircraft.airspeed-c.mission.patrolSpeed)/c.reward.speedTolerance,
+        std::abs(WrapAngle(aircraft.heading-trackHeading))
+            /(c.mission.patrolHeadingToleranceDegrees*DegreesToRadians)};
+}
+
+double PatrolTrackingReward(Config const& c,FlightPlan const& plan,AircraftState const& before,
+    AircraftState const& after,double forward) noexcept
+{
+    if(plan.count<2) return 0;
+    double const dt=c.mission.physicsDt;
+    auto const previous=PatrolTrackingError(c,plan,before);
+    auto const current=PatrolTrackingError(c,plan,after);
+    double const cost=current.Cost();
+    double const improvement=std::clamp((previous.Cost()-cost)*c.reward.pathTolerance
+        /std::max(c.mission.patrolSpeed*dt,1.0),-1.0,1.0);
+    double const tracking=std::clamp(1-std::max({current.position,current.speed,current.heading}),0.0,1.0);
+    double const progress=std::clamp(forward/std::max(c.mission.patrolSpeed*dt,1.0),0.0,1.0);
+    return std::clamp(0.5*improvement+progress*(0.25*(1-cost)+0.75*tracking)-0.25*cost,-1.0,1.0);
 }
 /** @brief Capture edges confirmed by the acquisition/loss state machine. */
 struct CaptureTransition final { bool entered{},lost{}; };
@@ -205,6 +285,7 @@ void ReturnToPatrol(FlightPlan const& plan,MissionState& state,AircraftState con
     state.glideLossSeconds=0;
     state.capturedLocalizer=false;
     state.capturedGlide=false;
+    state.rallyCorridorLatched=false;
     state.pathQualified=false;
     state.waypointsPassed=0;
     state.waypoint=ClosestPatrolWaypoint(plan,aircraft.position);
@@ -322,15 +403,13 @@ Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& miss
     if (mission.phase == Phase::Patrol && plan.count > 1)
     {
         g.mode=GuidanceMode::Patrol;
-        // Guidance and lap validation are deliberately separate.  Always use
-        // the Blue-patrol projection/preview principle for control; the fixed
-        // ordered gates below only validate physical circuit completion.  A
-        // missed 100 m gate can therefore never leave the actor orbiting a
-        // stale point behind or below the aircraft.
         auto const projection=ProjectOnPlan(plan,a.position);
-        g.target=LookAheadOnPlan(plan,projection,
-            c.mission.patrolSpeed*c.mission.patrolLookaheadSeconds);
         g.pathDistance=projection.distance;
+        if(!mission.pathQualified)
+            g.target=LookAheadOnPlan(plan,projection,
+                c.mission.patrolSpeed*c.mission.patrolLookaheadSeconds);
+        else
+            g.target=plan.points[mission.waypoint%plan.count];
         g.targetValid=true;
     }
     else
@@ -470,8 +549,7 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         // Use the same phase and waypoint for both ends, including a gate pass.
         auto const previousGuidance=Guide(c,plan,s,referenceBefore);
         if (s.phase == Phase::Patrol)
-            add(Reward::Path,GuidanceReward(c,GuidanceQuality(previousGuidance.pathDistance,c.reward.pathTolerance),
-                GuidanceQuality(g.pathDistance,c.reward.pathTolerance),std::clamp(pathProgress/(c.mission.patrolSpeed*dt),0.0,1.0)));
+            add(Reward::Path,PatrolTrackingReward(c,plan,referenceBefore,after,pathProgress));
         if (s.phase == Phase::Approach)
         {
             double const progress=std::clamp((g.along-previousGuidance.along)/(g.targetSpeed*dt),-1.0,1.0);

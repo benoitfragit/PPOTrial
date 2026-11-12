@@ -75,6 +75,8 @@ struct MissionState final
     /** @brief Continuous time outside each beam's release envelope. */
     double localizerLossSeconds{},glideLossSeconds{};
     std::size_t waypointsPassed{},completedLaps{};
+    /** @brief First in-corridor RALLY sample, confirmed on the next sample. */
+    bool rallyCorridorLatched{};
     bool pathQualified{};
     /** @brief Active captures; sustained pre-threshold loss returns to patrol and clears both. */
     bool capturedLocalizer{}, capturedGlide{};

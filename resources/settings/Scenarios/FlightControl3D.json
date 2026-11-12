@@ -17,14 +17,14 @@
     "switchDistanceMeters": 6500.0, "ilsRangeMeters": 15000.0, "ilsSectorDegrees": 35.0,
     "glideDegrees": 3.0, "localizerCaptureDegrees": 2.5, "glideCaptureDegrees": 0.7,
     "captureHoldSeconds": 0.5, "captureHysteresis": 1.5, "requiredLaps": 1, "pathCorridorMeters": 350.0, "maximumWaypointStepMeters": 50.0,
-    "approachHeadingToleranceDegrees": 35.0, "approachCrossToleranceMeters": 2500.0, "approachAltitudeToleranceMeters": 600.0,
+    "patrolHeadingToleranceDegrees": 20.0, "approachHeadingToleranceDegrees": 35.0, "approachCrossToleranceMeters": 2500.0, "approachAltitudeToleranceMeters": 600.0,
     "patrolSpeed": 65.0, "approachSpeed": 56.0, "flareSpeed": 46.0, "flareHeightMeters": 20.0,
     "maxTouchdownSink": 3.0, "maxTouchdownSpeed": 60.0, "maxTouchdownRollDegrees": 8.0,
     "minTouchdownPitchDegrees": -3.0, "maxTouchdownPitchDegrees": 12.0, "maxTouchdownHeadingDegrees": 15.0,
     "gearDownMinimum": 0.99, "contactHeightMeters": 0.3, "stoppedSpeed": 1.0, "stoppedHoldSeconds": 2.0,
     "racetrackCenterAlong": -8000.0, "racetrackCenterCross": 1500.0, "racetrackHalfStraight": 2000.0,
-    "racetrackRadius": 1500.0, "patrolAltitude": 600.0, "waypointRadius": 100.0, "patrolLookaheadSeconds": 5.0,
-    "turnSamples": 16, "straightSamples": 4
+    "racetrackRadius": 1500.0, "patrolAltitude": 600.0, "waypointRadius": 200.0, "patrolLookaheadSeconds": 5.0,
+    "turnSamples": 10, "straightSamples": 3
   },
   "initial": {
     "runwayAlignedProbability": 0.3333333333333333,

@@ -27,6 +27,7 @@ struct MissionSettings final
     double switchDistanceMeters{}, ilsRangeMeters{}, ilsSectorDegrees{}, glideDegrees{};
     double localizerCaptureDegrees{}, glideCaptureDegrees{};
     double captureHoldSeconds{},captureHysteresis{},pathCorridorMeters{},maximumWaypointStepMeters{};
+    double patrolHeadingToleranceDegrees{};
     double approachHeadingToleranceDegrees{},approachCrossToleranceMeters{},approachAltitudeToleranceMeters{};
     std::size_t requiredLaps{};
     double patrolSpeed{}, approachSpeed{}, flareSpeed{}, flareHeightMeters{};

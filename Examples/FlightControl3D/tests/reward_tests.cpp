@@ -131,26 +131,34 @@ void SecondaryGuidance(Config const& c)
         "rally guidance projects onto the racetrack and anticipates forward like Blue patrol");
     rally.pathQualified=true;rally.waypoint=1;
     auto const followGuidance=Guide(c,plan,rally,rallyAircraft);
-    Check(Near(followGuidance.target.north,rallyGuidance.target.north)
-        && Near(followGuidance.target.east,rallyGuidance.target.east)
-        && std::hypot(followGuidance.target.north-plan.points[rally.waypoint].north,
-            followGuidance.target.east-plan.points[rally.waypoint].east,
-            followGuidance.target.up-plan.points[rally.waypoint].up)>0,
-        "validated patrol keeps projection-preview guidance instead of orbiting a stale gate");
+    Check(Near(followGuidance.target.north,plan.points[rally.waypoint].north)
+        && Near(followGuidance.target.east,plan.points[rally.waypoint].east),
+        "confirmed FOLLOW uses the fixed active waypoint like Blue patrol");
+    MissionState acquiring{};
+    rallyAircraft.airspeed=c.mission.patrolSpeed;
+    AdvanceMission(c,plan,acquiring,rallyAircraft,rallyAircraft);
+    Check(acquiring.rallyCorridorLatched && !acquiring.pathQualified,
+        "one in-corridor sample only arms RALLY acquisition");
+    AdvanceMission(c,plan,acquiring,rallyAircraft,rallyAircraft);
+    auto const acquiredGuidance=Guide(c,plan,acquiring,rallyAircraft);
+    Check(acquiring.pathQualified && acquiring.waypoint==1
+        && Near(acquiredGuidance.target.north,plan.points[1].north)
+        && Near(acquiredGuidance.target.east,plan.points[1].east),
+        "confirmed RALLY acquisition exposes the next fixed point rather than the point under the aircraft");
     MissionState patrol{};
     auto const midpoint=Scale(Add(plan.points[0],plan.points[1]),0.5);
     auto before=At(c,0,0,600);before.position=Add(midpoint,Scale(RunwayRight(c.runway),-1500));
     auto after=before;after.position=Add(before.position,Scale(RunwayRight(c.runway),0.2));
     auto const toward=AdvanceMission(c,plan,patrol,before,after);
-    Check(Channel(toward,Reward::Path)>0 && !patrol.pathQualified && patrol.completedLaps==0,
-        "far racetrack convergence is rewarded without qualifying a lap or shortcut");
     auto const away=AdvanceMission(c,plan,patrol,after,before);
-    Check(Channel(away,Reward::Path)<0,"moving farther from the racetrack loses shaping");
+    Check(Channel(toward,Reward::Path)>Channel(away,Reward::Path)
+        && Channel(away,Reward::Path)<0 && !patrol.pathQualified && patrol.completedLaps==0,
+        "Blue-style patrol cost prefers recovery and penalizes retreat without qualifying a lap");
 
     MissionState missed{};missed.waypoint=1;missed.pathQualified=true;missed.waypointsPassed=5;
     auto const segment=Subtract(plan.points[1],plan.points[0]);
     auto const tangent=Scale(segment,1/std::sqrt(Dot(segment,segment)));
-    before.position=Add(plan.points[1],Add(Scale(tangent,199),Scale(RunwayRight(c.runway),150)));
+    before.position=Add(plan.points[1],Add(Scale(tangent,201),Scale(RunwayRight(c.runway),201)));
     after.position=Add(before.position,Scale(tangent,1));
     AdvanceMission(c,plan,missed,before,after);
     Check(missed.waypoint!=1 && !missed.pathQualified && missed.waypointsPassed==0 && missed.completedLaps==0,

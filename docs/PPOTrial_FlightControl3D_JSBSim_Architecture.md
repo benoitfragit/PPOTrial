@@ -35,7 +35,7 @@ Le JSON livré active `training.resume: true` et `checkpointEvery: 1`. En entra�
 
 Le desktop traite `maxUpdates` comme un budget supplémentaire à partir du modèle chargé. Par exemple, un `latest` à l'update 120 et un budget de 10 000 donnent une fin de bloc à 10 120. Après validation finale, un nouveau Play prolonge le budget en conservant le même learner. Le renderer diffère Stop/join et Play hors du verrou de snapshot, puis le callback ECS `Init` prolonge la session terminée. Le headless conserve son budget total existant. L'UI affiche la source du modèle et la limite du bloc courant ; le journal contient `[FLIGHT_SESSION] Resumed latest` et l'update chargé.
 
-La reprise d'entraînement conserve les poids, Adam et le RNG lors d'un changement des intervalles horizontaux, de l'orientation d'interception, de `initial.approach`, du guidage compatible déclaré ou des réglages de reward. `rewardVersion: 3`, `guidanceVersion: 8` et `spawnVersion: 2` séparent les contrats de shaping, de guidage et d'ordonnancement initial. Les checkpoints de guidage V2 à V7, les placements aléatoires antérieurs et les signatures sans ces versions peuvent amorcer l'entraînement, mais leur BEST n'est jamais réutilisé sans une nouvelle validation. Les changements de géométrie de piste, de physique ou d'autres observations restent incompatibles. Un BEST antérieur est conservé avec ses générations et son contrôle d'intégrité ; l'inférence exige un BEST validé sur le contrat exact.
+La reprise d'entraînement conserve les poids, Adam et le RNG lors d'un changement des intervalles horizontaux, de l'orientation d'interception, de `initial.approach`, du guidage compatible déclaré ou des réglages de reward. `rewardVersion: 4`, `guidanceVersion: 9` et `spawnVersion: 2` séparent les contrats de shaping, de guidage et d'ordonnancement initial. Les checkpoints de guidage V2 à V8 et de reward V2 à V3, les placements aléatoires antérieurs et les signatures sans ces versions peuvent amorcer l'entraînement, mais leur BEST n'est jamais réutilisé sans une nouvelle validation. Les changements de géométrie de piste, de physique ou d'autres observations restent incompatibles. Un BEST antérieur est conservé avec ses générations et son contrôle d'intégrité ; l'inférence exige un BEST validé sur le contrat exact.
 
 ## Interface FlightControl3D
 
@@ -94,7 +94,7 @@ Le scénario livré démarre en phase hippodrome (`initial.approach: false`), qu
 
 Le flightplan hippodrome est lié à la piste courante. Sa branche entrante est exactement superposée à l'axe LOC et parcourue vers le seuil ; à l'altitude de patrouille livrée, sa partie éloignée traverse aussi la fenêtre de capture du glide. Le suivi d'hippodrome peut donc présenter naturellement l'avion à l'ILS sans contrôleur d'affectation externe. Pendant le ralliement, la position est projetée sur le segment 3D le plus proche et la cible est avancée de `patrolSpeed × patrolLookaheadSeconds` sur le circuit. Après acquisition, les portes séquentielles restent fixes et autoritaires pour la validation du tour. Hors corridor ou après une porte ratée, le ralliement anticipé reprend et toute progression incomplète est invalidée. Une réacquisition ne valide ni porte ni tour fictif ; un avion immobile n'accumule aucun progrès.
 
-Comme BlueAgent, Flight3D sépare désormais un ralliement par projection/anticipation d'un suivi séquentiel physiquement validé. Flight3D conserve son implémentation 3D distincte et `2 × (straightSamples + turnSamples)`, soit 40 portes avec 4 et 16 dans le JSON livré, recalculées avec le mouvement de la piste. Le point anticipé ne remplace pas les portes de validation. Les composants BlueAgent et RLMission ne sont pas modifiés.
+Comme BlueAgent, Flight3D sépare désormais un ralliement par projection/anticipation d'un suivi séquentiel physiquement validé. Flight3D conserve son implémentation 3D distincte et `2 × (straightSamples + turnSamples)`, soit 26 portes avec 3 par ligne droite et 10 par demi-tour dans le JSON livré, recalculées avec le mouvement de la piste. Le point anticipé ne remplace pas les portes de FOLLOW. Les composants BlueAgent et RLMission ne sont pas modifiés.
 
 Le signal ILS brut est visible uniquement devant le seuil, à moins de `ilsRangeMeters` (15 km), au-dessus du plan de piste et dans le secteur horizontal `±ilsSectorDegrees` (±35°). Cela ne constitue pas une capture. Le LOC exige en plus une erreur `±localizerCaptureDegrees` (±2,5°), un cap compatible à ±35° et un maintien de 0,5 s. Le glide exige ensuite `±glideCaptureDegrees` (±0,7°) pendant 0,5 s.
 
@@ -130,13 +130,13 @@ Un crash ou un arrêt réussi est terminal. La limite de temps est une troncatur
 
 Les dix canaux propres à FlightControl3D sont `Path`, `Localizer`, `Glide`, `Speed`, `Slope`, `EnterLocalizer`, `EnterGlide`, `Touchdown`, `Stop`, `Crash`. Aucune modification des canaux Blue MAPPO n'est effectuée.
 
-Les guidages `Path`, `Localizer` et `Glide` utilisent une qualité lisse `Q(e) = tolérance / (tolérance + abs(e))`. Elle reste strictement positive pour une erreur finie, même loin de la tolérance de capture. Leur contribution est `poids * [dt * Q_après * progrès + convergenceSeconds * (Q_après − Q_avant)]`.
+Les guidages `Localizer` et `Glide` utilisent une qualité lisse `Q(e) = tolérance / (tolérance + abs(e))`. Elle reste strictement positive pour une erreur finie, même loin de la tolérance de capture. Leur contribution est `poids * [dt * Q_après * progrès + convergenceSeconds * (Q_après − Q_avant)]`.
 
 La différence signée récompense le rapprochement et pénalise l'éloignement. Elle n'est pas clippée : une amélioration lente suivie d'une régression rapide ne doit pas créer de bonus net. Le facteur de temps vaut 20 secondes dans le JSON. La comparaison avant/après utilise la même phase, le même waypoint et les deux repères successifs de la piste, sans gain artificiel dû au seul mouvement rigide du pont.
 
 En approche, le progrès est l'avancement longitudinal relatif à la piste, normalisé par la vitesse cible et borné entre −1 et +1. Un déplacement qui s'éloigne du seuil ne peut rapporter de contribution LOC/glide positive, même si l'erreur angulaire diminue avec la distance. Une géométrie stationnaire ne reçoit pas de maintien ILS répété. La qualité ILS est nulle hors signal ; la perte et la reprise du secteur entrent dans la différence signée. `Path` fournit alors un guidage secondaire vers le point d'interception.
 
-En patrouille, le maintien `Path` exige toujours un avancement qualifié dans le corridor de 350 m ; son terme de convergence reste actif depuis l'extérieur. Le tour complet ne rapporte aucun nouveau bonus dédié. Les canaux `Speed` et `Slope` conservent la qualité triangulaire `max(0, 1 − abs(erreur)/tolérance)` pondérée par le temps physique. Les captures restent payées une seule fois par épisode après maintien confirmé.
+En patrouille, `Path` reprend le shaping borné de BlueAgent : coût rationnel composé à 50 % de l'écart à la courbe, 30 % de l'écart de vitesse et 20 % de l'écart de cap, amélioration signée, progression physique projetée et pénalité de coût courant. Le résultat est borné dans `[-1, 1]` avant le poids existant `0,002`. Stationner, reculer, s'écarter ou tourner autour d'une porte ne rapporte rien de positif. Le tour complet ne rapporte aucun nouveau bonus dédié. Les canaux `Speed` et `Slope` conservent la qualité triangulaire `max(0, 1 − abs(erreur)/tolérance)` pondérée par le temps physique. Les captures restent payées une seule fois par épisode après maintien confirmé.
 
 | Canal | Poids livré | Amplitude et rôle |
 |---|---:|---|
@@ -292,6 +292,26 @@ Un passage manqué ne peut donc plus maintenir la ligne de guidage sur un point 
 100 m déjà dépassé et provoquer une orbite autour de celui-ci. Les checkpoints
 de guidage V2 à V7 restent utilisables comme warm start ; le BEST doit être
 revalidé sur V8.
+
+Validation locale : ni compilation ni test exécuté, conformément à la consigne.
+
+Cette tentative V8 a été remplacée par V9 : conserver la projection mobile en
+FOLLOW ne reproduisait pas le séquenceur BlueAgent et pouvait faire sauter la
+cible entre des segments voisins.
+
+## Séquenceur hippodrome RALLY/FOLLOW V9 (11 novembre 2026)
+
+V9 reprend les invariants du séquenceur BlueAgent. RALLY projette l'avion sur le
+circuit et place un point anticipé. Deux échantillons consécutifs dans le corridor
+confirment FOLLOW. FOLLOW vise alors une porte fixe parmi 26, dans l'ordre ; le
+passage physique avance d'une seule porte et une porte manquée invalide le tour
+partiel avant de revenir en RALLY. Les portes utilisent un rayon de 200 m avec
+trois échantillons par droite et dix par demi-tour.
+
+Le canal existant `Path` passe à `rewardVersion=4` et utilise également le shaping borné de BlueAgent : coût
+position/vitesse/cap `50/30/20`, amélioration signée, progression projetée et
+pénalité du coût courant. Aucun canal, bonus ni poids supplémentaire n'est créé.
+Le checkpoint V8 reste un warm start compatible ; le BEST doit être revalidé.
 
 Validation locale : ni compilation ni test exécuté, conformément à la consigne.
 

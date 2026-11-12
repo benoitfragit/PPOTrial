@@ -76,7 +76,7 @@ Config LoadConfig(std::filesystem::path const& path)
     Keys(m, {"physicsDt", "actionSubsteps", "maxSeconds", "maxDistanceMeters", "maxAltitudeMeters",
         "switchDistanceMeters", "ilsRangeMeters", "ilsSectorDegrees", "glideDegrees",
         "localizerCaptureDegrees", "glideCaptureDegrees", "captureHoldSeconds", "captureHysteresis", "requiredLaps", "pathCorridorMeters", "maximumWaypointStepMeters",
-        "approachHeadingToleranceDegrees", "approachCrossToleranceMeters", "approachAltitudeToleranceMeters", "patrolSpeed", "approachSpeed", "flareSpeed", "flareHeightMeters",
+        "patrolHeadingToleranceDegrees", "approachHeadingToleranceDegrees", "approachCrossToleranceMeters", "approachAltitudeToleranceMeters", "patrolSpeed", "approachSpeed", "flareSpeed", "flareHeightMeters",
         "maxTouchdownSink", "maxTouchdownSpeed", "maxTouchdownRollDegrees", "maxTouchdownPitchDegrees", "minTouchdownPitchDegrees", "maxTouchdownHeadingDegrees",
         "gearDownMinimum", "contactHeightMeters", "stoppedSpeed", "stoppedHoldSeconds", "racetrackCenterAlong", "racetrackCenterCross",
         "racetrackHalfStraight", "racetrackRadius", "patrolAltitude", "waypointRadius", "patrolLookaheadSeconds", "turnSamples", "straightSamples"});
@@ -86,6 +86,7 @@ Config LoadConfig(std::filesystem::path const& path)
     READ_M(switchDistanceMeters); READ_M(ilsRangeMeters); READ_M(ilsSectorDegrees); READ_M(glideDegrees);
     READ_M(localizerCaptureDegrees); READ_M(glideCaptureDegrees); READ_M(patrolSpeed); READ_M(approachSpeed);
     READ_M(captureHoldSeconds);READ_M(captureHysteresis);READ_M(pathCorridorMeters);READ_M(maximumWaypointStepMeters);
+    READ_M(patrolHeadingToleranceDegrees);
     READ_M(approachHeadingToleranceDegrees);READ_M(approachCrossToleranceMeters);READ_M(approachAltitudeToleranceMeters);
     READ_M(flareSpeed); READ_M(flareHeightMeters); READ_M(maxTouchdownSink); READ_M(maxTouchdownSpeed);
     READ_M(maxTouchdownRollDegrees); READ_M(maxTouchdownPitchDegrees); READ_M(minTouchdownPitchDegrees); READ_M(maxTouchdownHeadingDegrees);
@@ -156,8 +157,8 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics.erase("training");
     semantics.erase("evaluation");
     semantics["distribution"] = {training.minLogStd,training.maxLogStd};
-    semantics["rewardVersion"] = 3;
-    semantics["guidanceVersion"] = 8;
+    semantics["rewardVersion"] = 4;
+    semantics["guidanceVersion"] = 9;
     semantics["spawnVersion"] = 2;
     config.checkpointSignature = semantics.dump();
     Validate(config);
@@ -175,11 +176,12 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
         if(!signature->contains("reward") || !(*signature)["reward"].is_object()
             || !(*signature)["initial"].contains("approach") || !(*signature)["initial"]["approach"].is_boolean()) return false;
         if(signature->contains("rewardVersion") && (*signature)["rewardVersion"]!=2
-            && (*signature)["rewardVersion"]!=3) return false;
+            && (*signature)["rewardVersion"]!=3 && (*signature)["rewardVersion"]!=4) return false;
         if(signature->contains("guidanceVersion") && (*signature)["guidanceVersion"]!=2
             && (*signature)["guidanceVersion"]!=3 && (*signature)["guidanceVersion"]!=4
             && (*signature)["guidanceVersion"]!=5 && (*signature)["guidanceVersion"]!=6
-            && (*signature)["guidanceVersion"]!=7 && (*signature)["guidanceVersion"]!=8) return false;
+            && (*signature)["guidanceVersion"]!=7 && (*signature)["guidanceVersion"]!=8
+            && (*signature)["guidanceVersion"]!=9) return false;
         if(signature->contains("spawnVersion") && (*signature)["spawnVersion"]!=2) return false;
     }
     for(char const* name : {"distanceMeters","bearingDegrees","headingOffsetDegrees"})
@@ -194,6 +196,10 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
     if(!previous.contains("mission") || !next.contains("mission")
         || !previous["mission"].is_object() || !next["mission"].is_object()) return false;
     previous["mission"].erase("patrolLookaheadSeconds"); next["mission"].erase("patrolLookaheadSeconds");
+    previous["mission"].erase("patrolHeadingToleranceDegrees"); next["mission"].erase("patrolHeadingToleranceDegrees");
+    previous["mission"].erase("waypointRadius"); next["mission"].erase("waypointRadius");
+    previous["mission"].erase("turnSamples"); next["mission"].erase("turnSamples");
+    previous["mission"].erase("straightSamples"); next["mission"].erase("straightSamples");
     previous["mission"].erase("approachHeadingToleranceDegrees"); next["mission"].erase("approachHeadingToleranceDegrees");
     previous["mission"].erase("racetrackCenterCross"); next["mission"].erase("racetrackCenterCross");
     previous.erase("reward"); next.erase("reward");
@@ -227,7 +233,8 @@ void Validate(Config const& c)
     Require(m.localizerCaptureDegrees > 0 && m.localizerCaptureDegrees < m.ilsSectorDegrees
         && m.glideCaptureDegrees > 0 && m.glideCaptureDegrees < m.glideDegrees, "ILS capture tolerances");
     Require(m.captureHoldSeconds>=m.physicsDt && m.captureHysteresis>=1 && m.pathCorridorMeters>0
-        && m.maximumWaypointStepMeters>0 && m.approachHeadingToleranceDegrees>0 && m.approachHeadingToleranceDegrees<90
+        && m.maximumWaypointStepMeters>0 && m.patrolHeadingToleranceDegrees>0 && m.patrolHeadingToleranceDegrees<90
+        && m.approachHeadingToleranceDegrees>0 && m.approachHeadingToleranceDegrees<90
         && m.approachCrossToleranceMeters>0 && m.approachAltitudeToleranceMeters>0,"navigation and capture confirmation");
     Require(m.patrolSpeed > 0 && m.approachSpeed > m.flareSpeed && m.flareSpeed > m.stoppedSpeed
         && m.flareHeightMeters > r.thresholdHeightMeters && m.stoppedSpeed >= 0, "target speeds and flare");
