@@ -82,6 +82,10 @@ La configuration unique est `resources/settings/Scenarios/FlightControl3D.json`.
 | Vitesse calibrée | 55 à 80 m/s |
 | Roulis / tangage / pente | ±15° / −4 à +8° / ±3° |
 
+`initial.runwayAlignedProbability` règle le mélange des départs : `0.5` par défaut donne une probabilité de 50 % d'être sur le prolongement de l'axe, avant le seuil, avec le cap de la piste orienté vers celle-ci. Le repère utilisé est celui de la piste réellement tirée pour l'épisode, y compris sa translation et son inclinaison. Les autres départs conservent l'azimut ±20° et le cap indépendant ±180° indiqués ci-dessus. Distance, hauteur, vitesse, roulis, tangage et pente restent aléatoires dans les deux cas ; être dans l'axe horizontal ne signifie pas être sur le glide.
+
+Cette probabilité finie doit appartenir à [0, 1] : `0` conserve le tirage précédent, `1` aligne tous les départs. Le mélange s'applique à chaque reset, quelle que soit la phase initiale. Les checkpoints sans ce nouveau champ peuvent amorcer l'entraînement ; modifier sa valeur conserve les poids et Adam, mais exige une nouvelle validation du BEST sur la distribution courante. Les récompenses et les dimensions du réseau restent identiques.
+
 La position de la piste varie de ±2 km sur les deux axes ; son orientation varie de ±35°. La surface peut avancer de 0 à 3 m/s. La houle tire une amplitude verticale de 0 à 0,8 m, une période de 8 à 14 s, des amplitudes de tangage de 0 à 0,25° et de roulis de 0 à 0,4°, avec phases indépendantes. Le pivot de rotation est au centre de la piste. Ces valeurs sont des réglages JSON modifiables ; le schéma refuse les plages incohérentes et les départs sous la mer.
 
 Le callback `FGGroundCallback` fournit réellement à JSBSim la surface finie, sa normale et sa vitesse au point de contact. Le pont bouge dans la physique, le guidage et le rendu. Hors de son rectangle, le contact correspond au plan de la mer. Il s'agit d'une surface rigide cinématique avec mouvements sinusoïdaux ; aucun modèle hydrodynamique de navire n'est revendiqué.
@@ -173,6 +177,8 @@ La réussite exige un poser sûr puis l'arrêt confirmé sur la piste. Par défa
 Chaque génération admise est conservée sous `best/flight_<update>_<checksum>.txt`. Le pointeur transactionnel `best/current.json` contient score, compteurs, graine, contrat, update et checksum d'intégrité FNV-1a64 du fichier. Une incohérence est rejetée ; aucun retour silencieux vers `latest`. La sauvegarde d'entraînement et une évaluation de production ne remplacent jamais le BEST. Reprendre un budget déjà consommé termine sa validation avant de considérer la session finie.
 
 ## Vérification et limites
+
+Correctif des départs dans l'axe : builds GCC 14 Debug et Release, 15/15 CTest dans chaque configuration. Les régressions couvrent 3 000 tirages déterministes aux probabilités 0/0,5/1 sur quatre caps de piste avec translation et houle, les départs aléatoires des deux côtés, le cap vers la piste, les paramètres qui restent aléatoires, le refus des probabilités invalides, 32 resets JSBSim réels alignés, la reprise des checkpoints sans ce champ et la revalidation après changement de probabilité. La CI Windows/Linux du nouveau commit doit être vérifiée séparément ; ces tests ne démontrent aucune convergence d'atterrissage.
 
 Les régressions déterministes couvrent géométrie, captures uniques, transitions, crash train/impact/attitude, toucher, arrêt relatif, limites de temps, 1 000 tirages aléatoires, dérivée cinématique de la houle, callback réellement consulté par JSBSim, mouvement des commandes, contact des vraies roues, gradients hybrides par différences finies, mise à jour RLtools, reprise des moments/RNG et intégrité en évaluation.
 

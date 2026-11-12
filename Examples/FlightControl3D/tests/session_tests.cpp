@@ -41,20 +41,24 @@ void DesktopContinuation(Config c)
     {std::ofstream broken(store.Latest());broken<<"broken";}
     Rejects([&] {FlightSession invalid(c,true,directory.path);},"corrupt latest must not silently create a new policy");
 }
-void ChangedTrainingContract(Config c,bool rewards)
+enum class TrainingContractChange { HorizontalStarts, Rewards, LegacyStarts, AlignedProbability };
+void ChangedTrainingContract(Config c,TrainingContractChange change)
 {
     c.training.rolloutSteps=8;c.training.minibatch=4;c.training.epochs=1;c.training.maxUpdates=1;
     c.training.resume=true;c.training.checkpointEvery=1;c.mission.maxSeconds=1;c.evaluation.episodes=2;
     TemporaryDirectory directory("flight-changed-starts-");
     auto old=c;
     auto signature=nlohmann::json::parse(c.checkpointSignature);
-    if(rewards)
+    if(change==TrainingContractChange::Rewards)
     {
         signature.erase("rewardVersion");signature["reward"].erase("convergenceSeconds");
         signature["reward"]["weights"]["Path"]=0.02;signature["reward"]["weights"]["Speed"]=0.02;
         signature["reward"]["weights"]["Slope"]=0.02;signature["initial"]["approach"]=false;
     }
-    else {signature["initial"]["distanceMeters"]={7000,14000};signature["initial"]["bearingDegrees"]={-180,180};}
+    else if(change==TrainingContractChange::HorizontalStarts)
+    {signature["initial"]["distanceMeters"]={7000,14000};signature["initial"]["bearingDegrees"]={-180,180};}
+    else if(change==TrainingContractChange::LegacyStarts) signature["initial"].erase("runwayAlignedProbability");
+    else signature["initial"]["runwayAlignedProbability"]=0.25;
     old.checkpointSignature=signature.dump();
     FlightModelStore oldStore(old,directory.path);
     FlightLearner oldPolicy(old);oldPolicy.Save(oldStore.Latest());
@@ -93,7 +97,9 @@ int main()
     try
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
-        DesktopContinuation(c);ChangedTrainingContract(c,false);ChangedTrainingContract(c,true);
+        DesktopContinuation(c);
+        for(auto change : {TrainingContractChange::HorizontalStarts,TrainingContractChange::Rewards,
+            TrainingContractChange::LegacyStarts,TrainingContractChange::AlignedProbability}) ChangedTrainingContract(c,change);
         c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
         c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;
         TemporaryDirectory directory("flight-session-");

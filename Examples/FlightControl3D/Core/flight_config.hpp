@@ -40,6 +40,7 @@ struct MissionSettings final
 struct InitialSettings final
 {
     bool approach{}, gearDown{};
+    double runwayAlignedProbability{}; // Centreline position and runway heading; other state remains randomized.
     Range distanceMeters{}, bearingDegrees{}, heightMeters{}, speedMps{}, headingOffsetDegrees{};
     Range rollDegrees{}, pitchDegrees{}, slopeDegrees{};
     double throttle{}, flap{}, approachFlap{},rolloutFlap{},propeller{};
@@ -89,7 +90,7 @@ struct Config final
 /** Strict versioned JSON. Missing, unknown and non-finite fields are errors. */
 Config LoadConfig(std::filesystem::path const& path);
 void Validate(Config const& config);
-/** Warm-start training may change horizontal starts, entry phase and rewards; BEST requires an exact contract. */
+/** Warm-start training may change horizontal starts, their mixture, entry phase and rewards; BEST requires an exact contract. */
 bool CompatibleTrainingSignature(std::string const& stored,std::string const& current);
 
 } // namespace ppo::examples::flight

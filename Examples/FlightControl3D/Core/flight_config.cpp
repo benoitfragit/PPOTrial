@@ -98,10 +98,11 @@ Config LoadConfig(std::filesystem::path const& path)
     mission.straightSamples = Integer(m, "straightSamples", MaximumWaypoints);
     mission.requiredLaps=Integer(m,"requiredLaps",100);
     auto const& i = root.at("initial");
-    Keys(i, {"approach", "gearDown", "distanceMeters", "bearingDegrees", "heightMeters", "speedMps", "headingOffsetDegrees",
+    Keys(i, {"approach", "gearDown", "runwayAlignedProbability", "distanceMeters", "bearingDegrees", "heightMeters", "speedMps", "headingOffsetDegrees",
         "rollDegrees", "pitchDegrees", "slopeDegrees", "throttle", "flap", "approachFlap", "rolloutFlap", "propeller"});
     auto& initial = config.initial;
     initial.approach = Boolean(i, "approach"); initial.gearDown = Boolean(i, "gearDown");
+    initial.runwayAlignedProbability=Number(i,"runwayAlignedProbability");
     initial.distanceMeters=Bounds(i,"distanceMeters"); initial.bearingDegrees=Bounds(i,"bearingDegrees");
     initial.heightMeters=Bounds(i,"heightMeters"); initial.speedMps=Bounds(i,"speedMps");
     initial.headingOffsetDegrees=Bounds(i,"headingOffsetDegrees"); initial.rollDegrees=Bounds(i,"rollDegrees");
@@ -178,6 +179,7 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
     }
     // These changes keep the observation/action contract. Old scores are never
     // reused: production compares the complete, unmodified signature instead.
+    previous["initial"].erase("runwayAlignedProbability"); next["initial"].erase("runwayAlignedProbability");
     previous["initial"].erase("approach"); next["initial"].erase("approach");
     previous.erase("reward"); next.erase("reward");
     previous.erase("rewardVersion"); next.erase("rewardVersion");
@@ -187,6 +189,8 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
 void Validate(Config const& c)
 {
     auto const& i=c.initial;
+    Require(std::isfinite(i.runwayAlignedProbability) && i.runwayAlignedProbability>=0 && i.runwayAlignedProbability<=1,
+        "runwayAlignedProbability must be finite and within [0,1]");
     auto const& d=c.runwayRandomization;
     std::array<Range,18> const ranges{i.distanceMeters,i.bearingDegrees,i.heightMeters,i.speedMps,i.headingOffsetDegrees,
         i.rollDegrees,i.pitchDegrees,i.slopeDegrees,d.northMeters,d.eastMeters,d.headingOffsetDegrees,d.deckHeightMeters,

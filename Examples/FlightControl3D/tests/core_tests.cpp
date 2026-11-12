@@ -114,7 +114,7 @@ void Configuration()
 {
     std::ifstream source(PPO_FLIGHT_CONFIG); nlohmann::json valid; source>>valid;
     TemporaryDirectory temporary("flight-config-"); auto const path=temporary.path/"config.json";
-    for (int test=0; test<8; ++test)
+    for (int test=0; test<12; ++test)
     {
         auto json=valid;
         if (test==0) json["normalization"]["speed"]=0;
@@ -125,8 +125,19 @@ void Configuration()
         if (test==5) json["mission"]["hiddenConstant"]=3;
         if (test==6) json["training"]["checkpointDirectory"]="../BluePatrol/prod";
         if (test==7) json["mission"].erase("physicsDt");
+        if (test==8) json["initial"]["runwayAlignedProbability"]=-0.01;
+        if (test==9) json["initial"]["runwayAlignedProbability"]=1.01;
+        if (test==10) json["initial"]["runwayAlignedProbability"]=true;
+        if (test==11) json["initial"].erase("runwayAlignedProbability");
         { std::ofstream stream(path); stream<<json; }
         Rejects([&] { LoadConfig(path); },"invalid JSON accepted");
+    }
+    auto c=LoadConfig(PPO_FLIGHT_CONFIG);
+    Check(c.initial.runwayAlignedProbability==0.5,"default aligned-start probability");
+    for(double probability : {std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity()})
+    {
+        c.initial.runwayAlignedProbability=probability;
+        Rejects([&] { Validate(c); },"non-finite spawn probability accepted");
     }
 }
 void OrderedNavigation(Config const& config)
@@ -156,6 +167,61 @@ void OrderedNavigation(Config const& config)
     MissionState stopped{};a.position=plan.points[0];
     auto const stationary=AdvanceMission(c,plan,stopped,a,a);
     Check(stationary.rewards[0]==0 && stopped.waypoint==1,"stationary aircraft earns no path progression");
+}
+void AlignedStarts(Config c)
+{
+    std::array<double,4> const headings{0,90,181,359};
+    for(double probability : {0.0,1.0,0.5})
+    {
+        c.initial.runwayAlignedProbability=probability;
+        std::mt19937 rng(279),same(279);
+        std::size_t alignedCount=0,left=0,right=0,leftHeading=0,rightHeading=0,away=0;
+        double firstDistance=0,firstSpeed=0,firstRoll=0;
+        bool variedDistance=false,variedSpeed=false,variedRoll=false;
+        for(std::size_t sample=0;sample<1000;++sample)
+        {
+            auto motion=SampleRunway(c,rng),copy=SampleRunway(c,same);
+            motion.base.headingDegrees=headings[sample%headings.size()];copy.base.headingDegrees=motion.base.headingDegrees;
+            auto const runway=RunwayAt(motion,0),replicaRunway=RunwayAt(copy,0);
+            auto const aircraft=SampleAircraft(c,runway,rng),replica=SampleAircraft(c,replicaRunway,same);
+            auto const local=DeckCoordinates(runway,aircraft.position);
+            double const offset=WrapAngle(aircraft.heading-runway.headingDegrees*DegreesToRadians);
+            bool const aligned=Near(local.east,0,1e-7) && Near(offset,0,1e-10);
+            if(aligned)
+            {
+                ++alignedCount;
+                Check(local.north<0 && Dot(aircraft.velocity,RunwayForward(runway))>0,
+                    "aligned starts are before the threshold and fly towards the runway");
+            }
+            else
+            {
+                if(local.east<0) ++left;
+                if(local.east>0) ++right;
+                if(offset<0) ++leftHeading;
+                if(offset>0) ++rightHeading;
+                if(std::cos(offset)<0) ++away;
+            }
+            double const distance=std::hypot(local.north,local.east);
+            Check(distance>=c.initial.distanceMeters.minimum-1e-7 && distance<=c.initial.distanceMeters.maximum+1e-7
+                && local.up>=c.initial.heightMeters.minimum-1e-7 && local.up<=c.initial.heightMeters.maximum+1e-7,
+                "both spawn components keep the configured airborne envelope");
+            Check(aircraft.position.north==replica.position.north && aircraft.heading==replica.heading && rng==same,
+                "spawn mixture is reproducible for the same seed");
+            if(sample==0) { firstDistance=distance;firstSpeed=aircraft.airspeed;firstRoll=aircraft.roll; }
+            else
+            {
+                variedDistance=variedDistance || !Near(distance,firstDistance);
+                variedSpeed=variedSpeed || !Near(aircraft.airspeed,firstSpeed);
+                variedRoll=variedRoll || !Near(aircraft.roll,firstRoll);
+            }
+        }
+        Check(variedDistance && variedSpeed && variedRoll,"aligned starts must retain the other random parameters");
+        if(probability==0) Check(alignedCount==0,"zero probability retains broad random starts");
+        if(probability==1) Check(alignedCount==1000,"unit probability aligns every start on all runway headings");
+        if(probability==0.5) Check(alignedCount>400 && alignedCount<600,"half-probability produces both spawn components");
+        if(probability<1) Check(left>100 && right>100 && leftHeading>100 && rightHeading>100 && away>100,
+            "broad starts retain both sides, both heading signs and reversed courses");
+    }
 }
 void RandomizationAndMotion(Config const& c)
 {
@@ -256,7 +322,7 @@ void DisplayReferences(Config const& config)
 }
 int main()
 {
-    try { auto const c=LoadConfig(PPO_FLIGHT_CONFIG); Geometry(c); Landing(c); Configuration(); OrderedNavigation(c); RandomizationAndMotion(c); DisplayReferences(c); }
+    try { auto const c=LoadConfig(PPO_FLIGHT_CONFIG); Geometry(c); Landing(c); Configuration(); OrderedNavigation(c); AlignedStarts(c); RandomizationAndMotion(c); DisplayReferences(c); }
     catch(std::exception const& e) { std::cerr<<e.what()<<'\n'; return 1; }
     std::cout<<"Flight mission/configuration regressions passed\n";
 }

@@ -27,6 +27,7 @@
     "turnSamples": 16, "straightSamples": 4
   },
   "initial": {
+    "runwayAlignedProbability": 0.5,
     "approach": true, "gearDown": false, "distanceMeters": [5000.0, 7500.0], "bearingDegrees": [-20.0, 20.0],
     "heightMeters": [400.0, 1000.0], "speedMps": [55.0, 80.0], "pitchDegrees": [-4.0, 8.0],
     "headingOffsetDegrees": [-180.0, 180.0], "rollDegrees": [-15.0, 15.0], "slopeDegrees": [-3.0, 3.0],

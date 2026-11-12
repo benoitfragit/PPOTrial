@@ -41,12 +41,16 @@ int main()
         Check(last.truncated && !last.terminated,"actual FDM time limit");
         Rejects([&] { shortEpisode.Step(action); },"step after reset boundary");
         auto random=LoadConfig(PPO_FLIGHT_CONFIG);
+        random.initial.runwayAlignedProbability=1;
         FlightEnvironment randomized(random);
         for(int episode=0;episode<32;++episode)
         {
             randomized.Reset();
             auto const local=DeckCoordinates(randomized.Settings().runway,randomized.Aircraft().position);
             Check(local.up>=random.initial.heightMeters.minimum-0.1 && local.up<=random.initial.heightMeters.maximum+0.1,"real FDM randomized airborne height");
+            Check(local.north<0 && Near(local.east,0,0.02)
+                && Near(WrapAngle(randomized.Aircraft().heading-randomized.Settings().runway.headingDegrees*DegreesToRadians),0,1e-6),
+                "native JSBSim reset preserves runway centreline and inbound heading on moving tilted runways");
             Check(randomized.Aircraft().airspeed>=random.initial.speedMps.minimum-0.1 && randomized.Aircraft().airspeed<=random.initial.speedMps.maximum+0.1,"real FDM randomized calibrated speed");
         }
         JsbsimAircraft fdm(random,DefaultDataRoot());

@@ -75,7 +75,11 @@ RunwayMotion SampleRunway(Config const& c, std::mt19937& rng)
 AircraftState SampleAircraft(Config const& c, Runway const& runway, std::mt19937& rng)
 {
     auto const& i=c.initial;
-    double const distance=Draw(i.distanceMeters,rng),bearing=Draw(i.bearingDegrees,rng)*DegreesToRadians;
+    // At zero probability keep the original random sequence, including broad starts.
+    bool const aligned=i.runwayAlignedProbability>0
+        && (i.runwayAlignedProbability==1 || Draw({0,1},rng)<i.runwayAlignedProbability);
+    double const distance=Draw(i.distanceMeters,rng);
+    double const bearing=aligned ? 0 : Draw(i.bearingDegrees,rng)*DegreesToRadians;
     double const height=Draw(i.heightMeters,rng);
     AircraftState aircraft{};
     auto const local=Add(Scale(RunwayForward(runway),-distance*std::cos(bearing)),Scale(RunwayRight(runway),distance*std::sin(bearing)));
@@ -83,7 +87,8 @@ AircraftState SampleAircraft(Config const& c, Runway const& runway, std::mt19937
     // Height is above the instantaneous runway tangent plane.
     aircraft.position=Add(aircraft.position,Scale(RunwayNormal(runway),height));
     aircraft.airspeed=Draw(i.speedMps,rng);
-    aircraft.heading=WrapAngle((runway.headingDegrees+Draw(i.headingOffsetDegrees,rng))*DegreesToRadians);
+    double const headingOffset=aligned ? 0 : Draw(i.headingOffsetDegrees,rng);
+    aircraft.heading=WrapAngle((runway.headingDegrees+headingOffset)*DegreesToRadians);
     aircraft.roll=Draw(i.rollDegrees,rng)*DegreesToRadians;
     aircraft.pitch=Draw(i.pitchDegrees,rng)*DegreesToRadians;
     double const slope=Draw(i.slopeDegrees,rng)*DegreesToRadians;
