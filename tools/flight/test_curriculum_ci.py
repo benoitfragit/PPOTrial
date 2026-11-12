@@ -17,10 +17,10 @@ args = sys.argv
 output = Path(args[args.index("--output") + 1])
 stage = args[args.index("--stage") + 1]
 target = int(args[args.index("--updates") + 1])
-with (output / "calls.txt").open("a") as f: f.write(f"{stage} {target}\n")
+with (output / "calls.txt").open("a") as f: f.write(f"{stage} {target}\\n")
 checkpoint = output / "latest" / "flight_hybrid_v1.txt"
-checkpoint.write_text(f"PPO_FLIGHT_HYBRID_V1 56 5 128 {target}\n")
-(output / "training.csv").write_text("episode,updates\n1,1\n")
+checkpoint.write_text(f"PPO_FLIGHT_HYBRID_V1 56 5 128 {target}\\n")
+(output / "training.csv").write_text("episode,updates\\n1,1\\n")
 threshold = json.loads(os.environ["PASS_AT"])[stage]
 passed = target >= threshold
 if os.environ.get("MALFORMED_GATE") == "1":
