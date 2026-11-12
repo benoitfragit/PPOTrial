@@ -1,6 +1,17 @@
 name: Desktop VS2022 build
 
 on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+    branches:
+      - master
+    paths:
+      - '**/*.cpp'
+      - '**/*.hpp'
+      - '**/CMakeLists.txt'
+      - 'CMakeLists.txt'
+      - 'dependencies.cmake'
+      - '.github/workflows/desktop-windows.yml'
   workflow_dispatch:
 
 jobs:
