@@ -35,7 +35,7 @@ Le JSON livré active `training.resume: true` et `checkpointEvery: 1`. En entra�
 
 Le desktop traite `maxUpdates` comme un budget supplémentaire à partir du modèle chargé. Par exemple, un `latest` à l'update 120 et un budget de 10 000 donnent une fin de bloc à 10 120. Après validation finale, un nouveau Play prolonge le budget en conservant le même learner. Le renderer diffère Stop/join et Play hors du verrou de snapshot, puis le callback ECS `Init` prolonge la session terminée. Le headless conserve son budget total existant. L'UI affiche la source du modèle et la limite du bloc courant ; le journal contient `[FLIGHT_SESSION] Resumed latest` et l'update chargé.
 
-La reprise d'entraînement conserve les poids, Adam et le RNG lors d'un changement des intervalles horizontaux, de l'orientation d'interception, de `initial.approach`, du guidage compatible déclaré ou des réglages de reward. `rewardVersion: 4`, `guidanceVersion: 9` et `spawnVersion: 2` séparent les contrats de shaping, de guidage et d'ordonnancement initial. Les checkpoints de guidage V2 à V8 et de reward V2 à V3, les placements aléatoires antérieurs et les signatures sans ces versions peuvent amorcer l'entraînement, mais leur BEST n'est jamais réutilisé sans une nouvelle validation. Les changements de géométrie de piste, de physique ou d'autres observations restent incompatibles. Un BEST antérieur est conservé avec ses générations et son contrôle d'intégrité ; l'inférence exige un BEST validé sur le contrat exact.
+La reprise d'entraînement conserve les poids, Adam et le RNG lors d'un changement des intervalles horizontaux, de l'orientation d'interception, de `initial.approach`, du guidage compatible déclaré ou des réglages de reward. `rewardVersion: 5`, `guidanceVersion: 9` et `spawnVersion: 2` séparent les contrats de shaping, de guidage et d'ordonnancement initial. Les checkpoints de guidage V2 à V8 et de reward V2 à V4, les placements aléatoires antérieurs et les signatures sans ces versions peuvent amorcer l'entraînement, mais leur BEST n'est jamais réutilisé sans une nouvelle validation. Les changements de géométrie de piste, de physique ou d'autres observations restent incompatibles. Un BEST antérieur est conservé avec ses générations et son contrôle d'intégrité ; l'inférence exige un BEST validé sur le contrat exact.
 
 ## Interface FlightControl3D
 
@@ -134,7 +134,7 @@ Les guidages `Localizer` et `Glide` utilisent une qualité lisse `Q(e) = toléra
 
 La différence signée récompense le rapprochement et pénalise l'éloignement. Elle n'est pas clippée : une amélioration lente suivie d'une régression rapide ne doit pas créer de bonus net. Le facteur de temps vaut 20 secondes dans le JSON. La comparaison avant/après utilise la même phase, le même waypoint et les deux repères successifs de la piste, sans gain artificiel dû au seul mouvement rigide du pont.
 
-En approche, le progrès est l'avancement longitudinal relatif à la piste, normalisé par la vitesse cible et borné entre −1 et +1. Un déplacement qui s'éloigne du seuil ne peut rapporter de contribution LOC/glide positive, même si l'erreur angulaire diminue avec la distance. Une géométrie stationnaire ne reçoit pas de maintien ILS répété. La qualité ILS est nulle hors signal ; la perte et la reprise du secteur entrent dans la différence signée. `Path` fournit alors un guidage secondaire vers le point d'interception.
+Avant le seuil, le shaping LOC/GLIDE est dense dans toute la portée ILS, y compris hors du secteur radio, et agit dès la phase HIPP. Cette géométrie privilégiée ne modifie ni `ilsValid`, ni les observations radio, ni l'UI, ni les captures : le vrai signal conserve son secteur configuré. Le progrès est l'avancement longitudinal relatif à la piste, normalisé par la vitesse cible et borné entre −1 et +1. Un déplacement qui s'éloigne du seuil ne peut rapporter de contribution LOC/glide positive, même si l'erreur angulaire diminue avec la distance. Une géométrie stationnaire ne reçoit pas de maintien répété. Hors de la portée avant, le shaping ILS reste nul. `Path` conserve le guidage hippodrome ou le point d'interception secondaire.
 
 En patrouille, `Path` reprend le shaping borné de BlueAgent : coût rationnel composé à 50 % de l'écart à la courbe, 30 % de l'écart de vitesse et 20 % de l'écart de cap, amélioration signée, progression physique projetée et pénalité de coût courant. Le résultat est borné dans `[-1, 1]` avant le poids existant `0,002`. Stationner, reculer, s'écarter ou tourner autour d'une porte ne rapporte rien de positif. Le tour complet ne rapporte aucun nouveau bonus dédié. Les canaux `Speed` et `Slope` conservent la qualité triangulaire `max(0, 1 − abs(erreur)/tolérance)` pondérée par le temps physique. Les captures restent payées une seule fois par épisode après maintien confirmé.
 
@@ -173,6 +173,14 @@ Le checkpoint `flight_hybrid_v1.txt` contient acteur, critic, moments Adam, âge
 ### Politique BEST et validation
 
 Le lancement standard écrit `resources/model/FlightControl3D/latest/flight_hybrid_v1.txt`. Le chemin JSON est relatif à la racine `resources` déduite du scénario ; `--output` permet de choisir un autre répertoire en headless. Tous les dix updates et à la fin du budget, le candidat est figé et évalué sur un environnement séparé, avec 20 épisodes et la graine 4342, distincte de l'entraînement. Paramètres et fréquence sont dans `evaluation` du JSON. La validation n'ajoute aucun échantillon au rollout et ne modifie ni Adam ni le RNG de l'entraînement ; le dernier état physique d'entraînement reste en attente.
+
+Le fichier `latest/flight_hybrid_v1.txt` est le seul artefact FlightControl3D
+commitable sous `resources/model`. Il contient acteur, critic, moments Adam,
+âges des optimiseurs, RNG et compteur d'updates ; `.previous`, les temporaires
+et les générations BEST restent locaux. Lorsqu'il est présent dans le dépôt,
+le test de session CI le charge par le même chemin que le desktop et exige une
+reprise propre à la frontière d'un update avec un budget additionnel. Le workflow
+FlightControl3D est également déclenché par toute modification de ce checkpoint.
 
 La réussite exige un poser sûr puis l'arrêt confirmé sur la piste. Par défaut, le seuil est **92 %**, donc au moins **19 succès sur 20**. Un candidat ne devient production qu'après la campagne complète et le franchissement de ce seuil. Le score est le pourcentage de réussites ; à score identique, une abscisse moyenne d'arrêt plus courte départage les candidats. Un candidat identique, moins bon, incomplet ou sous le seuil conserve le BEST précédent.
 
@@ -315,11 +323,27 @@ Le checkpoint V8 reste un warm start compatible ; le BEST doit être revalidé.
 
 Validation locale : ni compilation ni test exécuté, conformément à la consigne.
 
+## Shaping ILS dense avant capture V5 (11 novembre 2026)
+
+Le contrat `rewardVersion=5` calcule les potentiels LOC et GLIDE dès HIPP sur
+toute la géométrie située avant le seuil, au-dessus du plan de piste et dans la
+portée ILS. La qualité rationnelle reste strictement positive loin des faisceaux,
+donc une amélioration produit un gradient avant la capture et même hors du
+secteur radio. Le recul ne rapporte jamais de contribution positive et une
+géométrie stationnaire ne reçoit aucun maintien répété.
+
+Ce shaping privilégié n'élargit pas le signal physique : `ilsValid`, les
+observations radio, l'affichage, les captures LOC/GLIDE et leurs bonus conservent
+le secteur et les seuils configurés. Aucun canal ni poids supplémentaire n'est
+créé.
+
+Validation locale : ni compilation ni test exécuté, conformément à la consigne.
+
 ## Tolérance ILS temporaire d'entraînement (11 novembre 2026)
 
 `training.ilsCaptureScale` multiplie uniquement les tolérances de capture LOC et
-GLIDE de l'environnement qui collecte les rollouts. La valeur livrée `1.5` donne
-donc `LOC ±3,75°` et `GLIDE ±1,05°` pendant l'entraînement. Les valeurs nominales
+GLIDE de l'environnement qui collecte les rollouts. La valeur locale `2.0` donne
+donc `LOC ±5°` et `GLIDE ±1,4°` pendant l'entraînement. Les valeurs nominales
 `±2,5°` et `±0,7°` restent utilisées sans modification par les campagnes de
 validation et par l'inférence. Le rendu affiche l'enveloppe réellement active et
 revient automatiquement à l'enveloppe nominale pendant une validation.

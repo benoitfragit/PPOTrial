@@ -42,6 +42,26 @@ void Convergence(Config const& c)
     Check(Channel(improvement,Reward::EnterLocalizer)==0 && Channel(improvement,Reward::EnterGlide)==0,
         "far convergence does not claim a capture");
 
+    MissionState patrol{};
+    auto const plan=MakeFlightPlan(c);
+    auto const patrolImprovement=AdvanceMission(c,plan,patrol,far,closer);
+    Check(patrol.phase==Phase::Patrol && Channel(patrolImprovement,Reward::Localizer)>0
+        && Channel(patrolImprovement,Reward::Glide)>0
+        && Channel(patrolImprovement,Reward::EnterLocalizer)==0
+        && Channel(patrolImprovement,Reward::EnterGlide)==0,
+        "visible raw ILS shapes LOC and glide before capture while patrol remains active");
+    auto const outside=At(c,-4000,5000,700),outsideCloser=At(c,-4000,4999.8,699.98);
+    MissionState outsidePatrol{};
+    auto const denseShaping=AdvanceMission(c,plan,outsidePatrol,outside,outsideCloser);
+    Check(!Guide(c,plan,outsidePatrol,outsideCloser).ilsValid
+        && Channel(denseShaping,Reward::Localizer)>0 && Channel(denseShaping,Reward::Glide)>0,
+        "dense shaping guides acquisition outside the physical signal sector");
+    auto const beyondRange=At(c,-16000,0,1000),nearerBeyondRange=At(c,-15999.8,0,1000);
+    MissionState beyondRangePatrol{};
+    auto const noGeometry=AdvanceMission(c,plan,beyondRangePatrol,beyondRange,nearerBeyondRange);
+    Check(Channel(noGeometry,Reward::Localizer)==0 && Channel(noGeometry,Reward::Glide)==0,
+        "ILS shaping remains bounded to the configured front-side range");
+
     // Slow improvement followed by one fast regression must also cancel.
     auto previous=far;double localizer{},glide{};
     for(int step=1;step<=100;++step)
@@ -164,10 +184,11 @@ void SecondaryGuidance(Config const& c)
     Check(missed.waypoint!=1 && !missed.pathQualified && missed.waypointsPassed==0 && missed.completedLaps==0,
         "a missed gate advances guidance through reacquisition without crediting a shortcut");
 
-    auto const outside=At(c,-4000,5000,600),intercepting=At(c,-4000,4999.8,600);
+    auto const outside=At(c,-4000,5000,600),intercepting=At(c,-4000,4999.8,599.8);
     auto const fallback=ApproachStep(c,outside,intercepting);
-    Check(Channel(fallback,Reward::Path)>0 && Channel(fallback,Reward::Localizer)==0 && Channel(fallback,Reward::Glide)==0,
-        "outside ILS uses secondary geometric intercept guidance without claiming a signal");
+    Check(Channel(fallback,Reward::Path)>0 && Channel(fallback,Reward::Localizer)>0
+        && Channel(fallback,Reward::Glide)>0,
+        "outside the radio sector, dense ILS shaping complements the geometric intercept path");
     MissionState approach{};approach.phase=Phase::Approach;
     auto const target=DeckCoordinates(c.runway,Guide(c,plan,approach,outside).target);
     auto const afterThreshold=At(c,1000,5000,600);

@@ -157,7 +157,7 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics.erase("training");
     semantics.erase("evaluation");
     semantics["distribution"] = {training.minLogStd,training.maxLogStd};
-    semantics["rewardVersion"] = 4;
+    semantics["rewardVersion"] = 5;
     semantics["guidanceVersion"] = 9;
     semantics["spawnVersion"] = 2;
     config.checkpointSignature = semantics.dump();
@@ -176,7 +176,8 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
         if(!signature->contains("reward") || !(*signature)["reward"].is_object()
             || !(*signature)["initial"].contains("approach") || !(*signature)["initial"]["approach"].is_boolean()) return false;
         if(signature->contains("rewardVersion") && (*signature)["rewardVersion"]!=2
-            && (*signature)["rewardVersion"]!=3 && (*signature)["rewardVersion"]!=4) return false;
+            && (*signature)["rewardVersion"]!=3 && (*signature)["rewardVersion"]!=4
+            && (*signature)["rewardVersion"]!=5) return false;
         if(signature->contains("guidanceVersion") && (*signature)["guidanceVersion"]!=2
             && (*signature)["guidanceVersion"]!=3 && (*signature)["guidanceVersion"]!=4
             && (*signature)["guidanceVersion"]!=5 && (*signature)["guidanceVersion"]!=6

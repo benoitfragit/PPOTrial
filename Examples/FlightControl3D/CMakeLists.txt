@@ -67,6 +67,8 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
             PPO_FLIGHT_CONFIG="${CMAKE_SOURCE_DIR}/resources/settings/Scenarios/FlightControl3D.json")
         add_test(NAME FlightControl_${test_name}_tests COMMAND FlightControl_${test_name}_tests)
     endforeach()
+    target_compile_definitions(FlightControl_session_tests PRIVATE
+        PPO_FLIGHT_COMMITTED_CHECKPOINT="${CMAKE_SOURCE_DIR}/resources/model/FlightControl3D/latest/flight_hybrid_v1.txt")
     target_sources(FlightControl_learner_tests PRIVATE tests/other_rltools_backend.cpp)
     target_link_libraries(FlightControl_learner_tests PRIVATE RLtools::Core)
 endif()

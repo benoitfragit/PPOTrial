@@ -23,6 +23,14 @@ double GuidanceQuality(double error, double tolerance) noexcept
     // A finite error outside the capture tolerance must still provide guidance.
     return tolerance/(tolerance+std::abs(error));
 }
+bool IlsShapingEnvelope(Config const& c,Guidance const& guidance) noexcept
+{
+    // Reward geometry is deliberately denser than radio reception: it guides
+    // acquisition throughout the finite front-side range, while ilsValid stays
+    // authoritative for observations, UI state and capture transitions.
+    return guidance.along<0 && guidance.height>0
+        && guidance.distance<=c.mission.ilsRangeMeters;
+}
 double GuidanceReward(Config const& c,double previousQuality,double quality,double progress,double sustainScale=1.0) noexcept
 {
     // The signed difference cancels on a closed error excursion. Do not clip it:
@@ -550,7 +558,7 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         auto const previousGuidance=Guide(c,plan,s,referenceBefore);
         if (s.phase == Phase::Patrol)
             add(Reward::Path,PatrolTrackingReward(c,plan,referenceBefore,after,pathProgress));
-        if (s.phase == Phase::Approach)
+        if (s.phase != Phase::Rollout)
         {
             double const progress=std::clamp((g.along-previousGuidance.along)/(g.targetSpeed*dt),-1.0,1.0);
             // Decay only progress; the signed error potential must cancel across delayed reversals.
@@ -559,14 +567,18 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
             {
                 bool const localizer=channel==Reward::Localizer;
                 double const tolerance=(localizer ? c.reward.localizerToleranceDegrees : c.reward.glideToleranceDegrees)*DegreesToRadians;
-                double const previousQuality=previousGuidance.ilsValid
+                double const previousQuality=IlsShapingEnvelope(c,previousGuidance)
                     ? GuidanceQuality(localizer ? previousGuidance.localizer : previousGuidance.glideError,tolerance) : 0;
-                double const quality=g.ilsValid ? GuidanceQuality(localizer ? g.localizer : g.glideError,tolerance) : 0;
+                double const quality=IlsShapingEnvelope(c,g)
+                    ? GuidanceQuality(localizer ? g.localizer : g.glideError,tolerance) : 0;
                 double const value=GuidanceReward(c,previousQuality,quality,progress,ilsScale);
                 // Angular errors can shrink merely by flying away from the
                 // threshold; that must never earn a positive ILS reward.
                 add(channel,progress<0 ? std::min(value,0.0) : value);
             }
+        }
+        if (s.phase == Phase::Approach)
+        {
             if(!s.capturedLocalizer || !s.capturedGlide)
             {
                 double const previousDistance=previousGuidance.pathDistance;

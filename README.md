@@ -46,6 +46,13 @@ Le multiplicateur `training.ilsCaptureScale` élargit temporairement les toléra
 de capture pendant l'apprentissage seulement. L'évaluation et l'inférence gardent
 les angles réalistes de `mission`, et modifier ce multiplicateur permet de reprendre
 le checkpoint `latest` sans réinitialiser les poids ni Adam.
+Le shaping LOC/GLIDE reste dense avant le seuil dans toute la portée ILS, y
+compris avant capture et hors secteur radio ; le signal affiché et la capture
+conservent néanmoins leur géométrie physique stricte.
+Le checkpoint complet `resources/model/FlightControl3D/latest/flight_hybrid_v1.txt`
+peut être commité comme point de départ : la CI le charge réellement lorsqu'il
+est présent et vérifie une reprise à la frontière d'un update PPO. La sauvegarde
+`.previous` reste locale.
 L'IHM distingue signal visible, captures actives et durées d'épisode en secondes
 simulées, avec un grand badge `HIPP` ou `APPROACH`, la vitesse, la pente et
 `GEAR` lorsque le train est physiquement sorti sur la caméra. La conception

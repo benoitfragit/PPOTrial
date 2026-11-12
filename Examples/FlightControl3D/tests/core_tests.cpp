@@ -165,7 +165,7 @@ void Configuration()
     }
     auto c=LoadConfig(PPO_FLIGHT_CONFIG);
     Check(Near(c.initial.runwayAlignedProbability,1.0/3.0),"balanced LOC/glide-start probability");
-    Check(Near(c.training.ilsCaptureScale,1.5),"training-only ILS capture scale");
+    Check(Near(c.training.ilsCaptureScale,2.0),"training-only ILS capture scale");
     for(double probability : {std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity()})
     {
         c.initial.runwayAlignedProbability=probability;

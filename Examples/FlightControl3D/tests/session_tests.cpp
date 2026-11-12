@@ -42,6 +42,20 @@ void DesktopContinuation(Config c)
     Rejects([&] {FlightSession invalid(c,true,directory.path);},"corrupt latest must not silently create a new policy");
 }
 enum class TrainingContractChange { HorizontalStarts, Rewards, LegacyStarts, LegacyGuidance, AlignedProbability };
+void CommittedTrainingCheckpoint(Config c)
+{
+    std::filesystem::path const checkpoint{PPO_FLIGHT_COMMITTED_CHECKPOINT};
+    if(!std::filesystem::exists(checkpoint)) return;
+    c.training.resume=true;
+    auto const modelDirectory=checkpoint.parent_path().parent_path();
+    FlightSession resumed(c,true,modelDirectory,std::nullopt,TrainingBudget::AdditionalUpdates);
+    auto const snapshot=resumed.Snapshot();
+    Check(snapshot.resumed && snapshot.learning.updates>0
+        && snapshot.trainingUpdateLimit==snapshot.learning.updates+c.training.maxUpdates,
+        "committed FlightControl3D checkpoint must be a complete additional-training warm start");
+    Check(resumed.Learner().Collected()==0,
+        "committed FlightControl3D checkpoint must start at an update boundary");
+}
 void ChangedTrainingContract(Config c,TrainingContractChange change)
 {
     c.training.rolloutSteps=8;c.training.minibatch=4;c.training.epochs=1;c.training.maxUpdates=1;
@@ -104,6 +118,9 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=3;
     Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
         "previous reward V3 remains usable as a training warm start");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=4;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "previous reward V4 remains usable as a training warm start");
     signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown shaping contract is rejected");
     signature=nlohmann::json::parse(c.checkpointSignature);signature["guidanceVersion"]=2;
@@ -140,6 +157,7 @@ int main()
     try
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
+        CommittedTrainingCheckpoint(c);
         DesktopContinuation(c);
         for(auto change : {TrainingContractChange::HorizontalStarts,TrainingContractChange::Rewards,
             TrainingContractChange::LegacyStarts,TrainingContractChange::LegacyGuidance,
