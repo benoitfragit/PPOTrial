@@ -86,6 +86,91 @@ bool TestObjectiveThreatPriority()
             GeneralizedRewardChannel::ThreatContainment), -expected);
 }
 
+/** @brief Applies exactly (1 + pre-loss risk) / N on the existing channel. */
+bool TestThreatWeightedNeutralization()
+{
+    auto const roles = *BlueTeamRoles::Create(4U, 2U);
+    DefenseSettings const defense{};
+    DefenseTrack const objective{0.F, 0.F, 0.F, 0.F, true};
+    GeneralizedRewardSettings weights{};
+    weights.weights.fill(0.F);
+    weights.weights[static_cast<std::size_t>(
+        GeneralizedRewardChannel::RedNeutralization)] = 2.F;
+    weights.weights[static_cast<std::size_t>(
+        GeneralizedRewardChannel::ThreatContainment)] = 2.F;
+    std::array<float, 3U> const distances{120000.F, 63333.333F, 9999.F};
+    std::array<float, 3U> const risks{0.F, 0.5F, 1.F};
+    for (std::size_t const redCount : {1U, 4U, 10U})
+        for (std::size_t sample = 0U; sample < risks.size(); ++sample)
+        {
+            float const risk = ObjectiveThreatRisk(defense,
+                {distances[sample], 0.F, 3.14159265F, 1.F, true}, objective);
+            if (!Near(risk, risks[sample]))
+                return false;
+            GeneralizedRewardTransition transition{};
+            transition.before = MakeState(4U, redCount);
+            transition.after = transition.before;
+            transition.after.redAlive[0] = false;
+            transition.responsibilities.redNeutralizationRiskBefore[0] = risk;
+            transition.responsibilities.threatContainment = risk
+                / static_cast<float>(redCount);
+            GeneralizedCooperativeRewards rewards{};
+            if (AggregateGeneralizedCooperativeRewards(roles, transition, weights, rewards)
+                    != GeneralizedRewardStatus::Applied
+                || !Near(Channel(rewards.team, GeneralizedRewardChannel::RedNeutralization),
+                    (1.F + risks[sample]) / static_cast<float>(redCount))
+                || !Near(rewards.team.Total(weights),
+                    2.F * (1.F + 2.F * risks[sample]) / static_cast<float>(redCount)))
+                return false;
+            for (std::size_t index = 0U; index < roles.ActiveBlueCount(); ++index)
+            {
+                if (!Near(Channel(rewards.perBlue[index], GeneralizedRewardChannel::RedNeutralization),
+                        Channel(rewards.team, GeneralizedRewardChannel::RedNeutralization)))
+                    return false;
+            }
+            transition.before = transition.after; // No new loss, no second credit.
+            transition.responsibilities.threatContainment = 0.F;
+            if (AggregateGeneralizedCooperativeRewards(roles, transition, weights, rewards)
+                    != GeneralizedRewardStatus::Applied
+                || rewards.team.Total(weights) != 0.F)
+                return false;
+        }
+    GeneralizedRewardTransition simultaneous{};
+    simultaneous.before = MakeState(4U, 4U);
+    simultaneous.before.redAlive[3] = false; // Delayed or already destroyed.
+    simultaneous.after = simultaneous.before;
+    simultaneous.after.redAlive.fill(false);
+    simultaneous.pendingThreats = true;
+    simultaneous.responsibilities.redNeutralizationRiskBefore = {0.F, 0.5F, 1.F, 1.F};
+    GeneralizedCooperativeRewards rewards{};
+    if (AggregateGeneralizedCooperativeRewards(roles, simultaneous, {}, rewards)
+            != GeneralizedRewardStatus::Applied
+        || !Near(Channel(rewards.team, GeneralizedRewardChannel::RedNeutralization), 1.125F))
+        return false;
+    // Activation is not a neutralization, even with a nonzero risk snapshot.
+    simultaneous.before = simultaneous.after;
+    simultaneous.after.redAlive[3] = true;
+    if (AggregateGeneralizedCooperativeRewards(roles, simultaneous, {}, rewards)
+            != GeneralizedRewardStatus::Applied
+        || Channel(rewards.team, GeneralizedRewardChannel::RedNeutralization) != 0.F)
+        return false;
+    simultaneous.before = MakeState(4U, 0U);
+    simultaneous.after = simultaneous.before;
+    if (AggregateGeneralizedCooperativeRewards(roles, simultaneous, {}, rewards)
+            != GeneralizedRewardStatus::Applied
+        || Channel(rewards.team, GeneralizedRewardChannel::RedNeutralization) != 0.F)
+        return false;
+    for (float const invalid : {-0.1F, 1.1F, std::numeric_limits<float>::infinity(),
+            std::numeric_limits<float>::quiet_NaN()})
+    {
+        simultaneous.responsibilities.redNeutralizationRiskBefore[0] = invalid;
+        if (AggregateGeneralizedCooperativeRewards(roles, simultaneous, {}, rewards)
+                != GeneralizedRewardStatus::InvalidSignals)
+            return false;
+    }
+    return true;
+}
+
 /**
  * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
  */
@@ -764,6 +849,8 @@ int main()
 {
     if (!TestObjectiveThreatPriority())
         return 21;
+    if (!TestThreatWeightedNeutralization())
+        return 28;
     if (!TestOneVersusZero())
         return 1;
     if (!TestNoRedNeedsCompletedLap())

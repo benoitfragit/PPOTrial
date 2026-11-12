@@ -7,6 +7,7 @@
 #include "generalized_patrol_team_agent.hpp"
 #include "generalized_patrol_production_policy.hpp"
 #include "generalized_episode_outcome.hpp"
+#include "generalized_leader_succession.hpp"
 
 #include "generalized_cooperative_reward.hpp"
 #include "generalized_patrol_learner.hpp"
@@ -96,17 +97,20 @@ std::size_t AliveCount(std::array<Mobile, Capacity> const& mobiles,
  * @brief Publishes the exact patrol references supplied to policy inference.
  * @param context Scenario context receiving render-only fixed-capacity data.
  * @param targets Physical-index targets computed for the current observation.
- * @param roles Immutable physical-to-role assignment for the episode.
+ * @param roles Current physical-to-role assignment.
+ * @param state Matching observation snapshot; only active Reds hide references.
  */
 void PublishPatrolReferenceOverlay(
     InitializerContext& context, GeneralizedPatrolTargets const& targets,
-    BlueTeamRoles const& roles) noexcept
+    BlueTeamRoles const& roles, GeneralizedRuntimeState const& state) noexcept
 {
     auto& overlay = context.patrolReferenceOverlay;
     overlay = ppo::model::sPatrolReferenceOverlay{};
     if (!roles.IsValid())
         return;
 
+    overlay.m_showInPatrol = !GeneralizedHasActiveRed(state)
+        && state.blues[roles.LeaderPhysicalIndex()].available;
     overlay.m_activeReferenceCount = roles.ActiveBlueCount();
     for (std::size_t physicalIndex = 0U;
          physicalIndex < roles.ActiveBlueCount(); ++physicalIndex)
@@ -748,7 +752,7 @@ void GeneralizedPatrolMappoAgent::ChooseAction()
         {
             auto& context = registry_->ctx().get<InitializerContext>();
             PublishPatrolReferenceOverlay(
-                context, beforeTargets_, roles);
+                context, beforeTargets_, roles, beforeStep_);
             PublishPatrolWaypointOverlay(context, waypointSequencer_);
         }
         BuildObservations(parameters, beforeStep_, observations, beforeTargets_);
@@ -830,7 +834,9 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         GeneralizedRuntimeState const after = ReadState(parameters);
         std::array<GeneralizedObservation,
                    TeamCapacity::MaximumBlueMobiles> observations{};
-        BlueTeamRoles const& roles = Roles();
+        // The action and its reward belong to the roles before physics. The
+        // next observation may already describe a promoted physical teammate.
+        BlueTeamRoles const roles = Roles();
         std::size_t const leaderIndex = roles.LeaderPhysicalIndex();
         GeneralizedPatrolTargets const baselineFrozenTargets =
             beforeTargets_[leaderIndex].valid
@@ -864,7 +870,20 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                 GeneralizedPhysicalSlotRotationFeasible(
                     parameters, beforeTargets_[index], afterTargets[index]);
         }
+        GeneralizedPatrolTargets const rewardAfterTargets = afterTargets;
+        auto& context = registry_->ctx().get<InitializerContext>();
+        if (RelieveGeneralizedLeader(after, *context.blueTeamRoles,
+                waypointSequencer_, noThreatLap_))
+        {
+            followTransitionStep_ = 0U;
+            afterTargets = waypointSequencer_.PhysicalTargets(
+                parameters, after, Roles(), training_.noThreatPatrol);
+        }
         BuildObservations(parameters, after, observations, afterTargets);
+        // Refresh from the resolved state, including spawn/loss transitions,
+        // so the next renderer snapshot cannot retain pre-step visibility.
+        PublishPatrolReferenceOverlay(context, afterTargets, Roles(), after);
+        PublishPatrolWaypointOverlay(context, waypointSequencer_);
 
         std::array<bool, TeamCapacity::MaximumBlueMobiles> availability{};
         for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
@@ -890,7 +909,8 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                 training_.noThreatPatrol, beforeTargets_, frozenAfterTargets);
         }
         auto const outcome = generalized_episode_detail::EvaluateOutcome(
-            after, pendingThreats, waypointSequencer_, leaderIndex, lapCompleted,
+            after, pendingThreats, waypointSequencer_,
+            Roles().LeaderPhysicalIndex(), lapCompleted,
             training_.noThreatPatrol, parameters.dt, episodeStep_,
             evaluation_.InProgress()
                 ? training_.evaluation.maxSteps : parameters.episodeSteps);
@@ -1052,6 +1072,17 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         transition.responsibilities.threatContainment = Clamp(
             ObjectiveThreatLevel(beforeStep_, parameters)
                 - ObjectiveThreatLevel(after, parameters), -1.F, 1.F);
+        DefenseTrack const objectiveBefore{beforeStep_.objectiveNorth,
+            beforeStep_.objectiveEast, 0.F, 0.F, beforeStep_.objectiveAvailable};
+        for (std::size_t index = 0U; index < counts_.redMobiles; ++index)
+        {
+            Mobile const& red = beforeStep_.reds[index];
+            if (red.available && !after.reds[index].available)
+                transition.responsibilities.redNeutralizationRiskBefore[index] =
+                    ObjectiveThreatRisk(parameters.defense,
+                        {red.north, red.east, red.heading, red.speed, red.available},
+                        objectiveBefore);
+        }
         float const patrolWeight = rewardWeights_[static_cast<std::size_t>(
             GeneralizedRewardChannel::PatrolTracking)];
         float const formationWeight = rewardWeights_[static_cast<std::size_t>(
@@ -1064,7 +1095,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             GeneralizedPatrolRewardRelevant(beforeStep_, after);
         transition.responsibilities.leaderPatrol = patrolRelevant
             ? GeneralizedUnifiedPatrolConvergenceShaping(
-                parameters, beforeStep_, after, beforeTargets_, afterTargets,
+                parameters, beforeStep_, after, beforeTargets_, rewardAfterTargets,
                 roles, roles.LeaderPhysicalIndex(), training_.noThreatPatrol)
                 / std::max(patrolWeight, 1.F)
             : 0.F;
@@ -1080,7 +1111,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                 transition.responsibilities.formationSlots[assignment.formationSlot] =
                     patrolRelevant
                     ? GeneralizedUnifiedPatrolConvergenceShaping(
-                        parameters, beforeStep_, after, beforeTargets_, afterTargets,
+                        parameters, beforeStep_, after, beforeTargets_, rewardAfterTargets,
                         roles, index, training_.noThreatPatrol)
                         / std::max(formationWeight, 1.F)
                     : GeneralizedCooperationWeight(parameters, beforeStep_)

@@ -233,12 +233,20 @@ struct sPatrolReferenceOverlay final
     std::array<sPatrolReferenceOverlayEntry, ReferenceCapacity> m_references{};
     /** @brief Number of active role positions, including the leader. */
     std::size_t m_activeReferenceCount{};
+    /** @brief Render-only patrol visibility; false while any Red is active. */
+    bool m_showInPatrol{};
 
     /** @brief Returns true when the active prefix fits the fixed storage. */
     constexpr bool Valid() const noexcept
     {
         return m_activeReferenceCount != 0U
             && m_activeReferenceCount <= ReferenceCapacity;
+    }
+
+    /** @brief Common visibility contract for labels, 3D arrows and minimap. */
+    constexpr bool Visible() const noexcept
+    {
+        return m_showInPatrol && Valid() && m_references[0].m_valid;
     }
 };
 

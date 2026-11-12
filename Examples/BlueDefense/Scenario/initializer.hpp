@@ -57,7 +57,7 @@ struct InitializerContext {
     std::uint64_t episodeIndex{};
     /** @brief Physical blue-guard index assigned leader role for this episode. */
     std::size_t leaderGuardIndex{};
-    /** @brief Exactly one sampled leader and P-1 immutable formation roles. */
+    /** @brief Current roles; combat leader loss rebuilds the physical assignment. */
     std::optional<defenders::BlueTeamRoles> blueTeamRoles{};
     float arclength{0.F};
     bool evaluationOverride{false};

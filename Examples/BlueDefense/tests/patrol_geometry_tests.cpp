@@ -79,6 +79,27 @@ bool TestGeneralizedRewardConfiguration()
     return true;
 }
 
+/** @brief Checks the actual Blue JSON and fallback, retaining outer thresholds. */
+bool TestObjectiveRiskConfiguration()
+{
+    auto const parameters = patrol::LoadPatrolParameters(PPO_SETTINGS_ROOT);
+    for (auto const settings : {patrol::DefenseSettings{}, parameters.defense})
+    {
+        if (settings.protectedRadiusMeters != 10000.F
+            || settings.activationDistanceMeters != 90000.F
+            || settings.deactivationDistanceMeters != 110000.F
+            || settings.timeToIntrusionSeconds != 300.F)
+            return false;
+        patrol::DefenseTrack const objective{0.F, 0.F, 0.F, 0.F, true};
+        if (patrol::ObjectiveThreatRisk(settings,
+                {10000.F, 0.F, 0.F, 0.F, true}, objective) != 1.F
+            || patrol::ObjectiveThreatRisk(settings,
+                {10001.F, 0.F, 0.F, 0.F, true}, objective) >= 1.F)
+            return false;
+    }
+    return true;
+}
+
 /**
  * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
  */
@@ -101,6 +122,8 @@ int main()
 {
     if (!TestGeneralizedRewardConfiguration())
         return 12;
+    if (!TestObjectiveRiskConfiguration())
+        return 13;
     patrol::PatrolGeometrySettings const settings =
         patrol::ParsePatrolGeometrySettings(ValidDocument());
     patrol::PatrolSamplingConstraints const constraints{

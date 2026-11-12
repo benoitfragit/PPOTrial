@@ -22,7 +22,7 @@ struct DefenseSettings final
     float deactivationRisk{0.10F};
     float activationDistanceMeters{90000.F};
     float deactivationDistanceMeters{110000.F};
-    float protectedRadiusMeters{12000.F};
+    float protectedRadiusMeters{10000.F};
     float timeToIntrusionSeconds{300.F};
     float teammateThreatDistanceMeters{30000.F};
     float teammateVulnerabilityWeight{0.75F};

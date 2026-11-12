@@ -1020,6 +1020,61 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertIsNone(dispatcher.next_dispatch_from_checkpoint(
             result, state, config, "41798688051"))
 
+    def test_run_117_manual_fixed_threshold_resume_dispatches_4v4(self) -> None:
+        """Manual auto_advance=true must not invalidate a passed 4v3 gate."""
+        production = Path(__file__).resolve().with_name("gates.json")
+        gate.existing.write_json(
+            gate.GATES_FILE, json.loads(production.read_text(encoding="utf-8")))
+        config = gate.GATES_FILE.read_bytes()
+        digest = hashlib.sha256(config).hexdigest()
+        state = {
+            "gateConfigSha256": digest, "gate": "4v3", "gateIndex": 12,
+            "maxTeamSize": 4, "hostileZones": True,
+            "objectiveLayout": "randomized", "rehearsalProfile": "balanced_v1",
+            "passed": True, "lastCheckpointUpdates": 7290,
+            "validatedGates": ["4v3"],
+            "restartCycle": {
+                "schemaVersion": 1, "bootstrapRunId": 43000000000,
+                "sourceRunId": 42900000000,
+                "sameThresholdAllGates": True, "successPercent": 92.0,
+                "autoAdvance": True, "rehearsalProfile": "balanced_v1",
+                "hostileZones": True, "objectiveLayout": "randomized",
+            },
+        }
+        result = {
+            "gateConfigSha256": digest, "gate": "4v3", "passed": True,
+            "maxTeamSize": 4, "hostileZones": True,
+            "objectiveLayout": "randomized", "rehearsalProfile": "balanced_v1",
+            "optimizerUpdates": 7290, "autoAdvance": True,
+            "thresholdPercent": 92.0, "nextGate": "4v4",
+            "nextThresholdPercent": 75, "nextMaxSeconds": 14400,
+        }
+        expected = {
+            "resume_run_id": "43156454561", "progressive_gate": "4v4",
+            "max_team_size": "4", "scenario_variant": "randomized_zones",
+            "rehearsal_profile": "balanced_v1", "success_percent": "92",
+            "max_seconds": "14400", "save_every_updates": "1",
+            "auto_advance": "false", "same_threshold_all_gates": "true",
+        }
+        self.assertEqual(dispatcher.next_dispatch_from_checkpoint(
+            result, state, config, "43156454561"), expected)
+        self.assertEqual(dispatcher.next_dispatch_from_checkpoint(
+            dict(result, autoAdvance=False), state, config,
+            "43156454561"), expected)
+
+        # The user's saved opt-out must win over a manual input.
+        state["restartCycle"]["autoAdvance"] = False
+        self.assertIsNone(dispatcher.next_dispatch_from_checkpoint(
+            result, state, config, "43156454561"))
+        state["restartCycle"]["autoAdvance"] = True
+
+        # 4v4 is terminal; no second run can be dispatched.
+        state.update(gate="4v4", gateIndex=13,
+                     validatedGates=["4v3", "4v4"])
+        result.update(gate="4v4", nextGate=None)
+        self.assertIsNone(dispatcher.next_dispatch_from_checkpoint(
+            result, state, config, "43156454561"))
+
     def test_default_uniform_threshold_is_preserved_across_gates(self) -> None:
         """85% on 1v0 must remain 85% on 1v1 and 4v4, not 80%/75%."""
         config = gate.GATES_FILE.read_bytes()
@@ -1116,7 +1171,7 @@ class ProgressiveGateTests(unittest.TestCase):
         }
         for field, value in (
             ("optimizerUpdates", 61), ("thresholdPercent", 75.0),
-            ("autoAdvance", True), ("gate", "4v4")):
+            ("autoAdvance", "true"), ("gate", "4v4")):
             with self.subTest(field=field):
                 altered = dict(result, **{field: value})
                 with self.assertRaises(ValueError):
