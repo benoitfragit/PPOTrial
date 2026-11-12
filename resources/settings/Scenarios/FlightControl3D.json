@@ -44,10 +44,10 @@
   },
   "evaluation": { "seed": 4342, "episodes": 20, "everyUpdates": 10, "minimumSuccessRate": 0.92 },
   "training": {
-    "seed": 42, "rolloutSteps": 2048, "minibatch": 64, "epochs": 4, "maxUpdates": 10000, "checkpointEvery": 10, "hiddenWidth": 64,
+    "seed": 42, "rolloutSteps": 2048, "minibatch": 64, "epochs": 4, "maxUpdates": 10000, "checkpointEvery": 1, "hiddenWidth": 64,
     "actorRate": 0.0003, "criticRate": 0.0003, "gamma": 0.99, "lambda": 0.95, "clip": 0.2,
     "entropy": 0.001, "valueWeight": 0.5, "minLogStd": -5.0, "maxLogStd": 0.5, "initialLogStd": -1.0,
     "maxGradientNorm": 0.5, "adamBeta1": 0.9, "adamBeta2": 0.999, "adamEpsilon": 1e-8,
-    "resume": false, "checkpointDirectory": "model/FlightControl3D"
+    "resume": true, "checkpointDirectory": "model/FlightControl3D"
   }
 }

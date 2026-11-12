@@ -632,6 +632,8 @@ private:
     * @brief True when a stop request has been issued from the UI.
     */
     bool m_stopRequested{ false };
+    /** @brief Flight transport requests executed outside the snapshot lock. */
+    bool m_flightPlayRequested{ false },m_flightRestartBlock{ false };
     /**
     * @brief Entity-name filter buffer used by the UI.
     */

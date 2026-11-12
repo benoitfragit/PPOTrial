@@ -1,19 +1,38 @@
 #include "flight_session.hpp"
 #include <utility>
+#include <limits>
 
 namespace ppo::examples::flight {
-FlightSession::FlightSession(Config config, bool training, std::filesystem::path modelDirectory,std::optional<std::size_t> inferenceEpisodes)
+namespace {
+std::uint64_t AdditionalUpdateLimit(std::uint64_t updates,std::size_t additional)
+{
+    if(updates>std::numeric_limits<std::uint64_t>::max()-additional)
+        throw std::overflow_error("FlightControl3D: training update budget overflow");
+    return updates+additional;
+}
+}
+FlightSession::FlightSession(Config config, bool training, std::filesystem::path modelDirectory,
+    std::optional<std::size_t> inferenceEpisodes,TrainingBudget budget)
     : config_(std::move(config)),training_(training),models_(config_,std::move(modelDirectory)),
       environment_(config_,DefaultDataRoot(),training ? config_.training.seed : config_.evaluation.seed),learner_(config_)
 {
     if(inferenceEpisodes && (training_ || *inferenceEpisodes==0 || *inferenceEpisodes>1000000))
         throw std::invalid_argument("FlightControl3D: invalid inference episode budget");
     inferenceEpisodeLimit_=inferenceEpisodes.value_or(config_.evaluation.episodes);
-    best_=models_.BestMetrics();
+    best_=models_.BestMetrics(training_);
     if(!training_) models_.LoadBest(learner_);
-    else if(config_.training.resume) learner_.Load(models_.Latest());
+    else if(config_.training.resume && std::filesystem::exists(models_.Latest()))
+    { learner_.Load(models_.Latest()); resumed_=true; }
+    trainingUpdateLimit_=budget==TrainingBudget::AdditionalUpdates
+        ? AdditionalUpdateLimit(learner_.Stats().updates,config_.training.maxUpdates) : config_.training.maxUpdates;
     environment_.Reset();
-    if(training_ && learner_.Stats().updates>=config_.training.maxUpdates) StartValidation();
+    if(training_ && learner_.Stats().updates>=trainingUpdateLimit_) StartValidation();
+}
+void FlightSession::ContinueTraining()
+{
+    if(!training_ || !finished_) return;
+    trainingUpdateLimit_=AdditionalUpdateLimit(learner_.Stats().updates,config_.training.maxUpdates);
+    finished_=false; pendingReset_=true;
 }
 void FlightSession::ResetEpisode()
 {
@@ -42,7 +61,7 @@ void FlightSession::Tick()
     if (training_ && learner_.Ready())
     {
         learner_.Optimize();
-        bool const final=learner_.Stats().updates>=config_.training.maxUpdates;
+        bool const final=learner_.Stats().updates>=trainingUpdateLimit_;
         bool const validate=final || learner_.Stats().updates%config_.evaluation.everyUpdates==0;
         if(validate || learner_.Stats().updates%config_.training.checkpointEvery==0) learner_.Save(models_.Latest());
         if(validate) StartValidation();
@@ -59,6 +78,7 @@ FlightSnapshot FlightSession::Snapshot() const noexcept
     state.validating=static_cast<bool>(validationEnvironment_);state.hasBest=best_.has_value();state.bestScore=best_ ? best_->Score() : 0;
     state.localizerCaptureDegrees=config_.mission.localizerCaptureDegrees;
     state.glideCaptureDegrees=config_.mission.glideCaptureDegrees;
+    state.trainingUpdateLimit=trainingUpdateLimit_;state.resumed=resumed_;
     return state;
 }
 void FlightSession::StartValidation()
@@ -83,10 +103,10 @@ void FlightSession::TickValidation()
         else
         {
             models_.Promote(learner_,validation_);
-            best_=models_.BestMetrics();lastValidation_=validation_;++validationCampaigns_;
+            best_=models_.BestMetrics(true);lastValidation_=validation_;++validationCampaigns_;
             validationEnvironment_.reset();
             lastStep_={};controls_={};
-            finished_=learner_.Stats().updates>=config_.training.maxUpdates;
+            finished_=learner_.Stats().updates>=trainingUpdateLimit_;
         }
     }
 }

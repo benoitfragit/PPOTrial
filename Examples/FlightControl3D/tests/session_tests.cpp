@@ -10,11 +10,80 @@ std::string ReadFile(std::filesystem::path const& path)
     std::ifstream stream(path,std::ios::binary);
     return {std::istreambuf_iterator<char>(stream),std::istreambuf_iterator<char>()};
 }
+void DesktopContinuation(Config c)
+{
+    c.training.rolloutSteps=8;c.training.minibatch=4;c.training.epochs=1;c.training.maxUpdates=1;
+    c.training.resume=true;c.training.checkpointEvery=1;c.mission.maxSeconds=1;c.evaluation.episodes=2;
+    TemporaryDirectory directory("flight-desktop-resume-");
+    FlightModelStore store(c,directory.path);
+    {
+        FlightSession session(c,true,directory.path,std::nullopt,TrainingBudget::AdditionalUpdates);
+        Check(!session.Snapshot().resumed && session.Snapshot().learning.updates==0,"missing latest creates a first policy");
+        for(int i=0;i<3;++i) session.Tick();
+        session.ContinueTraining();
+        Check(session.Learner().Collected()==3,"Play during a partial rollout preserves the collector");
+        for(int i=0;i<1000 && !session.Finished();++i) session.Tick();
+        Check(session.Finished() && session.Snapshot().learning.updates==1,"desktop block completes validation");
+        auto const before=ReadFile(store.Latest());
+        session.ContinueTraining();
+        auto const comparison=directory.path/"continued.txt";session.Learner().Save(comparison);
+        Check(!session.Finished() && session.Snapshot().trainingUpdateLimit==2 && ReadFile(comparison)==before,
+            "second Play extends the budget without resetting weights, Adam or RNG");
+        for(int i=0;i<1000 && !session.Finished();++i) session.Tick();
+        Check(session.Finished() && session.Snapshot().learning.updates==2,"second block advances the same model");
+    }
+    FlightSession relaunched(c,true,directory.path,std::nullopt,TrainingBudget::AdditionalUpdates);
+    Check(relaunched.Snapshot().resumed && relaunched.Snapshot().learning.updates==2
+        && relaunched.Snapshot().trainingUpdateLimit==3 && !relaunched.Snapshot().validating,
+        "relaunch resumes latest with a fresh additional update budget");
+    auto const comparison=directory.path/"relaunched.txt";relaunched.Learner().Save(comparison);
+    Check(ReadFile(comparison)==ReadFile(store.Latest()),"relaunch restores the complete training checkpoint exactly");
+    {std::ofstream broken(store.Latest());broken<<"broken";}
+    Rejects([&] {FlightSession invalid(c,true,directory.path);},"corrupt latest must not silently create a new policy");
+}
+void ChangedStarts(Config c)
+{
+    c.training.rolloutSteps=8;c.training.minibatch=4;c.training.epochs=1;c.training.maxUpdates=1;
+    c.training.resume=true;c.training.checkpointEvery=1;c.mission.maxSeconds=1;c.evaluation.episodes=2;
+    TemporaryDirectory directory("flight-changed-starts-");
+    auto old=c;
+    auto signature=nlohmann::json::parse(c.checkpointSignature);
+    signature["initial"]["distanceMeters"]={7000,14000};signature["initial"]["bearingDegrees"]={-180,180};
+    old.checkpointSignature=signature.dump();
+    FlightModelStore oldStore(old,directory.path);
+    FlightLearner oldPolicy(old);oldPolicy.Save(oldStore.Latest());
+    ValidationMetrics successful{};successful.episodes=2;successful.touchdowns=2;successful.stops=2;
+    successful.touchdownSumMeters=100;successful.stopSumMeters=600;
+    Check(oldStore.Promote(oldPolicy,successful),"controlled old-distribution BEST fixture");
+    auto const pointer=directory.path/"best/current.json";
+    auto const previous=ReadFile(pointer);
+    auto const generation=directory.path/"best"/nlohmann::json::parse(previous).at("checkpoint").get<std::string>();
+    FlightSession resumed(c,true,directory.path,std::nullopt,TrainingBudget::AdditionalUpdates);
+    Check(resumed.Snapshot().resumed && !resumed.Snapshot().hasBest
+        && ReadFile(pointer)==previous,"new starts resume training while preserving the old BEST without reusing its score");
+    Check(resumed.Learner().Collected()==0,"new episode starts with an empty collector");
+    FlightLearner comparison(c);comparison.Load(oldStore.Latest());
+    Check(comparison.Evaluate({})==oldPolicy.Evaluate({}),"changed spawn ranges preserve learned policy outputs");
+    Rejects([&] {FlightSession inference(c,false,directory.path);},"inference rejects BEST validated on different starts");
+    for(int i=0;i<1000 && !resumed.Finished();++i) resumed.Tick();
+    Check(resumed.Finished() && ReadFile(pointer)==previous && std::filesystem::exists(generation),
+        "failed revalidation keeps the previous BEST generation and pointer intact");
+    FlightModelStore newStore(c,directory.path);successful.update=resumed.Snapshot().learning.updates;
+    Check(newStore.Promote(resumed.Learner(),successful) && newStore.BestMetrics().has_value()
+        && std::filesystem::exists(generation),"a newly validated candidate preserves the old generation");
+    auto incompatible=c;signature=nlohmann::json::parse(c.checkpointSignature);signature["mission"]["glideDegrees"]=4;
+    incompatible.checkpointSignature=signature.dump();
+    Rejects([&] {FlightLearner rejected(incompatible);rejected.Load(oldStore.Latest());},"guidance changes remain incompatible");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature["initial"]["speedMps"]={60,80};
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature)
+        && !CompatibleTrainingSignature("broken",c.checkpointSignature),"only horizontal spawn changes are accepted");
+}
 int main()
 {
     try
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
+        DesktopContinuation(c);ChangedStarts(c);
         c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
         c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;
         TemporaryDirectory directory("flight-session-");

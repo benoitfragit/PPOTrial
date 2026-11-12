@@ -6,14 +6,16 @@ Date : 11 novembre 2026. Projet : PPOTrial. Issue : #82. PR : [#83](https://gith
 
 `FlightControl3D.exe` est un exécutable graphique dédié. Il utilise le même `Environment`, les mêmes snapshots ECS et le même renderer raylib/ImGui que l'application actuelle. L'exemple apparaît aussi dans le catalogue de `PPO.exe`. Le contrôleur RLMission, BlueDefense et leurs modèles restent hors du diff.
 
-À la racine, deux raccourcis relatifs appellent les lanceurs correspondants :
+Après compilation de `FlightControl3D`, deux raccourcis Windows sont créés à la racine pour cette copie du dépôt. Ils ciblent les lanceurs correspondants, avec le bon répertoire de travail :
 
 | Raccourci | Exécutable |
 |---|---|
 | `FlightControl3D_Debug.lnk` | `build/debug/Main/Debug/FlightControl3D.exe` |
 | `FlightControl3D_Release.lnk` | `build/release/Main/Release/FlightControl3D.exe` |
 
-Les fichiers `Lancer_FlightControl3D_Debug.bat` et `Lancer_FlightControl3D_Release.bat` permettent aussi le lancement par double-clic. Ils se placent dans le dépôt, acceptent des arguments et affichent une erreur si l'exécutable n'a pas été compilé. Aucun chemin utilisateur absolu n'est embarqué dans ces lanceurs.
+Les fichiers `Lancer_FlightControl3D_Debug.bat` et `Lancer_FlightControl3D_Release.bat` permettent aussi le lancement par double-clic. Ils se placent dans le dépôt, acceptent des arguments et affichent une erreur si l'exécutable n'a pas été compilé. Aucun chemin utilisateur absolu n'est embarqué dans ces lanceurs. La création utilise `tools/windows/CreateFlightShortcuts.ps1` en post-build ; les anciens liens contenant uniquement `RelativePath`, sans cible Windows résolue, sont remplacés par des liens générés et ignorés par Git.
+
+Les lanceurs conservent la sortie et les erreurs dans `logs/FlightControl3D_Debug.log` ou `logs/FlightControl3D_Release.log`. En cas d'échec, le code de sortie et le journal restent affichés. Échap ne ferme plus l'UI Flight3D ; la fin d'un budget conserve la fenêtre ouverte.
 
 Dans un répertoire VS2022 déjà configuré pour la bonne variante de LibTorch :
 
@@ -26,6 +28,14 @@ cmake --build build/release --config Release --target FlightControl3D
 L'option CMake `PPO_BUILD_FLIGHT_CONTROL` vaut ON par défaut pour le desktop. Si un ancien cache l'a désactivée, la réactiver explicitement. CMake 3.18 minimum est requis par JSBSim. Les archives LibTorch Debug et Release doivent continuer à correspondre à la configuration du dépôt.
 
 Le programme démarre en pause ; Play lance l'apprentissage. `--auto-run` démarre immédiatement. `--inference` charge exclusivement le BEST validé et lance une évaluation déterministe à graines distinctes. Sans BEST validé, le lancement d'inférence échoue explicitement. `--config FICHIER` sélectionne une autre configuration complète. `--check-example` vérifie le bootstrap sans fenêtre ni entraînement.
+
+### Reprise par Play et après fermeture
+
+Le JSON livré active `training.resume: true` et `checkpointEvery: 1`. En entraînement, un `latest` existant restaure acteur, critic, moments Adam, âges, RNG et numéro d'update. Son absence permet le premier démarrage ; un fichier présent mais corrompu ou incompatible produit une erreur explicite. Chaque update terminé est sauvegardé. Fermer pendant la collecte abandonne seulement le rollout incomplet, dont aucun update n'a encore été appris ; Stop/Play dans le même processus conserve cette collecte.
+
+Le desktop traite `maxUpdates` comme un budget supplémentaire à partir du modèle chargé. Par exemple, un `latest` à l'update 120 et un budget de 10 000 donnent une fin de bloc à 10 120. Après validation finale, un nouveau Play prolonge le budget en conservant le même learner. Le renderer diffère Stop/join et Play hors du verrou de snapshot, puis le callback ECS `Init` prolonge la session terminée. Le headless conserve son budget total existant. L'UI affiche la source du modèle et la limite du bloc courant ; le journal contient `[FLIGHT_SESSION] Resumed latest` et l'update chargé.
+
+Le rapprochement des départs demandé ici n'invalide pas les poids déjà appris : la compatibilité de reprise autorise seulement les changements de `initial.distanceMeters` et `initial.bearingDegrees`. Une modification du guidage, des observations ou des autres paramètres sémantiques reste incompatible. Un BEST validé sur d'autres départs est conservé avec son intégrité et ses générations, mais son score n'est pas présenté comme validé sur la nouvelle distribution. L'inférence exige une validation du contrat courant ; seul un candidat admissible sur les nouveaux départs peut actualiser le pointeur.
 
 ## Interface FlightControl3D
 
@@ -120,7 +130,7 @@ Le checkpoint `flight_hybrid_v1.txt` contient acteur, critic, moments Adam, âge
 
 ### Politique BEST et validation
 
-L'entraînement écrit `model/FlightControl3D/latest/flight_hybrid_v1.txt`. Tous les dix updates et à la fin du budget, le candidat est figé et évalué sur un environnement séparé, avec 20 épisodes et la graine 4342, distincte de l'entraînement. Paramètres et fréquence sont dans `evaluation` du JSON. La validation n'ajoute aucun échantillon au rollout et ne modifie ni Adam ni le RNG de l'entraînement ; le dernier état physique d'entraînement reste en attente.
+Le lancement standard écrit `resources/model/FlightControl3D/latest/flight_hybrid_v1.txt`. Le chemin JSON est relatif à la racine `resources` déduite du scénario ; `--output` permet de choisir un autre répertoire en headless. Tous les dix updates et à la fin du budget, le candidat est figé et évalué sur un environnement séparé, avec 20 épisodes et la graine 4342, distincte de l'entraînement. Paramètres et fréquence sont dans `evaluation` du JSON. La validation n'ajoute aucun échantillon au rollout et ne modifie ni Adam ni le RNG de l'entraînement ; le dernier état physique d'entraînement reste en attente.
 
 La réussite exige un poser sûr puis l'arrêt confirmé sur la piste. Par défaut, le seuil est **92 %**, donc au moins **19 succès sur 20**. Un candidat ne devient production qu'après la campagne complète et le franchissement de ce seuil. Le score est le pourcentage de réussites ; à score identique, une abscisse moyenne d'arrêt plus courte départage les candidats. Un candidat identique, moins bon, incomplet ou sous le seuil conserve le BEST précédent.
 
@@ -131,6 +141,8 @@ Chaque génération admise est conservée sous `best/flight_<update>_<checksum>.
 Les régressions déterministes couvrent géométrie, captures uniques, transitions, crash train/impact/attitude, toucher, arrêt relatif, limites de temps, 1 000 tirages aléatoires, dérivée cinématique de la houle, callback réellement consulté par JSBSim, mouvement des commandes, contact des vraies roues, gradients hybrides par différences finies, mise à jour RLtools, reprise des moments/RNG et intégrité en évaluation.
 
 La révision d'interface ajoute les références ILS sur quatre caps avec inclinaison et mouvement, la pente relative distincte du tangage, le transport des tolérances vers le snapshot et la proximité des 1 000 départs avec le circuit. Un test ImGui sans fenêtre vérifie les deux cases par clics simulés, les valeurs consigne/mesure et l'absence des compteurs d'apprentissage dans les instruments. Localement, les 14 CTest headless passent en Debug et Release ; le test ImGui est aussi exécuté séparément. La compilation complète du desktop reste vérifiée par la CI VS2022 de la PR.
+
+La reprise est couverte par comparaison octet pour octet des checkpoints avant/après prolongation et relance, conservation du collector actif, refus d'un `latest` corrompu, migration des seuls intervalles horizontaux et conservation du BEST antérieur. Le test desktop ECS vérifie le vrai worker en aperçu sans physique, un bloc complet, Stop/Play vers le bloc suivant et une nouvelle instance reprenant l'update sauvegardé. Le test Windows des raccourcis recharge les `.lnk` par COM et contrôle cible et répertoire de travail. Le rendu interactif et le double-clic Explorer restent des vérifications distinctes sur la machine cible.
 
 Validation locale au premier état relu : GCC 14, Debug et Release, CTest ; smoke d'un update puis deux épisodes indépendants. L'échec des deux épisodes d'évaluation de ce modèle presque vierge ne démontre aucune convergence. La CI Windows du desktop et les quatre configurations headless Windows/Linux doivent être vérifiées avant de déclarer la livraison validée. Le lancement des raccourcis par l'explorateur Windows doit encore être confirmé sur la machine cible.
 

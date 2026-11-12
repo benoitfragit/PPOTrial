@@ -157,6 +157,20 @@ Config LoadConfig(std::filesystem::path const& path)
     return config;
 }
 
+bool CompatibleTrainingSignature(std::string const& stored,std::string const& current)
+{
+    if(stored==current) return true;
+    auto previous=Json::parse(stored,nullptr,false),next=Json::parse(current,nullptr,false);
+    if(!previous.is_object() || !next.is_object() || !previous.contains("initial") || !next.contains("initial")
+        || !previous["initial"].is_object() || !next["initial"].is_object()) return false;
+    for(char const* name : {"distanceMeters","bearingDegrees"})
+    {
+        if(!previous["initial"].contains(name) || !next["initial"].contains(name)) return false;
+        previous["initial"].erase(name); next["initial"].erase(name);
+    }
+    return previous==next;
+}
+
 void Validate(Config const& c)
 {
     auto const& i=c.initial;

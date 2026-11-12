@@ -374,3 +374,8 @@ resources/model/BluePatrol/prod/*.score.bak
 resources/model/BluePatrol/latest/*.txt.tmp
 resources/model/BluePatrol/latest/*.txt.bak
 /build/**
+
+# Windows shell links are generated for this checkout by the FlightControl3D build.
+/FlightControl3D_Debug.lnk
+/FlightControl3D_Release.lnk
+/resources/model/FlightControl3D/

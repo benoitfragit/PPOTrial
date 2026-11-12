@@ -5,6 +5,8 @@
 
 namespace ppo::examples::flight {
 
+enum class TrainingBudget { TotalUpdates, AdditionalUpdates };
+
 /** Value-only render snapshot; the renderer never reads FDM or network objects. */
 struct FlightSnapshot final
 {
@@ -24,6 +26,8 @@ struct FlightSnapshot final
     double bestScore{};
     bool validating{},hasBest{};
     double localizerCaptureDegrees{},glideCaptureDegrees{};
+    std::uint64_t trainingUpdateLimit{};
+    bool resumed{};
 };
 
 /** Shared orchestration for the current desktop framework and CPU headless runner. */
@@ -31,9 +35,12 @@ class FlightSession final
 {
 public:
     FlightSession(Config config, bool training, std::filesystem::path modelDirectory,
-        std::optional<std::size_t> inferenceEpisodes = std::nullopt);
+        std::optional<std::size_t> inferenceEpisodes = std::nullopt,
+        TrainingBudget budget = TrainingBudget::TotalUpdates);
     void Tick();
     void ResetEpisode();
+    /** Extend a completed desktop block without reinitializing the learned policy. */
+    void ContinueTraining();
     FlightSnapshot Snapshot() const noexcept;
     bool Finished() const noexcept { return finished_; }
     FlightLearner const& Learner() const noexcept { return learner_; }
@@ -48,6 +55,8 @@ private:
     MissionState lastEpisode_{};
     std::uint64_t episodes_{}, touchdowns_{}, stops_{}, crashes_{}, timeouts_{};
     bool pendingReset_{}, finished_{};
+    std::uint64_t trainingUpdateLimit_{};
+    bool resumed_{};
     std::unique_ptr<FlightEnvironment> validationEnvironment_;
     ValidationMetrics validation_{},lastValidation_{};
     std::optional<ValidationMetrics> best_;

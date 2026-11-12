@@ -24,7 +24,7 @@ class FlightModelStore final
 public:
     FlightModelStore(Config const& config,std::filesystem::path directory);
     std::filesystem::path Latest() const;
-    std::optional<ValidationMetrics> BestMetrics() const;
+    std::optional<ValidationMetrics> BestMetrics(bool allowChangedStarts = false) const;
     void LoadBest(FlightLearner& learner) const;
     bool Promote(FlightLearner const& learner,ValidationMetrics const& metrics);
 private:

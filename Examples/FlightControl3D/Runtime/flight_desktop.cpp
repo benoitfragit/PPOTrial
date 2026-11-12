@@ -5,8 +5,9 @@
 #include <iostream>
 #include <string_view>
 
+namespace {
 /** Dedicated desktop executable using the existing Environment and renderer. */
-int main(int argc,char** argv)
+int RunFlightDesktop(int argc,char** argv)
 {
     bool inference=false,check=false,autoRun=false;
     std::filesystem::path config=std::filesystem::path{RESOURCE_PATH}/"Scenarios/FlightControl3D.json";
@@ -34,4 +35,10 @@ int main(int argc,char** argv)
     while(renderer->Run()) {}
     environment.Stop();
     return 0;
+}
+}
+int main(int argc,char** argv)
+{
+    try {return RunFlightDesktop(argc,argv);}
+    catch(std::exception const& error) {std::cerr<<"[FLIGHT_ERROR] "<<error.what()<<'\n';return 1;}
 }

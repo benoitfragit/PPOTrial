@@ -38,7 +38,22 @@ if (PPO_BUILD_FLIGHT_CONTROL)
     add_custom_command(TARGET FlightControl3D POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_BINARY_DIR}/libtorch/lib" "$<TARGET_FILE_DIR:FlightControl3D>")
+    if (WIN32)
+        add_custom_command(TARGET FlightControl3D POST_BUILD
+            COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
+                "${CMAKE_SOURCE_DIR}/tools/windows/CreateFlightShortcuts.ps1"
+                -ProjectRoot "${CMAKE_SOURCE_DIR}"
+            VERBATIM)
+    endif()
     if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
+        if (WIN32)
+            add_test(NAME FlightControlRootShortcuts
+                COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
+                    "${CMAKE_SOURCE_DIR}/tools/windows/CreateFlightShortcuts.ps1"
+                    -ProjectRoot "${CMAKE_SOURCE_DIR}" -Verify)
+            set_tests_properties(FlightControlRootShortcuts PROPERTIES
+                PASS_REGULAR_EXPRESSION "Verified FlightControl3D root shortcuts")
+        endif()
         add_test(NAME FlightControlDedicatedBootstrap
             COMMAND $<TARGET_FILE:FlightControl3D> --check-example)
         set_tests_properties(FlightControlDedicatedBootstrap PROPERTIES

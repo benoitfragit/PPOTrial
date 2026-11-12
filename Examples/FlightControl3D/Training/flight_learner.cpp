@@ -289,7 +289,7 @@ public:
         std::mt19937 candidateRng;
         if (!(stream >> magic >> observations >> actions >> width >> updates >> std::quoted(signature) >> actorAge >> criticAge >> candidateRng)
             || magic!="PPO_FLIGHT_HYBRID_V1" || observations!=ObservationSize || actions!=ContinuousActions || width!=Width
-            || signature!=config.checkpointSignature || actorAge==0 || criticAge==0)
+            || !CompatibleTrainingSignature(signature,config.checkpointSignature) || actorAge==0 || criticAge==0)
             throw std::runtime_error("FlightControl3D: incompatible/corrupt checkpoint header");
         // RLtools static matrices contain self-pointers: never use C++ copies.
         // Stage independent networks on the heap (including on Windows' small stack).

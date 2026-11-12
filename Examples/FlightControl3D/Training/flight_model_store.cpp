@@ -19,12 +19,14 @@ std::string Checksum(std::filesystem::path const& path)
     std::ostringstream text;text<<std::hex<<std::setw(16)<<std::setfill('0')<<hash;return text.str();
 }
 struct BestRecord final { ValidationMetrics metrics{};std::filesystem::path checkpoint; };
-std::optional<BestRecord> ReadBest(Config const& config,std::filesystem::path const& directory)
+std::optional<BestRecord> ReadBest(Config const& config,std::filesystem::path const& directory,bool allowChangedStarts = false)
 {
     auto const pointer=directory/"best/current.json";
     if(!std::filesystem::exists(pointer)) return std::nullopt;
     std::ifstream stream(pointer);Json json;stream>>json;
-    if(json.at("formatVersion")!=1 || json.at("signature").get<std::string>()!=config.checkpointSignature
+    auto const signature=json.at("signature").get<std::string>();
+    bool const changedStarts=signature!=config.checkpointSignature;
+    if(json.at("formatVersion")!=1 || (changedStarts && (!allowChangedStarts || !CompatibleTrainingSignature(signature,config.checkpointSignature)))
         || json.at("seed").get<std::uint32_t>()!=config.evaluation.seed
         || json.at("requiredEpisodes").get<std::size_t>()!=config.evaluation.episodes)
         throw std::runtime_error("FlightControl3D: incompatible BEST validation contract");
@@ -40,6 +42,8 @@ std::optional<BestRecord> ReadBest(Config const& config,std::filesystem::path co
     record.checkpoint=directory/"best"/filename;
     if(Checksum(record.checkpoint)!=json.at("fnv1a64").get<std::string>())
         throw std::runtime_error("FlightControl3D: BEST checkpoint/manifest mismatch");
+    // Preserve the old generation, but its score is not validated for new starts.
+    if(changedStarts) return std::nullopt;
     return record;
 }
 void CommitPointer(std::filesystem::path const& path,Json const& json)
@@ -82,9 +86,9 @@ bool Better(ValidationMetrics const& candidate,ValidationMetrics const& incumben
 FlightModelStore::FlightModelStore(Config const& config,std::filesystem::path directory)
     : config_(config),directory_(std::move(directory)) {}
 std::filesystem::path FlightModelStore::Latest() const { return directory_/"latest/flight_hybrid_v1.txt"; }
-std::optional<ValidationMetrics> FlightModelStore::BestMetrics() const
+std::optional<ValidationMetrics> FlightModelStore::BestMetrics(bool allowChangedStarts) const
 {
-    auto const record=ReadBest(config_,directory_);
+    auto const record=ReadBest(config_,directory_,allowChangedStarts);
     return record ? std::optional<ValidationMetrics>(record->metrics) : std::nullopt;
 }
 void FlightModelStore::LoadBest(FlightLearner& learner) const
@@ -99,7 +103,7 @@ bool FlightModelStore::Promote(FlightLearner const& learner,ValidationMetrics co
 {
     if(!Validated(config_,metrics)) return false;
     if(metrics.update!=learner.Stats().updates) throw std::logic_error("FlightControl3D: validation must describe the frozen candidate");
-    auto const best=ReadBest(config_,directory_);
+    auto const best=ReadBest(config_,directory_,true);
     if(best && !Better(metrics,best->metrics)) return false;
     auto const bestDirectory=directory_/"best";
     std::filesystem::create_directories(bestDirectory);

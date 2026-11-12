@@ -30,6 +30,9 @@ public:
     {
         // Never discard a partial on-policy rollout on a desktop Stop/Play.
         // A stopped worker resumes this same session at its next transition.
+        try { session_->ContinueTraining(); }
+        catch(std::exception const& error)
+        { failed_=true; std::cerr<<"[FLIGHT_ERROR] "<<error.what()<<'\n'; }
     }
     void ChooseAction() override
     {
@@ -110,7 +113,10 @@ bool Load(std::filesystem::path const& path,ppo::model::Environment& env,bool tr
     {
         auto const config=LoadConfig(path);
         auto const directory=path.parent_path().parent_path().parent_path()/config.training.checkpointDirectory;
-        auto session=std::make_shared<FlightSession>(config,training,directory);
+        auto session=std::make_shared<FlightSession>(config,training,directory,std::nullopt,TrainingBudget::AdditionalUpdates);
+        auto const initial=session->Snapshot();
+        std::cout<<"[FLIGHT_SESSION] "<<(training ? (initial.resumed ? "Resumed latest" : "New policy") : "Validated BEST")
+            <<" | update="<<initial.learning.updates<<" | limit="<<initial.trainingUpdateLimit<<std::endl;
         auto entity=env.CreateEntity<AircraftEntity>();
         auto agent=env.CreateAgent<FlightAgent>(session,entity,config);
         agent->SetNewState();

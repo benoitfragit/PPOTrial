@@ -2047,6 +2047,7 @@ EnvironmentRenderer::SetEnvironment(ppo::model::Environment& env, View view) noe
     if (m_flightControlView != flightView)
         m_layoutInitialized = false;
     m_flightControlView = flightView;
+    SetExitKey(flightView ? KEY_NULL : KEY_ESCAPE);
 
     p_environment->ReadSnapshot([&](entt::registry const& snapshot)
     {
@@ -2720,7 +2721,16 @@ EnvironmentRenderer::DrawSimulationControls(entt::registry const& snapshot)
             if (agent != nullptr)
                 agent->m_started = true;
 
-        p_environment->Play();
+#ifdef PPO_WITH_FLIGHT_CONTROL
+        if (m_flightControlView)
+        {
+            m_flightPlayRequested = true;
+            m_flightRestartBlock = snapshot.ctx().contains<ppo::examples::flight::FlightSnapshot>()
+                && snapshot.ctx().get<ppo::examples::flight::FlightSnapshot>().finished;
+        }
+        else
+#endif
+            p_environment->Play();
     }
 
     ImGui::SameLine();
@@ -4337,6 +4347,13 @@ EnvironmentRenderer::DrawAgentsWindow(entt::registry const& snapshot)
         auto const& flight = snapshot.ctx().get<ppo::examples::flight::FlightSnapshot>();
         ImGui::Text("%s%s", flight.training ? "Hybrid PPO training" : "Independent evaluation",
             flight.failed ? " | Error" : flight.finished ? " | Complete" : "");
+        if (flight.training)
+        {
+            ImGui::TextDisabled("Source: %s",flight.resumed ? "latest training checkpoint" : "new policy");
+            ImGui::TextDisabled("Current block ends at update %llu",static_cast<unsigned long long>(flight.trainingUpdateLimit));
+            if (flight.finished && !flight.failed)
+                ImGui::TextUnformatted("Play continues training from this model.");
+        }
         ImGui::Text("Episodes %llu | Touchdowns %llu | Stops %llu",
             static_cast<unsigned long long>(flight.episodes),static_cast<unsigned long long>(flight.touchdowns),
             static_cast<unsigned long long>(flight.stops));
@@ -4434,6 +4451,15 @@ EnvironmentRenderer::Run(void)
     {
         p_environment->Stop();
         m_stopRequested = false;
+    }
+    if (m_flightPlayRequested)
+    {
+        // Stop/join must never run while ReadSnapshot holds the snapshot mutex.
+        if (m_flightRestartBlock)
+            p_environment->Stop();
+        p_environment->Play();
+        m_flightPlayRequested = false;
+        m_flightRestartBlock = false;
     }
 
     p_environment->ReadSnapshot([&](entt::registry const& snapshot)
