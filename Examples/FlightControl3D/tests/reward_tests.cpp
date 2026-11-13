@@ -189,7 +189,8 @@ void MovingFrame(Config c)
     c.reward.localizerInterceptGain=4.01;
     Rejects([&] {Validate(c);},"excessive LOC intercept gain rejected");
     c.reward.localizerInterceptGain=2;
-    c.reward.localizerInterceptLimitDegrees=c.initial.bearingDegrees.maximum+3;
+    c.reward.localizerInterceptLimitDegrees=c.initial.bearingDegrees.maximum
+        +std::max(std::abs(c.initial.headingOffsetDegrees.minimum),std::abs(c.initial.headingOffsetDegrees.maximum));
     Rejects([&] {Validate(c);},"LOC intercept limit must exceed every initial course");
     c.reward.localizerInterceptLimitDegrees=90;
     Rejects([&] {Validate(c);},"LOC intercept limit below ninety degrees required");
@@ -199,7 +200,8 @@ int main()
 {
     try
     {
-        auto const config=LoadConfig(PPO_FLIGHT_CONFIG);
+        auto config=LoadConfig(PPO_FLIGHT_CONFIG);
+        config.mission.patrolEnabled=true; // Exercise the preserved optional patrol path reward.
         Convergence(config);ProgressAndAmplitude(config);SpeedAndSlopeShaping(config);SecondaryGuidance(config);MovingFrame(config);
     }
     catch(std::exception const& error) {std::cerr<<error.what()<<'\n';return 1;}

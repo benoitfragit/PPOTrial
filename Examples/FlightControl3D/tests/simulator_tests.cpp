@@ -64,6 +64,45 @@ void InterceptActionReward(Config const& config)
         && neutral.localizerReward>outward.localizerReward,
         "real FDM LOC reward prefers the aileron direction that establishes the inward interception");
 }
+
+void CloseApproachStarts(Config c)
+{
+    Check(!c.mission.patrolEnabled && c.initial.distanceMeters.minimum==4000
+        && c.initial.distanceMeters.maximum==6500,"delivered starts are closer to the ILS cone");
+    c.initial.approach=false; // Disabled patrol must override this legacy initial phase.
+    for(auto const stage : {CurriculumStage::Loc,CurriculumStage::Glide,CurriculumStage::Joint})
+    {
+        c.training.curriculumStage=stage;
+        FlightEnvironment environment(c,DefaultDataRoot(),981U);
+        bool left=false,right=false;
+        for(int episode=0;episode<24;++episode)
+        {
+            auto const observation=environment.Reset();
+            auto const guidance=environment.CurrentGuidance();
+            auto const& runway=environment.Settings().runway;
+            auto const& aircraft=environment.Aircraft();
+            double const heading=WrapAngle(aircraft.heading-runway.headingDegrees*DegreesToRadians);
+            Check(guidance.distance>=3999.9 && guidance.distance<=6500.1 && guidance.ilsValid
+                && std::abs(guidance.localizer)<=10.01*DegreesToRadians
+                && std::abs(heading)<=12.1*DegreesToRadians
+                && Dot(aircraft.velocity,RunwayForward(runway))>0
+                && environment.Plan().count==0 && environment.Mission().phase==Phase::Approach
+                && !guidance.targetValid && observation[0]==0 && observation[1]==0 && observation[2]==0,
+                "real JSBSim resets remain near the cone, inbound to the moving runway and point-free");
+            left=left || guidance.cross< -0.1;right=right || guidance.cross>0.1;
+            auto const result=environment.Step({0,0,0,c.initial.throttle,0,false});
+            Check(environment.Mission().phase==Phase::Approach && !environment.CurrentGuidance().targetValid
+                && result.rewards[static_cast<std::size_t>(Reward::Path)]==0,
+                "the first physical action cannot reactivate disabled patrol");
+        }
+        if(stage!=CurriculumStage::Glide) Check(left && right,"closer LOC starts retain both sides");
+    }
+    c.mission.patrolEnabled=true;
+    FlightEnvironment patrol(c,DefaultDataRoot(),982U);
+    patrol.Reset();
+    Check(patrol.Mission().phase==Phase::Patrol && patrol.Plan().count>1 && patrol.CurrentGuidance().targetValid,
+        "explicit reactivation restores the original airborne patrol guidance");
+}
 }
 
 int main()
@@ -71,6 +110,7 @@ int main()
     try
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
+        CloseApproachStarts(c);
         PhaseControlMapping(c);
         c.initial.distanceMeters={10000,10000}; c.initial.bearingDegrees={8,8}; c.initial.heightMeters={600,600};
         c.initial.headingOffsetDegrees={0,0}; c.initial.rollDegrees={0,0}; c.initial.pitchDegrees={2,2};

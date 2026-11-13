@@ -2,6 +2,8 @@
 
 Date : 11 novembre 2026. Projet : PPOTrial. Issue : #82. PR : [#83](https://github.com/benoitfragit/PPOTrial/pull/83). Branche : `feat/jsbsim-flight-control`.
 
+Mise à jour du 13 novembre 2026 : le scénario livré désactive temporairement l’hippodrome avec `mission.patrolEnabled=false`. Il reste en approche après perte LOC/GLIDE, sans reward Path ni point de guidage. Les départs sont rapprochés à 4–6,5 km et orientés vers le seuil. Le code hippodrome reste réactivable ; voir [approche seule, réglages et validation](PPOTrial_FlightControl3D_Approche_Sans_Hippodrome_Issue86.md). Les sections historiques ci-dessous décrivent aussi les anciens réglages.
+
 ## Livraison et lancement local
 
 `FlightControl3D.exe` est un exécutable graphique dédié. Il utilise le même `Environment`, les mêmes snapshots ECS et le même renderer raylib/ImGui que l'application actuelle. L'exemple apparaît aussi dans le catalogue de `PPO.exe`. Le contrôleur RLMission, BlueDefense et leurs modèles restent hors du diff.

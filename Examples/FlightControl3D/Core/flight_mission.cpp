@@ -181,7 +181,7 @@ Vec3 LookAheadOnPlan(FlightPlan const& plan,PlanProjection const& projection,dou
 double AdvancePatrol(Config const& c,FlightPlan const& plan,MissionState& s,
     AircraftState const& before,AircraftState const& after,Runway const& previousDeck) noexcept
 {
-    if(s.phase!=Phase::Patrol || plan.count<2) return 0;
+    if(!c.mission.patrolEnabled || s.phase!=Phase::Patrol || plan.count<2) return 0;
     auto const referenceBefore=InCurrentDeckFrame(previousDeck,c.runway,before);
     auto const previousProjection=ProjectOnPlan(plan,referenceBefore.position);
     auto const currentProjection=ProjectOnPlan(plan,after.position);
@@ -434,6 +434,7 @@ std::array<double,2> ToRunway(Runway const& r, Vec3 const& point) noexcept
 FlightPlan MakeFlightPlan(Config const& c) noexcept
 {
     FlightPlan plan{};
+    if(!c.mission.patrolEnabled) return plan;
     auto const& m = c.mission;
     // One closed counter-clockwise stadium, bounded by validated capacity.
     for (std::size_t side = 0; side < 2; ++side)
@@ -484,7 +485,7 @@ Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& miss
     g.ilsValid = g.along < 0 && g.distance <= c.mission.ilsRangeMeters && g.height > 0
         && std::abs(g.localizer) <= c.mission.ilsSectorDegrees*DegreesToRadians;
     g.targetSpeed = c.mission.patrolSpeed;
-    if (mission.phase == Phase::Patrol && plan.count > 1)
+    if (c.mission.patrolEnabled && mission.phase == Phase::Patrol && plan.count > 1)
     {
         g.mode=GuidanceMode::Patrol;
         auto const projection=ProjectOnPlan(plan,a.position);
@@ -529,6 +530,16 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         result.terminated = s.outcome != Outcome::Timeout;
         result.truncated = s.outcome == Outcome::Timeout;
         return result;
+    }
+    // Enforce approach-only operation even for a stale Patrol state or plan.
+    // Capture hysteresis remains active, but losing a beam cannot enable HIPP.
+    if(!c.mission.patrolEnabled)
+    {
+        if(s.phase==Phase::Patrol) s.phase=Phase::Approach;
+        s.waypoint=0;s.waypointsPassed=0;s.completedLaps=0;
+        s.pathQualified=false;s.rallyCorridorLatched=false;
+        s.approachRecoverySeconds=0;
+        s.approachRecoveryPending=false;s.approachRecoveryRequiresGlide=false;
     }
     ++s.steps;
     auto g = Guide(c,plan,s,after);
@@ -587,9 +598,9 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
     // A confirmed beam loss first leaves a short approach-only grace period.
     // This prevents an immediate HIPP/APPROACH point and reward toggle. The
     // lost beam must be recaptured; otherwise the racetrack returns later.
-    if(s.phase==Phase::Approach && (lostLocalizer || lostGlide))
+    if(c.mission.patrolEnabled && s.phase==Phase::Approach && (lostLocalizer || lostGlide))
         BeginApproachRecovery(s,lostGlide && !lostLocalizer);
-    else if(s.phase==Phase::Approach && s.approachRecoveryPending)
+    else if(c.mission.patrolEnabled && s.phase==Phase::Approach && s.approachRecoveryPending)
     {
         bool const recovered=s.capturedLocalizer
             && (!s.approachRecoveryRequiresGlide || s.capturedGlide);
@@ -649,7 +660,7 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         auto const referenceBefore=InCurrentDeckFrame(previousDeck,c.runway,before);
         // Use the same phase and waypoint for both ends, including a gate pass.
         auto const previousGuidance=Guide(c,plan,s,referenceBefore);
-        if (s.phase == Phase::Patrol)
+        if (c.mission.patrolEnabled && s.phase == Phase::Patrol)
             add(Reward::Path,PatrolTrackingReward(c,plan,referenceBefore,after,pathProgress));
         if (s.phase != Phase::Rollout)
         {

@@ -149,7 +149,7 @@ void Configuration()
 {
     std::ifstream source(PPO_FLIGHT_CONFIG); nlohmann::json valid; source>>valid;
     TemporaryDirectory temporary("flight-config-"); auto const path=temporary.path/"config.json";
-    for (int test=0; test<32; ++test)
+    for (int test=0; test<34; ++test)
     {
         auto json=valid;
         if (test==0) json["normalization"]["speed"]=0;
@@ -185,10 +185,13 @@ void Configuration()
         if (test==29) json["training"]["curriculum"]["gateHeadingDegrees"]=0;
         if (test==30) json["training"]["curriculum"]["gateRouteDegrees"]=50;
         if (test==31) json["training"]["curriculum"]["gateSlopeDegrees"]=10;
+        if (test==32) json["mission"]["patrolEnabled"]=1;
+        if (test==33) json["mission"].erase("patrolEnabled");
         { std::ofstream stream(path); stream<<json; }
         Rejects([&] { LoadConfig(path); },"invalid JSON accepted");
     }
     auto c=LoadConfig(PPO_FLIGHT_CONFIG);
+    Check(!c.mission.patrolEnabled,"delivered scenario disables patrol without removing its settings");
     Check(Near(c.initial.runwayAlignedProbability,1.0/3.0),"balanced LOC/glide-start probability");
     Check(Near(c.training.ilsCaptureScale,2.0),"training-only ILS capture scale");
     Check(Near(c.mission.maxDistanceMeters,18000),"bounded recovery margin beyond ILS range");
@@ -197,6 +200,63 @@ void Configuration()
         c.initial.runwayAlignedProbability=probability;
         Rejects([&] { Validate(c); },"non-finite spawn probability accepted");
     }
+}
+
+void ApproachOnly(Config c)
+{
+    Check(!c.mission.patrolEnabled && MakeFlightPlan(c).count==0,
+        "disabled patrol publishes no racetrack geometry");
+    auto enabled=c;enabled.mission.patrolEnabled=true;
+    auto const stalePlan=MakeFlightPlan(enabled);
+    Check(stalePlan.count>1,"patrol geometry can be explicitly re-enabled");
+    c.reward.weights[static_cast<std::size_t>(Reward::Path)]=100;
+    auto const onBeam=Approach(c,-5000);
+    auto offGlide=onBeam;offGlide.position.up+=500;
+    auto const offLoc=Approach(c,-5000,5000);
+    std::array<AircraftState,5> const samples{onBeam,offGlide,onBeam,offLoc,onBeam};
+    std::size_t const holdSteps=static_cast<std::size_t>(
+        std::ceil(c.mission.captureHoldSeconds/c.mission.physicsDt))+1;
+    MissionState s{};
+    s.pathQualified=true;s.rallyCorridorLatched=true;s.waypointsPassed=5;s.completedLaps=1;
+    s.approachRecoveryPending=true;s.approachRecoverySeconds=c.mission.captureHoldSeconds;
+    Check(!Guide(c,stalePlan,s,onBeam).targetValid,
+        "a stale patrol phase and plan cannot expose a guidance point while disabled");
+    double localizerBonus{},glideBonus{};
+    for(int cycle=0;cycle<3;++cycle)
+    {
+        for(std::size_t sample=0;sample<samples.size();++sample)
+        {
+            auto const& aircraft=samples[sample];
+            for(std::size_t step=0;step<4*holdSteps;++step)
+            {
+                auto const result=AdvanceMission(c,stalePlan,s,aircraft,aircraft);
+                auto const guidance=Guide(c,stalePlan,s,aircraft);
+                auto const observation=Observe(c,stalePlan,s,aircraft);
+                localizerBonus+=result.rewards[static_cast<std::size_t>(Reward::EnterLocalizer)];
+                glideBonus+=result.rewards[static_cast<std::size_t>(Reward::EnterGlide)];
+                Check(s.phase==Phase::Approach && !s.approachRecoveryPending
+                    && !s.pathQualified && s.waypointsPassed==0 && s.completedLaps==0
+                    && !guidance.targetValid && guidance.mode!=GuidanceMode::Patrol
+                    && guidance.target.north==aircraft.position.north
+                    && guidance.target.east==aircraft.position.east
+                    && guidance.target.up==aircraft.position.up
+                    && result.rewards[static_cast<std::size_t>(Reward::Path)]==0
+                    && observation[0]==0 && observation[1]==0 && observation[2]==0
+                    && observation[32]==0 && observation[33]==1,
+                    "approach-only cannot restore HIPP, its point or its reward across repeated beam losses");
+                Check(!result.terminated && !result.truncated,"beam loss alone is not an episode boundary");
+            }
+            if(sample==3)
+                Check(!s.capturedLocalizer && !s.capturedGlide,"LOC loss still releases both captures");
+            else if(sample==1)
+                Check(s.capturedLocalizer && !s.capturedGlide,"glide loss preserves LOC capture");
+            else Check(s.capturedLocalizer && s.capturedGlide,"both beams can still be recaptured");
+        }
+    }
+    Check(Near(localizerBonus,c.reward.weights[static_cast<std::size_t>(Reward::EnterLocalizer)])
+        && Near(glideBonus,c.reward.weights[static_cast<std::size_t>(Reward::EnterGlide)]),
+        "approach-only recaptures do not repeat entry bonuses");
+    Landing(c); // Real landing, crash and timeout rules remain authoritative without patrol.
 }
 void OrderedNavigation(Config const& config)
 {
@@ -549,7 +609,13 @@ void DisplayReferences(Config const& config)
 }
 int main()
 {
-    try { auto const c=LoadConfig(PPO_FLIGHT_CONFIG); Geometry(c); Landing(c); Configuration(); OrderedNavigation(c); AlignedStarts(c); CapturePriority(c); RandomizationAndMotion(c); DisplayReferences(c); }
+    try
+    {
+        auto c=LoadConfig(PPO_FLIGHT_CONFIG);
+        ApproachOnly(c);Configuration();
+        c.mission.patrolEnabled=true; // Keep all legacy patrol/recovery regressions active.
+        Geometry(c);Landing(c);OrderedNavigation(c);AlignedStarts(c);CapturePriority(c);RandomizationAndMotion(c);DisplayReferences(c);
+    }
     catch(std::exception const& e) { std::cerr<<e.what()<<'\n'; return 1; }
     std::cout<<"Flight mission/configuration regressions passed\n";
 }

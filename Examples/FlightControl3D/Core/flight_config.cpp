@@ -73,7 +73,7 @@ Config LoadConfig(std::filesystem::path const& path)
         Bounds(d,"speedMps"),Bounds(d,"heaveAmplitudeMeters"),Bounds(d,"wavePeriodSeconds"),Bounds(d,"pitchAmplitudeDegrees"),
         Bounds(d,"rollAmplitudeDegrees"),Bounds(d,"phaseDegrees"),Number(d,"seaHeightMeters")};
     auto const& m = root.at("mission");
-    Keys(m, {"physicsDt", "actionSubsteps", "maxSeconds", "maxDistanceMeters", "maxAltitudeMeters",
+    Keys(m, {"patrolEnabled", "physicsDt", "actionSubsteps", "maxSeconds", "maxDistanceMeters", "maxAltitudeMeters",
         "switchDistanceMeters", "ilsRangeMeters", "ilsSectorDegrees", "glideDegrees",
         "localizerCaptureDegrees", "glideCaptureDegrees", "captureHoldSeconds", "captureHysteresis", "requiredLaps", "pathCorridorMeters", "maximumWaypointStepMeters",
         "patrolHeadingToleranceDegrees", "approachHeadingToleranceDegrees", "approachCrossToleranceMeters", "approachAltitudeToleranceMeters", "patrolSpeed", "approachSpeed", "flareSpeed", "flareHeightMeters",
@@ -81,6 +81,7 @@ Config LoadConfig(std::filesystem::path const& path)
         "gearDownMinimum", "contactHeightMeters", "stoppedSpeed", "stoppedHoldSeconds", "racetrackCenterAlong", "racetrackCenterCross",
         "racetrackHalfStraight", "racetrackRadius", "patrolAltitude", "waypointRadius", "patrolLookaheadSeconds", "turnSamples", "straightSamples"});
     auto& mission = config.mission;
+    mission.patrolEnabled=Boolean(m,"patrolEnabled");
 #define READ_M(field) mission.field = Number(m, #field)
     READ_M(physicsDt); READ_M(maxSeconds); READ_M(maxDistanceMeters); READ_M(maxAltitudeMeters);
     READ_M(switchDistanceMeters); READ_M(ilsRangeMeters); READ_M(ilsSectorDegrees); READ_M(glideDegrees);
@@ -176,7 +177,7 @@ Config LoadConfig(std::filesystem::path const& path)
     // The raw-Gaussian-to-FCS mapping is part of the checkpoint policy contract.
     semantics["actionMappingVersion"] = 2;
     semantics["rewardVersion"] = 11;
-    semantics["guidanceVersion"] = 13;
+    semantics["guidanceVersion"] = 14;
     semantics["spawnVersion"] = 2;
     config.checkpointSignature = semantics.dump();
     Validate(config);
@@ -205,13 +206,13 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
             && (*signature)["guidanceVersion"]!=7 && (*signature)["guidanceVersion"]!=8
             && (*signature)["guidanceVersion"]!=9 && (*signature)["guidanceVersion"]!=10
             && (*signature)["guidanceVersion"]!=11 && (*signature)["guidanceVersion"]!=12
-            && (*signature)["guidanceVersion"]!=13) return false;
+            && (*signature)["guidanceVersion"]!=13 && (*signature)["guidanceVersion"]!=14) return false;
         if(signature->contains("spawnVersion") && (*signature)["spawnVersion"]!=2) return false;
     }
     // A checkpoint trained with tanh actuators cannot warm-start the new mapping.
     if(!previous.contains("actionMappingVersion") || !next.contains("actionMappingVersion")
         || previous["actionMappingVersion"]!=next["actionMappingVersion"]) return false;
-    for(char const* name : {"distanceMeters","bearingDegrees","headingOffsetDegrees"})
+    for(char const* name : {"distanceMeters","bearingDegrees","heightMeters","headingOffsetDegrees"})
     {
         if(!previous["initial"].contains(name) || !next["initial"].contains(name)) return false;
         previous["initial"].erase(name); next["initial"].erase(name);
@@ -227,6 +228,14 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
     next["normalization"].erase("localizerDegrees");
     if(!previous.contains("mission") || !next.contains("mission")
         || !previous["mission"].is_object() || !next["mission"].is_object()) return false;
+    // Legacy contracts always enabled patrol. Either setting can warm-start
+    // the same policy, while production still requires the full signature.
+    for(auto* signature : {&previous,&next})
+    {
+        auto& mission=(*signature)["mission"];
+        if(mission.contains("patrolEnabled") && !mission["patrolEnabled"].is_boolean()) return false;
+        mission.erase("patrolEnabled");
+    }
     previous["mission"].erase("patrolLookaheadSeconds"); next["mission"].erase("patrolLookaheadSeconds");
     previous["mission"].erase("patrolHeadingToleranceDegrees"); next["mission"].erase("patrolHeadingToleranceDegrees");
     previous["mission"].erase("waypointRadius"); next["mission"].erase("waypointRadius");

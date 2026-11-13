@@ -45,7 +45,7 @@ void DesktopContinuation(Config c)
 enum class TrainingContractChange
 {
     HorizontalStarts, Rewards, LegacyStarts, LegacyGuidance, AlignedProbability,
-    EpisodeBoundary
+    EpisodeBoundary, ApproachOnly
 };
 void CommittedTrainingCheckpoint(Config c)
 {
@@ -102,6 +102,15 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     }
     else if(change==TrainingContractChange::AlignedProbability)
         signature["initial"]["runwayAlignedProbability"]=0.25;
+    else if(change==TrainingContractChange::ApproachOnly)
+    {
+        signature["guidanceVersion"]=13;
+        signature["mission"].erase("patrolEnabled");
+        signature["initial"]["distanceMeters"]={5000,14000};
+        signature["initial"]["bearingDegrees"]={12,30};
+        signature["initial"]["heightMeters"]={400,1000};
+        signature["initial"]["headingOffsetDegrees"]={-3,3};
+    }
     else
         signature["mission"]["maxDistanceMeters"]=30000.0;
     old.checkpointSignature=signature.dump();
@@ -214,7 +223,17 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
         "guidance V12 with the retired LOC scale remains usable as a training warm start");
     signature=nlohmann::json::parse(c.checkpointSignature);signature["guidanceVersion"]=13;
     Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "current guidance V13 remains compatible");
+        "guidance V13 remains a compatible warm start");
+    signature["guidanceVersion"]=14;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "approach-only guidance V14 remains compatible");
+    signature["mission"]["patrolEnabled"]=true;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "explicitly re-enabling patrol keeps a compatible training architecture");
+    signature["mission"]["patrolEnabled"]=1;
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "non-boolean patrol setting is rejected from warm-start contracts");
+    signature=nlohmann::json::parse(c.checkpointSignature);
     signature["guidanceVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown guidance contract is rejected");
     signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("spawnVersion");
@@ -232,7 +251,8 @@ int main()
         DesktopContinuation(c);
         for(auto change : {TrainingContractChange::HorizontalStarts,TrainingContractChange::Rewards,
             TrainingContractChange::LegacyStarts,TrainingContractChange::LegacyGuidance,
-            TrainingContractChange::AlignedProbability,TrainingContractChange::EpisodeBoundary})
+            TrainingContractChange::AlignedProbability,TrainingContractChange::EpisodeBoundary,
+            TrainingContractChange::ApproachOnly})
             ChangedTrainingContract(c,change);
         c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
         c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;
@@ -240,6 +260,8 @@ int main()
         FlightModelStore store(c,directory.path);auto const checkpoint=store.Latest();
         FlightSession training(c,true,directory.path);
         auto const display=training.Snapshot();
+        Check(display.plan.count==0 && display.mission.phase==Phase::Approach && !display.guidance.targetValid,
+            "desktop and validation snapshots carry no disabled racetrack or guidance point");
         Check(display.localizerCaptureDegrees==c.mission.localizerCaptureDegrees*c.training.ilsCaptureScale
             && display.glideCaptureDegrees==c.mission.glideCaptureDegrees*c.training.ilsCaptureScale
             && display.gearDownMinimum==c.mission.gearDownMinimum,

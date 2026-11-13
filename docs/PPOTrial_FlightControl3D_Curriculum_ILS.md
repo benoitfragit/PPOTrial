@@ -2,6 +2,8 @@
 
 Date : 12 novembre 2026. Branche : feat/jsbsim-flight-control. PR : #83.
 
+Depuis le 13 novembre, `mission.patrolEnabled=false` maintient les trois gates en approche, sans circuit ni point hippodrome et avec `Path=0`. Les départs sont à 4–6,5 km ; LOC conserve les deux côtés (4–10°) et Glide ses écarts verticaux et rappels. La réactivation reste explicite par JSON : [architecture du correctif #86](PPOTrial_FlightControl3D_Approche_Sans_Hippodrome_Issue86.md).
+
 ## Contrat de shaping
 
 La qualité LOC reste une moyenne (0,5 / 0,5) entre la qualité d'écart latéral et la qualité de route d'interception. La route relative à la piste est dérivée de son vecteur vitesse, pas du cap fuselage :

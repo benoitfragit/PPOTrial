@@ -27,7 +27,7 @@ Observation FlightEnvironment::Reset()
     bool const reminder=stage==CurriculumStage::Glide
         && std::bernoulli_distribution(config_.training.locReminderProbability)(rng_);
     episodeConfig_.training.curriculumStage=reminder ? CurriculumStage::Loc : stage;
-    mission_.phase = config_.initial.approach ? Phase::Approach : Phase::Patrol;
+    mission_.phase = !config_.mission.patrolEnabled || config_.initial.approach ? Phase::Approach : Phase::Patrol;
     motion_=SampleRunway(config_,rng_);
     episodeConfig_.runway=RunwayAt(motion_,0);
     plan_=MakeFlightPlan(episodeConfig_);

@@ -22,6 +22,8 @@ struct RunwayRandomization final
 };
 struct MissionSettings final
 {
+    /** @brief Enables racetrack guidance and fallback; false keeps airborne flight in approach. */
+    bool patrolEnabled{true};
     double physicsDt{}, maxSeconds{}, maxDistanceMeters{}, maxAltitudeMeters{};
     std::size_t actionSubsteps{};
     double switchDistanceMeters{}, ilsRangeMeters{}, ilsSectorDegrees{}, glideDegrees{};
@@ -110,8 +112,8 @@ void Validate(Config const& config);
  * @param current Serialized checkpoint signature for the requested session.
  * @return True for compatible training-only changes; BEST still requires an exact contract.
  *
- * Compatible changes include horizontal starts, their mixture, entry phase,
- * reward settings and the terminal distance boundary.
+ * Compatible changes include spawn position ranges, their mixture, entry phase,
+ * patrol activation, reward settings and the terminal distance boundary.
  */
 bool CompatibleTrainingSignature(std::string const& stored,std::string const& current);
 
