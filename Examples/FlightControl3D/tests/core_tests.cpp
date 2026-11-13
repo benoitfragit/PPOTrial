@@ -580,6 +580,55 @@ void CapturePriority(Config const& c)
         && rolloutGuidance.target.east==flareAircraft.position.east,
         "flare and rollout cannot reactivate a threshold guidance line");
 }
+/** Ideal kinematic intercept: a necessary timing check, not an aircraft/policy qualification. */
+Outcome CaptureReferenceOutcome(Config c,double distance,double bearingDegrees)
+{
+    c.training.curriculumStage=CurriculumStage::Loc;
+    c.mission.patrolEnabled=false;
+    c.mission.maxSeconds=std::min(c.mission.maxSeconds,c.training.captureMaxSeconds);
+    c.runway.velocity={};c.runway.angularVelocity={};c.runway.pitch=0;c.runway.roll=0;
+    auto const plan=MakeFlightPlan(c);
+    MissionState mission{};mission.phase=Phase::Approach;
+    double const bearing=bearingDegrees*DegreesToRadians;
+    auto aircraft=Approach(c,-distance*std::cos(bearing),distance*std::sin(bearing));
+    aircraft.airspeed=c.mission.approachSpeed-c.training.captureStart.speedToleranceMps;
+    double const dt=c.mission.physicsDt;
+    std::size_t const maximumSteps=static_cast<std::size_t>(std::ceil(c.mission.maxSeconds/dt))+1;
+    for(std::size_t step=0;step<maximumSteps && mission.outcome==Outcome::Flying;++step)
+    {
+        auto const before=aircraft;
+        auto const guidance=Guide(c,plan,mission,before);
+        double const limit=c.reward.localizerInterceptLimitDegrees*DegreesToRadians;
+        double const route=-std::clamp(c.reward.localizerInterceptGain*guidance.localizer,-limit,limit);
+        double const forwardSpeed=aircraft.airspeed*std::cos(route);
+        aircraft.velocity=Add(Scale(RunwayForward(c.runway),forwardSpeed),
+            Add(Scale(RunwayRight(c.runway),aircraft.airspeed*std::sin(route)),
+                Scale(RunwayNormal(c.runway),-forwardSpeed*std::tan(c.mission.glideDegrees*DegreesToRadians))));
+        aircraft.position=Add(before.position,Scale(aircraft.velocity,dt));
+        aircraft.heading=c.runway.headingDegrees*DegreesToRadians+route;
+        aircraft.yawRate=step==0 ? 0 : WrapAngle(aircraft.heading-before.heading)/dt;
+        AdvanceMission(c,plan,mission,before,aircraft);
+    }
+    return mission.outcome;
+}
+
+/** The delivered spawn geometry must admit its own intercept reference before timeout. */
+void CaptureLessonInterceptBudget(Config c)
+{
+    for(double const heading:{0.0,90.0,181.0,359.0})
+    {
+        c.runway.headingDegrees=heading;
+        for(double const distance:{c.initial.distanceMeters.minimum,c.initial.distanceMeters.maximum})
+            for(double const bearing:{c.initial.bearingDegrees.minimum,c.initial.bearingDegrees.maximum})
+                for(double const side:{-1.0,1.0})
+                    Check(CaptureReferenceOutcome(c,distance,side*bearing)==Outcome::CaptureCompleted,
+                        "capture lesson budget admits both extreme spawn distances/bearings and stabilized hold");
+    }
+    c.training.captureMaxSeconds=60;
+    Check(CaptureReferenceOutcome(c,c.initial.distanceMeters.maximum,c.initial.bearingDegrees.maximum)==Outcome::Timeout,
+        "former 60-second budget cuts off a valid far intercept before stable LOC capture");
+}
+
 void RunwayCourseObservation(Config c)
 {
     MissionState approach{};approach.phase=Phase::Approach;
@@ -810,7 +859,7 @@ int main()
     try
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
-        RunwayCourseObservation(c);SurfaceRelativeFlightPath(c);NoWaveScenario(c);
+        RunwayCourseObservation(c);SurfaceRelativeFlightPath(c);NoWaveScenario(c);CaptureLessonInterceptBudget(c);
         ApproachOnly(c);Configuration();CaptureLessonTermination(c);
         c.mission.patrolEnabled=true; // Keep all legacy patrol/recovery regressions active.
         Geometry(c);Landing(c);OrderedNavigation(c);AlignedStarts(c);CapturePriority(c);RandomizationAndMotion(c);DisplayReferences(c);

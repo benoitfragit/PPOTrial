@@ -53,7 +53,7 @@
       "glideOffsetMeters": 120.0, "gateHoldSeconds": 2.0,
       "gateHeadingDegrees": 5.0, "gateRouteDegrees": 5.0, "gateSlopeDegrees": 1.5,
       "gateSpeedToleranceMps": 5.0, "gateRollDegrees": 8.0, "gateRateDegreesPerSecond": 5.0,
-      "captureMaxSeconds": 60.0,
+      "captureMaxSeconds": 120.0,
       "captureStart": {"speedToleranceMps": 2.0, "rollDegrees": 3.0, "pitchDegrees": [1.0, 3.0],
         "slopeToleranceDegrees": 0.5, "localizerHeightOffsetMeters": 20.0}},
     "actorRate": 0.0001, "criticRate": 0.0003, "gamma": 0.99, "lambda": 0.95, "clip": 0.2, "targetKl": 0.02,

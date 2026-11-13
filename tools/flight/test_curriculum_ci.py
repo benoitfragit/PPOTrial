@@ -18,9 +18,14 @@ output = Path(args[args.index("--output") + 1])
 stage = args[args.index("--stage") + 1]
 target = int(args[args.index("--updates") + 1])
 with (output / "calls.txt").open("a") as f: f.write(f"{stage} {target}\\n")
+with Path(os.environ["ALL_CALLS"]).open("a") as f: f.write(f"{stage} {target}\\n")
 checkpoint = output / "latest" / "flight_hybrid_v1.txt"
 checkpoint.parent.mkdir(parents=True, exist_ok=True)
-checkpoint.write_text(f"PPO_FLIGHT_HYBRID_V1 56 5 128 {target}\\n")
+previous = int(checkpoint.read_text().split()[4]) if checkpoint.exists() else 0
+if target != previous:
+    checkpoint.write_text(f"PPO_FLIGHT_HYBRID_V1 56 5 128 {target}\\n")
+elif os.environ.get("CORRUPT_RECHECK") == "1":
+    with checkpoint.open("a") as f: f.write("unexpected optimizer change\\n")
 (output / "training.csv").write_text("episode,updates\\n1,1\\n")
 threshold = json.loads(os.environ["PASS_AT"])[stage]
 passed = target >= threshold
@@ -51,10 +56,13 @@ class CurriculumTests(unittest.TestCase):
             self.launcher = root / "headless.cmd"
             self.launcher.write_text(f'@echo off\r\n"{sys.executable}" "{self.fake}" %*\r\n')
         self.summary = root / "summary.txt"
+        self.all_calls = root / "all_calls.txt"
 
-    def execute(self, max_updates=100, stage="progressive", interval=10, malformed=False):
+    def execute(self, max_updates=100, stage="progressive", interval=10, malformed=False,
+                corrupt_recheck=False):
         env = {**os.environ, "PASS_AT": json.dumps({"loc": 30, "glide": 50, "joint": 70, "joint-mobile": 90}),
-               "GITHUB_STEP_SUMMARY": str(self.summary), "MALFORMED_GATE": str(int(malformed))}
+               "GITHUB_STEP_SUMMARY": str(self.summary), "MALFORMED_GATE": str(int(malformed)),
+               "ALL_CALLS": str(self.all_calls), "CORRUPT_RECHECK": str(int(corrupt_recheck))}
         return subprocess.run([sys.executable, str(RUNNER), "--executable", str(self.launcher),
                                "--config", str(self.config), "--output", str(self.output),
                                "--stage", stage, "--updates-per-evaluation", str(interval),
@@ -157,6 +165,75 @@ class CurriculumTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("checkpoint header", result.stderr)
         self.assertFalse((self.output / "calls.txt").exists())
+
+    def test_resumed_capture_pass_preserves_latest_best_and_training_telemetry(self):
+        original = "PPO_FLIGHT_HYBRID_V1 56 5 128 8000\noptimizer and RNG\n"
+        self.checkpoint.write_text(original)
+        telemetry = self.output / "training.csv"
+        archived = self.output / "training_loc_8000.csv"
+        best = self.output / "best" / "manifest.json"
+        best.parent.mkdir()
+        for path in [telemetry, archived, best]:
+            path.write_text("original content\n")
+        result = self.execute(stage="loc", max_updates=1)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.all_calls.read_text().splitlines(), ["loc 8000"])
+        self.assertEqual(self.checkpoint.read_text(), original)
+        for path in [telemetry, archived, best]:
+            self.assertEqual(path.read_text(), "original content\n")
+        self.assertEqual((self.output / "curriculum_stage.txt").read_text().strip(), "glide")
+        self.assertTrue((self.output / "gate_recheck_loc_8000.log").is_file())
+        self.assertFalse(list(self.output.glob("flight-recheck-*")))
+
+    def test_capture_recheck_pass_advances_without_consuming_update_budget(self):
+        self.checkpoint.write_text("PPO_FLIGHT_HYBRID_V1 56 5 128 30\n")
+        result = self.execute(max_updates=10)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(self.all_calls.read_text().splitlines(), ["loc 30", "glide 40"])
+        self.assertEqual(self.checkpoint.read_text().split()[4], "40")
+        self.assertEqual((self.output / "curriculum_stage.txt").read_text().strip(), "glide")
+
+    def test_capture_recheck_failure_keeps_full_training_budget(self):
+        self.checkpoint.write_text("PPO_FLIGHT_HYBRID_V1 56 5 128 20\n")
+        result = self.execute(stage="loc", max_updates=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.all_calls.read_text().splitlines(), ["loc 20", "loc 30"])
+        self.assertEqual(self.checkpoint.read_text().split()[4], "30")
+
+    def test_malformed_capture_recheck_preserves_original_and_does_not_advance(self):
+        original = "PPO_FLIGHT_HYBRID_V1 56 5 128 30\noptimizer and RNG\n"
+        self.checkpoint.write_text(original)
+        result = self.execute(malformed=True)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(self.checkpoint.read_text(), original)
+        self.assertEqual((self.output / "curriculum_stage.txt").read_text().strip(), "loc")
+        self.assertTrue((self.output / "gate_recheck_loc_30.log").is_file())
+
+    def test_capture_recheck_rejects_mutated_policy_without_touching_original(self):
+        original = "PPO_FLIGHT_HYBRID_V1 56 5 128 30\noptimizer and RNG\n"
+        self.checkpoint.write_text(original)
+        result = self.execute(corrupt_recheck=True)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("modified checkpoint", result.stderr)
+        self.assertEqual(self.checkpoint.read_text(), original)
+        self.assertEqual((self.output / "curriculum_stage.txt").read_text().strip(), "loc")
+
+    def test_landing_resume_uses_normal_promotion_path(self):
+        self.checkpoint.write_text("PPO_FLIGHT_HYBRID_V1 56 5 128 70\n")
+        result = self.execute(stage="joint", max_updates=1)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.all_calls.read_text().splitlines(), ["joint 71"])
+        self.assertFalse(list(self.output.glob("gate_recheck_*.log")))
+
+    def test_disabled_resume_does_not_mislabel_training_as_read_only_recheck(self):
+        self.checkpoint.write_text("PPO_FLIGHT_HYBRID_V1 56 5 128 20\n")
+        config = json.loads(self.config.read_text())
+        config["training"] = {"resume": False}
+        self.config.write_text(json.dumps(config))
+        result = self.execute(stage="loc", max_updates=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.all_calls.read_text().splitlines(), ["loc 30"])
+        self.assertFalse(list(self.output.glob("gate_recheck_*.log")))
 
 
 if __name__ == "__main__":

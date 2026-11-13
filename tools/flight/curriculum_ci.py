@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 STAGES = ("loc", "glide", "joint", "joint-mobile")
@@ -78,6 +79,29 @@ def run_block(executable: Path, config: Path, output: Path, stage: str, target: 
     return passed
 
 
+def recheck_capture(executable: Path, config: Path, output: Path, stage: str,
+                    current: int, expected_episodes: int, min_success_rate: float) -> bool:
+    """Validate a resumed capture policy without modifying its model or telemetry."""
+    checkpoint = output / "latest" / "flight_hybrid_v1.txt"
+    original = checkpoint.read_bytes()
+    saved_log = output / f"gate_recheck_{stage}_{current}.log"
+    with tempfile.TemporaryDirectory(prefix="flight-recheck-", dir=output) as directory:
+        trial = Path(directory)
+        (trial / "latest").mkdir()
+        trial_checkpoint = trial / "latest" / checkpoint.name
+        shutil.copyfile(checkpoint, trial_checkpoint)
+        try:
+            passed = run_block(executable, config, trial, stage, current,
+                               expected_episodes, min_success_rate)
+            if trial_checkpoint.read_bytes() != original:
+                raise RuntimeError("Capture recheck modified checkpoint")
+            return passed
+        finally:
+            log = trial / f"gate_{stage}_{current}.log"
+            if log.is_file():
+                shutil.copyfile(log, saved_log)
+
+
 def run(args: argparse.Namespace) -> int:
     if args.updates_per_evaluation < 1 or args.max_additional_updates < 1:
         raise ValueError("Update budgets must be positive")
@@ -122,7 +146,17 @@ def run(args: argparse.Namespace) -> int:
     completed_selected_stage = stage == "done"
     blocks = 0
     current = start_update
-    while stage != "done":
+    # A changed capture contract may already qualify the restored policy.
+    # Landing lessons retain their normal in-place BEST promotion path.
+    if (current > 0 and stage in ("loc", "glide")
+            and config.get("training", {}).get("resume", True)):
+        emit_summary([f"Rechecking {stage}: saved PPO update {current}, no training"])
+        if recheck_capture(args.executable, args.config, output, stage, current,
+                           expected_episodes, min_success_rate):
+            stage = STAGES[STAGES.index(stage) + 1]
+            progress.write_text(stage + "\n", encoding="utf-8")
+            completed_selected_stage = args.stage != "progressive"
+    while stage != "done" and not completed_selected_stage:
         if current >= ceiling or time.monotonic() >= deadline:
             break
         target = min(current + args.updates_per_evaluation, ceiling)
@@ -145,7 +179,7 @@ def run(args: argparse.Namespace) -> int:
     status = "completed" if complete else "incomplete"
     (output / "curriculum_status.txt").write_text(status + "\n", encoding="utf-8")
     emit_summary([f"Curriculum status: {status}", f"Next stage: {stage}",
-                  f"Updates: {start_update} -> {current} ({blocks} evaluated blocks)",
+                  f"Updates: {start_update} -> {current} ({blocks} evaluated training blocks)",
                   "Resume by supplying this workflow run ID as resume_run_id." if not complete else
                   "Curriculum target validated by independent gate evaluations."])
     # A green workflow must not represent an unfinished curriculum.
