@@ -892,12 +892,21 @@ void DisplayReferences(Config const& config)
     stopped.relativeVelocity={0,100,100};
     Check(Near(DisplaySlopeDegrees(stopped),45),"climb uses full horizontal speed and positive slope");
 }
+void LocalizerRewardContract(Config const& c)
+{
+    auto previous=nlohmann::json::parse(c.checkpointSignature);
+    previous["rewardVersion"]=13;
+    Check(previous.dump()!=c.checkpointSignature
+        && CompatibleTrainingSignature(previous.dump(),c.checkpointSignature),
+        "previous LOC slope rewards permit a training warm start but not reuse of exact BEST qualification");
+}
 }
 int main()
 {
     try
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
+        LocalizerRewardContract(c);
         RunwayCourseObservation(c);SurfaceRelativeFlightPath(c);NoWaveScenario(c);CaptureLessonInterceptBudget(c);
         ApproachOnly(c);Configuration();CaptureLessonTermination(c);
         c.mission.patrolEnabled=true; // Keep all legacy patrol/recovery regressions active.

@@ -740,14 +740,18 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
             double const priorSpeed=GuidanceQuality(referenceBefore.airspeed-previousGuidance.targetSpeed,c.reward.speedTolerance);
             double const speed=GuidanceQuality(after.airspeed-g.targetSpeed,c.reward.speedTolerance);
             add(Reward::Speed,QualityImprovement(priorSpeed,speed));
-            double const priorSlope=std::atan2(previousGuidance.relativeVelocity.up,
-                std::hypot(previousGuidance.relativeVelocity.north,previousGuidance.relativeVelocity.east));
-            double const slope=std::atan2(g.relativeVelocity.up,
-                std::hypot(g.relativeVelocity.north,g.relativeVelocity.east));
-            double const tol=c.reward.slopeToleranceDegrees*DegreesToRadians;
-            add(Reward::Slope,QualityImprovement(
-                GuidanceQuality(priorSlope-previousGuidance.targetSlope,tol),
-                GuidanceQuality(slope-g.targetSlope,tol)));
+            // The active LOC lesson, including Glide reminders, has no vertical objective.
+            if(c.training.curriculumStage!=CurriculumStage::Loc)
+            {
+                double const priorSlope=std::atan2(previousGuidance.relativeVelocity.up,
+                    std::hypot(previousGuidance.relativeVelocity.north,previousGuidance.relativeVelocity.east));
+                double const slope=std::atan2(g.relativeVelocity.up,
+                    std::hypot(g.relativeVelocity.north,g.relativeVelocity.east));
+                double const tol=c.reward.slopeToleranceDegrees*DegreesToRadians;
+                add(Reward::Slope,QualityImprovement(
+                    GuidanceQuality(priorSlope-previousGuidance.targetSlope,tol),
+                    GuidanceQuality(slope-g.targetSlope,tol)));
+            }
         }
         if (contact && !s.touchedDown)
         {

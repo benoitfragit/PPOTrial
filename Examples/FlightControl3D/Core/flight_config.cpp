@@ -189,7 +189,7 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics["distribution"] = {training.minLogStd,training.maxLogStd};
     // The raw-Gaussian-to-FCS mapping is part of the checkpoint policy contract.
     semantics["actionMappingVersion"] = 2;
-    semantics["rewardVersion"] = 13;
+    semantics["rewardVersion"] = 14;
     semantics["guidanceVersion"] = 16;
     semantics["contactVersion"] = 2;
     semantics["spawnVersion"] = 4;
@@ -218,7 +218,7 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
             && (*signature)["rewardVersion"]!=7 && (*signature)["rewardVersion"]!=8
             && (*signature)["rewardVersion"]!=9 && (*signature)["rewardVersion"]!=10
             && (*signature)["rewardVersion"]!=11 && (*signature)["rewardVersion"]!=12
-            && (*signature)["rewardVersion"]!=13) return false;
+            && (*signature)["rewardVersion"]!=13 && (*signature)["rewardVersion"]!=14) return false;
         if(signature->contains("guidanceVersion") && (*signature)["guidanceVersion"]!=2
             && (*signature)["guidanceVersion"]!=3 && (*signature)["guidanceVersion"]!=4
             && (*signature)["guidanceVersion"]!=5 && (*signature)["guidanceVersion"]!=6

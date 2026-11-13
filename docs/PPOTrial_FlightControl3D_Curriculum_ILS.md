@@ -49,7 +49,17 @@ Par sous-pas physique de 0,01 s (sans décadence ni maintien constant) :
 - r_LOC = 30 (Q_LOC_après - Q_LOC_avant).
 - r_GLIDE = 10 (Q_GLIDE_après - Q_GLIDE_avant).
 - r_V = 1 (Q_V_après - Q_V_avant), Q_V = 15/(15+|Vair - Vcible|).
-- r_pente = 1 (Q_pente_après - Q_pente_avant).
+- r_pente = 1 (Q_pente_après - Q_pente_avant), uniquement dans les épisodes Glide et les phases Joint ; zéro en LOC.
+
+Correctif #98 : le LOC n'impose aucune pente verticale. Son shaping est uniquement
+`30 ΔQ_LOC + ΔQ_V`, avec le bonus de succès stabilisé et les pénalités physiques
+existants. Cela vaut aussi pour chaque épisode de rappel LOC tiré pendant la phase
+Glide : c'est la leçon active de l'épisode qui choisit le reward. Les observations,
+les critères de capture et les commandes restent identiques. Glide conserve son
+shaping vertical actuel ; sa double contribution de pente n'est pas modifiée par
+ce correctif ciblé. `rewardVersion=14` distingue le contrat corrigé : les latest
+précédents peuvent reprendre l'entraînement, mais une ancienne qualification BEST
+ne vaut pas validation du nouveau contrat.
 
 Le reward total d'une action PPO est la somme de ses sous-pas JSBSim. Une transition hors enveloppe annule le delta de la composante correspondante ; une progression négative vers le seuil interdit un reward LOC/Glide positif. Ces exceptions signifient que le retour n'est pas strictement un potentiel global garanti invariant pour PPO avec gamma<1 : ce choix de façonnage est à évaluer expérimentalement. Les poids événementiels +2/+2/+100/+100/−100 restent identiques. En LOC, `EnterLocalizer=+2` est versé uniquement au succès stabilisé ; en Glide, `EnterLocalizer=+2` et `EnterGlide=+2` le sont au succès stabilisé complet. Aucun de ces bonus n'est versé lors d'un simple passage, d'une stabilisation interrompue, d'un timeout ou d'un crash. En Joint fixe/mobile, leur attribution géométrique historique est conservée.
 
@@ -57,7 +67,7 @@ Le reward total d'une action PPO est la somme de ses sous-pas JSBSim. Une transi
 
 Le paramétrage est dans training.curriculum du JSON (stage, locReminderProbability, glideOffsetMeters, gateHoldSeconds) et peut être surchargé par --stage pour FlightControlHeadless sans changer le réseau.
 
-- Gate LOC : départs gauche/droite équilibrés, reward Glide et bonus de capture Glide éteints. Signal vitesse/pente de sécurité conservé même avant capture LOC.
+- Gate LOC : départs gauche/droite équilibrés, rewards Glide et Slope ainsi que bonus de capture Glide éteints. Signal vitesse et sécurité physique conservés même avant capture LOC ; aucun objectif vertical ajouté à l'alignement latéral.
 - Gate Glide : 70 % d'épisodes démarrant sur le LOC mais ±(0,25..1)*glideOffsetMeters au-dessus ou au-dessous du plan ; 30 % d'épisodes de rappel LOC avec les mêmes règles que Gate 1. LOC reste récompensé à chaque épisode.
 - Gate Joint : piste fixe à 0 m/s, distributions complètes habituelles, les deux canaux de reward actifs, puis atterrissage et arrêt.
 - Gate Joint mobile (`joint-mobile`) : même objectif complet, avec translation de piste tirée dans `runwayRandomization.speedMps` ; elle commence uniquement après validation de Joint fixe en mode progressif. La houle reste coupée.

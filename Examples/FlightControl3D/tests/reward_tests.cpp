@@ -106,6 +106,49 @@ void SpeedAndSlopeShaping(Config const& c)
             && Channel(ApproachStep(c,bad,bad),channel)==0,
             "speed and slope improve/recede with no constant baseline");
 }
+void LocalizerLessonHasNoVerticalObjective(Config c)
+{
+    c.mission.patrolEnabled=false;
+    auto before=At(c,-6000,500,400);
+    before.airspeed=c.mission.approachSpeed-5;
+    before=WithCourse(c,before,0);
+    auto after=before;
+    after.position=FromRunway(c.runway,-6000,499.8,400);
+    after.airspeed+=1;
+    after=WithCourse(c,after,0);
+    for(auto const stage : {CurriculumStage::Loc,CurriculumStage::Glide,
+        CurriculumStage::Joint,CurriculumStage::JointMobile})
+    {
+        c.training.curriculumStage=stage;
+        for(double const slopeDegrees : {-c.mission.glideDegrees,c.mission.glideDegrees})
+        {
+            auto changed=after;
+            changed.velocity.up=std::hypot(changed.velocity.north,changed.velocity.east)
+                *std::tan(slopeDegrees*DegreesToRadians);
+            auto const result=ApproachStep(c,before,changed);
+            if(stage==CurriculumStage::Loc)
+                Check(Channel(result,Reward::Slope)==0 && Channel(result,Reward::Glide)==0,
+                    "LOC never rewards or penalizes a vertical slope change");
+            else
+            {
+                double const tolerance=c.reward.slopeToleranceDegrees;
+                double const expected=c.reward.weights[static_cast<std::size_t>(Reward::Slope)]
+                    *(tolerance/(tolerance+std::abs(slopeDegrees+c.mission.glideDegrees))
+                        -tolerance/(tolerance+c.mission.glideDegrees));
+                Check(Near(Channel(result,Reward::Slope),expected,1e-12),
+                    "Glide and landing lessons preserve their signed slope shaping");
+            }
+            Check(Channel(result,Reward::Localizer)>0 && Channel(result,Reward::Speed)>0,
+                "lateral interception and speed shaping remain active in every lesson");
+        }
+    }
+    c.training.curriculumStage=CurriculumStage::Loc;
+    after.structuralContact=true;
+    auto const crash=ApproachStep(c,before,after);
+    Check(crash.terminated && Channel(crash,Reward::Crash)
+        ==c.reward.weights[static_cast<std::size_t>(Reward::Crash)],
+        "LOC keeps physical crash safety without a vertical shaping objective");
+}
 void SecondaryGuidance(Config const& c)
 {
     auto const plan=MakeFlightPlan(c);
@@ -284,6 +327,7 @@ int main()
     try
     {
         auto config=LoadConfig(PPO_FLIGHT_CONFIG);
+        LocalizerLessonHasNoVerticalObjective(config);
         StabilizedCaptureBonuses(config);
         TrueSnapshotCycle(config);
         config.mission.patrolEnabled=true; // Exercise the preserved optional patrol path reward.

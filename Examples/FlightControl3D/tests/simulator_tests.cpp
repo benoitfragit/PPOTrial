@@ -379,6 +379,13 @@ int main()
         reminderEnv.Reset();
         Check(reminderEnv.Settings().training.curriculumStage==CurriculumStage::Loc,
             "gate 2 can replay true LOC-only episodes");
+        for(int step=0;step<10 && reminderEnv.Mission().outcome==Outcome::Flying;++step)
+        {
+            auto const reminderStep=reminderEnv.Step(action);
+            Check(reminderStep.rewards[static_cast<std::size_t>(Reward::Slope)]==0
+                && reminderStep.rewards[static_cast<std::size_t>(Reward::Glide)]==0,
+                "native Glide reminders use the LOC reward without any vertical shaping");
+        }
         c.mission.maxSeconds=0.2; c.mission.actionSubsteps=1;
         FlightEnvironment shortEpisode(c); shortEpisode.Reset();
         StepResult last{};
