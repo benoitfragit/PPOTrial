@@ -178,7 +178,7 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics["actionMappingVersion"] = 2;
     semantics["rewardVersion"] = 11;
     semantics["guidanceVersion"] = 14;
-    semantics["spawnVersion"] = 2;
+    semantics["spawnVersion"] = 3;
     config.checkpointSignature = semantics.dump();
     Validate(config);
     return config;
@@ -207,7 +207,8 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
             && (*signature)["guidanceVersion"]!=9 && (*signature)["guidanceVersion"]!=10
             && (*signature)["guidanceVersion"]!=11 && (*signature)["guidanceVersion"]!=12
             && (*signature)["guidanceVersion"]!=13 && (*signature)["guidanceVersion"]!=14) return false;
-        if(signature->contains("spawnVersion") && (*signature)["spawnVersion"]!=2) return false;
+        if(signature->contains("spawnVersion") && (*signature)["spawnVersion"]!=2
+            && (*signature)["spawnVersion"]!=3) return false;
     }
     // A checkpoint trained with tanh actuators cannot warm-start the new mapping.
     if(!previous.contains("actionMappingVersion") || !next.contains("actionMappingVersion")

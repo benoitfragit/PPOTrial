@@ -45,7 +45,7 @@ void DesktopContinuation(Config c)
 enum class TrainingContractChange
 {
     HorizontalStarts, Rewards, LegacyStarts, LegacyGuidance, AlignedProbability,
-    EpisodeBoundary, ApproachOnly
+    EpisodeBoundary, ApproachOnly, ResetAttitude
 };
 void CommittedTrainingCheckpoint(Config c)
 {
@@ -111,6 +111,8 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
         signature["initial"]["heightMeters"]={400,1000};
         signature["initial"]["headingOffsetDegrees"]={-3,3};
     }
+    else if(change==TrainingContractChange::ResetAttitude)
+        signature["spawnVersion"]=2;
     else
         signature["mission"]["maxDistanceMeters"]=30000.0;
     old.checkpointSignature=signature.dump();
@@ -239,6 +241,12 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("spawnVersion");
     Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
         "legacy random placement remains usable as a training warm start");
+    signature["spawnVersion"]=2;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "old reset attitude semantics remain usable as a training warm start");
+    signature["spawnVersion"]=3;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "independent attitude and velocity reset keeps a compatible architecture");
     signature=nlohmann::json::parse(c.checkpointSignature);signature["spawnVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown spawn contract is rejected");
 }
@@ -252,7 +260,7 @@ int main()
         for(auto change : {TrainingContractChange::HorizontalStarts,TrainingContractChange::Rewards,
             TrainingContractChange::LegacyStarts,TrainingContractChange::LegacyGuidance,
             TrainingContractChange::AlignedProbability,TrainingContractChange::EpisodeBoundary,
-            TrainingContractChange::ApproachOnly})
+            TrainingContractChange::ApproachOnly,TrainingContractChange::ResetAttitude})
             ChangedTrainingContract(c,change);
         c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
         c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;

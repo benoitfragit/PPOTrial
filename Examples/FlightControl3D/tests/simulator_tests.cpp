@@ -103,6 +103,44 @@ void CloseApproachStarts(Config c)
     Check(patrol.Mission().phase==Phase::Patrol && patrol.Plan().count>1 && patrol.CurrentGuidance().targetValid,
         "explicit reactivation restores the original airborne patrol guidance");
 }
+
+void IndependentResetAttitude(Config c)
+{
+    c.initial.distanceMeters={6000,6000};c.initial.speedMps={60,60};
+    std::mt19937 rng(183U);
+    JsbsimAircraft fdm(c,DefaultDataRoot());
+    for(double heading : {0.,90.,181.,359.})
+    {
+        auto motion=SampleRunway(c,rng);
+        motion.base.headingDegrees=heading;
+        fdm.SetRunwayMotion(motion);
+        auto const runway=RunwayAt(motion,0);
+        for(double roll : {-15.,0.,15.}) for(double pitch : {-4.,2.,8.}) for(double slope : {-3.,0.,3.})
+        {
+            c.initial.rollDegrees={roll,roll};c.initial.pitchDegrees={pitch,pitch};c.initial.slopeDegrees={slope,slope};
+            auto const requested=SampleAircraft(c,runway,SpawnPlacement::Left,rng);
+            auto const actual=fdm.Reset(requested);
+            double const actualSlope=std::atan2(actual.velocity.up,
+                std::hypot(actual.velocity.north,actual.velocity.east))/DegreesToRadians;
+            Check(Near(actual.roll,requested.roll,1e-8) && Near(actual.pitch,requested.pitch,1e-8)
+                && Near(WrapAngle(actual.heading-requested.heading),0,1e-8)
+                && Near(actual.airspeed,requested.airspeed,1e-5)
+                && std::abs(actualSlope-slope)<0.2,
+                "native reset preserves sampled attitude independently of flight-path slope and calibrated speed");
+            for(int step=0;step<20;++step) fdm.Advance({0.2,-0.2,0.1,c.initial.throttle,0,true});
+            auto const repeated=fdm.Reset(requested);
+            Check(Near(repeated.roll,actual.roll,1e-8) && Near(repeated.pitch,actual.pitch,1e-8)
+                && Near(WrapAngle(repeated.heading-actual.heading),0,1e-8)
+                && Near(repeated.velocity.north,actual.velocity.north,1e-7)
+                && Near(repeated.velocity.east,actual.velocity.east,1e-7)
+                && Near(repeated.velocity.up,actual.velocity.up,1e-7),
+                "a previous maneuver cannot contaminate the next reset attitude or velocity");
+        }
+    }
+    auto invalid=SampleAircraft(c,RunwayAt(SampleRunway(c,rng),0),SpawnPlacement::Left,rng);
+    invalid.velocity.up=1000;
+    Rejects([&] {fdm.Reset(invalid);},"impossible initial climb must fail explicitly");
+}
 }
 
 int main()
@@ -110,6 +148,7 @@ int main()
     try
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
+        IndependentResetAttitude(c);
         CloseApproachStarts(c);
         PhaseControlMapping(c);
         c.initial.distanceMeters={10000,10000}; c.initial.bearingDegrees={8,8}; c.initial.heightMeters={600,600};

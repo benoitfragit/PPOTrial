@@ -145,9 +145,22 @@ AircraftState JsbsimAircraft::Reset(AircraftState const& initial)
     ic->SetLongitudeDegIC(location.GetLongitude()/DegreesToRadians);
     ic->SetTerrainElevationFtIC(p.config.runway.elevationMeters/FeetToMeters);
     ic->SetAltitudeASLFtIC(location.GetGeodAltitude());
-    ic->SetPhiRadIC(initial.roll); ic->SetThetaRadIC(initial.pitch); ic->SetPsiRadIC(initial.heading);
     ic->SetVcalibratedKtsIC(initial.airspeed/(1852.0/3600.0));
-    ic->SetClimbRateFpsIC(initial.velocity.up/FeetToMeters);
+    // SetClimbRateFpsIC preserves incidence by changing theta: using it after
+    // SetThetaRadIC silently replaces the sampled pitch by the flight-path angle.
+    // Explicit NED velocity setters retain the velocity when attitude is set last.
+    double const trueSpeed=ic->GetVtrueFpsIC();
+    double const climb=initial.velocity.up/FeetToMeters;
+    if(std::abs(climb)>trueSpeed)
+        throw std::invalid_argument("FlightControl3D: initial climb exceeds true airspeed");
+    double const horizontal=std::sqrt(std::max(0.0,trueSpeed*trueSpeed-climb*climb));
+    double const requestedHorizontal=std::hypot(initial.velocity.north,initial.velocity.east);
+    double const course=requestedHorizontal>0
+        ? std::atan2(initial.velocity.east,initial.velocity.north) : initial.heading;
+    ic->SetVNorthFpsIC(horizontal*std::cos(course));
+    ic->SetVEastFpsIC(horizontal*std::sin(course));
+    ic->SetVDownFpsIC(-climb);
+    ic->SetPhiRadIC(initial.roll); ic->SetThetaRadIC(initial.pitch); ic->SetPsiRadIC(initial.heading);
     ic->SetPRadpsIC(0); ic->SetQRadpsIC(0); ic->SetRRadpsIC(0);
     p.fdm.GetFCS()->SetDaCmd(0); p.fdm.GetFCS()->SetDeCmd(0); p.fdm.GetFCS()->SetDrCmd(0);
     p.fdm.GetFCS()->SetThrottleCmd(-1,p.config.initial.throttle);
