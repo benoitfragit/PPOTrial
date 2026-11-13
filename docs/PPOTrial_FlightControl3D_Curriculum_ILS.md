@@ -45,6 +45,10 @@ Le paramétrage est dans training.curriculum du JSON (stage, locReminderProbabil
 - Gate Joint mobile (`joint-mobile`) : même objectif complet, avec translation de piste tirée dans `runwayRandomization.speedMps` ; elle commence uniquement après validation de Joint fixe en mode progressif. La houle reste coupée.
 
 Les validations utilisent le seed d'évaluation indépendant et la tolérance de capture stricte.
+Depuis le correctif #95, la validation Glide utilise uniquement des épisodes Glide ;
+elle est suivie de 20 épisodes LOC séparés pour mesurer la rétention, sans les ajouter
+au score Glide. La ligne `[FLIGHT_RETENTION]` rapporte ce contrôle diagnostique.
+Les 30 % de rappels LOC sont conservés uniquement pendant l'entraînement.
 Les erreurs de cap sont évaluées par rapport à la piste réellement tirée dans
 l'épisode (orientation aléatoire et mobile), et non au cap nominal du JSON.
 La capture seule ne suffit pas : le cap de fuselage est contrôlé à ±5° du cap piste,
@@ -57,7 +61,7 @@ et gateSlopeDegrees. Le roulis relatif doit rester dans ±8° et chacune des vit
 
 GitHub Actions > **FlightControl3D Curriculum Training** > **Run workflow**, branche contenant le correctif, `stage=progressive`. Le déclencheur par label `flight-curriculum` reste possible sur une PR.
 
-- `additional_updates=10` : **intervalle d'évaluation** (10 updates PPO, puis 20 épisodes indépendants). Ce n'est plus le budget total d'un lancement.
+- `additional_updates=10` : **intervalle d'évaluation** (10 updates PPO, puis 20 épisodes indépendants ; en Glide, 20 autres épisodes LOC mesurent séparément la rétention). Ce n'est plus le budget total d'un lancement.
 - `max_additional_updates=1000` : budget cumulé maximal de l'exécution CI, partagé entre les quatre gates.
 - Le workflow répète la gate courante après `passed=false`, sans avancer. Après `passed=true`, il passe automatiquement à la gate suivante. Le critère >=19/20 reste inchangé, sans requalification fictive des BEST.
 - Une limite de 280 minutes de pilotage avant chaque bloc protège le job GitHub (`timeout-minutes=350`). Si le budget global ou la durée sont atteints sans achever la cible, le job est indiqué **incomplete** et quitte avec code 2 (pas de faux vert).

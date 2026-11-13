@@ -145,6 +145,45 @@ void Landing(Config c)
     auto const noRepeat=AdvanceMission(c,plan,timeout,before,before);
     Check(noRepeat.reward==0 && noRepeat.truncated,"terminal reward not repeated");
 }
+void FiniteSurfaceContacts(Config c)
+{
+    c.training.curriculumStage=CurriculumStage::Joint;
+    c.runway.origin={100,-200,15};c.runway.pitch=0;c.runway.roll=0;
+    c.runwayRandomization.seaHeightMeters=0;
+    for(double const heading:{0.0,90.0,181.0,359.0})
+    {
+        c.runway.headingDegrees=heading;
+        for(auto const position:std::array<std::array<double,2>,4>{{
+            {{-10,0}},{{c.runway.lengthMeters+10,0}},{{500,-c.runway.widthMeters}},{{500,c.runway.widthMeters}}}})
+        {
+            for(bool const native:{false,true})
+            {
+                auto aircraft=Approach(c,position[0],position[1]);
+                aircraft.position=FromRunway(c.runway,position[0],position[1],0.1);
+                aircraft.wheelDataValid=native;
+                MissionState mission{};mission.phase=Phase::Approach;
+                auto const step=AdvanceMission(c,{},mission,aircraft,aircraft);
+                Check(!step.terminated && !mission.contactAttempted && mission.outcome==Outcome::Flying,
+                    "elevated runway tangent plane cannot cause an off-deck impact above the sea");
+                aircraft.position.up=c.runwayRandomization.seaHeightMeters+0.1;
+                aircraft.structuralContact=native;
+                mission={};mission.phase=Phase::Approach;
+                auto const impact=AdvanceMission(c,{},mission,aircraft,aircraft);
+                Check(impact.terminated && !impact.truncated && mission.outcome==Outcome::Crash
+                    && impact.rewards[static_cast<std::size_t>(Reward::Crash)]==c.reward.weights[9],
+                    "real sea impact stays a penalized terminal failure");
+            }
+        }
+        auto above=Approach(c,500);above.position=FromRunway(c.runway,500,0,0.1);
+        above.wheelDataValid=true;
+        MissionState mission{};mission.phase=Phase::Approach;
+        Check(!AdvanceMission(c,{},mission,above,above).terminated && !mission.contactAttempted,
+            "native wheel and structure contacts are authoritative above the finite deck too");
+        above.structuralContact=true;
+        Check(AdvanceMission(c,{},mission,above,above).terminated && mission.outcome==Outcome::Crash,
+            "native structural contact cannot be masked by the geometric fallback");
+    }
+}
 void Configuration()
 {
     std::ifstream source(PPO_FLIGHT_CONFIG); nlohmann::json valid; source>>valid;
@@ -862,7 +901,7 @@ int main()
         RunwayCourseObservation(c);SurfaceRelativeFlightPath(c);NoWaveScenario(c);CaptureLessonInterceptBudget(c);
         ApproachOnly(c);Configuration();CaptureLessonTermination(c);
         c.mission.patrolEnabled=true; // Keep all legacy patrol/recovery regressions active.
-        Geometry(c);Landing(c);OrderedNavigation(c);AlignedStarts(c);CapturePriority(c);RandomizationAndMotion(c);DisplayReferences(c);
+        Geometry(c);Landing(c);FiniteSurfaceContacts(c);OrderedNavigation(c);AlignedStarts(c);CapturePriority(c);RandomizationAndMotion(c);DisplayReferences(c);
     }
     catch(std::exception const& e) { std::cerr<<e.what()<<'\n'; return 1; }
     std::cout<<"Flight mission/configuration regressions passed\n";

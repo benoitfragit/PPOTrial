@@ -382,6 +382,16 @@ bool OnRunway(Config const& c, Guidance const& g) noexcept
 {
     return g.along >= 0 && g.along <= c.runway.lengthMeters && std::abs(g.cross) <= c.runway.widthMeters/2;
 }
+bool ContactDetected(Config const& c,AircraftState const& aircraft,Guidance const& guidance) noexcept
+{
+    if(aircraft.weightOnWheels || aircraft.structuralContact) return true;
+    // Native JSBSim contacts use the finite deck and the sea outside it.
+    // A tangent-plane height cannot override a valid physical contact sample.
+    if(aircraft.wheelDataValid) return false;
+    double const height=OnRunway(c,guidance) ? guidance.height
+        : aircraft.position.up-c.runwayRandomization.seaHeightMeters;
+    return height<=c.mission.contactHeightMeters;
+}
 bool WheelsInside(Config const& c,AircraftState const& a) noexcept
 {
     if(!a.wheelDataValid) return true;
@@ -577,7 +587,7 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
     auto g = Guide(c,plan,s,after);
     auto const& previousDeck=previousRunway ? *previousRunway : c.runway;
     double const pathProgress=AdvancePatrol(c,plan,s,before,after,previousDeck);
-    bool const contact = after.weightOnWheels || after.structuralContact || g.height <= c.mission.contactHeightMeters;
+    bool const contact = ContactDetected(c,after,g);
     double const headingError=WrapAngle(after.heading-c.runway.headingDegrees*DegreesToRadians);
     bool const headingCompatible=std::abs(headingError)<=c.mission.approachHeadingToleranceDegrees*DegreesToRadians;
     bool enteredLocalizer{},enteredGlide{},lostLocalizer{},lostGlide{};

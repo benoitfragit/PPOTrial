@@ -191,6 +191,7 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics["actionMappingVersion"] = 2;
     semantics["rewardVersion"] = 13;
     semantics["guidanceVersion"] = 16;
+    semantics["contactVersion"] = 2;
     semantics["spawnVersion"] = 4;
     semantics["curriculumVersion"] = 5;
     semantics["policyLikelihoodVersion"] = 2;
@@ -228,6 +229,8 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
             && (*signature)["guidanceVersion"]!=15 && (*signature)["guidanceVersion"]!=16) return false;
         if(signature->contains("spawnVersion") && (*signature)["spawnVersion"]!=2
             && (*signature)["spawnVersion"]!=3 && (*signature)["spawnVersion"]!=4) return false;
+        if(signature->contains("contactVersion") && (*signature)["contactVersion"]!=1
+            && (*signature)["contactVersion"]!=2) return false;
         if(signature->contains("curriculumVersion") && (*signature)["curriculumVersion"]!=2
             && (*signature)["curriculumVersion"]!=3 && (*signature)["curriculumVersion"]!=4
             && (*signature)["curriculumVersion"]!=5) return false;
@@ -306,6 +309,7 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
     previous.erase("reward"); next.erase("reward");
     previous.erase("rewardVersion"); next.erase("rewardVersion");
     previous.erase("guidanceVersion"); next.erase("guidanceVersion");
+    previous.erase("contactVersion"); next.erase("contactVersion");
     previous.erase("spawnVersion"); next.erase("spawnVersion");
     previous.erase("curriculumVersion"); next.erase("curriculumVersion");
     previous.erase("policyLikelihoodVersion"); next.erase("policyLikelihoodVersion");

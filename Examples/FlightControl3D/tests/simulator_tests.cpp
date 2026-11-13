@@ -2,6 +2,41 @@
 using namespace ppo::examples::flight;
 
 namespace {
+void FiniteSurfaceContactAuthority(Config c)
+{
+    c.training.curriculumStage=CurriculumStage::Joint;c.initial.gearDown=false;
+    c.runwayRandomization.seaHeightMeters=0;
+    for(double const heading:{0.0,90.0,181.0,359.0})
+    {
+        RunwayMotion motion{};motion.base=c.runway;
+        motion.base.headingDegrees=heading;motion.base.origin={0,0,15};
+        motion.base.pitch=0;motion.base.roll=0;motion.seaHeight=0;motion.period=10;
+        c.runway=RunwayAt(motion,0);
+        JsbsimAircraft fdm(c,DefaultDataRoot());fdm.SetRunwayMotion(motion);
+        AircraftState initial{};
+        initial.position=FromRunway(c.runway,500,c.runway.widthMeters+50,0.1);
+        initial.airspeed=56;initial.heading=heading*DegreesToRadians;
+        initial.velocity=Scale(RunwayForward(c.runway),56);
+        auto before=fdm.Reset(initial,Phase::Approach);
+        auto after=fdm.Advance({0,0,0,c.initial.throttle,0,false,c.initial.approachFlap});
+        Check(after.wheelDataValid && !after.weightOnWheels && !after.structuralContact
+            && fdm.ProbeGround(after.position).height>10,
+            "native aircraft crossing the off-deck tangent plane remains physically airborne");
+        MissionState mission{};mission.phase=Phase::Approach;
+        Check(!AdvanceMission(c,{},mission,before,after).terminated && !mission.contactAttempted,
+            "mission cannot invent native contact on the infinite runway extension");
+
+        initial.position.up=motion.seaHeight+3;initial.airspeed=3;initial.velocity={0,0,-1};
+        before=fdm.Reset(initial,Phase::Approach);mission={};mission.phase=Phase::Approach;
+        for(int step=0;step<500 && mission.outcome==Outcome::Flying;++step)
+        {
+            after=fdm.Advance({0,0,0,0,0,false,c.initial.approachFlap});
+            AdvanceMission(c,{},mission,before,after);before=after;
+        }
+        Check(mission.outcome==Outcome::Crash && (after.structuralContact || after.weightOnWheels),
+            "real native impact with the sea remains a terminal crash");
+    }
+}
 void PropulsionAndPhaseReset(Config c)
 {
     c.initial.distanceMeters={6000,6000};c.initial.speedMps={56,56};
@@ -275,6 +310,7 @@ int main()
     try
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
+        FiniteSurfaceContactAuthority(c);
         PropulsionAndPhaseReset(c);
         CurriculumRunwayMotion(c);
         IndependentResetAttitude(c);

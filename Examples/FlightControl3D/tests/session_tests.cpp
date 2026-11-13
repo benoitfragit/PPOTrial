@@ -46,7 +46,7 @@ void DesktopContinuation(Config c)
 enum class TrainingContractChange
 {
     HorizontalStarts, Rewards, LegacyStarts, LegacyGuidance, AlignedProbability,
-    EpisodeBoundary, ApproachOnly, ResetAttitude, LegacyCurriculum, Exploration, PoweredFlight, WavesDisabled, CourseObservation
+    EpisodeBoundary, ApproachOnly, ResetAttitude, LegacyCurriculum, Exploration, PoweredFlight, WavesDisabled, CourseObservation, LegacyContacts
 };
 void CommittedTrainingCheckpoint(Config c)
 {
@@ -131,6 +131,8 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     }
     else if(change==TrainingContractChange::CourseObservation)
     {signature["guidanceVersion"]=15;signature["rewardVersion"]=12;}
+    else if(change==TrainingContractChange::LegacyContacts)
+        signature.erase("contactVersion");
     else if(change==TrainingContractChange::Exploration)
     {
         old.training.initialLogStd=-1;old.training.maxLogStd=0.5;
@@ -293,6 +295,8 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown curriculum contract rejected");
     signature=nlohmann::json::parse(c.checkpointSignature);signature["policyLikelihoodVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown action mask contract rejected");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature["contactVersion"]=999;
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown contact contract rejected");
     auto changed=c;signature=nlohmann::json::parse(c.checkpointSignature);
     signature["curriculum"]["gateHeadingDegrees"]=4.0;changed.checkpointSignature=signature.dump();
     Check(changed.checkpointSignature!=c.checkpointSignature
@@ -423,7 +427,8 @@ int main()
             TrainingContractChange::AlignedProbability,TrainingContractChange::EpisodeBoundary,
             TrainingContractChange::ApproachOnly,TrainingContractChange::ResetAttitude,
             TrainingContractChange::LegacyCurriculum,TrainingContractChange::Exploration,
-            TrainingContractChange::PoweredFlight,TrainingContractChange::WavesDisabled,TrainingContractChange::CourseObservation})
+            TrainingContractChange::PoweredFlight,TrainingContractChange::WavesDisabled,TrainingContractChange::CourseObservation,
+            TrainingContractChange::LegacyContacts})
             ChangedTrainingContract(c,change);
         c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
         c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;
