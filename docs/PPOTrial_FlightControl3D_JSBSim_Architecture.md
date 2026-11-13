@@ -379,6 +379,8 @@ Validation locale : ni compilation ni test exécuté, conformément à la consig
 
 ## Tolérance ILS temporaire d'entraînement (11 novembre 2026)
 
+Évolution du 13 novembre, issue #90 : cet élargissement est désormais limité à Joint. Les leçons LOC/Glide terminent sur le même objectif nominal que leur validation ; l’ancien élargissement de leur terminal permettait des sorties anticipées non validables. Le bruit gaussien du scénario est aussi réduit, sans changement du mapping ni des rewards : [diagnostic du run #6 et limites de validation](PPOTrial_FlightControl3D_Diagnostic_Run6_Issue90_PR87.md).
+
 `training.ilsCaptureScale` multiplie uniquement les tolérances de capture LOC et
 GLIDE de l'environnement qui collecte les rollouts. La valeur locale `2.0` donne
 donc `LOC ±5°` et `GLIDE ±1,4°` pendant l'entraînement. Les valeurs nominales

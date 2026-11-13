@@ -46,7 +46,7 @@ void DesktopContinuation(Config c)
 enum class TrainingContractChange
 {
     HorizontalStarts, Rewards, LegacyStarts, LegacyGuidance, AlignedProbability,
-    EpisodeBoundary, ApproachOnly, ResetAttitude, LegacyCurriculum
+    EpisodeBoundary, ApproachOnly, ResetAttitude, LegacyCurriculum, Exploration
 };
 void CommittedTrainingCheckpoint(Config c)
 {
@@ -116,6 +116,12 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
         signature["spawnVersion"]=2;
     else if(change==TrainingContractChange::LegacyCurriculum)
         signature.erase("curriculumVersion");
+    else if(change==TrainingContractChange::Exploration)
+    {
+        old.training.initialLogStd=-1;old.training.maxLogStd=0.5;
+        signature["distribution"]={old.training.minLogStd,old.training.maxLogStd};
+        signature["curriculumVersion"]=2;
+    }
     else
         signature["mission"]["maxDistanceMeters"]=30000.0;
     old.checkpointSignature=signature.dump();
@@ -255,8 +261,40 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("curriculumVersion");
     Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
         "previous landing-length capture lessons can warm-start the improved curriculum");
+    signature["curriculumVersion"]=2;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "widened-terminal capture lessons can warm-start the nominal objective");
     signature["curriculumVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown curriculum contract rejected");
+    for(auto const& invalid : {nlohmann::json{},nlohmann::json::array({-5}),
+        nlohmann::json::array({-5,"0.5"}),nlohmann::json::array({-5,-6}),
+        nlohmann::json::array({-11,0.5}),nlohmann::json::array({-5,3})})
+    {
+        signature=nlohmann::json::parse(c.checkpointSignature);signature["distribution"]=invalid;
+        Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+            "malformed exploration contract cannot warm-start training");
+    }
+}
+
+void NominalCaptureLessons(Config c)
+{
+    c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
+    c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;
+    for(auto stage : {CurriculumStage::Loc,CurriculumStage::Glide})
+    {
+        c.training.curriculumStage=stage;
+        TemporaryDirectory directory("flight-nominal-capture-");
+        FlightSession training(c,true,directory.path);
+        auto const before=training.Snapshot();
+        Check(before.localizerCaptureDegrees==c.mission.localizerCaptureDegrees
+            && before.glideCaptureDegrees==c.mission.glideCaptureDegrees,
+            "capture training must use the nominal independent gate tolerances");
+        for(std::size_t step=0;step<c.training.rolloutSteps;++step) training.Tick();
+        auto const validation=training.Snapshot();
+        Check(validation.validating && validation.localizerCaptureDegrees==before.localizerCaptureDegrees
+            && validation.glideCaptureDegrees==before.glideCaptureDegrees,
+            "entering validation cannot tighten a capture lesson's terminal objective");
+    }
 }
 int main()
 {
@@ -265,11 +303,12 @@ int main()
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
         CommittedTrainingCheckpoint(c);
         DesktopContinuation(c);
+        NominalCaptureLessons(c);
         for(auto change : {TrainingContractChange::HorizontalStarts,TrainingContractChange::Rewards,
             TrainingContractChange::LegacyStarts,TrainingContractChange::LegacyGuidance,
             TrainingContractChange::AlignedProbability,TrainingContractChange::EpisodeBoundary,
             TrainingContractChange::ApproachOnly,TrainingContractChange::ResetAttitude,
-            TrainingContractChange::LegacyCurriculum})
+            TrainingContractChange::LegacyCurriculum,TrainingContractChange::Exploration})
             ChangedTrainingContract(c,change);
         c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
         c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;

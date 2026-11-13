@@ -76,7 +76,7 @@ struct TrainingSettings final
 {
     std::uint32_t seed{};
     std::size_t rolloutSteps{}, minibatch{}, epochs{}, maxUpdates{}, checkpointEvery{}, hiddenWidth{};
-    /** @brief Training-only multiplier for LOC and glide capture tolerances. */
+    /** @brief Joint-training multiplier; capture lessons keep the nominal objective. */
     double ilsCaptureScale{1.0};
     CurriculumStage curriculumStage{CurriculumStage::Joint};
     double locReminderProbability{0.30}, glideOffsetMeters{120.0}, gateHoldSeconds{2.0};
@@ -120,7 +120,8 @@ void Validate(Config const& config);
  * @return True for compatible training-only changes; BEST still requires an exact contract.
  *
  * Compatible changes include spawn position ranges, their mixture, entry phase,
- * patrol activation, reward settings and the terminal distance boundary.
+ * patrol activation, reward settings, Gaussian exploration bounds and the
+ * terminal distance boundary. New rollouts never reuse old likelihoods.
  */
 bool CompatibleTrainingSignature(std::string const& stored,std::string const& current);
 

@@ -188,7 +188,7 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics["rewardVersion"] = 11;
     semantics["guidanceVersion"] = 14;
     semantics["spawnVersion"] = 3;
-    semantics["curriculumVersion"] = 2;
+    semantics["curriculumVersion"] = 3;
     config.checkpointSignature = semantics.dump();
     Validate(config);
     return config;
@@ -219,11 +219,25 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
             && (*signature)["guidanceVersion"]!=13 && (*signature)["guidanceVersion"]!=14) return false;
         if(signature->contains("spawnVersion") && (*signature)["spawnVersion"]!=2
             && (*signature)["spawnVersion"]!=3) return false;
-        if(signature->contains("curriculumVersion") && (*signature)["curriculumVersion"]!=2) return false;
+        if(signature->contains("curriculumVersion") && (*signature)["curriculumVersion"]!=2
+            && (*signature)["curriculumVersion"]!=3) return false;
     }
     // A checkpoint trained with tanh actuators cannot warm-start the new mapping.
     if(!previous.contains("actionMappingVersion") || !next.contains("actionMappingVersion")
         || previous["actionMappingVersion"]!=next["actionMappingVersion"]) return false;
+    // Only complete update-boundary checkpoints are loaded. New rollouts use
+    // the new Gaussian bounds and likelihoods, so changed exploration may
+    // warm-start the same actor/critic without reusing old on-policy samples.
+    for(auto* signature : {&previous,&next})
+    {
+        if(!signature->contains("distribution")) return false;
+        auto const& bounds=(*signature)["distribution"];
+        if(!bounds.is_array() || bounds.size()!=2 || !bounds[0].is_number() || !bounds[1].is_number()) return false;
+        double const minimum=bounds[0].get<double>(),maximum=bounds[1].get<double>();
+        if(!std::isfinite(minimum) || !std::isfinite(maximum)
+            || minimum<-10 || maximum>2 || !(minimum<maximum)) return false;
+        signature->erase("distribution");
+    }
     for(char const* name : {"distanceMeters","bearingDegrees","heightMeters","headingOffsetDegrees"})
     {
         if(!previous["initial"].contains(name) || !next["initial"].contains(name)) return false;

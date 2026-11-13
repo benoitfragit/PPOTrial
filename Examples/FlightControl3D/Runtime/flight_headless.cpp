@@ -83,8 +83,10 @@ int main(int argc, char** argv)
             }
             if(state.validationCampaigns!=previousValidations)
             {
+                double const success=state.gateEvaluated>0
+                    ? static_cast<double>(state.gateSuccesses)/static_cast<double>(state.gateEvaluated) : 0;
                 std::cout<<"[FLIGHT_VALIDATION] update="<<state.lastValidation.update<<" episodes="<<state.lastValidation.episodes
-                    <<" success="<<state.lastValidation.SuccessRate()<<" best="<<(state.hasBest ? state.bestScore : -1)<<std::endl;
+                    <<" success="<<success<<" best="<<(state.hasBest ? state.bestScore : -1)<<std::endl;
                 previousValidations=state.validationCampaigns;
             }
         }

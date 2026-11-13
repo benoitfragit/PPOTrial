@@ -13,7 +13,9 @@ std::uint64_t AdditionalUpdateLimit(std::uint64_t updates,std::size_t additional
 }
 Config EnvironmentConfig(Config config,bool training)
 {
-    if(!training) return config;
+    // Capture lessons terminate at their objective: widening that objective
+    // teaches early exits that cannot pass the nominal independent gate.
+    if(!training || config.training.curriculumStage!=CurriculumStage::Joint) return config;
     config.mission.localizerCaptureDegrees*=config.training.ilsCaptureScale;
     config.mission.glideCaptureDegrees*=config.training.ilsCaptureScale;
     config.training.ilsCaptureScale=1.0;

@@ -6,25 +6,31 @@ using namespace ppo::examples::flight;
 namespace {
 void Hybrid(Config const& c)
 {
+    auto settings=c.training;
+    settings.entropy=0.001; // Keep entropy derivatives covered independently of the scenario default.
     PolicyVector output{};
-    for (std::size_t i=0;i<ContinuousActions;++i) { output[i]=0.1*static_cast<double>(i); output[ContinuousActions+i]=-0.5; }
+    for (std::size_t i=0;i<ContinuousActions;++i)
+    {
+        output[i]=0.1*static_cast<double>(i);
+        output[ContinuousActions+i]=0.5*(settings.minLogStd+settings.maxLogStd);
+    }
     output.back()=0.3;
     std::mt19937 rng(4);
-    auto a=Sample(output,c.training,rng,false);
-    Check(Near(LogProbability(output,a,c.training),a.logProbability),"joint sampled log probability");
+    auto a=Sample(output,settings,rng,false);
+    Check(Near(LogProbability(output,a,settings),a.logProbability),"joint sampled log probability");
     auto other=a; other.gearDown=!a.gearDown;
-    Check(!Near(LogProbability(output,other,c.training),a.logProbability),"Bernoulli included in joint likelihood");
+    Check(!Near(LogProbability(output,other,settings),a.logProbability),"Bernoulli included in joint likelihood");
     for (double advantage : {-1.7,1.4})
     {
         for (double ratio : {0.6,1.0,1.5})
         {
-            a.logProbability=LogProbability(output,a,c.training)-std::log(ratio);
-            auto const loss=ClippedLoss(output,a,advantage,c.training);
+            a.logProbability=LogProbability(output,a,settings)-std::log(ratio);
+            auto const loss=ClippedLoss(output,a,advantage,settings);
             for (std::size_t i=0;i<PolicyOutputs;++i)
             {
                 auto plus=output,minus=output;
                 plus[i]+=1e-6; minus[i]-=1e-6;
-                double const numerical=(ClippedLoss(plus,a,advantage,c.training).loss-ClippedLoss(minus,a,advantage,c.training).loss)/2e-6;
+                double const numerical=(ClippedLoss(plus,a,advantage,settings).loss-ClippedLoss(minus,a,advantage,settings).loss)/2e-6;
                 Check(Near(numerical,loss.derivative[i],1e-5),"hybrid finite-difference PPO gradient");
             }
         }
@@ -32,7 +38,7 @@ void Hybrid(Config const& c)
     for(double logit : {-1000.,1000.})
     {
         output.back()=logit;
-        Check(std::isfinite(LogProbability(output,a,c.training)) && std::isfinite(Entropy(output,c.training)),"stable extreme Bernoulli logits");
+        Check(std::isfinite(LogProbability(output,a,settings)) && std::isfinite(Entropy(output,settings)),"stable extreme Bernoulli logits");
     }
     // The environment clips raw Gaussian actions, just like BlueAgent.
     a.raw={-1000,1000,0,-1000,1000};
@@ -59,6 +65,32 @@ void Hybrid(Config const& c)
     ComputeAdvantages(rows.data(),rows.size(),c.training);
     Check(Near(rows[0].advantage,1+c.training.gamma*3-2),"timeout bootstrap; no GAE leak across reset");
     Check(Near(rows[1].advantage,1000),"terminal no bootstrap");
+}
+void Exploration(Config const& c)
+{
+    FlightLearner learner(c);
+    auto const output=learner.Evaluate({});
+    Check(std::exp(c.training.initialLogStd)<0.051 && std::exp(c.training.maxLogStd)<0.14,
+        "delivered flight scenario bounds exploration below full-deflection noise");
+    for(std::size_t axis=0;axis<ContinuousActions;++axis)
+        Check(Near(output[axis],0) && Near(output[ContinuousActions+axis],c.training.initialLogStd),
+            "initial actor retains full linear control authority with the configured small Gaussian");
+    auto saturated=output;
+    for(std::size_t axis=0;axis<ContinuousActions;++axis) saturated[ContinuousActions+axis]=100;
+    std::mt19937 rng(5243U);
+    double square=0;
+    constexpr std::size_t samples=2048;
+    for(std::size_t sample=0;sample<samples;++sample)
+    {
+        auto const action=Sample(saturated,c.training,rng,false);
+        Check(std::isfinite(action.logProbability),"bounded exploration keeps finite latent likelihoods");
+        square+=action.raw[0]*action.raw[0];
+        for(double value:action.raw)
+            Check(std::abs(value)<1,"fixed-seed bounded exploration does not clip neutral flight controls");
+    }
+    double const expected=std::exp(c.training.maxLogStd);
+    Check(std::abs(std::sqrt(square/static_cast<double>(samples))-expected)<0.01,
+        "saturated log-std output obeys the configured exploration ceiling");
 }
 void Training(Config c)
 {
@@ -123,7 +155,7 @@ void Training(Config c)
 }
 int main()
 {
-    try { auto const c=LoadConfig(PPO_FLIGHT_CONFIG); Hybrid(c); Training(c); }
+    try { auto const c=LoadConfig(PPO_FLIGHT_CONFIG); Hybrid(c); Exploration(c); Training(c); }
     catch(std::exception const& e) { std::cerr<<e.what()<<'\n'; return 1; }
     std::cout<<"Hybrid PPO/RLtools regressions passed\n";
 }
