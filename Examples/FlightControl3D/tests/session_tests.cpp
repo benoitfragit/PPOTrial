@@ -46,7 +46,7 @@ void DesktopContinuation(Config c)
 enum class TrainingContractChange
 {
     HorizontalStarts, Rewards, LegacyStarts, LegacyGuidance, AlignedProbability,
-    EpisodeBoundary, ApproachOnly, ResetAttitude, LegacyCurriculum, Exploration
+    EpisodeBoundary, ApproachOnly, ResetAttitude, LegacyCurriculum, Exploration, PoweredFlight
 };
 void CommittedTrainingCheckpoint(Config c)
 {
@@ -114,6 +114,12 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     }
     else if(change==TrainingContractChange::ResetAttitude)
         signature["spawnVersion"]=2;
+    else if(change==TrainingContractChange::PoweredFlight)
+    {
+        signature["spawnVersion"]=3;signature["rewardVersion"]=11;signature["curriculumVersion"]=3;
+        signature.erase("policyLikelihoodVersion");signature.erase("curriculum");
+        signature["initial"].erase("mixture");
+    }
     else if(change==TrainingContractChange::LegacyCurriculum)
         signature.erase("curriculumVersion");
     else if(change==TrainingContractChange::Exploration)
@@ -266,6 +272,13 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
         "widened-terminal capture lessons can warm-start the nominal objective");
     signature["curriculumVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown curriculum contract rejected");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature["policyLikelihoodVersion"]=999;
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown action mask contract rejected");
+    auto changed=c;signature=nlohmann::json::parse(c.checkpointSignature);
+    signature["curriculum"]["gateHeadingDegrees"]=4.0;changed.checkpointSignature=signature.dump();
+    Check(changed.checkpointSignature!=c.checkpointSignature
+        && CompatibleTrainingSignature(c.checkpointSignature,changed.checkpointSignature),
+        "changing a capture gate invalidates the exact BEST contract but permits a training warm start");
     for(auto const& invalid : {nlohmann::json{},nlohmann::json::array({-5}),
         nlohmann::json::array({-5,"0.5"}),nlohmann::json::array({-5,-6}),
         nlohmann::json::array({-11,0.5}),nlohmann::json::array({-5,3})})
@@ -308,7 +321,8 @@ int main()
             TrainingContractChange::LegacyStarts,TrainingContractChange::LegacyGuidance,
             TrainingContractChange::AlignedProbability,TrainingContractChange::EpisodeBoundary,
             TrainingContractChange::ApproachOnly,TrainingContractChange::ResetAttitude,
-            TrainingContractChange::LegacyCurriculum,TrainingContractChange::Exploration})
+            TrainingContractChange::LegacyCurriculum,TrainingContractChange::Exploration,
+            TrainingContractChange::PoweredFlight})
             ChangedTrainingContract(c,change);
         c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
         c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;

@@ -1,6 +1,7 @@
 #include "test_support.hpp"
 #include "flight_learner.hpp"
 #include <fstream>
+#include <iomanip>
 using namespace ppo::examples::flight;
 
 namespace {
@@ -92,6 +93,48 @@ void Exploration(Config const& c)
     Check(std::abs(std::sqrt(square/static_cast<double>(samples))-expected)<0.01,
         "saturated log-std output obeys the configured exploration ceiling");
 }
+void ActiveControls(Config c)
+{
+    c.training.entropy=0.01;
+    PolicyVector output{};
+    for(std::size_t i=0;i<ContinuousActions;++i) output[ContinuousActions+i]=c.training.initialLogStd;
+    std::mt19937 rng(91U);
+    for(bool gearActive:{false,true}) for(bool brakeActive:{false,true})
+    {
+        auto const action=Sample(output,c.training,rng,false,brakeActive,gearActive,false);
+        auto changed=output;
+        if(!brakeActive) {changed[4]=100;changed[ContinuousActions+4]=100;}
+        if(!gearActive) changed.back()=100;
+        Check(Near(LogProbability(changed,action,c.training),action.logProbability),
+            "ignored controls cannot change the PPO likelihood ratio");
+        auto const loss=ClippedLoss(output,action,1.2,c.training);
+        for(std::size_t axis=0;axis<PolicyOutputs;++axis)
+        {
+            auto plus=output,minus=output;plus[axis]+=1e-6;minus[axis]-=1e-6;
+            double const numerical=(ClippedLoss(plus,action,1.2,c.training).loss
+                -ClippedLoss(minus,action,1.2,c.training).loss)/2e-6;
+            Check(Near(numerical,loss.derivative[axis],1e-5),"masked PPO and entropy gradients match finite differences");
+        }
+        if(!brakeActive) Check(action.raw[4]==0 && loss.derivative[4]==0
+            && loss.derivative[ContinuousActions+4]==0,"airborne brakes are neither sampled nor optimized");
+        if(!gearActive) Check(!action.gearDown && loss.derivative.back()==0,"fixed capture gear is neither sampled nor optimized");
+    }
+    for(auto stage:{CurriculumStage::Loc,CurriculumStage::Glide,CurriculumStage::Joint})
+    {
+        c.training.curriculumStage=stage;
+        FlightLearner learner(c);Observation observation{};
+        for(int sample=0;sample<32;++sample)
+        {
+            auto const action=learner.Choose(observation);
+            Check(!action.brakeActive && action.raw[4]==0
+                && action.gearActive==(stage==CurriculumStage::Joint)
+                && (action.gearActive || action.gearDown==c.initial.gearDown),
+                "native learner selects action masks from lesson and physical phase");
+        }
+        observation[RolloutObservation]=1;
+        Check(learner.Choose(observation).brakeActive,"brake learning becomes active during rollout");
+    }
+}
 void Training(Config c)
 {
     TemporaryDirectory temporary("flight-learner-"); auto const path=temporary.path/"flight.txt";
@@ -152,10 +195,39 @@ void Training(Config c)
     Rejects([&] { learner.Evaluate(observation); },"unnormalized observation accepted");
     for (std::size_t width : {32U,128U}) { c.training.hiddenWidth=width; FlightLearner variant(c); variant.Evaluate({}); }
 }
+void KlStopsActorOnly(Config c)
+{
+    c.training.hiddenWidth=32;c.training.rolloutSteps=128;c.training.minibatch=16;
+    c.training.epochs=4;c.training.actorRate=0.01;c.training.targetKl=1e-6;
+    FlightLearner learner(c);Observation observation{};
+    for(std::size_t row=0;row<c.training.rolloutSteps;++row)
+    {
+        auto const action=learner.Choose(observation);
+        StepResult step{};step.terminated=true;step.reward=action.raw[0];
+        learner.Record(observation,action,step,observation);
+    }
+    learner.Optimize();auto const& stats=learner.Stats();
+    Check(stats.actorStoppedByKl && stats.maximumApproximateKl>c.training.targetKl
+        && stats.actorSteps==1 && stats.updates==1,
+        "excessive likelihood drift stops subsequent actor steps within the rollout");
+    TemporaryDirectory directory("flight-kl-");auto const path=directory.path/"checkpoint.txt";
+    learner.Save(path);
+    std::ifstream stream(path);std::string line,signature;
+    std::getline(stream,line);stream>>std::quoted(signature);
+    std::size_t actorAge{},criticAge{};stream>>actorAge>>criticAge;
+    Check(actorAge==1+stats.actorSteps
+        && criticAge==1+c.training.epochs*c.training.rolloutSteps/c.training.minibatch,
+        "KL stopping freezes actor Adam age while all critic minibatches run");
+    FlightLearner resumed(c);resumed.Load(path);
+    Check(resumed.Evaluate(observation)==learner.Evaluate(observation),"KL-stopped checkpoint resumes exactly");
+    c.training.targetKl=0;Rejects([&] {Validate(c);},"zero target KL rejected");
+    c.training.targetKl=std::numeric_limits<double>::infinity();
+    Rejects([&] {Validate(c);},"non-finite target KL rejected");
+}
 }
 int main()
 {
-    try { auto const c=LoadConfig(PPO_FLIGHT_CONFIG); Hybrid(c); Exploration(c); Training(c); }
+    try { auto const c=LoadConfig(PPO_FLIGHT_CONFIG); Hybrid(c); Exploration(c); ActiveControls(c); Training(c); KlStopsActorOnly(c); }
     catch(std::exception const& e) { std::cerr<<e.what()<<'\n'; return 1; }
     std::cout<<"Hybrid PPO/RLtools regressions passed\n";
 }

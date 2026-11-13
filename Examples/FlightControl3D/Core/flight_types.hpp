@@ -13,6 +13,7 @@ inline constexpr double DegreesToRadians = Pi / 180.0;
 inline constexpr std::size_t ContinuousActions = 5; // elevator, aileron, rudder, throttle, brake
 inline constexpr std::size_t PolicyOutputs = 2 * ContinuousActions + 1;
 inline constexpr std::size_t ObservationSize = 56;
+inline constexpr std::size_t RolloutObservation = 34;
 inline constexpr std::size_t MaximumWaypoints = 128;
 
 struct Vec3 final { double north{}, east{}, up{}; };
@@ -23,7 +24,7 @@ struct AircraftState final
 {
     Vec3 position{}, velocity{};
     double airspeed{}, roll{}, pitch{}, heading{};
-    double rollRate{}, pitchRate{}, yawRate{}, gearPosition{};
+    double rollRate{}, pitchRate{}, yawRate{}, gearPosition{}, flapPosition{};
     bool weightOnWheels{}, structuralContact{}, finite{true};
     std::array<WheelContact,3> wheels{};
     bool wheelDataValid{};
@@ -117,11 +118,11 @@ inline double WrapAngle(double angle) noexcept
 
 inline bool IsFinite(AircraftState const& state) noexcept
 {
-    std::array<double, 17> const values{
+    std::array<double, 18> const values{
         state.position.north, state.position.east, state.position.up,
         state.velocity.north, state.velocity.east, state.velocity.up,
         state.airspeed, state.roll, state.pitch, state.heading,
-        state.rollRate, state.pitchRate, state.yawRate, state.gearPosition,
+        state.rollRate, state.pitchRate, state.yawRate, state.gearPosition, state.flapPosition,
         std::hypot(state.velocity.north, state.velocity.east),
         std::hypot(state.position.north, state.position.east), state.velocity.up};
     for (double const value : values)

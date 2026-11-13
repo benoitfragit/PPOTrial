@@ -49,7 +49,7 @@ struct InitialSettings final
     double runwayAlignedProbability{};
     Range distanceMeters{}, bearingDegrees{}, heightMeters{}, speedMps{}, headingOffsetDegrees{};
     Range rollDegrees{}, pitchDegrees{}, slopeDegrees{};
-    double throttle{}, flap{}, approachFlap{},rolloutFlap{},propeller{};
+    double throttle{}, flap{}, approachFlap{},rolloutFlap{},propeller{},mixture{1.0};
 };
 struct Normalization final
 {
@@ -83,7 +83,7 @@ struct TrainingSettings final
     double gateHeadingDegrees{5.0}, gateRouteDegrees{5.0}, gateSlopeDegrees{1.5};
     double gateSpeedToleranceMps{},gateRollDegrees{},gateRateDegreesPerSecond{},captureMaxSeconds{};
     CaptureStartSettings captureStart{};
-    double actorRate{}, criticRate{}, gamma{}, lambda{}, clip{}, entropy{}, valueWeight{};
+    double actorRate{}, criticRate{}, gamma{}, lambda{}, clip{}, entropy{}, valueWeight{}, targetKl{};
     double minLogStd{}, maxLogStd{}, initialLogStd{}, maxGradientNorm{};
     double adamBeta1{}, adamBeta2{}, adamEpsilon{};
     bool resume{};

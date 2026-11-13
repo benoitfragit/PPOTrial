@@ -28,7 +28,9 @@ void LogUpdate(LearningStats const& stats)
         <<" mean_reward="<<stats.meanReward
         <<" policy_loss="<<stats.policyLoss
         <<" value_loss="<<stats.valueLoss
-        <<" entropy="<<stats.entropy;
+        <<" entropy="<<stats.entropy
+        <<" approx_kl="<<stats.maximumApproximateKl<<" actor_steps="<<stats.actorSteps
+        <<" kl_stop="<<stats.actorStoppedByKl;
     for(std::size_t channel=0;channel<RewardCount;++channel)
         std::cout<<' '<<RewardNames[channel]<<'='<<stats.meanRewards[channel];
     std::cout<<std::endl;

@@ -2,6 +2,8 @@
 
 Mise à jour : 13 novembre 2026. Branche : `fix/flight-approach-only`. PR : #87, issues #89 et #90. L’implémentation initiale provenait de la PR #83.
 
+Correctif approfondi #91 : démarrage effectif des deux moteurs C310, volets initialisés à la configuration de la phase, train fixe dans les leçons LOC/Glide, composantes inutilisées exclues de PPO, comparaison des vrais instantanés pour le reward et arrêt acteur sur dérive KL. Les critères de passage sont conservés. [Architecture, expériences et limites du correctif #91](PPOTrial_FlightControl3D_Convergence_Propulsion_Reward_Issue91_PR87.md).
+
 Depuis le 13 novembre, `mission.patrolEnabled=false` maintient les trois gates en approche, sans circuit ni point hippodrome et avec `Path=0`. Les départs sont à 4–6,5 km ; LOC conserve les deux côtés (4–10°) et Glide ses écarts verticaux et rappels. La réactivation reste explicite par JSON : [architecture du correctif #86](PPOTrial_FlightControl3D_Approche_Sans_Hippodrome_Issue86.md).
 
 Le curriculum amélioré termine maintenant les épisodes LOC/Glide dès leur capture stabilisée, sans attendre un atterrissage ; leur durée maximale est de 60 secondes. Leurs départs facilitent le pilotage (56 ±2 m/s, roulis ±3°, tangage 1–3°), puis Joint retrouve les départs complets et ses 900 secondes. Les workflows et le runner CI restent inchangés : [architecture, réglages et régressions du curriculum #89](PPOTrial_FlightControl3D_Curriculum_Captures_Stabilisees_Issue89_PR87.md).

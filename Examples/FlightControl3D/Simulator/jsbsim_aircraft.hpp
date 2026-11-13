@@ -16,7 +16,7 @@ public:
     ~JsbsimAircraft();
     JsbsimAircraft(JsbsimAircraft const&) = delete;
     JsbsimAircraft& operator=(JsbsimAircraft const&) = delete;
-    AircraftState Reset(AircraftState const& initial);
+    AircraftState Reset(AircraftState const& initial, Phase phase=Phase::Patrol);
     AircraftState Advance(Controls const& controls);
     void SetRunwayMotion(RunwayMotion const& motion);
     GroundSample ProbeGround(Vec3 point) const;

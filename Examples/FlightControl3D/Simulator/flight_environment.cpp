@@ -21,11 +21,12 @@ void ConfigureCaptureLesson(Config& config) noexcept
     config.mission.maxSeconds=std::min(config.mission.maxSeconds,config.training.captureMaxSeconds);
 }
 }
-Controls ApplyPhaseControls(Controls controls, Phase phase, InitialSettings const& initial) noexcept
+Controls ApplyPhaseControls(Controls controls, Phase phase, InitialSettings const& initial,CurriculumStage stage) noexcept
 {
     controls.flap=phase==Phase::Patrol ? initial.flap
         : phase==Phase::Approach ? initial.approachFlap : initial.rolloutFlap;
     if(phase!=Phase::Rollout) controls.brake=0.0;
+    if(stage!=CurriculumStage::Joint) controls.gearDown=initial.gearDown;
     return controls;
 }
 FlightEnvironment::FlightEnvironment(Config config, std::filesystem::path const& data, std::optional<std::uint32_t> randomSeed)
@@ -74,7 +75,7 @@ Observation FlightEnvironment::Reset()
         initial.position=Add(initial.position,Scale(RunwayNormal(episodeConfig_.runway),sign*magnitude));
     }
     mission_.waypoint=ClosestPatrolWaypoint(plan_,initial.position);
-    aircraft_ = fdm_.Reset(initial);
+    aircraft_ = fdm_.Reset(initial,mission_.phase);
     return ObservationNow();
 }
 
@@ -82,7 +83,7 @@ StepResult FlightEnvironment::Step(Controls const& action)
 {
     if (mission_.outcome != Outcome::Flying) throw std::logic_error("FlightControl3D: reset required after episode boundary");
     StepResult total{};
-    auto const controls=ApplyPhaseControls(action,mission_.phase,config_.initial);
+    auto const controls=ApplyPhaseControls(action,mission_.phase,config_.initial,episodeConfig_.training.curriculumStage);
     for (std::size_t substep=0; substep<config_.mission.actionSubsteps; ++substep)
     {
         auto const previous = aircraft_;

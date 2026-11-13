@@ -2,6 +2,41 @@
 using namespace ppo::examples::flight;
 
 namespace {
+void PropulsionAndPhaseReset(Config c)
+{
+    c.initial.distanceMeters={6000,6000};c.initial.speedMps={56,56};
+    c.initial.rollDegrees={0,0};c.initial.pitchDegrees={2,2};c.initial.slopeDegrees={-3,-3};
+    c.initial.headingOffsetDegrees={0,0};
+    c.runwayRandomization.speedMps={0,0};c.runwayRandomization.heaveAmplitudeMeters={0,0};
+    c.runwayRandomization.pitchAmplitudeDegrees={0,0};c.runwayRandomization.rollAmplitudeDegrees={0,0};
+    std::mt19937 rng(91U);
+    auto const motion=SampleRunway(c,rng);
+    auto const runway=RunwayAt(motion,0);
+    auto const initial=SampleAircraft(c,runway,SpawnPlacement::LocalizerGlide,rng);
+    JsbsimAircraft fdm(c,DefaultDataRoot());fdm.SetRunwayMotion(motion);
+    std::array<double,3> speeds{};
+    for(std::size_t run=0;run<speeds.size();++run)
+    {
+        fdm.Reset(initial);
+        double const throttle=run==1 ? 1.0 : 0.0;
+        AircraftState after{};
+        for(int step=0;step<500;++step)
+            after=fdm.Advance({0,0,0,throttle,0,false,c.initial.flap});
+        Check(IsFinite(after),"native powered flight stays finite after reset");
+        speeds[run]=after.airspeed;
+    }
+    Check(speeds[1]>speeds[0]+5 && Near(speeds[0],speeds[2],1e-7),
+        "native throttle changes airspeed after reset and no propulsion state leaks between episodes");
+    for(auto phase:{Phase::Patrol,Phase::Approach,Phase::Rollout})
+    {
+        auto const requested=ApplyPhaseControls({},phase,c.initial);
+        auto const reset=fdm.Reset(initial,phase);
+        auto const after=fdm.Advance(requested);
+        Check(Near(reset.flapPosition,requested.flap,1e-10)
+            && Near(after.flapPosition,requested.flap,1e-10),
+            "native flap actuator starts at its phase detent without a first-action transient");
+    }
+}
 void PhaseControlMapping(Config const& c)
 {
     Controls const requested{0.1,-0.2,0.3,c.initial.throttle,0.8,true,0.99};
@@ -15,6 +50,9 @@ void PhaseControlMapping(Config const& c)
     Check(patrol.gearDown && approach.gearDown && rollout.gearDown
         && Near(approach.aileron,requested.aileron) && Near(approach.throttle,requested.throttle),
         "continuous controls and discrete gear survive phase mapping");
+    for(auto stage:{CurriculumStage::Loc,CurriculumStage::Glide})
+        Check(ApplyPhaseControls(requested,Phase::Approach,c.initial,stage).gearDown==c.initial.gearDown,
+            "capture lessons preserve the configured gear instead of applying untrained switches");
 }
 struct InterceptProbe final
 {
@@ -194,6 +232,7 @@ int main()
     try
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
+        PropulsionAndPhaseReset(c);
         IndependentResetAttitude(c);
         NativeCaptureCompletion(c);
         CloseApproachStarts(c);

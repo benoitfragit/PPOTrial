@@ -471,17 +471,19 @@ std::size_t ClosestPatrolWaypoint(FlightPlan const& plan,Vec3 position) noexcept
     return closest;
 }
 
-Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& mission, AircraftState const& a) noexcept
+Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& mission, AircraftState const& a,
+    Runway const* runway) noexcept
 {
     Guidance g{};
-    auto const runway = ToRunway(c.runway,a.position);
-    g.along = runway[0]; g.cross = runway[1];
-    g.height=DeckCoordinates(c.runway,a.position).up;
-    g.relativeVelocity=RelativeVelocity(c.runway,a);
+    auto const& deck=runway ? *runway : c.runway;
+    auto const local = ToRunway(deck,a.position);
+    g.along = local[0]; g.cross = local[1];
+    g.height=DeckCoordinates(deck,a.position).up;
+    g.relativeVelocity=RelativeVelocity(deck,a);
     g.distance = std::hypot(g.along,g.cross);
     g.localizer = std::atan2(g.cross, -g.along);
     double const slope = c.mission.glideDegrees*DegreesToRadians;
-    g.glideError = std::atan2(g.height-c.runway.thresholdHeightMeters, -g.along)-slope;
+    g.glideError = std::atan2(g.height-deck.thresholdHeightMeters, -g.along)-slope;
     g.ilsValid = g.along < 0 && g.distance <= c.mission.ilsRangeMeters && g.height > 0
         && std::abs(g.localizer) <= c.mission.ilsSectorDegrees*DegreesToRadians;
     g.targetSpeed = c.mission.patrolSpeed;
@@ -513,7 +515,7 @@ Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& miss
         // Keep the stored value at the aircraft as a defensive no-op for any
         // consumer that does not inspect targetValid.
         g.target = a.position;
-        g.pathDistance = std::hypot(g.cross, g.height-(c.runway.thresholdHeightMeters-std::min(g.along,0.0)*std::tan(slope)));
+        g.pathDistance = std::hypot(g.cross, g.height-(deck.thresholdHeightMeters-std::min(g.along,0.0)*std::tan(slope)));
         g.targetValid=false;
     }
     g.courseError = g.targetValid
@@ -569,6 +571,7 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         s.approachRecoverySeconds=0;
         s.approachRecoveryPending=false;s.approachRecoveryRequiresGlide=false;
     }
+    auto const priorMission=s;
     ++s.steps;
     auto g = Guide(c,plan,s,after);
     auto const& previousDeck=previousRunway ? *previousRunway : c.runway;
@@ -686,8 +689,9 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         };
         double const dt = c.mission.physicsDt;
         auto const referenceBefore=InCurrentDeckFrame(previousDeck,c.runway,before);
-        // Use the same phase and waypoint for both ends, including a gate pass.
-        auto const previousGuidance=Guide(c,plan,s,referenceBefore);
+        // Approach qualities compare each actual aircraft/runway/mission snapshot.
+        // Patrol tracking retains its transported point and active waypoint.
+        auto const previousGuidance=Guide(c,plan,priorMission,before,&previousDeck);
         if (c.mission.patrolEnabled && s.phase == Phase::Patrol)
             add(Reward::Path,PatrolTrackingReward(c,plan,referenceBefore,after,pathProgress));
         if (s.phase != Phase::Rollout)

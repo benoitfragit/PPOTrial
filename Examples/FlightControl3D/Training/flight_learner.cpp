@@ -241,6 +241,7 @@ public:
             double const sigma = std::sqrt(variance);
             for (auto& row : rows) row.advantage = sigma > std::numeric_limits<double>::epsilon() ? (row.advantage-mean)/sigma : 0;
             stats.policyLoss=0; stats.valueLoss=0; stats.entropy=0;
+            stats.maximumApproximateKl=0;stats.actorSteps=0;stats.actorStoppedByKl=false;
             double const samples = static_cast<double>(collected*config.training.epochs);
             for (std::size_t epoch=0; epoch<config.training.epochs; ++epoch)
             {
@@ -249,6 +250,7 @@ public:
                 for (std::size_t start=0; start<collected; start+=config.training.minibatch)
                 {
                     rlt::zero_gradient(device_,actor_); rlt::zero_gradient(device_,critic_);
+                    double approximateKl=0;
                     for (std::size_t j=0; j<config.training.minibatch; ++j)
                     {
                         auto const& row = rows[order[start+j]];
@@ -257,6 +259,9 @@ public:
                         PolicyVector output{};
                         for (Index k=0; k<PolicyOutputs; ++k) output[k]=rlt::get(actorOutput_,0,k);
                         auto const loss=ClippedLoss(output,row.action,row.advantage,config.training);
+                        double const logRatio=LogProbability(output,row.action,config.training)-row.action.logProbability;
+                        approximateKl+=(std::expm1(std::clamp(logRatio,-80.0,80.0))
+                            -std::clamp(logRatio,-80.0,80.0))/static_cast<double>(config.training.minibatch);
                         if (!std::isfinite(loss.loss)) throw std::runtime_error("FlightControl3D: invalid PPO loss");
                         for (Index k=0; k<PolicyOutputs; ++k)
                             rlt::set(actorDerivative_,0,k,static_cast<float>(loss.derivative[k]/static_cast<double>(config.training.minibatch)));
@@ -270,7 +275,16 @@ public:
                         stats.valueLoss += 0.5*difference*difference/samples;
                     }
                     ClipGradients(actor_); ClipGradients(critic_);
-                    rlt::step(device_,actorOptimizer_,actor_); rlt::step(device_,criticOptimizer_,critic_);
+                    stats.maximumApproximateKl=std::max(stats.maximumApproximateKl,approximateKl);
+                    if(approximateKl>config.training.targetKl) stats.actorStoppedByKl=true;
+                    // Freeze actor and Adam age for the remainder of this
+                    // rollout; the critic still learns from every minibatch.
+                    if(!stats.actorStoppedByKl)
+                    {
+                        rlt::step(device_,actorOptimizer_,actor_);
+                        ++stats.actorSteps;
+                    }
+                    rlt::step(device_,criticOptimizer_,critic_);
                     ValidateNetwork(actor_);ValidateNetwork(critic_);
                 }
             }
@@ -341,7 +355,13 @@ FlightLearner::FlightLearner(Config const& c)
 FlightLearner::~FlightLearner() = default;
 PolicyVector FlightLearner::Evaluate(Observation const& observation) { return impl_->Evaluate(observation); }
 PolicyAction FlightLearner::Choose(Observation const& observation, bool deterministic)
-{ return Sample(impl_->Evaluate(observation),impl_->config.training,impl_->rng,deterministic); }
+{
+    auto const& config=impl_->config;
+    bool const landingLesson=config.training.curriculumStage==CurriculumStage::Joint;
+    bool const rollout=observation[RolloutObservation]>0.5F;
+    return Sample(impl_->Evaluate(observation),config.training,impl_->rng,deterministic,
+        rollout,landingLesson,config.initial.gearDown);
+}
 bool FlightLearner::Ready() const noexcept { return impl_->collected==impl_->rows.size(); }
 std::size_t FlightLearner::Collected() const noexcept { return impl_->collected; }
 LearningStats const& FlightLearner::Stats() const noexcept { return impl_->stats; }

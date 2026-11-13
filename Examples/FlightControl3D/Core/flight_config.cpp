@@ -101,7 +101,7 @@ Config LoadConfig(std::filesystem::path const& path)
     mission.requiredLaps=Integer(m,"requiredLaps",100);
     auto const& i = root.at("initial");
     Keys(i, {"approach", "gearDown", "runwayAlignedProbability", "distanceMeters", "bearingDegrees", "heightMeters", "speedMps", "headingOffsetDegrees",
-        "rollDegrees", "pitchDegrees", "slopeDegrees", "throttle", "flap", "approachFlap", "rolloutFlap", "propeller"});
+        "rollDegrees", "pitchDegrees", "slopeDegrees", "throttle", "flap", "approachFlap", "rolloutFlap", "propeller", "mixture"});
     auto& initial = config.initial;
     initial.approach = Boolean(i, "approach"); initial.gearDown = Boolean(i, "gearDown");
     initial.runwayAlignedProbability=Number(i,"runwayAlignedProbability");
@@ -110,6 +110,7 @@ Config LoadConfig(std::filesystem::path const& path)
     initial.headingOffsetDegrees=Bounds(i,"headingOffsetDegrees"); initial.rollDegrees=Bounds(i,"rollDegrees");
     initial.pitchDegrees=Bounds(i,"pitchDegrees"); initial.slopeDegrees=Bounds(i,"slopeDegrees");
     initial.throttle=Number(i,"throttle"); initial.flap=Number(i,"flap"); initial.propeller=Number(i,"propeller");
+    initial.mixture=Number(i,"mixture");
     initial.approachFlap=Number(i,"approachFlap");initial.rolloutFlap=Number(i,"rolloutFlap");
     auto const& n = root.at("normalization");
     Keys(n, {"distance", "altitude", "speed", "rate", "path", "glideDegrees"});
@@ -133,7 +134,7 @@ Config LoadConfig(std::filesystem::path const& path)
     auto const& t = root.at("training");
     Keys(t, {"seed", "rolloutSteps", "minibatch", "epochs", "maxUpdates", "checkpointEvery", "hiddenWidth", "actorRate", "criticRate", "gamma", "lambda",
         "clip", "entropy", "valueWeight", "minLogStd", "maxLogStd", "initialLogStd", "maxGradientNorm", "adamBeta1", "adamBeta2", "adamEpsilon",
-        "ilsCaptureScale", "curriculum", "resume", "checkpointDirectory"});
+        "ilsCaptureScale", "curriculum", "resume", "checkpointDirectory", "targetKl"});
     auto& training = config.training;
     training.seed = static_cast<std::uint32_t>(Integer(t,"seed", UINT32_MAX));
     training.rolloutSteps = Integer(t,"rolloutSteps", 65536);
@@ -169,6 +170,7 @@ Config LoadConfig(std::filesystem::path const& path)
         Number(start,"slopeToleranceDegrees"),Number(start,"localizerHeightOffsetMeters"),Bounds(start,"pitchDegrees")};
     READ_T(actorRate); READ_T(criticRate); READ_T(gamma); READ_T(lambda); READ_T(clip); READ_T(entropy);
     READ_T(valueWeight); READ_T(minLogStd); READ_T(maxLogStd); READ_T(initialLogStd); READ_T(maxGradientNorm);
+    READ_T(targetKl);
     READ_T(adamBeta1); READ_T(adamBeta2); READ_T(adamEpsilon);
 #undef READ_T
     training.resume = Boolean(t,"resume");
@@ -185,10 +187,13 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics["distribution"] = {training.minLogStd,training.maxLogStd};
     // The raw-Gaussian-to-FCS mapping is part of the checkpoint policy contract.
     semantics["actionMappingVersion"] = 2;
-    semantics["rewardVersion"] = 11;
+    semantics["rewardVersion"] = 12;
     semantics["guidanceVersion"] = 14;
-    semantics["spawnVersion"] = 3;
-    semantics["curriculumVersion"] = 3;
+    semantics["spawnVersion"] = 4;
+    semantics["curriculumVersion"] = 4;
+    semantics["policyLikelihoodVersion"] = 2;
+    semantics["curriculum"] = curriculum;
+    semantics["curriculum"].erase("stage"); // A checkpoint passes between LOC, Glide and Joint.
     config.checkpointSignature = semantics.dump();
     Validate(config);
     return config;
@@ -200,7 +205,7 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
     auto previous=Json::parse(stored,nullptr,false),next=Json::parse(current,nullptr,false);
     if(!previous.is_object() || !next.is_object() || !previous.contains("initial") || !next.contains("initial")
         || !previous["initial"].is_object() || !next["initial"].is_object()) return false;
-    for(auto const* signature : {&previous,&next})
+    for(auto* signature : {&previous,&next})
     {
         if(!signature->contains("reward") || !(*signature)["reward"].is_object()
             || !(*signature)["initial"].contains("approach") || !(*signature)["initial"]["approach"].is_boolean()) return false;
@@ -209,7 +214,7 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
             && (*signature)["rewardVersion"]!=5 && (*signature)["rewardVersion"]!=6
             && (*signature)["rewardVersion"]!=7 && (*signature)["rewardVersion"]!=8
             && (*signature)["rewardVersion"]!=9 && (*signature)["rewardVersion"]!=10
-            && (*signature)["rewardVersion"]!=11) return false;
+            && (*signature)["rewardVersion"]!=11 && (*signature)["rewardVersion"]!=12) return false;
         if(signature->contains("guidanceVersion") && (*signature)["guidanceVersion"]!=2
             && (*signature)["guidanceVersion"]!=3 && (*signature)["guidanceVersion"]!=4
             && (*signature)["guidanceVersion"]!=5 && (*signature)["guidanceVersion"]!=6
@@ -218,9 +223,15 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
             && (*signature)["guidanceVersion"]!=11 && (*signature)["guidanceVersion"]!=12
             && (*signature)["guidanceVersion"]!=13 && (*signature)["guidanceVersion"]!=14) return false;
         if(signature->contains("spawnVersion") && (*signature)["spawnVersion"]!=2
-            && (*signature)["spawnVersion"]!=3) return false;
+            && (*signature)["spawnVersion"]!=3 && (*signature)["spawnVersion"]!=4) return false;
         if(signature->contains("curriculumVersion") && (*signature)["curriculumVersion"]!=2
-            && (*signature)["curriculumVersion"]!=3) return false;
+            && (*signature)["curriculumVersion"]!=3 && (*signature)["curriculumVersion"]!=4) return false;
+        if(signature->contains("policyLikelihoodVersion") && (*signature)["policyLikelihoodVersion"]!=2) return false;
+        if(signature->contains("curriculum") && !(*signature)["curriculum"].is_object()) return false;
+        auto& initial=(*signature)["initial"];
+        if(!initial.contains("mixture")) initial["mixture"]=1.0; // Historical full-rich startup.
+        if(!initial["mixture"].is_number() || !std::isfinite(initial["mixture"].get<double>())
+            || initial["mixture"].get<double>()<0 || initial["mixture"].get<double>()>1) return false;
     }
     // A checkpoint trained with tanh actuators cannot warm-start the new mapping.
     if(!previous.contains("actionMappingVersion") || !next.contains("actionMappingVersion")
@@ -277,6 +288,8 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
     previous.erase("guidanceVersion"); next.erase("guidanceVersion");
     previous.erase("spawnVersion"); next.erase("spawnVersion");
     previous.erase("curriculumVersion"); next.erase("curriculumVersion");
+    previous.erase("policyLikelihoodVersion"); next.erase("policyLikelihoodVersion");
+    previous.erase("curriculum"); next.erase("curriculum");
     return previous==next;
 }
 
@@ -337,7 +350,8 @@ void Validate(Config const& c)
         && i.bearingDegrees.maximum+maximumHeadingJitter<=m.approachHeadingToleranceDegrees,
         "left/right starts must point inward within the LOC capture heading envelope");
     Require(i.throttle >= 0 && i.throttle <= 1 && i.flap >= 0 && i.flap <= 1 && i.approachFlap>=0 && i.approachFlap<=1
-        && i.rolloutFlap>=0 && i.rolloutFlap<=1 && i.propeller >= 0 && i.propeller <= 1, "initial and phase controls");
+        && i.rolloutFlap>=0 && i.rolloutFlap<=1 && i.propeller >= 0 && i.propeller <= 1
+        && std::isfinite(i.mixture) && i.mixture>=0 && i.mixture<=1, "initial and phase controls");
     Require(d.heaveAmplitudeMeters.minimum>=0 && d.heaveAmplitudeMeters.maximum<=5 && d.wavePeriodSeconds.minimum>=3
         && d.wavePeriodSeconds.maximum<=60 && d.pitchAmplitudeDegrees.minimum>=0 && d.pitchAmplitudeDegrees.maximum<=2
         && d.rollAmplitudeDegrees.minimum>=0 && d.rollAmplitudeDegrees.maximum<=2
@@ -377,6 +391,7 @@ void Validate(Config const& c)
     Require(t.hiddenWidth == 32 || t.hiddenWidth == 64 || t.hiddenWidth == 128, "hiddenWidth must be 32, 64 or 128");
     Require(t.actorRate > 0 && t.criticRate > 0 && t.gamma > 0 && t.gamma <= 1 && t.lambda >= 0 && t.lambda <= 1
         && t.clip > 0 && t.clip < 1 && t.entropy >= 0 && t.valueWeight > 0 && t.maxGradientNorm > 0, "PPO hyperparameters");
+    Require(std::isfinite(t.targetKl) && t.targetKl>0 && t.targetKl<=1,"positive PPO target KL within (0,1]");
     Require(t.minLogStd >= -10 && t.maxLogStd <= 2 && t.minLogStd < t.initialLogStd && t.initialLogStd < t.maxLogStd,
         "Gaussian log standard deviations");
     Require(t.adamBeta1 >= 0 && t.adamBeta1 < 1 && t.adamBeta2 >= 0 && t.adamBeta2 < 1 && t.adamEpsilon > 0,

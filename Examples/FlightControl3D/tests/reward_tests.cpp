@@ -195,12 +195,30 @@ void MovingFrame(Config c)
     c.reward.localizerInterceptLimitDegrees=90;
     Rejects([&] {Validate(c);},"LOC intercept limit below ninety degrees required");
 }
+void TrueSnapshotCycle(Config c)
+{
+    c.mission.patrolEnabled=false;
+    auto aircraft=WithCourse(c,At(c,-6000,0,400),0);
+    aircraft.velocity.up=-aircraft.airspeed*std::tan(c.mission.glideDegrees*DegreesToRadians);
+    auto const firstDeck=c.runway;
+    auto moved=c;
+    moved.runway.pitch=0.02;moved.runway.roll=-0.01;
+    moved.runway.angularVelocity={0.001,0.002,0.003};moved.runway.velocity={1,2,0.4};
+    auto next=aircraft;next.velocity.up+=0.3;
+    MissionState forward{},reverse{};forward.phase=reverse.phase=Phase::Approach;
+    auto const outward=AdvanceMission(moved,{},forward,aircraft,next,&firstDeck);
+    auto const inward=AdvanceMission(c,{},reverse,next,aircraft,&moved.runway);
+    for(auto channel:{Reward::Speed,Reward::Slope})
+        Check(Near(Channel(outward,channel)+Channel(inward,channel),0,1e-11),
+            "true state and runway snapshots telescope across a closed moving-deck cycle");
+}
 }
 int main()
 {
     try
     {
         auto config=LoadConfig(PPO_FLIGHT_CONFIG);
+        TrueSnapshotCycle(config);
         config.mission.patrolEnabled=true; // Exercise the preserved optional patrol path reward.
         Convergence(config);ProgressAndAmplitude(config);SpeedAndSlopeShaping(config);SecondaryGuidance(config);MovingFrame(config);
     }

@@ -21,10 +21,11 @@ std::size_t ClosestPatrolWaypoint(FlightPlan const& plan,Vec3 position) noexcept
  * @param plan Closed racetrack bound to the current runway pose.
  * @param mission Current phase, capture state and ordered waypoint progress.
  * @param aircraft Current finite aircraft state.
+ * @param runway Optional previous runway snapshot for time-consistent reward evaluation.
  * @return Value-only guidance consumed by observations, rewards and rendering.
  */
 Guidance Guide(Config const& config, FlightPlan const& plan,
-    MissionState const& mission, AircraftState const& aircraft) noexcept;
+    MissionState const& mission, AircraftState const& aircraft, Runway const* runway = nullptr) noexcept;
 /** Confirm actual beam geometry and stable physical flight before a lesson can end. */
 bool CaptureGateQualified(Config const&,CurriculumStage,MissionState const&,
     AircraftState const&,Guidance const&) noexcept;

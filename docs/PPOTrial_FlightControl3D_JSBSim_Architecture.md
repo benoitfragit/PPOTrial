@@ -2,6 +2,8 @@
 
 Date : 11 novembre 2026. Projet : PPOTrial. Issue : #82. PR : [#83](https://github.com/benoitfragit/PPOTrial/pull/83). Branche : `feat/jsbsim-flight-control`.
 
+État courant du 13 novembre 2026 : [corrections de propulsion, actions et apprentissage #91 / PR #87](PPOTrial_FlightControl3D_Convergence_Propulsion_Reward_Issue91_PR87.md). Le démarrage moteur historique, le reset des volets et la comparaison temporelle des rewards sont corrigés ; les scores de convergence restent distincts des tests logiciels.
+
 Mise à jour du 13 novembre 2026 : le scénario livré désactive temporairement l’hippodrome avec `mission.patrolEnabled=false`. Il reste en approche après perte LOC/GLIDE, sans reward Path ni point de guidage. Les départs sont rapprochés à 4–6,5 km et orientés vers le seuil. Le code hippodrome reste réactivable ; voir [approche seule, réglages et validation](PPOTrial_FlightControl3D_Approche_Sans_Hippodrome_Issue86.md). Les sections historiques ci-dessous décrivent aussi les anciens réglages.
 
 ## Livraison et lancement local
