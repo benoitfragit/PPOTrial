@@ -15,7 +15,7 @@ Config EnvironmentConfig(Config config,bool training)
 {
     // Capture lessons terminate at their objective: widening that objective
     // teaches early exits that cannot pass the nominal independent gate.
-    if(!training || config.training.curriculumStage!=CurriculumStage::Joint) return config;
+    if(!training || IsCaptureLesson(config.training.curriculumStage)) return config;
     config.mission.localizerCaptureDegrees*=config.training.ilsCaptureScale;
     config.mission.glideCaptureDegrees*=config.training.ilsCaptureScale;
     config.training.ilsCaptureScale=1.0;
@@ -136,16 +136,16 @@ void FlightSession::TickValidation()
     auto const stage=config_.training.curriculumStage;
     if(lastStep_.terminated || lastStep_.truncated)
     {
-        if(stage!=CurriculumStage::Joint && evaluation.Mission().outcome==Outcome::CaptureCompleted)
+        if(IsCaptureLesson(stage) && evaluation.Mission().outcome==Outcome::CaptureCompleted)
             ++validationGateSuccesses_;
         validation_.Record(evaluation.Mission());
         if(validation_.episodes<config_.evaluation.episodes) validationPendingReset_=true;
         else
         {
             // Intermediate capture gates never promote a landing BEST.
-            if(stage==CurriculumStage::Joint) models_.Promote(learner_,validation_);
+            if(!IsCaptureLesson(stage)) models_.Promote(learner_,validation_);
             best_=models_.BestMetrics(true);lastValidation_=validation_;++validationCampaigns_;
-            lastGateSuccesses_=stage==CurriculumStage::Joint ? validation_.stops : validationGateSuccesses_;
+            lastGateSuccesses_=IsCaptureLesson(stage) ? validationGateSuccesses_ : validation_.stops;
             lastGateEvaluated_=validation_.episodes;
             validationEnvironment_.reset();
             lastStep_={};controls_={};

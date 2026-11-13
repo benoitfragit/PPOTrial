@@ -12,10 +12,11 @@ import subprocess
 import sys
 import time
 
-STAGES = ("loc", "glide", "joint")
+STAGES = ("loc", "glide", "joint", "joint-mobile")
+CURRICULUM_VERSION = "5"
 MAX_UPDATE = 100_000_000
 GATE_PATTERN = re.compile(
-    r"^\[FLIGHT_GATE\] stage=(loc|glide|joint) successes=(\d+) "
+    r"^\[FLIGHT_GATE\] stage=(loc|glide|joint|joint-mobile) successes=(\d+) "
     r"episodes=(\d+) passed=(true|false)$"
 )
 
@@ -88,6 +89,9 @@ def run(args: argparse.Namespace) -> int:
     output.mkdir(parents=True, exist_ok=True)
     checkpoint = output / "latest" / "flight_hybrid_v1.txt"
     progress = output / "curriculum_stage.txt"
+    version = output / "curriculum_version.txt"
+    if version.exists() and version.read_text(encoding="utf-8").strip() != CURRICULUM_VERSION:
+        raise ValueError("Incompatible saved FlightControl3D curriculum version")
     if checkpoint.is_file():
         start_update = checkpoint_update(checkpoint)
     elif progress.exists():
@@ -106,8 +110,14 @@ def run(args: argparse.Namespace) -> int:
     stage = args.stage
     if stage == "progressive":
         stage = progress.read_text(encoding="utf-8").strip() if progress.is_file() else "loc"
+        # An old three-gate 'done' does not qualify the new fixed/mobile sequence.
+        if stage == "done" and not version.exists():
+            stage = "joint"
     if stage not in (*STAGES, "done"):
         raise ValueError(f"Invalid saved curriculum stage: {stage}")
+    # Save a migrated legacy stage before marking the new contract as installed.
+    progress.write_text(stage + "\n", encoding="utf-8")
+    version.write_text(CURRICULUM_VERSION + "\n", encoding="utf-8")
     deadline = time.monotonic() + args.runtime_seconds
     completed_selected_stage = stage == "done"
     blocks = 0
@@ -124,7 +134,8 @@ def run(args: argparse.Namespace) -> int:
         current = target
         blocks += 1
         if passed:
-            stage = "glide" if stage == "loc" else "joint" if stage == "glide" else "done"
+            next_index = STAGES.index(stage) + 1
+            stage = STAGES[next_index] if next_index < len(STAGES) else "done"
             progress.write_text(stage + "\n", encoding="utf-8")
             if args.stage != "progressive":
                 completed_selected_stage = True

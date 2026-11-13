@@ -271,13 +271,16 @@ void CaptureLessonTermination(Config c)
         Check(!lost.terminated && briefLoss.capturedLocalizer && briefLoss.captureGateSeconds==0,
             "hysteresis cannot turn an out-of-tolerance snapshot into stabilized success");
     }
-    c.training.curriculumStage=CurriculumStage::Joint;
-    MissionState finalApproach{};finalApproach.phase=Phase::Approach;
-    finalApproach.capturedLocalizer=true;finalApproach.capturedGlide=true;
-    for(int step=0;step<30;++step)
-        Check(!AdvanceMission(c,plan,finalApproach,aircraft,aircraft).terminated,
-            "Joint must continue from captured beams through touchdown and stop");
-    Check(finalApproach.captureGateSeconds==0,"Joint does not accumulate pedagogical completion");
+    for(auto const stage : {CurriculumStage::Joint,CurriculumStage::JointMobile})
+    {
+        c.training.curriculumStage=stage;
+        MissionState finalApproach{};finalApproach.phase=Phase::Approach;
+        finalApproach.capturedLocalizer=true;finalApproach.capturedGlide=true;
+        for(int step=0;step<30;++step)
+            Check(!AdvanceMission(c,plan,finalApproach,aircraft,aircraft).terminated,
+                "both Joint lessons continue from captured beams through touchdown and stop");
+        Check(finalApproach.captureGateSeconds==0,"Joint does not accumulate pedagogical completion");
+    }
 }
 
 void ApproachOnly(Config c)
@@ -577,8 +580,77 @@ void CapturePriority(Config const& c)
         && rolloutGuidance.target.east==flareAircraft.position.east,
         "flare and rollout cannot reactivate a threshold guidance line");
 }
-void RandomizationAndMotion(Config const& c)
+void SurfaceRelativeFlightPath(Config c)
 {
+    for(double const heading : {0.0,90.0,247.0,359.0})
+    {
+        RunwayMotion motion{};
+        motion.base=c.runway;motion.base.headingDegrees=heading;
+        motion.period=8;motion.forwardSpeed=2;
+        motion.heaveAmplitude=0.8;
+        motion.pitchAmplitude=0.25*DegreesToRadians;
+        motion.rollAmplitude=0.4*DegreesToRadians;
+        c.runway=RunwayAt(motion,0);
+        MissionState mission{};mission.phase=Phase::Approach;
+        mission.capturedLocalizer=mission.capturedGlide=true;
+        for(double const distance : {500.0,6000.0,14000.0})
+        {
+            auto aircraft=Approach(c,-distance);
+            double const sink=-aircraft.airspeed*std::tan(c.mission.glideDegrees*DegreesToRadians);
+            aircraft.velocity=Add(c.runway.velocity,Add(
+                Scale(RunwayForward(c.runway),aircraft.airspeed),Scale(RunwayNormal(c.runway),sink)));
+            auto const guidance=Guide(c,{},mission,aircraft);
+            Check(Near(guidance.relativeVelocity.north,aircraft.airspeed,1e-9)
+                && Near(guidance.relativeVelocity.east,0,1e-9)
+                && Near(guidance.relativeVelocity.up,sink,1e-9),
+                "approach velocity uses the real threshold, without distance-amplified rotation");
+            auto const observation=Observe(c,{},mission,aircraft);
+            Check(Near(observation[42],c.runway.velocity.north/c.normalization.speed)
+                && Near(observation[43],c.runway.velocity.east/c.normalization.speed)
+                && Near(observation[44],c.runway.velocity.up/c.normalization.speed),
+                "policy observes the same physical surface velocity as guidance");
+            Check(Near(DisplaySlopeDegrees(guidance),-c.mission.glideDegrees,1e-9)
+                && CaptureGateQualified(c,CurriculumStage::Glide,mission,aircraft,guidance),
+                "rotating beams do not invent a climb or reject a physically aligned glide");
+        }
+    }
+}
+void NoWaveScenario(Config const& c)
+{
+    auto const& ranges=c.runwayRandomization;
+    for(auto const range : {ranges.heaveAmplitudeMeters,ranges.pitchAmplitudeDegrees,ranges.rollAmplitudeDegrees})
+        Check(range.minimum==0 && range.maximum==0,"shipped scenario explicitly disables every wave amplitude");
+    std::mt19937 rng(92);
+    bool positionVaries=false,headingVaries=false,heightVaries=false;
+    Runway first{};
+    for(int sample=0;sample<64;++sample)
+    {
+        auto const motion=SampleRunway(c,rng);
+        auto const initial=RunwayAt(motion,0);
+        auto const later=RunwayAt(motion,123.4);
+        auto const displacement=Scale(RunwayForward(initial),123.4*motion.forwardSpeed);
+        Check(initial.pitch==0 && initial.roll==0 && later.pitch==0 && later.roll==0
+            && Dot(later.angularVelocity,later.angularVelocity)==0 && later.velocity.up==0
+            && Near(later.origin.up,initial.origin.up),"no heave, pitch or roll during an episode");
+        Check(Near(later.origin.north-initial.origin.north,displacement.north)
+            && Near(later.origin.east-initial.origin.east,displacement.east),
+            "disabling waves preserves the configured runway translation");
+        Check(initial.origin.up>=ranges.deckHeightMeters.minimum && initial.origin.up<=ranges.deckHeightMeters.maximum,
+            "runway altitude remains inside its configured reset range");
+        if(sample==0) first=initial;
+        positionVaries|=initial.origin.north!=first.origin.north || initial.origin.east!=first.origin.east;
+        headingVaries|=initial.headingDegrees!=first.headingDegrees;
+        heightVaries|=initial.origin.up!=first.origin.up;
+    }
+    Check(positionVaries && headingVaries && heightVaries,
+        "wave-free episodes retain random runway position, heading and altitude");
+}
+void RandomizationAndMotion(Config c)
+{
+    // Exercise the supported motion explicitly even while the shipped scenario disables waves.
+    c.runwayRandomization.heaveAmplitudeMeters={0.4,0.8};
+    c.runwayRandomization.pitchAmplitudeDegrees={0.1,0.25};
+    c.runwayRandomization.rollAmplitudeDegrees={0.2,0.4};
     std::mt19937 rng(91),same(91);
     SpawnPlacementSampler placements{},samePlacements{};
     bool differentPositions=false,differentAttitudes=false;
@@ -627,6 +699,13 @@ void RandomizationAndMotion(Config const& c)
         auto const velocity=DeckVelocity(deck,point);
         Check(Near(velocity.north,numerical.north,1e-5) && Near(velocity.east,numerical.east,1e-5)
             && Near(velocity.up,numerical.up,1e-5),"heave/pitch/roll contact velocity matches surface derivative");
+        auto const surface=RunwaySurfaceVelocity(deck,FromRunway(deck,600,8,500));
+        Check(Near(surface.north,numerical.north,1e-5) && Near(surface.east,numerical.east,1e-5)
+            && Near(surface.up,numerical.up,1e-5),"airborne surface reference agrees with the physical deck derivative");
+        auto const corner=DeckVelocity(deck,FromRunway(deck,0,deck.widthMeters/2,0));
+        auto const distant=RunwaySurfaceVelocity(deck,FromRunway(deck,-6000,2000,700));
+        Check(Near(corner.north,distant.north) && Near(corner.east,distant.east) && Near(corner.up,distant.up),
+            "approach references the finite deck corner, not a distant rotating imaginary plane");
         auto const transformed=DeckCoordinates(deck,FromRunway(deck,-2100,27,500));
         Check(Near(transformed.north,-2100) && Near(transformed.east,27) && Near(transformed.up,500),"moving tilted runway inverse");
     }
@@ -666,7 +745,7 @@ void DisplayReferences(Config const& config)
             "LOC envelope follows configured capture angle");
         MissionState approach{}; approach.phase=Phase::Approach;
         AircraftState onGlide{}; onGlide.position=display.glideEnd; onGlide.pitch=8*DegreesToRadians;
-        onGlide.velocity=Add(DeckVelocity(c.runway,onGlide.position),
+        onGlide.velocity=Add(RunwaySurfaceVelocity(c.runway,onGlide.position),
             Add(Scale(RunwayForward(c.runway),100*std::cos(3*DegreesToRadians)),
                 Scale(RunwayNormal(c.runway),-100*std::sin(3*DegreesToRadians))));
         auto const guidance=Guide(c,MakeFlightPlan(c),approach,onGlide);
@@ -690,6 +769,7 @@ int main()
     try
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
+        SurfaceRelativeFlightPath(c);NoWaveScenario(c);
         ApproachOnly(c);Configuration();CaptureLessonTermination(c);
         c.mission.patrolEnabled=true; // Keep all legacy patrol/recovery regressions active.
         Geometry(c);Landing(c);OrderedNavigation(c);AlignedStarts(c);CapturePriority(c);RandomizationAndMotion(c);DisplayReferences(c);

@@ -3,6 +3,7 @@
 #include <fstream>
 #include <algorithm>
 #include <stdexcept>
+#include <string_view>
 
 namespace ppo::examples::flight {
 namespace {
@@ -151,9 +152,10 @@ Config LoadConfig(std::filesystem::path const& path)
         "gateRollDegrees","gateRateDegreesPerSecond","captureMaxSeconds","captureStart"});
     Require(curriculum.at("stage").is_string(),"curriculum stage");
     auto const stage=curriculum.at("stage").get<std::string>();
-    Require(stage=="loc" || stage=="glide" || stage=="joint","curriculum stage");
+    Require(stage=="loc" || stage=="glide" || stage=="joint" || stage=="joint-mobile","curriculum stage");
     training.curriculumStage=stage=="loc" ? CurriculumStage::Loc
-        : stage=="glide" ? CurriculumStage::Glide : CurriculumStage::Joint;
+        : stage=="glide" ? CurriculumStage::Glide
+        : stage=="joint" ? CurriculumStage::Joint : CurriculumStage::JointMobile;
     training.locReminderProbability=Number(curriculum,"locReminderProbability");
     training.glideOffsetMeters=Number(curriculum,"glideOffsetMeters");
     training.gateHoldSeconds=Number(curriculum,"gateHoldSeconds");
@@ -188,9 +190,9 @@ Config LoadConfig(std::filesystem::path const& path)
     // The raw-Gaussian-to-FCS mapping is part of the checkpoint policy contract.
     semantics["actionMappingVersion"] = 2;
     semantics["rewardVersion"] = 12;
-    semantics["guidanceVersion"] = 14;
+    semantics["guidanceVersion"] = 15;
     semantics["spawnVersion"] = 4;
-    semantics["curriculumVersion"] = 4;
+    semantics["curriculumVersion"] = 5;
     semantics["policyLikelihoodVersion"] = 2;
     semantics["curriculum"] = curriculum;
     semantics["curriculum"].erase("stage"); // A checkpoint passes between LOC, Glide and Joint.
@@ -221,11 +223,13 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
             && (*signature)["guidanceVersion"]!=7 && (*signature)["guidanceVersion"]!=8
             && (*signature)["guidanceVersion"]!=9 && (*signature)["guidanceVersion"]!=10
             && (*signature)["guidanceVersion"]!=11 && (*signature)["guidanceVersion"]!=12
-            && (*signature)["guidanceVersion"]!=13 && (*signature)["guidanceVersion"]!=14) return false;
+            && (*signature)["guidanceVersion"]!=13 && (*signature)["guidanceVersion"]!=14
+            && (*signature)["guidanceVersion"]!=15) return false;
         if(signature->contains("spawnVersion") && (*signature)["spawnVersion"]!=2
             && (*signature)["spawnVersion"]!=3 && (*signature)["spawnVersion"]!=4) return false;
         if(signature->contains("curriculumVersion") && (*signature)["curriculumVersion"]!=2
-            && (*signature)["curriculumVersion"]!=3 && (*signature)["curriculumVersion"]!=4) return false;
+            && (*signature)["curriculumVersion"]!=3 && (*signature)["curriculumVersion"]!=4
+            && (*signature)["curriculumVersion"]!=5) return false;
         if(signature->contains("policyLikelihoodVersion") && (*signature)["policyLikelihoodVersion"]!=2) return false;
         if(signature->contains("curriculum") && !(*signature)["curriculum"].is_object()) return false;
         auto& initial=(*signature)["initial"];
@@ -256,6 +260,21 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
     }
     // These changes keep the network dimensions and may warm-start training.
     // Old scores are never reused: production compares the complete signature.
+    for(auto* signature : {&previous,&next})
+    {
+        if(!signature->contains("runwayRandomization") || !(*signature)["runwayRandomization"].is_object()) return false;
+        auto& motion=(*signature)["runwayRandomization"];
+        for(char const* name : {"heaveAmplitudeMeters","pitchAmplitudeDegrees","rollAmplitudeDegrees"})
+        {
+            if(!motion.contains(name)) return false;
+            auto const& range=motion[name];
+            if(!range.is_array() || range.size()!=2 || !range[0].is_number() || !range[1].is_number()) return false;
+            double const minimum=range[0].get<double>(),maximum=range[1].get<double>();
+            double const limit=std::string_view{name}=="heaveAmplitudeMeters" ? 5.0 : 2.0;
+            if(!std::isfinite(minimum) || !std::isfinite(maximum) || minimum<0 || minimum>maximum || maximum>limit) return false;
+            motion.erase(name);
+        }
+    }
     previous["initial"].erase("runwayAlignedProbability"); next["initial"].erase("runwayAlignedProbability");
     previous["initial"].erase("approach"); next["initial"].erase("approach");
     if(!previous.contains("normalization") || !next.contains("normalization")
@@ -400,7 +419,7 @@ void Validate(Config const& c)
         && t.locReminderProbability<=1 && std::isfinite(t.glideOffsetMeters)
         && t.glideOffsetMeters>0 && t.glideOffsetMeters<minimumGlideHeight-m.flareHeightMeters
         && std::isfinite(t.gateHoldSeconds) && t.gateHoldSeconds>=m.physicsDt
-        && (t.curriculumStage==CurriculumStage::Joint || t.gateHoldSeconds<=m.maxSeconds)
+        && (!IsCaptureLesson(t.curriculumStage) || t.gateHoldSeconds<=m.maxSeconds)
         && std::isfinite(t.gateHeadingDegrees) && t.gateHeadingDegrees>0 && t.gateHeadingDegrees<=20
         && std::isfinite(t.gateRouteDegrees) && t.gateRouteDegrees>0 && t.gateRouteDegrees<=20
         && std::isfinite(t.gateSlopeDegrees) && t.gateSlopeDegrees>0 && t.gateSlopeDegrees<=5,

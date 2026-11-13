@@ -53,7 +53,7 @@ class CurriculumTests(unittest.TestCase):
         self.summary = root / "summary.txt"
 
     def execute(self, max_updates=100, stage="progressive", interval=10, malformed=False):
-        env = {**os.environ, "PASS_AT": json.dumps({"loc": 30, "glide": 50, "joint": 70}),
+        env = {**os.environ, "PASS_AT": json.dumps({"loc": 30, "glide": 50, "joint": 70, "joint-mobile": 90}),
                "GITHUB_STEP_SUMMARY": str(self.summary), "MALFORMED_GATE": str(int(malformed))}
         return subprocess.run([sys.executable, str(RUNNER), "--executable", str(self.launcher),
                                "--config", str(self.config), "--output", str(self.output),
@@ -67,8 +67,13 @@ class CurriculumTests(unittest.TestCase):
         self.assertEqual((self.output / "curriculum_stage.txt").read_text().strip(), "done")
         self.assertEqual((self.output / "curriculum_status.txt").read_text().strip(), "completed")
         self.assertEqual((self.output / "calls.txt").read_text().splitlines(),
-                         ["loc 10", "loc 20", "loc 30", "glide 40", "glide 50", "joint 60", "joint 70"])
-        self.assertEqual(len(list(self.output.glob("training_*.csv"))), 7)
+                         ["loc 10", "loc 20", "loc 30", "glide 40", "glide 50", "joint 60", "joint 70",
+                          "joint-mobile 80", "joint-mobile 90"])
+        self.assertEqual(len(list(self.output.glob("training_*.csv"))), 9)
+        self.assertEqual((self.output / "curriculum_version.txt").read_text().strip(), "5")
+        second = self.execute()
+        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        self.assertEqual(len((self.output / "calls.txt").read_text().splitlines()), 9)
 
     def test_fresh_v2_curriculum_starts_without_a_checkpoint(self):
         self.checkpoint.unlink()
@@ -76,8 +81,9 @@ class CurriculumTests(unittest.TestCase):
         result = self.execute()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((self.output / "calls.txt").read_text().splitlines(),
-                         ["loc 10", "loc 20", "loc 30", "glide 40", "glide 50", "joint 60", "joint 70"])
-        self.assertEqual(self.checkpoint.read_text().split()[4], "70")
+                         ["loc 10", "loc 20", "loc 30", "glide 40", "glide 50", "joint 60", "joint 70",
+                          "joint-mobile 80", "joint-mobile 90"])
+        self.assertEqual(self.checkpoint.read_text().split()[4], "90")
         self.assertEqual((self.output / "curriculum_status.txt").read_text().strip(), "completed")
 
     def test_missing_resume_checkpoint_is_rejected_before_training(self):
@@ -94,10 +100,43 @@ class CurriculumTests(unittest.TestCase):
         self.assertEqual(self.checkpoint.read_text().split()[4], "20")
         self.assertEqual((self.output / "curriculum_stage.txt").read_text().strip(), "loc")
         self.assertEqual((self.output / "curriculum_status.txt").read_text().strip(), "incomplete")
-        second = self.execute(max_updates=60)
+        second = self.execute(max_updates=70)
         self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
         self.assertEqual((self.output / "curriculum_stage.txt").read_text().strip(), "done")
-        self.assertEqual(self.checkpoint.read_text().split()[4], "70")
+        self.assertEqual(self.checkpoint.read_text().split()[4], "90")
+
+    def test_joint_fixed_pass_does_not_complete_mobile_gate(self):
+        result = self.execute(max_updates=70)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual((self.output / "curriculum_stage.txt").read_text().strip(), "joint-mobile")
+        self.assertEqual((self.output / "curriculum_status.txt").read_text().strip(), "incomplete")
+        result = self.execute(max_updates=20)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.output / "calls.txt").read_text().splitlines()[-2:],
+                         ["joint-mobile 80", "joint-mobile 90"])
+
+    def test_legacy_done_revalidates_fixed_then_mobile_landing(self):
+        self.checkpoint.write_text("PPO_FLIGHT_HYBRID_V1 56 5 128 70\n")
+        (self.output / "curriculum_stage.txt").write_text("done\n")
+        result = self.execute(max_updates=20)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.output / "calls.txt").read_text().splitlines(),
+                         ["joint 80", "joint-mobile 90"])
+
+    def test_manual_joint_stops_before_mobile_and_mobile_is_selectable(self):
+        result = self.execute(stage="joint")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.output / "curriculum_stage.txt").read_text().strip(), "joint-mobile")
+        result = self.execute(stage="joint-mobile", max_updates=20)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.output / "curriculum_stage.txt").read_text().strip(), "done")
+
+    def test_unknown_curriculum_version_is_rejected(self):
+        (self.output / "curriculum_version.txt").write_text("999\n")
+        result = self.execute()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("curriculum version", result.stderr)
+        self.assertFalse((self.output / "calls.txt").exists())
 
     def test_manual_stage_stops_after_validation_and_saves_next_stage(self):
         result = self.execute(stage="loc")

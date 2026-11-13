@@ -46,7 +46,7 @@ void DesktopContinuation(Config c)
 enum class TrainingContractChange
 {
     HorizontalStarts, Rewards, LegacyStarts, LegacyGuidance, AlignedProbability,
-    EpisodeBoundary, ApproachOnly, ResetAttitude, LegacyCurriculum, Exploration, PoweredFlight
+    EpisodeBoundary, ApproachOnly, ResetAttitude, LegacyCurriculum, Exploration, PoweredFlight, WavesDisabled
 };
 void CommittedTrainingCheckpoint(Config c)
 {
@@ -122,6 +122,13 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     }
     else if(change==TrainingContractChange::LegacyCurriculum)
         signature.erase("curriculumVersion");
+    else if(change==TrainingContractChange::WavesDisabled)
+    {
+        signature["guidanceVersion"]=14;signature["curriculumVersion"]=4;
+        signature["runwayRandomization"]["heaveAmplitudeMeters"]={0,0.8};
+        signature["runwayRandomization"]["pitchAmplitudeDegrees"]={0,0.25};
+        signature["runwayRandomization"]["rollAmplitudeDegrees"]={0,0.4};
+    }
     else if(change==TrainingContractChange::Exploration)
     {
         old.training.initialLogStd=-1;old.training.maxLogStd=0.5;
@@ -253,6 +260,16 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     signature=nlohmann::json::parse(c.checkpointSignature);
     signature["guidanceVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown guidance contract is rejected");
+    signature=nlohmann::json::parse(c.checkpointSignature);
+    signature["runwayRandomization"]["speedMps"]={0,5};
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unrelated runway-speed changes remain incompatible");
+    for(auto const& invalid : {nlohmann::json{},nlohmann::json::array({0}),nlohmann::json::array({0,"1"}),
+        nlohmann::json::array({-1,1}),nlohmann::json::array({2,1}),nlohmann::json::array({0,6})})
+    {
+        signature=nlohmann::json::parse(c.checkpointSignature);
+        signature["runwayRandomization"]["heaveAmplitudeMeters"]=invalid;
+        Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"invalid wave range cannot bypass warm-start compatibility");
+    }
     signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("spawnVersion");
     Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
         "legacy random placement remains usable as a training warm start");
@@ -309,6 +326,29 @@ void NominalCaptureLessons(Config c)
             "entering validation cannot tighten a capture lesson's terminal objective");
     }
 }
+void RunwayBestQualification(Config c)
+{
+    TemporaryDirectory directory("flight-runway-best-");
+    c.training.curriculumStage=CurriculumStage::Joint;
+    FlightLearner fixed(c);FlightModelStore fixedStore(c,directory.path);
+    fixed.Save(fixedStore.Latest());
+    // Controlled manifest fixture, not a claim about a trained landing policy.
+    ValidationMetrics successful{};successful.episodes=c.evaluation.episodes;
+    successful.touchdowns=successful.stops=successful.episodes;
+    successful.touchdownSumMeters=100;successful.stopSumMeters=600;
+    Check(fixedStore.Promote(fixed,successful) && fixedStore.BestMetrics().has_value(),
+        "fixed landing can qualify a fixed-runway BEST");
+    c.training.curriculumStage=CurriculumStage::JointMobile;
+    FlightLearner mobile(c);mobile.Load(fixedStore.Latest());
+    Check(mobile.Evaluate({})==fixed.Evaluate({}),"JointMobile starts from the same latest policy");
+    FlightModelStore mobileStore(c,directory.path);
+    Check(!mobileStore.BestMetrics(true),"fixed-runway success does not qualify JointMobile");
+    Rejects([&] {mobileStore.LoadBest(mobile);},"inference cannot use a fixed BEST as a mobile qualification");
+    Check(mobileStore.Promote(mobile,successful) && mobileStore.BestMetrics().has_value(),
+        "JointMobile requires its own independent landing validation before BEST promotion");
+    Check(!fixedStore.BestMetrics(true),"mobile and fixed BEST scores cannot be interchanged");
+}
+
 int main()
 {
     try
@@ -316,13 +356,14 @@ int main()
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
         CommittedTrainingCheckpoint(c);
         DesktopContinuation(c);
+        RunwayBestQualification(c);
         NominalCaptureLessons(c);
         for(auto change : {TrainingContractChange::HorizontalStarts,TrainingContractChange::Rewards,
             TrainingContractChange::LegacyStarts,TrainingContractChange::LegacyGuidance,
             TrainingContractChange::AlignedProbability,TrainingContractChange::EpisodeBoundary,
             TrainingContractChange::ApproachOnly,TrainingContractChange::ResetAttitude,
             TrainingContractChange::LegacyCurriculum,TrainingContractChange::Exploration,
-            TrainingContractChange::PoweredFlight})
+            TrainingContractChange::PoweredFlight,TrainingContractChange::WavesDisabled})
             ChangedTrainingContract(c,change);
         c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
         c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;

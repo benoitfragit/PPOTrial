@@ -108,7 +108,7 @@ void CloseApproachStarts(Config c)
     Check(!c.mission.patrolEnabled && c.initial.distanceMeters.minimum==4000
         && c.initial.distanceMeters.maximum==6500,"delivered starts are closer to the ILS cone");
     c.initial.approach=false; // Disabled patrol must override this legacy initial phase.
-    for(auto const stage : {CurriculumStage::Loc,CurriculumStage::Glide,CurriculumStage::Joint})
+    for(auto const stage : {CurriculumStage::Loc,CurriculumStage::Glide,CurriculumStage::Joint,CurriculumStage::JointMobile})
     {
         c.training.curriculumStage=stage;
         FlightEnvironment environment(c,DefaultDataRoot(),981U);
@@ -128,7 +128,7 @@ void CloseApproachStarts(Config c)
                 && !guidance.targetValid && observation[0]==0 && observation[1]==0 && observation[2]==0,
                 "real JSBSim resets remain near the cone, inbound to the moving runway and point-free");
             left=left || guidance.cross< -0.1;right=right || guidance.cross>0.1;
-            if(stage!=CurriculumStage::Joint)
+            if(IsCaptureLesson(stage))
             {
                 auto const& start=c.training.captureStart;
                 auto const local=DeckCoordinates(runway,aircraft.position);
@@ -188,6 +188,45 @@ void NativeCaptureCompletion(Config c)
     }
 }
 
+void CurriculumRunwayMotion(Config c)
+{
+    c.runwayRandomization.speedMps={2,2}; // A nonzero source range must not move the first three gates.
+    for(auto const stage : {CurriculumStage::Loc,CurriculumStage::Glide,CurriculumStage::Joint,CurriculumStage::JointMobile})
+    {
+        c.training.curriculumStage=stage;
+        FlightEnvironment environment(c,DefaultDataRoot(),92U);
+        double const speed=stage==CurriculumStage::JointMobile ? 2.0 : 0.0;
+        Runway first{};
+        bool positionVaries=false,heightVaries=false;
+        for(int episode=0;episode<8;++episode)
+        {
+            auto const observation=environment.Reset();
+            auto const initial=environment.Settings().runway;
+            auto const expected=Scale(RunwayForward(initial),speed);
+            Check(Near(initial.velocity.north,expected.north) && Near(initial.velocity.east,expected.east)
+                && initial.velocity.up==0 && Dot(initial.angularVelocity,initial.angularVelocity)==0,
+                "only the fourth JointMobile gate translates; all shipped lessons remain wave-free");
+            Check(Near(observation[42],expected.north/c.normalization.speed)
+                && Near(observation[43],expected.east/c.normalization.speed) && observation[44]==0,
+                "native policy observation receives the actual stage-specific runway velocity");
+            if(episode==0) first=initial;
+            positionVaries|=initial.origin.north!=first.origin.north || initial.origin.east!=first.origin.east;
+            heightVaries|=initial.origin.up!=first.origin.up;
+            for(int step=0;step<10 && environment.Mission().outcome==Outcome::Flying;++step)
+                environment.Step({0,0,0,c.initial.throttle,0,false});
+            double const elapsed=static_cast<double>(environment.Mission().steps)*c.mission.physicsDt;
+            auto const final=environment.Settings().runway;
+            Check(elapsed>0 && Near(final.origin.north-initial.origin.north,expected.north*elapsed)
+                && Near(final.origin.east-initial.origin.east,expected.east*elapsed)
+                && Near(final.origin.up,initial.origin.up),"native steps preserve a fixed runway until JointMobile");
+            auto const action=ApplyPhaseControls({0,0,0,0,0,true},Phase::Approach,c.initial,stage);
+            Check(action.gearDown==(IsCaptureLesson(stage) ? c.initial.gearDown : true),
+                "JointMobile retains learned landing gear rather than capture-only controls");
+        }
+        Check(positionVaries && heightVaries,"a fixed runway still changes position and altitude between episodes");
+    }
+}
+
 void IndependentResetAttitude(Config c)
 {
     c.initial.distanceMeters={6000,6000};c.initial.speedMps={60,60};
@@ -233,6 +272,7 @@ int main()
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
         PropulsionAndPhaseReset(c);
+        CurriculumRunwayMotion(c);
         IndependentResetAttitude(c);
         NativeCaptureCompletion(c);
         CloseApproachStarts(c);
@@ -306,6 +346,10 @@ int main()
         Check(last.truncated && !last.terminated,"actual FDM time limit");
         Rejects([&] { shortEpisode.Step(action); },"step after reset boundary");
         auto random=LoadConfig(PPO_FLIGHT_CONFIG);
+        // Keep native moving/tilted contact coverage with waves disabled by default.
+        random.runwayRandomization.heaveAmplitudeMeters={0.4,0.8};
+        random.runwayRandomization.pitchAmplitudeDegrees={0.1,0.25};
+        random.runwayRandomization.rollAmplitudeDegrees={0.2,0.4};
         random.initial.runwayAlignedProbability=1;
         FlightEnvironment randomized(random);
         for(int episode=0;episode<32;++episode)

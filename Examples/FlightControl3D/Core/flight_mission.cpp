@@ -11,7 +11,7 @@ double Distance(Vec3 const& a, Vec3 const& b) noexcept
 }
 Vec3 RelativeVelocity(Runway const& r, AircraftState const& state) noexcept
 {
-    auto const velocity=Subtract(state.velocity,DeckVelocity(r,state.position));
+    auto const velocity=Subtract(state.velocity,RunwaySurfaceVelocity(r,state.position));
     return {Dot(velocity,RunwayForward(r)),Dot(velocity,RunwayRight(r)),Dot(velocity,RunwayNormal(r))};
 }
 double GuidanceQuality(double error, double tolerance) noexcept
@@ -526,7 +526,7 @@ Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& miss
 bool CaptureGateQualified(Config const& c,CurriculumStage stage,
     MissionState const& mission,AircraftState const& aircraft,Guidance const& g) noexcept
 {
-    if(stage==CurriculumStage::Joint || mission.phase!=Phase::Approach
+    if(!IsCaptureLesson(stage) || mission.phase!=Phase::Approach
         || mission.outcome!=Outcome::Flying || !mission.capturedLocalizer || !IsFinite(aircraft)
         || aircraft.weightOnWheels || aircraft.structuralContact || !g.ilsValid
         || !(g.along<0) || !(g.height>c.mission.flareHeightMeters)
@@ -762,7 +762,7 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         }
         // Capture lessons end at their own stabilized objective; Joint still
         // requires touchdown and a complete safe stop. Check every FDM substep.
-        if(s.outcome==Outcome::Flying && c.training.curriculumStage!=CurriculumStage::Joint)
+        if(s.outcome==Outcome::Flying && IsCaptureLesson(c.training.curriculumStage))
         {
             s.captureGateSeconds=CaptureGateQualified(c,c.training.curriculumStage,s,after,g)
                 ? std::min(s.captureGateSeconds+dt,c.training.gateHoldSeconds) : 0;
@@ -792,7 +792,7 @@ Observation Observe(Config const& c, FlightPlan const& plan, MissionState const&
     // Front-side LOC lies in [-pi/2, pi/2], where sine is signed and strictly
     // monotonic. Unlike the former sector-based scale, it never clips at 35°.
     double const localizerObservation=LocalizerShapingEnvelope(c,g) ? std::sin(g.localizer) : 0;
-    auto const deckVelocity=DeckVelocity(c.runway,a.position);
+    auto const deckVelocity=RunwaySurfaceVelocity(c.runway,a.position);
     auto const normal=RunwayNormal(c.runway);
     return {Unit(forward/n.distance), Unit(right/n.distance),
         Unit(g.targetValid ? (g.target.up-a.position.up)/n.altitude : 0),
@@ -806,7 +806,7 @@ Observation Observe(Config const& c, FlightPlan const& plan, MissionState const&
         Unit(a.gearPosition), Unit(a.weightOnWheels), Unit(s.phase==Phase::Patrol), Unit(s.phase==Phase::Approach), Unit(s.phase==Phase::Rollout),
         Unit(static_cast<double>(s.steps)*c.mission.physicsDt/c.mission.maxSeconds), Unit(s.capturedLocalizer), Unit(s.capturedGlide),
         Unit(s.touchedDown), Unit(s.touchdownFromThreshold/n.distance), Unit((c.runway.lengthMeters-g.along)/n.distance),
-        Unit(c.training.curriculumStage!=CurriculumStage::Joint && s.phase==Phase::Approach
+        Unit(IsCaptureLesson(c.training.curriculumStage) && s.phase==Phase::Approach
             ? s.captureGateSeconds/c.training.gateHoldSeconds : s.stoppedSeconds/c.mission.stoppedHoldSeconds),
         Unit(deckVelocity.north/n.speed),Unit(deckVelocity.east/n.speed),Unit(deckVelocity.up/n.speed),
         Unit(normal.north),Unit(normal.east),Unit(normal.up),Unit(c.runway.angularVelocity.north/n.rate),

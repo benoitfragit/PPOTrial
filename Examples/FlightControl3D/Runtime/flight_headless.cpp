@@ -30,7 +30,7 @@ int main(int argc, char** argv)
             if (option=="--evaluate") { training=false; continue; }
             if (option=="--help")
             {
-                std::cout<<"FlightControlHeadless [--config FILE] [--output DIRECTORY] [--updates N] [--stage loc|glide|joint] [--evaluate --episodes N]\n";
+                std::cout<<"FlightControlHeadless [--config FILE] [--output DIRECTORY] [--updates N] [--stage loc|glide|joint|joint-mobile] [--evaluate --episodes N]\n";
                 return 0;
             }
             if (option!="--config" && option!="--output" && option!="--updates" && option!="--episodes" && option!="--stage")
@@ -45,7 +45,8 @@ int main(int argc, char** argv)
                 if(value=="loc") stage=CurriculumStage::Loc;
                 else if(value=="glide") stage=CurriculumStage::Glide;
                 else if(value=="joint") stage=CurriculumStage::Joint;
-                else throw std::invalid_argument("Expected curriculum stage loc, glide or joint");
+                else if(value=="joint-mobile") stage=CurriculumStage::JointMobile;
+                else throw std::invalid_argument("Expected curriculum stage loc, glide, joint or joint-mobile");
             }
             else episodes=Positive(argv[i]);
         }

@@ -357,7 +357,7 @@ PolicyVector FlightLearner::Evaluate(Observation const& observation) { return im
 PolicyAction FlightLearner::Choose(Observation const& observation, bool deterministic)
 {
     auto const& config=impl_->config;
-    bool const landingLesson=config.training.curriculumStage==CurriculumStage::Joint;
+    bool const landingLesson=!IsCaptureLesson(config.training.curriculumStage);
     bool const rollout=observation[RolloutObservation]>0.5F;
     return Sample(impl_->Evaluate(observation),config.training,impl_->rng,deterministic,
         rollout,landingLesson,config.initial.gearDown);

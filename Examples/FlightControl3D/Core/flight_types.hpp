@@ -39,11 +39,16 @@ struct Controls final
 
 enum class Phase : std::uint8_t { Patrol, Approach, Rollout };
 enum class Outcome : std::uint8_t { Flying, Stopped, Crash, Timeout, CaptureCompleted };
-/** One policy, three independent training scenarios. The desktop defaults to Joint. */
-enum class CurriculumStage : std::uint8_t { Loc, Glide, Joint };
+/** One policy: fixed-runway capture/landing, then a separate moving-runway lesson. */
+enum class CurriculumStage : std::uint8_t { Loc, Glide, Joint, JointMobile };
+inline constexpr bool IsCaptureLesson(CurriculumStage stage) noexcept
+{
+    return stage==CurriculumStage::Loc || stage==CurriculumStage::Glide;
+}
 inline constexpr char const* StageName(CurriculumStage stage) noexcept
 {
-    return stage==CurriculumStage::Loc ? "loc" : stage==CurriculumStage::Glide ? "glide" : "joint";
+    return stage==CurriculumStage::Loc ? "loc" : stage==CurriculumStage::Glide ? "glide"
+        : stage==CurriculumStage::Joint ? "joint" : "joint-mobile";
 }
 /** @brief Active navigation reference exposed to the policy snapshot and renderer. */
 enum class GuidanceMode : std::uint8_t { Patrol, Localizer, Glide, Flare, Rollout };
@@ -53,7 +58,10 @@ struct Guidance final
     double along{}, cross{}, distance{}, localizer{}, glideError{};
     double targetSpeed{}, targetSlope{}, pathDistance{}, courseError{};
     double height{};
-    Vec3 target{}, relativeVelocity{};
+    Vec3 target{};
+    /** Aircraft minus nearest deck-surface velocity, expressed in runway axes.
+     * Physical relative velocity, not the derivative of rotating coordinates. */
+    Vec3 relativeVelocity{};
     /** @brief Source that owns the current target point and speed/slope commands. */
     GuidanceMode mode{GuidanceMode::Patrol};
     /** @brief True only when target/course-error fields are an active control reference. */

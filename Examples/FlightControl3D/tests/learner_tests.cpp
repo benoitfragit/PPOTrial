@@ -119,7 +119,7 @@ void ActiveControls(Config c)
             && loss.derivative[ContinuousActions+4]==0,"airborne brakes are neither sampled nor optimized");
         if(!gearActive) Check(!action.gearDown && loss.derivative.back()==0,"fixed capture gear is neither sampled nor optimized");
     }
-    for(auto stage:{CurriculumStage::Loc,CurriculumStage::Glide,CurriculumStage::Joint})
+    for(auto stage:{CurriculumStage::Loc,CurriculumStage::Glide,CurriculumStage::Joint,CurriculumStage::JointMobile})
     {
         c.training.curriculumStage=stage;
         FlightLearner learner(c);Observation observation{};
@@ -127,7 +127,7 @@ void ActiveControls(Config c)
         {
             auto const action=learner.Choose(observation);
             Check(!action.brakeActive && action.raw[4]==0
-                && action.gearActive==(stage==CurriculumStage::Joint)
+                && action.gearActive==!IsCaptureLesson(stage)
                 && (action.gearActive || action.gearDown==c.initial.gearDown),
                 "native learner selects action masks from lesson and physical phase");
         }

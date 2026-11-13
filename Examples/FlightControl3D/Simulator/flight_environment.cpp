@@ -9,7 +9,7 @@ Config Checked(Config config) { Validate(config); return config; }
 /** Limit early lessons to capture and basic pilotage; Joint retains the full distribution. */
 void ConfigureCaptureLesson(Config& config) noexcept
 {
-    if(config.training.curriculumStage==CurriculumStage::Joint) return;
+    if(!IsCaptureLesson(config.training.curriculumStage)) return;
     auto const& start=config.training.captureStart;
     auto& initial=config.initial;
     initial.speedMps={config.mission.approachSpeed-start.speedToleranceMps,
@@ -26,7 +26,7 @@ Controls ApplyPhaseControls(Controls controls, Phase phase, InitialSettings cons
     controls.flap=phase==Phase::Patrol ? initial.flap
         : phase==Phase::Approach ? initial.approachFlap : initial.rolloutFlap;
     if(phase!=Phase::Rollout) controls.brake=0.0;
-    if(stage!=CurriculumStage::Joint) controls.gearDown=initial.gearDown;
+    if(IsCaptureLesson(stage)) controls.gearDown=initial.gearDown;
     return controls;
 }
 FlightEnvironment::FlightEnvironment(Config config, std::filesystem::path const& data, std::optional<std::uint32_t> randomSeed)
@@ -43,11 +43,13 @@ Observation FlightEnvironment::Reset()
     bool const reminder=stage==CurriculumStage::Glide
         && std::bernoulli_distribution(config_.training.locReminderProbability)(rng_);
     episodeConfig_.training.curriculumStage=reminder ? CurriculumStage::Loc : stage;
+    // Static landing must be learned before the separate JointMobile gate.
+    if(stage!=CurriculumStage::JointMobile) episodeConfig_.runwayRandomization.speedMps={0,0};
     ConfigureCaptureLesson(episodeConfig_);
     auto const active=episodeConfig_.training.curriculumStage;
-    mission_.phase = active!=CurriculumStage::Joint || !config_.mission.patrolEnabled || config_.initial.approach
+    mission_.phase = IsCaptureLesson(active) || !config_.mission.patrolEnabled || config_.initial.approach
         ? Phase::Approach : Phase::Patrol;
-    motion_=SampleRunway(config_,rng_);
+    motion_=SampleRunway(episodeConfig_,rng_);
     episodeConfig_.runway=RunwayAt(motion_,0);
     plan_=MakeFlightPlan(episodeConfig_);
     fdm_.SetRunwayMotion(motion_);

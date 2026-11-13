@@ -1,4 +1,5 @@
 #include "runway_motion.hpp"
+#include <algorithm>
 
 namespace ppo::examples::flight {
 Vec3 Add(Vec3 a, Vec3 b) noexcept { return {a.north+b.north,a.east+b.east,a.up+b.up}; }
@@ -27,6 +28,13 @@ Vec3 DeckCoordinates(Runway const& r, Vec3 point) noexcept
 }
 Vec3 DeckVelocity(Runway const& r, Vec3 point) noexcept
 { return Add(r.velocity,Cross(r.angularVelocity,Subtract(point,r.origin))); }
+Vec3 RunwaySurfaceVelocity(Runway const& r, Vec3 point) noexcept
+{
+    auto const local=DeckCoordinates(r,point);
+    auto const offset=Add(Scale(RunwayForward(r),std::clamp(local.north,0.0,r.lengthMeters)),
+        Scale(RunwayRight(r),std::clamp(local.east,-r.widthMeters/2,r.widthMeters/2)));
+    return Add(r.velocity,Cross(r.angularVelocity,offset));
+}
 
 Runway RunwayAt(RunwayMotion const& motion, double seconds) noexcept
 {
