@@ -189,8 +189,8 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics["distribution"] = {training.minLogStd,training.maxLogStd};
     // The raw-Gaussian-to-FCS mapping is part of the checkpoint policy contract.
     semantics["actionMappingVersion"] = 2;
-    semantics["rewardVersion"] = 12;
-    semantics["guidanceVersion"] = 15;
+    semantics["rewardVersion"] = 13;
+    semantics["guidanceVersion"] = 16;
     semantics["spawnVersion"] = 4;
     semantics["curriculumVersion"] = 5;
     semantics["policyLikelihoodVersion"] = 2;
@@ -216,7 +216,8 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
             && (*signature)["rewardVersion"]!=5 && (*signature)["rewardVersion"]!=6
             && (*signature)["rewardVersion"]!=7 && (*signature)["rewardVersion"]!=8
             && (*signature)["rewardVersion"]!=9 && (*signature)["rewardVersion"]!=10
-            && (*signature)["rewardVersion"]!=11 && (*signature)["rewardVersion"]!=12) return false;
+            && (*signature)["rewardVersion"]!=11 && (*signature)["rewardVersion"]!=12
+            && (*signature)["rewardVersion"]!=13) return false;
         if(signature->contains("guidanceVersion") && (*signature)["guidanceVersion"]!=2
             && (*signature)["guidanceVersion"]!=3 && (*signature)["guidanceVersion"]!=4
             && (*signature)["guidanceVersion"]!=5 && (*signature)["guidanceVersion"]!=6
@@ -224,7 +225,7 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
             && (*signature)["guidanceVersion"]!=9 && (*signature)["guidanceVersion"]!=10
             && (*signature)["guidanceVersion"]!=11 && (*signature)["guidanceVersion"]!=12
             && (*signature)["guidanceVersion"]!=13 && (*signature)["guidanceVersion"]!=14
-            && (*signature)["guidanceVersion"]!=15) return false;
+            && (*signature)["guidanceVersion"]!=15 && (*signature)["guidanceVersion"]!=16) return false;
         if(signature->contains("spawnVersion") && (*signature)["spawnVersion"]!=2
             && (*signature)["spawnVersion"]!=3 && (*signature)["spawnVersion"]!=4) return false;
         if(signature->contains("curriculumVersion") && (*signature)["curriculumVersion"]!=2

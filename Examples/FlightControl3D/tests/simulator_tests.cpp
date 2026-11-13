@@ -209,6 +209,10 @@ void CurriculumRunwayMotion(Config c)
             Check(Near(observation[42],expected.north/c.normalization.speed)
                 && Near(observation[43],expected.east/c.normalization.speed) && observation[44]==0,
                 "native policy observation receives the actual stage-specific runway velocity");
+            auto const relative=environment.CurrentGuidance().relativeVelocity;
+            double const course=std::atan2(relative.east,relative.north);
+            Check(Near(observation[27],std::sin(course)) && Near(observation[28],std::cos(course)),
+                "native JSBSim observations expose actual runway-relative course in all four stages");
             if(episode==0) first=initial;
             positionVaries|=initial.origin.north!=first.origin.north || initial.origin.east!=first.origin.east;
             heightVaries|=initial.origin.up!=first.origin.up;

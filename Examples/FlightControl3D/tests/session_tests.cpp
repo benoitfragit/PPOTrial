@@ -46,7 +46,7 @@ void DesktopContinuation(Config c)
 enum class TrainingContractChange
 {
     HorizontalStarts, Rewards, LegacyStarts, LegacyGuidance, AlignedProbability,
-    EpisodeBoundary, ApproachOnly, ResetAttitude, LegacyCurriculum, Exploration, PoweredFlight, WavesDisabled
+    EpisodeBoundary, ApproachOnly, ResetAttitude, LegacyCurriculum, Exploration, PoweredFlight, WavesDisabled, CourseObservation
 };
 void CommittedTrainingCheckpoint(Config c)
 {
@@ -124,11 +124,13 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
         signature.erase("curriculumVersion");
     else if(change==TrainingContractChange::WavesDisabled)
     {
-        signature["guidanceVersion"]=14;signature["curriculumVersion"]=4;
+        signature["rewardVersion"]=12;signature["guidanceVersion"]=14;signature["curriculumVersion"]=4;
         signature["runwayRandomization"]["heaveAmplitudeMeters"]={0,0.8};
         signature["runwayRandomization"]["pitchAmplitudeDegrees"]={0,0.25};
         signature["runwayRandomization"]["rollAmplitudeDegrees"]={0,0.4};
     }
+    else if(change==TrainingContractChange::CourseObservation)
+    {signature["guidanceVersion"]=15;signature["rewardVersion"]=12;}
     else if(change==TrainingContractChange::Exploration)
     {
         old.training.initialLogStd=-1;old.training.maxLogStd=0.5;
@@ -363,7 +365,7 @@ int main()
             TrainingContractChange::AlignedProbability,TrainingContractChange::EpisodeBoundary,
             TrainingContractChange::ApproachOnly,TrainingContractChange::ResetAttitude,
             TrainingContractChange::LegacyCurriculum,TrainingContractChange::Exploration,
-            TrainingContractChange::PoweredFlight,TrainingContractChange::WavesDisabled})
+            TrainingContractChange::PoweredFlight,TrainingContractChange::WavesDisabled,TrainingContractChange::CourseObservation})
             ChangedTrainingContract(c,change);
         c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
         c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;

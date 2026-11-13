@@ -580,6 +580,47 @@ void CapturePriority(Config const& c)
         && rolloutGuidance.target.east==flareAircraft.position.east,
         "flare and rollout cannot reactivate a threshold guidance line");
 }
+void RunwayCourseObservation(Config c)
+{
+    MissionState approach{};approach.phase=Phase::Approach;
+    for(double const heading : {0.0,90.0,181.0,359.0}) for(bool const mobile : {false,true})
+    {
+        c.runway.headingDegrees=heading;c.runway.origin={1200,-700,16};
+        c.runway.pitch=0.2*DegreesToRadians;c.runway.roll=-0.3*DegreesToRadians;
+        c.runway.velocity=mobile ? Vec3{4,-2,0.3} : Vec3{};
+        c.runway.angularVelocity=mobile ? Vec3{0.001,-0.002,0.003} : Vec3{};
+        for(double const side : {-1000.0,1000.0}) for(double const degrees : {-12.0,0.0,12.0})
+        {
+            auto aircraft=Approach(c,-5000,side);
+            aircraft.heading=WrapAngle(heading*DegreesToRadians+7*DegreesToRadians);
+            double const route=degrees*DegreesToRadians;
+            auto const reference=RunwaySurfaceVelocity(c.runway,aircraft.position);
+            aircraft.velocity=Add(reference,Add(Scale(RunwayForward(c.runway),56*std::cos(route)),
+                Add(Scale(RunwayRight(c.runway),56*std::sin(route)),Scale(RunwayNormal(c.runway),-3))));
+            auto const guidance=Guide(c,{},approach,aircraft);
+            auto const observation=Observe(c,{},approach,aircraft);
+            Check(Near(guidance.courseError,route,1e-10) && Near(observation[27],std::sin(route))
+                && Near(observation[28],std::cos(route)),
+                "approach explicitly observes runway-relative course, distinct from fuselage heading");
+            Check(!guidance.targetValid && observation[0]==0 && observation[1]==0 && observation[2]==0,
+                "observing the course never restores a competing guidance point");
+            aircraft.heading=WrapAngle(aircraft.heading-14*DegreesToRadians);
+            auto const slipped=Observe(c,{},approach,aircraft);
+            Check(Near(slipped[27],observation[27]) && Near(slipped[28],observation[28])
+                && !Near(slipped[15],observation[15]),"sideslip changes heading observations without changing physical course");
+        }
+    }
+    c.mission.patrolEnabled=true;
+    auto const plan=MakeFlightPlan(c);
+    MissionState patrol{};
+    auto aircraft=Approach(c);
+    auto const guidance=Guide(c,plan,patrol,aircraft);
+    double const pointError=WrapAngle(std::atan2(guidance.target.east-aircraft.position.east,
+        guidance.target.north-aircraft.position.north)-aircraft.heading);
+    Check(guidance.targetValid && Near(guidance.courseError,pointError),
+        "optional patrol retains its existing target-bearing error");
+}
+
 void SurfaceRelativeFlightPath(Config c)
 {
     for(double const heading : {0.0,90.0,247.0,359.0})
@@ -769,7 +810,7 @@ int main()
     try
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
-        SurfaceRelativeFlightPath(c);NoWaveScenario(c);
+        RunwayCourseObservation(c);SurfaceRelativeFlightPath(c);NoWaveScenario(c);
         ApproachOnly(c);Configuration();CaptureLessonTermination(c);
         c.mission.patrolEnabled=true; // Keep all legacy patrol/recovery regressions active.
         Geometry(c);Landing(c);OrderedNavigation(c);AlignedStarts(c);CapturePriority(c);RandomizationAndMotion(c);DisplayReferences(c);

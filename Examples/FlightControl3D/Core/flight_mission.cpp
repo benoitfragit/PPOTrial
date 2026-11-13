@@ -519,7 +519,8 @@ Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& miss
         g.targetValid=false;
     }
     g.courseError = g.targetValid
-        ? WrapAngle(std::atan2(g.target.east-a.position.east,g.target.north-a.position.north)-a.heading) : 0;
+        ? WrapAngle(std::atan2(g.target.east-a.position.east,g.target.north-a.position.north)-a.heading)
+        : std::atan2(g.relativeVelocity.east,g.relativeVelocity.north);
     return g;
 }
 
@@ -718,7 +719,7 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
                 add(channel,retreat ? std::min(improvement,0.0) : improvement);
             }
         }
-        if (s.phase == Phase::Approach)
+        if (s.phase == Phase::Approach && !IsCaptureLesson(c.training.curriculumStage))
         {
             if(enteredLocalizer) add(Reward::EnterLocalizer,1);
             if(enteredGlide && c.training.curriculumStage!=CurriculumStage::Loc) add(Reward::EnterGlide,1);
@@ -766,7 +767,14 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         {
             s.captureGateSeconds=CaptureGateQualified(c,c.training.curriculumStage,s,after,g)
                 ? std::min(s.captureGateSeconds+dt,c.training.gateHoldSeconds) : 0;
-            if(s.captureGateSeconds>=c.training.gateHoldSeconds) s.outcome=Outcome::CaptureCompleted;
+            if(s.captureGateSeconds>=c.training.gateHoldSeconds)
+            {
+                s.outcome=Outcome::CaptureCompleted;
+                // Reuse each lesson's existing event budget at its true objective.
+                // Geometric entries remain authoritative only in full landing lessons.
+                add(Reward::EnterLocalizer,1);
+                if(c.training.curriculumStage==CurriculumStage::Glide) add(Reward::EnterGlide,1);
+            }
         }
         if (s.outcome == Outcome::Flying && static_cast<double>(s.steps)*dt >= c.mission.maxSeconds)
             s.outcome = Outcome::Timeout;

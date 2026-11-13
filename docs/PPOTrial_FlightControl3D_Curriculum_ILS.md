@@ -10,6 +10,8 @@ Le curriculum amélioré termine les épisodes LOC/Glide dès leur capture stabi
 
 **Progression actuelle : LOC fixe → Glide fixe → Joint fixe → Joint mobile.** La vitesse de piste est exactement nulle pendant les trois premières gates ; seule `joint-mobile` utilise `runwayRandomization.speedMps=[0,3]`. La houle est coupée partout : amplitudes de pilonnement, tangage et roulis `[0,0]`. Position, cap et altitude de piste (14–16 m dans le repère local) restent aléatoires entre épisodes ; l'altitude ne varie plus pendant l'épisode. [Architecture et régressions du correctif #92](PPOTrial_FlightControl3D_Piste_Fixe_Joint_Mobile_Vitesse_Issue92_PR87.md).
 
+Le correctif #93 expose explicitement la route relative à la piste dans `course_error_sin/cos` en approche, sans point de guidage concurrent ni dimension réseau supplémentaire. Dans LOC/Glide, les bonus existants sont reportés à `CaptureCompleted`, après le maintien stabilisé complet. Les deux phases Joint conservent les événements d'entrée géométrique. [Observations, objectifs et régressions #93](PPOTrial_FlightControl3D_Observations_Route_Capture_Stabilisee_Issue93_PR87.md).
+
 Après l’échec du run curriculum #6 (1 000 updates, 100 validations à 0/20), les leçons LOC/Glide utilisent les mêmes tolérances nominales en apprentissage et en validation. `ilsCaptureScale` ne détend plus leur terminal ; il reste disponible pour Joint. Le scénario borne désormais le bruit gaussien : `initialLogStd=-3` (σ≈0,050), `maxLogStd=-2` (σ≈0,135), bonus d’entropie nul. Le mapping linéaire des gouvernes et leur pleine autorité restent identiques. Un ancien latest peut reprendre à une frontière d’update, avec de nouvelles vraisemblances ; le BEST exige une revalidation du contrat exact. Ces corrections ne constituent pas une preuve de convergence : [diagnostic, expériences et limites du correctif #90](PPOTrial_FlightControl3D_Diagnostic_Run6_Issue90_PR87.md).
 
 ## Contrat de shaping
@@ -31,7 +33,7 @@ Par sous-pas physique de 0,01 s (sans décadence ni maintien constant) :
 - r_V = 1 (Q_V_après - Q_V_avant), Q_V = 15/(15+|Vair - Vcible|).
 - r_pente = 1 (Q_pente_après - Q_pente_avant).
 
-Le reward total d'une action PPO est la somme de ses sous-pas JSBSim. Une transition hors enveloppe annule le delta de la composante correspondante ; une progression négative vers le seuil interdit un reward LOC/Glide positif. Ces exceptions signifient que le retour n'est pas strictement un potentiel global garanti invariant pour PPO avec gamma<1 : ce choix de façonnage est à évaluer expérimentalement. Les bonus événementiels +2/+2/+100/+100/−100 sont inchangés.
+Le reward total d'une action PPO est la somme de ses sous-pas JSBSim. Une transition hors enveloppe annule le delta de la composante correspondante ; une progression négative vers le seuil interdit un reward LOC/Glide positif. Ces exceptions signifient que le retour n'est pas strictement un potentiel global garanti invariant pour PPO avec gamma<1 : ce choix de façonnage est à évaluer expérimentalement. Les poids événementiels +2/+2/+100/+100/−100 restent identiques. En LOC, `EnterLocalizer=+2` est versé uniquement au succès stabilisé ; en Glide, `EnterLocalizer=+2` et `EnterGlide=+2` le sont au succès stabilisé complet. Aucun de ces bonus n'est versé lors d'un simple passage, d'une stabilisation interrompue, d'un timeout ou d'un crash. En Joint fixe/mobile, leur attribution géométrique historique est conservée.
 
 ## Curriculum à réseau unique
 

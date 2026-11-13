@@ -56,7 +56,9 @@ enum class GuidanceMode : std::uint8_t { Patrol, Localizer, Glide, Flare, Rollou
 struct Guidance final
 {
     double along{}, cross{}, distance{}, localizer{}, glideError{};
-    double targetSpeed{}, targetSlope{}, pathDistance{}, courseError{};
+    double targetSpeed{}, targetSlope{}, pathDistance{};
+    /** Patrol: target bearing minus heading. Approach/rollout: physical course relative to runway. */
+    double courseError{};
     double height{};
     Vec3 target{};
     /** Aircraft minus nearest deck-surface velocity, expressed in runway axes.
@@ -64,7 +66,7 @@ struct Guidance final
     Vec3 relativeVelocity{};
     /** @brief Source that owns the current target point and speed/slope commands. */
     GuidanceMode mode{GuidanceMode::Patrol};
-    /** @brief True only when target/course-error fields are an active control reference. */
+    /** @brief True only when the geometric target point is an active control reference. */
     bool targetValid{};
     bool ilsValid{};
 };

@@ -195,6 +195,72 @@ void MovingFrame(Config c)
     c.reward.localizerInterceptLimitDegrees=90;
     Rejects([&] {Validate(c);},"LOC intercept limit below ninety degrees required");
 }
+void StabilizedCaptureBonuses(Config c)
+{
+    auto aligned=WithCourse(c,At(c,-5000,0,c.runway.thresholdHeightMeters
+        +5000*std::tan(c.mission.glideDegrees*DegreesToRadians)),0);
+    aligned.velocity.up=-c.mission.approachSpeed*std::tan(c.mission.glideDegrees*DegreesToRadians);
+    auto crossing=WithCourse(c,aligned,20);
+    auto const loc=static_cast<std::size_t>(Reward::EnterLocalizer);
+    auto const glide=static_cast<std::size_t>(Reward::EnterGlide);
+    for(auto const stage : {CurriculumStage::Loc,CurriculumStage::Glide})
+    {
+        c.training.curriculumStage=stage;
+        MissionState mission{};mission.phase=Phase::Approach;
+        for(int step=0;step<120;++step)
+        {
+            auto const result=AdvanceMission(c,{},mission,crossing,crossing);
+            Check(mission.outcome==Outcome::Flying && result.rewards[loc]==0 && result.rewards[glide]==0,
+                "geometric beam crossings do not earn capture-lesson success bonuses");
+        }
+        Check(mission.capturedLocalizer && mission.capturedGlide,"transient pass really acquired the geometric beams");
+        for(int step=0;step<50;++step) AdvanceMission(c,{},mission,aligned,aligned);
+        auto unstable=aligned;unstable.rollRate=2*c.training.gateRateDegreesPerSecond*DegreesToRadians;
+        auto const interrupted=AdvanceMission(c,{},mission,aligned,unstable);
+        Check(mission.captureGateSeconds==0 && interrupted.rewards[loc]==0 && interrupted.rewards[glide]==0,
+            "an interrupted stabilization hold earns no success bonus");
+        double localizerBonus{},glideBonus{};
+        for(int step=0;step<300 && mission.outcome==Outcome::Flying;++step)
+        {
+            auto const result=AdvanceMission(c,{},mission,aligned,aligned);
+            localizerBonus+=result.rewards[loc];glideBonus+=result.rewards[glide];
+            if(mission.outcome==Outcome::Flying)
+                Check(result.rewards[loc]==0 && result.rewards[glide]==0,"partial stabilization remains unrewarded");
+        }
+        Check(mission.outcome==Outcome::CaptureCompleted && Near(localizerBonus,c.reward.weights[loc])
+            && Near(glideBonus,stage==CurriculumStage::Glide ? c.reward.weights[glide] : 0),
+            "stabilized completion pays the existing lesson bonuses exactly once");
+        Check(AdvanceMission(c,{},mission,aligned,aligned).reward==0,"terminal capture bonus never repeats");
+        MissionState timeout{};timeout.phase=Phase::Approach;
+        timeout.capturedLocalizer=timeout.capturedGlide=true;
+        timeout.captureGateSeconds=c.training.gateHoldSeconds/2;
+        timeout.steps=static_cast<std::uint64_t>(std::ceil(c.mission.maxSeconds/c.mission.physicsDt));
+        auto const expired=AdvanceMission(c,{},timeout,aligned,aligned);
+        Check(expired.truncated && expired.rewards[loc]==0 && expired.rewards[glide]==0,
+            "timeout cannot collect an unfinished stabilized success bonus");
+        MissionState failure{};failure.phase=Phase::Approach;
+        failure.capturedLocalizer=failure.capturedGlide=true;
+        failure.captureGateSeconds=c.training.gateHoldSeconds-c.mission.physicsDt;
+        auto crashed=aligned;crashed.structuralContact=true;
+        auto const rejected=AdvanceMission(c,{},failure,aligned,crashed);
+        Check(failure.outcome==Outcome::Crash && rejected.rewards[loc]==0 && rejected.rewards[glide]==0,
+            "crash remains authoritative at the last stabilized-capture substep");
+    }
+    for(auto const stage : {CurriculumStage::Joint,CurriculumStage::JointMobile})
+    {
+        c.training.curriculumStage=stage;
+        MissionState mission{};mission.phase=Phase::Approach;
+        double localizerBonus{},glideBonus{};
+        for(int step=0;step<120;++step)
+        {
+            auto const result=AdvanceMission(c,{},mission,crossing,crossing);
+            localizerBonus+=result.rewards[loc];glideBonus+=result.rewards[glide];
+        }
+        Check(mission.outcome==Outcome::Flying && Near(localizerBonus,c.reward.weights[loc])
+            && Near(glideBonus,c.reward.weights[glide]),"both full landing lessons retain their geometric entry events");
+    }
+}
+
 void TrueSnapshotCycle(Config c)
 {
     c.mission.patrolEnabled=false;
@@ -218,6 +284,7 @@ int main()
     try
     {
         auto config=LoadConfig(PPO_FLIGHT_CONFIG);
+        StabilizedCaptureBonuses(config);
         TrueSnapshotCycle(config);
         config.mission.patrolEnabled=true; // Exercise the preserved optional patrol path reward.
         Convergence(config);ProgressAndAmplitude(config);SpeedAndSlopeShaping(config);SecondaryGuidance(config);MovingFrame(config);
