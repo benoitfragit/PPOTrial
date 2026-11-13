@@ -84,6 +84,9 @@ int main(int argc, char** argv)
             }
             if(state.validationCampaigns!=previousValidations)
             {
+                if(state.locRetentionEvaluated>0)
+                    std::cout<<"[FLIGHT_RETENTION] stage=loc successes="<<state.locRetentionSuccesses
+                        <<" episodes="<<state.locRetentionEvaluated<<std::endl;
                 double const success=state.gateEvaluated>0
                     ? static_cast<double>(state.gateSuccesses)/static_cast<double>(state.gateEvaluated) : 0;
                 std::cout<<"[FLIGHT_VALIDATION] update="<<state.lastValidation.update<<" episodes="<<state.lastValidation.episodes

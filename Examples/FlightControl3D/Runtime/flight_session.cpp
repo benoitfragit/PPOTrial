@@ -13,6 +13,7 @@ std::uint64_t AdditionalUpdateLimit(std::uint64_t updates,std::size_t additional
 }
 Config EnvironmentConfig(Config config,bool training)
 {
+    if(!training) config.training.locReminderProbability=0;
     // Capture lessons terminate at their objective: widening that objective
     // teaches early exits that cannot pass the nominal independent gate.
     if(!training || IsCaptureLesson(config.training.curriculumStage)) return config;
@@ -112,14 +113,25 @@ FlightSnapshot FlightSession::Snapshot() const noexcept
     state.trainingUpdateLimit=trainingUpdateLimit_;state.resumed=resumed_;
     state.curriculumStage=config_.training.curriculumStage;
     state.gateSuccesses=lastGateSuccesses_;state.gateEvaluated=lastGateEvaluated_;
+    state.episodeStage=active.Settings().training.curriculumStage;
+    state.locRetentionSuccesses=lastLocRetentionSuccesses_;
+    state.locRetentionEvaluated=lastLocRetentionEvaluated_;
     return state;
 }
 void FlightSession::StartValidation()
 {
+    validatingLocRetention_=false;
+    lastLocRetentionSuccesses_=0;lastLocRetentionEvaluated_=0;
+    BeginValidationStage(config_.training.curriculumStage);
+}
+void FlightSession::BeginValidationStage(CurriculumStage stage)
+{
     validation_={};validation_.update=learner_.Stats().updates;
     validationPendingReset_=false;lastStep_={};controls_={};
     validationGateSuccesses_=0;
-    validationEnvironment_=std::make_unique<FlightEnvironment>(config_,DefaultDataRoot(),config_.evaluation.seed);
+    auto validationConfig=EnvironmentConfig(config_,false);
+    validationConfig.training.curriculumStage=stage;
+    validationEnvironment_=std::make_unique<FlightEnvironment>(validationConfig,DefaultDataRoot(),config_.evaluation.seed);
     validationEnvironment_->Reset();
 }
 void FlightSession::TickValidation()
@@ -133,21 +145,39 @@ void FlightSession::TickValidation()
     controls_=ToControls(action,config_.initial.throttle);
     lastStep_=evaluation.Step(controls_);
     // No Record/Optimize here: training rollout, optimizer and RNG remain frozen.
-    auto const stage=config_.training.curriculumStage;
+    auto const stage=validatingLocRetention_ ? CurriculumStage::Loc : config_.training.curriculumStage;
     if(lastStep_.terminated || lastStep_.truncated)
     {
-        if(IsCaptureLesson(stage) && evaluation.Mission().outcome==Outcome::CaptureCompleted)
+        if(IsCaptureLesson(stage) && evaluation.Settings().training.curriculumStage==stage
+            && evaluation.Mission().outcome==Outcome::CaptureCompleted)
             ++validationGateSuccesses_;
         validation_.Record(evaluation.Mission());
         if(validation_.episodes<config_.evaluation.episodes) validationPendingReset_=true;
         else
         {
-            // Intermediate capture gates never promote a landing BEST.
-            if(!IsCaptureLesson(stage)) models_.Promote(learner_,validation_);
-            best_=models_.BestMetrics(true);lastValidation_=validation_;++validationCampaigns_;
-            lastGateSuccesses_=IsCaptureLesson(stage) ? validationGateSuccesses_ : validation_.stops;
-            lastGateEvaluated_=validation_.episodes;
+            if(validatingLocRetention_)
+            {
+                lastLocRetentionSuccesses_=validationGateSuccesses_;
+                lastLocRetentionEvaluated_=validation_.episodes;
+            }
+            else
+            {
+                // Intermediate capture gates never promote a landing BEST.
+                if(!IsCaptureLesson(stage)) models_.Promote(learner_,validation_);
+                best_=models_.BestMetrics(true);lastValidation_=validation_;
+                lastGateSuccesses_=IsCaptureLesson(stage) ? validationGateSuccesses_ : validation_.stops;
+                lastGateEvaluated_=validation_.episodes;
+                if(stage==CurriculumStage::Glide)
+                {
+                    // Report retention separately; LOC captures cannot inflate the Glide gate.
+                    validatingLocRetention_=true;
+                    BeginValidationStage(CurriculumStage::Loc);
+                    return;
+                }
+            }
+            ++validationCampaigns_;
             validationEnvironment_.reset();
+            validatingLocRetention_=false;
             lastStep_={};controls_={};
             finished_=learner_.Stats().updates>=trainingUpdateLimit_;
         }

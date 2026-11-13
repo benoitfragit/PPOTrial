@@ -351,6 +351,63 @@ void RunwayBestQualification(Config c)
     Check(!fixedStore.BestMetrics(true),"mobile and fixed BEST scores cannot be interchanged");
 }
 
+void SeparateGlideValidation(Config c)
+{
+    c.training.curriculumStage=CurriculumStage::Glide;
+    c.training.locReminderProbability=1.0;
+    c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
+    c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;
+    TemporaryDirectory directory("flight-pure-glide-validation-");
+    FlightSession session(c,true,directory.path);
+    Check(std::abs(session.Snapshot().guidance.localizer)>3*DegreesToRadians,
+        "training retains the forced LOC reminder's off-axis placement");
+    for(std::size_t step=0;step<c.training.rolloutSteps;++step) session.Tick();
+    Check(session.Snapshot().validating && std::abs(session.Snapshot().guidance.localizer)<0.1*DegreesToRadians,
+        "Glide validation starts on the localizer even when training uses only LOC reminders");
+    Check(session.Snapshot().episodeStage==CurriculumStage::Glide,
+        "validation exposes its actual Glide lesson independently of training reminders");
+    FlightModelStore store(c,directory.path);
+    auto const checkpoint=ReadFile(store.Latest());
+    bool checkedRetention=false;
+    for(int step=0;step<1000 && !session.Finished();++step)
+    {
+        auto const snapshot=session.Snapshot();
+        if(snapshot.validating && snapshot.episodeStage==CurriculumStage::Loc)
+        {
+            checkedRetention=true;
+            Check(snapshot.gateEvaluated==c.evaluation.episodes && snapshot.validationCampaigns==0,
+                "LOC retention begins after the full Glide sample without publishing an incomplete campaign");
+        }
+        session.Tick();
+    }
+    auto const completed=session.Snapshot();
+    Check(session.Finished() && checkedRetention && completed.validationCampaigns==1
+        && completed.gateEvaluated==c.evaluation.episodes
+        && completed.lastValidation.episodes==c.evaluation.episodes
+        && completed.locRetentionEvaluated==c.evaluation.episodes,
+        "Glide and LOC retention each evaluate a separate full sample");
+    session.Learner().Save(directory.path/"after-validation.txt");
+    Check(ReadFile(directory.path/"after-validation.txt")==checkpoint && session.Learner().Collected()==0
+        && !std::filesystem::exists(directory.path/"best/current.json"),
+        "both validation samples preserve weights, Adam, RNG, rollout and landing BEST");
+
+    // Controlled pilotage tolerances make LOC easy while an offset Glide cannot
+    // enter its narrow beam during this one-second fixture. No trained success is claimed.
+    c.mission.maxSeconds=1;c.mission.captureHoldSeconds=c.mission.physicsDt;
+    c.mission.localizerCaptureDegrees=11;c.mission.glideCaptureDegrees=0.001;
+    c.training.gateHoldSeconds=c.mission.physicsDt;
+    c.training.gateHeadingDegrees=20;c.training.gateRouteDegrees=20;
+    c.training.gateRollDegrees=20;c.training.gateRateDegreesPerSecond=30;
+    c.training.gateSpeedToleranceMps=15;
+    TemporaryDirectory countedDirectory("flight-retention-not-glide-");
+    FlightSession counted(c,true,countedDirectory.path);
+    for(int step=0;step<1000 && !counted.Finished();++step) counted.Tick();
+    auto const separate=counted.Snapshot();
+    Check(counted.Finished() && separate.locRetentionSuccesses==c.evaluation.episodes
+        && separate.gateSuccesses==0 && separate.gateEvaluated==c.evaluation.episodes,
+        "successful LOC retention episodes cannot count as Glide successes");
+}
+
 int main()
 {
     try
@@ -360,6 +417,7 @@ int main()
         DesktopContinuation(c);
         RunwayBestQualification(c);
         NominalCaptureLessons(c);
+        SeparateGlideValidation(c);
         for(auto change : {TrainingContractChange::HorizontalStarts,TrainingContractChange::Rewards,
             TrainingContractChange::LegacyStarts,TrainingContractChange::LegacyGuidance,
             TrainingContractChange::AlignedProbability,TrainingContractChange::EpisodeBoundary,

@@ -34,6 +34,9 @@ struct FlightSnapshot final
     bool resumed{};
     CurriculumStage curriculumStage{CurriculumStage::Joint};
     std::size_t gateSuccesses{},gateEvaluated{};
+    /** Effective lesson, including training reminders and the separate LOC retention check. */
+    CurriculumStage episodeStage{CurriculumStage::Joint};
+    std::size_t locRetentionSuccesses{},locRetentionEvaluated{};
 };
 
 /** Shared orchestration for the current desktop framework and CPU headless runner. */
@@ -70,7 +73,10 @@ private:
     std::size_t inferenceEpisodeLimit_{};
     bool validationPendingReset_{};
     std::size_t validationGateSuccesses_{},lastGateSuccesses_{},lastGateEvaluated_{};
+    bool validatingLocRetention_{};
+    std::size_t lastLocRetentionSuccesses_{},lastLocRetentionEvaluated_{};
     void StartValidation();
+    void BeginValidationStage(CurriculumStage stage);
     void TickValidation();
 };
 } // namespace ppo::examples::flight
