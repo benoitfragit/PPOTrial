@@ -240,11 +240,12 @@ void Configuration()
         if (test==45) json["training"]["curriculum"]["captureStart"]["unknown"]=true;
         if (test==46)
         {
+            double const minimumDistance=json["initial"]["distanceMeters"][0].get<double>();
             json["initial"]["bearingDegrees"]={30,32};
             json["runwayRandomization"]["pitchAmplitudeDegrees"]={0,0};
             json["runwayRandomization"]["rollAmplitudeDegrees"]={0,0};
             json["training"]["curriculum"]["captureStart"]["localizerHeightOffsetMeters"]=
-                15+4000*std::cos(32*DegreesToRadians)*std::tan(3*DegreesToRadians)-20+1;
+                15+minimumDistance*std::cos(32*DegreesToRadians)*std::tan(3*DegreesToRadians)-20+1;
         }
         { std::ofstream stream(path); stream<<json; }
         Rejects([&] { LoadConfig(path); },"invalid JSON accepted");

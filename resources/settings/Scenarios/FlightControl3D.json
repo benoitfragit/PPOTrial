@@ -29,7 +29,7 @@
   },
   "initial": {
     "runwayAlignedProbability": 0.3333333333333333,
-    "approach": true, "gearDown": false, "distanceMeters": [4000.0, 6500.0], "bearingDegrees": [4.0, 10.0],
+    "approach": true, "gearDown": false, "distanceMeters": [5000.0, 7500.0], "bearingDegrees": [3.0, 6.0],
     "heightMeters": [180.0, 400.0], "speedMps": [55.0, 80.0], "pitchDegrees": [-4.0, 8.0],
     "headingOffsetDegrees": [-2.0, 2.0], "rollDegrees": [-15.0, 15.0], "slopeDegrees": [-3.0, 3.0],
     "throttle": 0.65, "flap": 0.0, "approachFlap": 0.33, "rolloutFlap": 0.33, "propeller": 1.0, "mixture": 1.0
@@ -50,7 +50,7 @@
     "seed": 42, "rolloutSteps": 2048, "minibatch": 64, "epochs": 4, "maxUpdates": 10000, "checkpointEvery": 1, "hiddenWidth": 128,
     "ilsCaptureScale": 2.0,
     "curriculum": {"stage": "joint", "locReminderProbability": 0.30,
-      "glideOffsetMeters": 120.0, "gateHoldSeconds": 2.0,
+      "glideOffsetMeters": 120.0, "gateHoldSeconds": 10.0,
       "gateHeadingDegrees": 5.0, "gateRouteDegrees": 5.0, "gateSlopeDegrees": 1.5,
       "gateSpeedToleranceMps": 5.0, "gateRollDegrees": 8.0, "gateRateDegreesPerSecond": 5.0,
       "captureMaxSeconds": 120.0,

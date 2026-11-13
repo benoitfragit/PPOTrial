@@ -140,8 +140,9 @@ void InterceptActionReward(Config const& config)
 
 void CloseApproachStarts(Config c)
 {
-    Check(!c.mission.patrolEnabled && c.initial.distanceMeters.minimum==4000
-        && c.initial.distanceMeters.maximum==6500,"delivered starts are closer to the ILS cone");
+    Check(!c.mission.patrolEnabled && c.initial.distanceMeters.minimum==5000
+        && c.initial.distanceMeters.maximum==7500 && c.initial.bearingDegrees.minimum==3
+        && c.initial.bearingDegrees.maximum==6,"delivered starts leave tracking room near the ILS cone");
     c.initial.approach=false; // Disabled patrol must override this legacy initial phase.
     for(auto const stage : {CurriculumStage::Loc,CurriculumStage::Glide,CurriculumStage::Joint,CurriculumStage::JointMobile})
     {
@@ -155,9 +156,9 @@ void CloseApproachStarts(Config c)
             auto const& runway=environment.Settings().runway;
             auto const& aircraft=environment.Aircraft();
             double const heading=WrapAngle(aircraft.heading-runway.headingDegrees*DegreesToRadians);
-            Check(guidance.distance>=3999.9 && guidance.distance<=6500.1 && guidance.ilsValid
-                && std::abs(guidance.localizer)<=10.01*DegreesToRadians
-                && std::abs(heading)<=12.1*DegreesToRadians
+            Check(guidance.distance>=4999.9 && guidance.distance<=7500.1 && guidance.ilsValid
+                && std::abs(guidance.localizer)<=6.01*DegreesToRadians
+                && std::abs(heading)<=8.1*DegreesToRadians
                 && Dot(aircraft.velocity,RunwayForward(runway))>0
                 && environment.Plan().count==0 && environment.Mission().phase==Phase::Approach
                 && !guidance.targetValid && observation[0]==0 && observation[1]==0 && observation[2]==0,

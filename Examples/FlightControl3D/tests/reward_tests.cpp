@@ -263,7 +263,7 @@ void StabilizedCaptureBonuses(Config c)
         Check(mission.captureGateSeconds==0 && interrupted.rewards[loc]==0 && interrupted.rewards[glide]==0,
             "an interrupted stabilization hold earns no success bonus");
         double localizerBonus{},glideBonus{};
-        for(int step=0;step<300 && mission.outcome==Outcome::Flying;++step)
+        for(int step=0;step<2000 && mission.outcome==Outcome::Flying;++step)
         {
             auto const result=AdvanceMission(c,{},mission,aligned,aligned);
             localizerBonus+=result.rewards[loc];glideBonus+=result.rewards[glide];
@@ -321,12 +321,67 @@ void TrueSnapshotCycle(Config c)
         Check(Near(Channel(outward,channel)+Channel(inward,channel),0,1e-11),
             "true state and runway snapshots telescope across a closed moving-deck cycle");
 }
+/** Kinematic probe for a constant-speed coordinated turn, with SI gravity. */
+AircraftState CoordinatedArc(Config const& c,double bankDegrees,double seconds)
+{
+    double const speed=c.mission.approachSpeed;
+    double const bank=bankDegrees*DegreesToRadians;
+    double const rate=9.80665*std::tan(bank)/speed;
+    double const course=rate*seconds;
+    double const forward=std::abs(rate)>1e-12 ? speed*std::sin(course)/rate : speed*seconds;
+    double const cross=std::abs(rate)>1e-12 ? speed*(1-std::cos(course))/rate : 0;
+    auto aircraft=WithCourse(c,At(c,-5000+forward,cross,300),course/DegreesToRadians);
+    aircraft.roll=bank;aircraft.pitch=2*DegreesToRadians;
+    aircraft.heading=c.runway.headingDegrees*DegreesToRadians+course;
+    aircraft.rollRate=-rate*std::sin(aircraft.pitch);
+    aircraft.pitchRate=rate*std::sin(bank)*std::cos(aircraft.pitch);
+    aircraft.yawRate=rate*std::cos(bank)*std::cos(aircraft.pitch);
+    return aircraft;
 }
+Outcome ArcCaptureOutcome(Config const& c,double bankDegrees,double& successBonus)
+{
+    MissionState mission{};mission.phase=Phase::Approach;
+    auto before=CoordinatedArc(c,bankDegrees,0);
+    for(int step=1;step<=12000 && mission.outcome==Outcome::Flying;++step)
+    {
+        auto const after=CoordinatedArc(c,bankDegrees,step*c.mission.physicsDt);
+        auto const result=AdvanceMission(c,{},mission,before,after);
+        successBonus+=Channel(result,Reward::EnterLocalizer);
+        before=after;
+    }
+    return mission.outcome;
+}
+void LocalizerTrackingRejectsBriefTurn(Config c)
+{
+    c.training.curriculumStage=CurriculumStage::Loc;
+    c.mission.patrolEnabled=false;c.mission.maxSeconds=120;
+    c.runway.velocity={};c.runway.angularVelocity={};
+    for(double const heading:{0.0,90.0,270.0})
+    {
+        c.runway.headingDegrees=heading;
+        for(double const bank:{-7.0,7.0})
+        {
+            auto legacy=c;legacy.training.gateHoldSeconds=2;
+            double legacyBonus{},trackingBonus{};
+            Check(ArcCaptureOutcome(legacy,bank,legacyBonus)==Outcome::CaptureCompleted
+                && Near(legacyBonus,c.reward.weights[static_cast<std::size_t>(Reward::EnterLocalizer)]),
+                "a turning arc reproduces the former two-second success loophole");
+            Check(ArcCaptureOutcome(c,bank,trackingBonus)==Outcome::Timeout && trackingBonus==0,
+                "delivered LOC tracking cannot complete on a brief left or right arc");
+        }
+        double straightBonus{};
+        Check(ArcCaptureOutcome(c,0,straightBonus)==Outcome::CaptureCompleted
+            && Near(straightBonus,c.reward.weights[static_cast<std::size_t>(Reward::EnterLocalizer)]),
+            "straight forward LOC tracking completes without imposing a descent slope");
+    }
+}
+} // namespace
 int main()
 {
     try
     {
         auto config=LoadConfig(PPO_FLIGHT_CONFIG);
+        LocalizerTrackingRejectsBriefTurn(config);
         LocalizerLessonHasNoVerticalObjective(config);
         StabilizedCaptureBonuses(config);
         TrueSnapshotCycle(config);

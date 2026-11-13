@@ -79,7 +79,7 @@ struct TrainingSettings final
     /** @brief Joint-training multiplier; capture lessons keep the nominal objective. */
     double ilsCaptureScale{1.0};
     CurriculumStage curriculumStage{CurriculumStage::Joint};
-    double locReminderProbability{0.30}, glideOffsetMeters{120.0}, gateHoldSeconds{2.0};
+    double locReminderProbability{0.30}, glideOffsetMeters{120.0}, gateHoldSeconds{10.0};
     double gateHeadingDegrees{5.0}, gateRouteDegrees{5.0}, gateSlopeDegrees{1.5};
     double gateSpeedToleranceMps{},gateRollDegrees{},gateRateDegreesPerSecond{},captureMaxSeconds{};
     CaptureStartSettings captureStart{};

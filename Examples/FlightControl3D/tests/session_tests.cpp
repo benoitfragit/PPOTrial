@@ -314,6 +314,7 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
 
 void NominalCaptureLessons(Config c)
 {
+    c.training.gateHoldSeconds=2; // Keep the two-second fixture independent of the delivered tracking hold.
     c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
     c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;
     for(auto stage : {CurriculumStage::Loc,CurriculumStage::Glide})
@@ -357,6 +358,7 @@ void RunwayBestQualification(Config c)
 
 void SeparateGlideValidation(Config c)
 {
+    c.training.gateHoldSeconds=2; // This fixture tests sample isolation within a two-second episode.
     c.training.curriculumStage=CurriculumStage::Glide;
     c.training.locReminderProbability=1.0;
     c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
