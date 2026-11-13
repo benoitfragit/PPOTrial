@@ -5,6 +5,9 @@
 
 namespace ppo::examples::flight {
 
+/** Resolve phase-controlled flaps and disable brakes before rollout. */
+Controls ApplyPhaseControls(Controls controls, Phase phase, InitialSettings const& initial) noexcept;
+
 /** Same transition loop for desktop, headless training and deterministic tests. */
 class FlightEnvironment final
 {

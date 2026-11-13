@@ -6,6 +6,13 @@ namespace ppo::examples::flight {
 namespace {
 Config Checked(Config config) { Validate(config); return config; }
 }
+Controls ApplyPhaseControls(Controls controls, Phase phase, InitialSettings const& initial) noexcept
+{
+    controls.flap=phase==Phase::Patrol ? initial.flap
+        : phase==Phase::Approach ? initial.approachFlap : initial.rolloutFlap;
+    if(phase!=Phase::Rollout) controls.brake=0.0;
+    return controls;
+}
 FlightEnvironment::FlightEnvironment(Config config, std::filesystem::path const& data, std::optional<std::uint32_t> randomSeed)
     : config_(Checked(std::move(config))),episodeConfig_(config_),fdm_(config_,data),rng_(randomSeed.value_or(config_.training.seed))
 {
@@ -48,8 +55,7 @@ StepResult FlightEnvironment::Step(Controls const& action)
 {
     if (mission_.outcome != Outcome::Flying) throw std::logic_error("FlightControl3D: reset required after episode boundary");
     StepResult total{};
-    auto controls=action;
-    controls.flap=mission_.phase==Phase::Patrol ? config_.initial.flap : mission_.phase==Phase::Approach ? config_.initial.approachFlap : config_.initial.rolloutFlap;
+    auto const controls=ApplyPhaseControls(action,mission_.phase,config_.initial);
     for (std::size_t substep=0; substep<config_.mission.actionSubsteps; ++substep)
     {
         auto const previous = aircraft_;

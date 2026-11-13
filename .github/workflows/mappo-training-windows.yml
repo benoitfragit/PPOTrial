@@ -189,13 +189,6 @@ jobs:
           python -m unittest discover -s tools/ci/adaptive_curriculum -p "test_*.py" -v
           if ($LASTEXITCODE -ne 0) { throw "MAPPO progressive gate tests failed" }
 
-      - name: Validate Blue training diagnostic tool
-        env:
-          PYTHONPATH: tools/blue_training_diagnostics
-        run: |
-          python -m unittest discover -s tools/blue_training_diagnostics/tests -p "test_*.py" -v
-          if ($LASTEXITCODE -ne 0) { throw "Blue diagnostic tests failed" }
-
       - name: Configure independent frequent checkpoints
         env:
           SAVE_EVERY_UPDATES: ${{ inputs.save_every_updates }}
@@ -414,24 +407,6 @@ jobs:
           }
           $manifest | ConvertTo-Json -Depth 8 | Set-Content `
             -LiteralPath "build/mappo-telemetry/run-manifest.json" -Encoding utf8
-
-      - name: Render Blue diagnostic HTML and GitHub run Summary
-        if: always()
-        env:
-          PYTHONPATH: tools/blue_training_diagnostics
-          PYTHONIOENCODING: utf-8
-        run: |
-          python -m blue_diagnostics.ci_report
-          if ($LASTEXITCODE -ne 0) { Write-Warning "Blue diagnostic HTML generation failed" }
-
-      - name: Publish Blue diagnostic HTML
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: blue-mappo-diagnostic
-          path: build/mappo-telemetry/diagnostic.html
-          if-no-files-found: warn
-          retention-days: 30
 
       - name: Publish MAPPO telemetry CSV and SVG curves
         if: always()

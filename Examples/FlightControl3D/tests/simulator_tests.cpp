@@ -2,6 +2,20 @@
 using namespace ppo::examples::flight;
 
 namespace {
+void PhaseControlMapping(Config const& c)
+{
+    Controls const requested{0.1,-0.2,0.3,c.initial.throttle,0.8,true,0.99};
+    auto const patrol=ApplyPhaseControls(requested,Phase::Patrol,c.initial);
+    auto const approach=ApplyPhaseControls(requested,Phase::Approach,c.initial);
+    auto const rollout=ApplyPhaseControls(requested,Phase::Rollout,c.initial);
+    Check(patrol.brake==0 && approach.brake==0 && rollout.brake==0.8,
+        "brakes remain disabled in flight and enabled during rollout");
+    Check(Near(patrol.flap,c.initial.flap) && Near(approach.flap,c.initial.approachFlap)
+        && Near(rollout.flap,c.initial.rolloutFlap),"flaps are phase-controlled");
+    Check(patrol.gearDown && approach.gearDown && rollout.gearDown
+        && Near(approach.aileron,requested.aileron) && Near(approach.throttle,requested.throttle),
+        "continuous controls and discrete gear survive phase mapping");
+}
 struct InterceptProbe final
 {
     double initialError{},finalError{},localizerReward{};
@@ -57,6 +71,7 @@ int main()
     try
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
+        PhaseControlMapping(c);
         c.initial.distanceMeters={10000,10000}; c.initial.bearingDegrees={8,8}; c.initial.heightMeters={600,600};
         c.initial.headingOffsetDegrees={0,0}; c.initial.rollDegrees={0,0}; c.initial.pitchDegrees={2,2};
         c.initial.slopeDegrees={0,0}; c.initial.speedMps={65,65};

@@ -6,6 +6,8 @@ on:
       - 'resources/settings/Scenarios/FlightControl3D.json'
       - 'resources/model/FlightControl3D/latest/flight_hybrid_v1.txt'
       - 'CMakeLists.txt'
+      - 'tools/flight/**'
+      - '.github/workflows/flight-control-training.yml'
       - '.github/workflows/flight-control.yml'
   workflow_dispatch:
 jobs:
@@ -34,3 +36,9 @@ jobs:
         run: cmake --build ${{ matrix.build_dir }} --config ${{ matrix.configuration }} --parallel 2
       - name: Deterministic CTest including real JSBSim and RLtools
         run: ctest --test-dir ${{ matrix.build_dir }} -C ${{ matrix.configuration }} --output-on-failure
+      - name: Set up Python for curriculum regression tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate curriculum runner behavior
+        run: python -m unittest discover -s tools/flight -p 'test_curriculum_ci.py' -v

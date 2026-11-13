@@ -1,6 +1,7 @@
 #include "test_support.hpp"
 #include "flight_session.hpp"
 #include <fstream>
+#include <iomanip>
 #include <iterator>
 #include <nlohmann/json.hpp>
 using namespace ppo::examples::flight;
@@ -50,15 +51,30 @@ void CommittedTrainingCheckpoint(Config c)
 {
     std::filesystem::path const checkpoint{PPO_FLIGHT_COMMITTED_CHECKPOINT};
     if(!std::filesystem::exists(checkpoint)) return;
+    // Legacy snapshots contain the old tanh mapping and must not be replayed as clamped policies.
+    std::ifstream stream(checkpoint);
+    std::string magic,signature;
+    std::size_t observations{},actions{},width{};
+    std::uint64_t updates{};
+    Check(static_cast<bool>(stream>>magic>>observations>>actions>>width>>updates>>std::quoted(signature)),
+        "read committed checkpoint signature");
+    if(!CompatibleTrainingSignature(signature,c.checkpointSignature))
+    {
+        Check(!nlohmann::json::parse(signature).contains("actionMappingVersion"),
+            "only the historical tanh checkpoint may be incompatible in this fixture");
+        Rejects([&] { FlightLearner rejected(c);rejected.Load(checkpoint); },
+            "old tanh checkpoint cannot warm-start clamped controls");
+        return;
+    }
     c.training.resume=true;
     auto const modelDirectory=checkpoint.parent_path().parent_path();
     FlightSession resumed(c,true,modelDirectory,std::nullopt,TrainingBudget::AdditionalUpdates);
     auto const snapshot=resumed.Snapshot();
     Check(snapshot.resumed && snapshot.learning.updates>0
         && snapshot.trainingUpdateLimit==snapshot.learning.updates+c.training.maxUpdates,
-        "committed FlightControl3D checkpoint must be a complete additional-training warm start");
+        "compatible FlightControl3D checkpoint is a complete additional-training warm start");
     Check(resumed.Learner().Collected()==0,
-        "committed FlightControl3D checkpoint must start at an update boundary");
+        "committed FlightControl3D checkpoint starts at an update boundary");
 }
 void ChangedTrainingContract(Config c,TrainingContractChange change)
 {
@@ -116,6 +132,12 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     signature=nlohmann::json::parse(c.checkpointSignature);signature["initial"]["speedMps"]={60,80};
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature)
         && !CompatibleTrainingSignature("broken",c.checkpointSignature),"other observation/physics changes remain incompatible");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("actionMappingVersion");
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "legacy tanh checkpoint cannot warm-start clamped controls");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature["actionMappingVersion"]=1;
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "different action mapping versions are incompatible");
     signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("reward");
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"missing reward contract is not a warm start");
     signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=2;

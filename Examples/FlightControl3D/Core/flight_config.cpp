@@ -173,6 +173,8 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics.erase("training");
     semantics.erase("evaluation");
     semantics["distribution"] = {training.minLogStd,training.maxLogStd};
+    // The raw-Gaussian-to-FCS mapping is part of the checkpoint policy contract.
+    semantics["actionMappingVersion"] = 2;
     semantics["rewardVersion"] = 11;
     semantics["guidanceVersion"] = 13;
     semantics["spawnVersion"] = 2;
@@ -206,6 +208,9 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
             && (*signature)["guidanceVersion"]!=13) return false;
         if(signature->contains("spawnVersion") && (*signature)["spawnVersion"]!=2) return false;
     }
+    // A checkpoint trained with tanh actuators cannot warm-start the new mapping.
+    if(!previous.contains("actionMappingVersion") || !next.contains("actionMappingVersion")
+        || previous["actionMappingVersion"]!=next["actionMappingVersion"]) return false;
     for(char const* name : {"distanceMeters","bearingDegrees","headingOffsetDegrees"})
     {
         if(!previous["initial"].contains(name) || !next["initial"].contains(name)) return false;

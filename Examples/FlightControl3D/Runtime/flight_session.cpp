@@ -87,7 +87,7 @@ void FlightSession::Tick()
     if (pendingReset_) ResetEpisode();
     auto const observation=environment_.ObservationNow();
     auto const action=learner_.Choose(observation,!training_);
-    controls_=ToControls(action);
+    controls_=ToControls(action,config_.initial.throttle);
     lastStep_=environment_.Step(controls_);
     if (training_) learner_.Record(observation,action,lastStep_,environment_.ObservationNow());
     if (lastStep_.terminated || lastStep_.truncated)
@@ -147,7 +147,7 @@ void FlightSession::TickValidation()
         validationHoldSeconds_=0;validationEpisodeSucceeded_=false;
     }
     auto const action=learner_.Choose(evaluation.ObservationNow(),true);
-    controls_=ToControls(action);
+    controls_=ToControls(action,config_.initial.throttle);
     lastStep_=evaluation.Step(controls_);
     // No Record/Optimize here: training rollout, optimizer and RNG remain frozen.
     auto const stage=config_.training.curriculumStage;
