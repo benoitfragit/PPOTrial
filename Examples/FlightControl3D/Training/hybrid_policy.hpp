@@ -15,6 +15,8 @@ struct PolicyAction final
     bool gearDown{};
     double logProbability{};
     bool brakeActive{true}, gearActive{true};
+    /** @brief Frozen collection distribution for the exact rollout KL guard. */
+    PolicyVector policy{};
 };
 
 inline double Softplus(double x) noexcept { return std::max(x,0.0)+std::log1p(std::exp(-std::abs(x))); }
@@ -37,6 +39,30 @@ inline double LogProbability(PolicyVector const& output, PolicyAction const& act
         logp -= 0.5*z*z + logStd + 0.5*std::log(2*Pi);
     }
     return logp;
+}
+
+/** @brief Exact old-to-new Gaussian/Bernoulli KL on the physically active controls. */
+inline double PolicyKl(PolicyVector const& previous,PolicyVector const& current,
+    PolicyAction const& action,TrainingSettings const& t) noexcept
+{
+    double result=0;
+    for(std::size_t i=0;i<ContinuousActions;++i)
+    {
+        if(i==4 && !action.brakeActive) continue;
+        double const oldStd=std::clamp(previous[ContinuousActions+i],t.minLogStd,t.maxLogStd);
+        double const newStd=std::clamp(current[ContinuousActions+i],t.minLogStd,t.maxLogStd);
+        double const logScale=oldStd-newStd;
+        double const difference=previous[i]-current[i];
+        result+=0.5*std::expm1(2*logScale)-logScale
+            +0.5*difference*difference*std::exp(-2*newStd);
+    }
+    if(action.gearActive)
+    {
+        double const probability=Sigmoid(previous.back());
+        result+=probability*(Softplus(-current.back())-Softplus(-previous.back()))
+            +(1-probability)*(Softplus(current.back())-Softplus(previous.back()));
+    }
+    return std::max(0.0,result);
 }
 
 /** Analytic entropy of the latent Gaussian x Bernoulli policy. */
@@ -69,6 +95,7 @@ PolicyAction Sample(PolicyVector const& output, TrainingSettings const& t, Engin
     for (double value : output)
         if (!std::isfinite(value)) throw std::runtime_error("FlightControl3D: non-finite actor output");
     PolicyAction action{};
+    action.policy=output;
     action.brakeActive=brakeActive;action.gearActive=gearActive;
     for (std::size_t i=0; i<ContinuousActions; ++i)
     {

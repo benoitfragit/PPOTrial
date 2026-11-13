@@ -14,6 +14,24 @@ Le correctif #93 expose explicitement la route relative à la piste dans `course
 
 Après l’échec du run curriculum #6 (1 000 updates, 100 validations à 0/20), les leçons LOC/Glide utilisent les mêmes tolérances nominales en apprentissage et en validation. `ilsCaptureScale` ne détend plus leur terminal ; il reste disponible pour Joint. Le scénario borne désormais le bruit gaussien : `initialLogStd=-3` (σ≈0,050), `maxLogStd=-2` (σ≈0,135), bonus d’entropie nul. Le mapping linéaire des gouvernes et leur pleine autorité restent identiques. Un ancien latest peut reprendre à une frontière d’update, avec de nouvelles vraisemblances ; le BEST exige une revalidation du contrat exact. Ces corrections ne constituent pas une preuve de convergence : [diagnostic, expériences et limites du correctif #90](PPOTrial_FlightControl3D_Diagnostic_Run6_Issue90_PR87.md).
 
+## Protection de la politique PPO — correctif #97
+
+Le seuil `targetKl=0.02` porte désormais sur la KL analytique moyenne de l'ancienne
+distribution vers la nouvelle, évaluée sur le rollout complet et les commandes
+actives. Avant de conserver un pas acteur, le learner contrôle sa proposition.
+Un dépassement restaure poids, moments et âge Adam, puis réduit le pas par deux,
+au plus 16 fois. La première réduction arrête ensuite l'acteur pour le reste du
+rollout ; le critic continue. Si aucune proposition ne convient, l'acteur reste
+exactement dans son état précédent. Le taux configuré est rétabli pour l'update
+suivante ; le format des checkpoints reste compatible.
+
+Les logs distinguent `policy_kl` (politique conservée, <= `targetKl`), `proposed_kl`
+(plus grande proposition), `actor_rejections` et l'ancien `approx_kl` par minibatch.
+Un `kl_stop=1` peut donc rester fréquent avec une politique conservée conforme.
+Ce contrôle couvre les observations collectées, pas tous les états LOC possibles ;
+il ne garantit pas la rétention d'une compétence ni la convergence. Son calcul
+ajoute des évaluations réseau sur CPU.
+
 ## Contrat de shaping
 
 La qualité LOC reste une moyenne (0,5 / 0,5) entre la qualité d'écart latéral et la qualité de route d'interception. La route relative à la piste est dérivée de son vecteur vitesse, pas du cap fuselage :
@@ -85,4 +103,11 @@ build/release/Examples/FlightControl3D/FlightControlHeadless \
 
 Avec `training.resume=true`, le runner réévalue désormais un latest repris en LOC/Glide avant toute nouvelle update PPO. Cette validation indépendante utilise une copie temporaire, contrôle l'intégrité du modèle et conserve le journal `gate_recheck_*.log` ; les checkpoints, BEST et CSV d'entraînement originaux sont préservés. Une réussite avance la gate sans consommer d'updates ; un échec laisse le budget d'entraînement entier. Joint fixe/mobile gardent leur chemin normal de promotion BEST.
 
-Dans la même CI et sur `fix/flight-approach-only`, utiliser `stage=progressive`, `resume_run_id=43406061312`, `additional_updates=10`, `max_additional_updates=10000`. La reprise conserve les 8 000 updates et réévalue d'abord la gate LOC avec 120 secondes, puis avance seulement après un nouveau verdict réussi. Le maintien de 2 s, les tolérances et le seuil 19/20 restent identiques. Les anciens scores ne qualifient pas Glide ou Joint.
+Pour un essai diagnostique après le run 15, utiliser la même CI et la branche
+`fix/flight-approach-only`, `stage=progressive`, `resume_run_id=43406061312`,
+`additional_updates=10`, `max_additional_updates=100`.
+La reprise conserve les 8 000 updates et réévalue d'abord LOC avec 120 secondes,
+puis avance après un nouveau verdict réussi. Comparer ensuite Glide et
+`FLIGHT_RETENTION` avant de prolonger. Le maintien de 2 s, les tolérances et le seuil
+19/20 sont identiques. Le run 15 reste sauvegardé, mais sa rétention LOC est
+dégradée. Les anciens scores ne qualifient pas Glide ou Joint.

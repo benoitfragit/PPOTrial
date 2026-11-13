@@ -200,6 +200,7 @@ void KlStopsActorOnly(Config c)
     c.training.hiddenWidth=32;c.training.rolloutSteps=128;c.training.minibatch=16;
     c.training.epochs=4;c.training.actorRate=0.01;c.training.targetKl=1e-6;
     FlightLearner learner(c);Observation observation{};
+    auto const before=learner.Evaluate(observation);
     for(std::size_t row=0;row<c.training.rolloutSteps;++row)
     {
         auto const action=learner.Choose(observation);
@@ -207,9 +208,13 @@ void KlStopsActorOnly(Config c)
         learner.Record(observation,action,step,observation);
     }
     learner.Optimize();auto const& stats=learner.Stats();
-    Check(stats.actorStoppedByKl && stats.maximumApproximateKl>c.training.targetKl
+    double const retainedKl=PolicyKl(before,learner.Evaluate(observation),PolicyAction{},c.training);
+    Check(retainedKl<=c.training.targetKl,"retained actor must respect the exact target KL");
+    Check(stats.actorStoppedByKl && stats.maximumProposedKl>c.training.targetKl
+        && stats.actorStepRejections>0 && stats.acceptedPolicyKl<=c.training.targetKl
+        && retainedKl<=c.training.targetKl && Near(retainedKl,stats.acceptedPolicyKl,1e-10)
         && stats.actorSteps==1 && stats.updates==1,
-        "excessive likelihood drift stops subsequent actor steps within the rollout");
+        "oversized actor proposals are reduced before the retained policy exceeds exact target KL");
     TemporaryDirectory directory("flight-kl-");auto const path=directory.path/"checkpoint.txt";
     learner.Save(path);
     std::ifstream stream(path);std::string line,signature;
@@ -224,10 +229,77 @@ void KlStopsActorOnly(Config c)
     c.training.targetKl=std::numeric_limits<double>::infinity();
     Rejects([&] {Validate(c);},"non-finite target KL rejected");
 }
+void AnalyticKl(Config const& c)
+{
+    PolicyVector previous{};
+    for(std::size_t i=0;i<ContinuousActions;++i) previous[ContinuousActions+i]=c.training.initialLogStd;
+    PolicyAction active{};
+    Check(PolicyKl(previous,previous,active,c.training)==0,"identical policies have zero exact KL");
+    auto changed=previous;changed[0]=0.01;
+    double const expected=0.01*0.01/(2*std::exp(2*c.training.initialLogStd));
+    Check(Near(PolicyKl(previous,changed,active,c.training),expected,1e-12),
+        "Gaussian mean KL agrees with the closed-form univariate value");
+    changed=previous;changed[ContinuousActions]=c.training.initialLogStd+0.1;
+    Check(Near(PolicyKl(previous,changed,active,c.training),0.1+0.5*(std::exp(-0.2)-1),1e-12),
+        "Gaussian variance KL uses the old-to-new direction");
+    changed=previous;changed.back()=std::log(3.0);
+    Check(Near(PolicyKl(previous,changed,active,c.training),0.5*std::log(4.0/3.0),1e-12),
+        "Bernoulli exact KL covers the gear distribution");
+    active.brakeActive=false;active.gearActive=false;
+    changed=previous;changed[4]=100;changed[ContinuousActions+4]=100;changed.back()=1000;
+    Check(PolicyKl(previous,changed,active,c.training)==0,"inactive controls cannot consume the KL budget");
+    previous[ContinuousActions]=-100;changed=previous;changed[ContinuousActions]=-200;
+    Check(PolicyKl(previous,changed,active,c.training)==0,"KL uses the actual clamped exploration scale");
+}
+void KlRollbackPreservesAdam(Config c)
+{
+    c.training.hiddenWidth=32;c.training.rolloutSteps=128;c.training.minibatch=128;
+    c.training.epochs=1;c.training.actorRate=0.01;c.training.targetKl=1e-6;
+    auto collect=[&](FlightLearner& learner)
+    {
+        for(std::size_t row=0;row<c.training.rolloutSteps;++row)
+        {
+            Observation observation{};observation[0]=static_cast<float>(row)/128.F;
+            observation[1]=-observation[0];
+            auto const action=learner.Choose(observation);
+            StepResult step{};step.terminated=true;step.reward=action.raw[0]+0.3*action.raw[1];
+            learner.Record(observation,action,step,observation);
+        }
+        learner.Optimize();
+    };
+    FlightLearner guarded(c);collect(guarded);
+    auto const rejected=guarded.Stats().actorStepRejections;
+    Check(rejected>0 && guarded.Stats().actorSteps==1,"rollback fixture rejects at least one oversized proposal");
+    auto reduced=c;reduced.training.actorRate=std::ldexp(c.training.actorRate,-static_cast<int>(rejected));
+    FlightLearner reference(reduced);collect(reference);
+    Check(reference.Stats().actorStepRejections==0 && reference.Stats().actorSteps==1,
+        "the accepted reduced step also fits without prior rejections");
+    TemporaryDirectory directory("flight-kl-rollback-");
+    auto const candidate=directory.path/"guarded.txt",expected=directory.path/"reference.txt";
+    guarded.Save(candidate);reference.Save(expected);
+    {
+        std::ifstream actualStream(candidate),expectedStream(expected);
+        std::string const actual{std::istreambuf_iterator<char>(actualStream),std::istreambuf_iterator<char>()};
+        std::string const expectedBytes{std::istreambuf_iterator<char>(expectedStream),std::istreambuf_iterator<char>()};
+        Check(actual==expectedBytes,
+            "rejected proposals leave no extra parameter, moment, Adam age, critic or RNG change");
+    }
+
+    c.training.targetKl=1e-40;
+    FlightLearner frozen(c);auto const before=frozen.Evaluate({});collect(frozen);
+    Check(frozen.Stats().actorSteps==0 && frozen.Stats().actorStepRejections>0
+        && frozen.Stats().acceptedPolicyKl==0 && frozen.Evaluate({})==before,
+        "when no bounded proposal fits, the previous actor is retained exactly");
+    frozen.Save(candidate);
+    std::ifstream checkpoint(candidate);std::string header,signature;
+    std::getline(checkpoint,header);checkpoint>>std::quoted(signature);
+    std::size_t actorAge{},criticAge{};checkpoint>>actorAge>>criticAge;
+    Check(actorAge==1 && criticAge==2,"a wholly rejected actor update still trains the critic once");
+}
 }
 int main()
 {
-    try { auto const c=LoadConfig(PPO_FLIGHT_CONFIG); Hybrid(c); Exploration(c); ActiveControls(c); Training(c); KlStopsActorOnly(c); }
+    try { auto const c=LoadConfig(PPO_FLIGHT_CONFIG); Hybrid(c); Exploration(c); ActiveControls(c); Training(c); AnalyticKl(c); KlStopsActorOnly(c); KlRollbackPreservesAdam(c); }
     catch(std::exception const& e) { std::cerr<<e.what()<<'\n'; return 1; }
     std::cout<<"Hybrid PPO/RLtools regressions passed\n";
 }
