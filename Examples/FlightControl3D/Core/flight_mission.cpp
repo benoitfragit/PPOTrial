@@ -521,6 +521,34 @@ Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& miss
     return g;
 }
 
+bool CaptureGateQualified(Config const& c,CurriculumStage stage,
+    MissionState const& mission,AircraftState const& aircraft,Guidance const& g) noexcept
+{
+    if(stage==CurriculumStage::Joint || mission.phase!=Phase::Approach
+        || mission.outcome!=Outcome::Flying || !mission.capturedLocalizer || !IsFinite(aircraft)
+        || aircraft.weightOnWheels || aircraft.structuralContact || !g.ilsValid
+        || !(g.along<0) || !(g.height>c.mission.flareHeightMeters)
+        || !(g.relativeVelocity.north>0)
+        || !(std::abs(g.localizer)<=c.mission.localizerCaptureDegrees*DegreesToRadians))
+        return false;
+    auto const attitude=RelativeAttitude(c.runway,aircraft);
+    double const route=std::atan2(g.relativeVelocity.east,g.relativeVelocity.north);
+    double const rate=c.training.gateRateDegreesPerSecond*DegreesToRadians;
+    if(!(std::abs(attitude[2])<=c.training.gateHeadingDegrees*DegreesToRadians)
+        || !(std::abs(route)<=c.training.gateRouteDegrees*DegreesToRadians)
+        || !(std::abs(aircraft.airspeed-g.targetSpeed)<=c.training.gateSpeedToleranceMps)
+        || !(std::abs(attitude[0])<=c.training.gateRollDegrees*DegreesToRadians)
+        || !(std::abs(aircraft.rollRate)<=rate) || !(std::abs(aircraft.pitchRate)<=rate)
+        || !(std::abs(aircraft.yawRate)<=rate))
+        return false;
+    if(stage==CurriculumStage::Loc) return true;
+    double const slope=std::atan2(g.relativeVelocity.up,
+        std::hypot(g.relativeVelocity.north,g.relativeVelocity.east));
+    return mission.capturedGlide
+        && std::abs(g.glideError)<=c.mission.glideCaptureDegrees*DegreesToRadians
+        && std::abs(slope-g.targetSlope)<=c.training.gateSlopeDegrees*DegreesToRadians;
+}
+
 StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState& s,
     AircraftState const& before, AircraftState const& after, Runway const* previousRunway) noexcept
 {
@@ -728,11 +756,20 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
                 add(Reward::Stop,1);
             }
         }
+        // Capture lessons end at their own stabilized objective; Joint still
+        // requires touchdown and a complete safe stop. Check every FDM substep.
+        if(s.outcome==Outcome::Flying && c.training.curriculumStage!=CurriculumStage::Joint)
+        {
+            s.captureGateSeconds=CaptureGateQualified(c,c.training.curriculumStage,s,after,g)
+                ? std::min(s.captureGateSeconds+dt,c.training.gateHoldSeconds) : 0;
+            if(s.captureGateSeconds>=c.training.gateHoldSeconds) s.outcome=Outcome::CaptureCompleted;
+        }
         if (s.outcome == Outcome::Flying && static_cast<double>(s.steps)*dt >= c.mission.maxSeconds)
             s.outcome = Outcome::Timeout;
     }
     for (double reward : result.rewards) result.reward += reward;
-    result.terminated = s.outcome == Outcome::Crash || s.outcome == Outcome::Stopped;
+    result.terminated = s.outcome == Outcome::Crash || s.outcome == Outcome::Stopped
+        || s.outcome==Outcome::CaptureCompleted;
     result.truncated = s.outcome == Outcome::Timeout;
     return result;
 }
@@ -765,7 +802,9 @@ Observation Observe(Config const& c, FlightPlan const& plan, MissionState const&
         Unit(a.gearPosition), Unit(a.weightOnWheels), Unit(s.phase==Phase::Patrol), Unit(s.phase==Phase::Approach), Unit(s.phase==Phase::Rollout),
         Unit(static_cast<double>(s.steps)*c.mission.physicsDt/c.mission.maxSeconds), Unit(s.capturedLocalizer), Unit(s.capturedGlide),
         Unit(s.touchedDown), Unit(s.touchdownFromThreshold/n.distance), Unit((c.runway.lengthMeters-g.along)/n.distance),
-        Unit(s.stoppedSeconds/c.mission.stoppedHoldSeconds),Unit(deckVelocity.north/n.speed),Unit(deckVelocity.east/n.speed),Unit(deckVelocity.up/n.speed),
+        Unit(c.training.curriculumStage!=CurriculumStage::Joint && s.phase==Phase::Approach
+            ? s.captureGateSeconds/c.training.gateHoldSeconds : s.stoppedSeconds/c.mission.stoppedHoldSeconds),
+        Unit(deckVelocity.north/n.speed),Unit(deckVelocity.east/n.speed),Unit(deckVelocity.up/n.speed),
         Unit(normal.north),Unit(normal.east),Unit(normal.up),Unit(c.runway.angularVelocity.north/n.rate),
         Unit(c.runway.angularVelocity.east/n.rate),Unit(c.runway.angularVelocity.up/n.rate),
         Unit(plan.count ? static_cast<double>(s.waypointsPassed)/static_cast<double>(plan.count) : 0),

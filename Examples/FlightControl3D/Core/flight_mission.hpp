@@ -25,6 +25,9 @@ std::size_t ClosestPatrolWaypoint(FlightPlan const& plan,Vec3 position) noexcept
  */
 Guidance Guide(Config const& config, FlightPlan const& plan,
     MissionState const& mission, AircraftState const& aircraft) noexcept;
+/** Confirm actual beam geometry and stable physical flight before a lesson can end. */
+bool CaptureGateQualified(Config const&,CurriculumStage,MissionState const&,
+    AircraftState const&,Guidance const&) noexcept;
 /** Called after each FDM substep; landing limits also inspect the pre-impact state. */
 StepResult AdvanceMission(Config const& config, FlightPlan const& plan, MissionState& mission,
     AircraftState const& before, AircraftState const& after, Runway const* previousRunway = nullptr) noexcept;
@@ -38,7 +41,7 @@ inline constexpr std::array<char const*, ObservationSize> ObservationNames{
     "roll_rate", "pitch_rate", "yaw_rate", "slope_sin", "slope_cos", "localizer_sin", "glide_error",
     "ils_valid", "target_speed", "target_slope", "course_error_sin", "course_error_cos", "path_distance",
     "gear_position", "weight_on_wheels", "patrol", "approach", "rollout", "elapsed",
-    "localizer_captured", "glide_captured", "touchdown", "touchdown_distance", "remaining_runway", "stopped_hold",
+    "localizer_captured", "glide_captured", "touchdown", "touchdown_distance", "remaining_runway", "completion_hold",
     "deck_velocity_north", "deck_velocity_east", "deck_velocity_up", "deck_normal_north", "deck_normal_east", "deck_normal_up",
     "deck_angular_north", "deck_angular_east", "deck_angular_up",
     "lap_progress", "completed_laps", "path_qualified", "localizer_hold", "glide_hold"};

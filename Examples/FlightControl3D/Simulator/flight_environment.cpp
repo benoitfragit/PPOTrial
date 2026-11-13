@@ -1,10 +1,25 @@
 #include "flight_environment.hpp"
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 
 namespace ppo::examples::flight {
 namespace {
 Config Checked(Config config) { Validate(config); return config; }
+/** Limit early lessons to capture and basic pilotage; Joint retains the full distribution. */
+void ConfigureCaptureLesson(Config& config) noexcept
+{
+    if(config.training.curriculumStage==CurriculumStage::Joint) return;
+    auto const& start=config.training.captureStart;
+    auto& initial=config.initial;
+    initial.speedMps={config.mission.approachSpeed-start.speedToleranceMps,
+        config.mission.approachSpeed+start.speedToleranceMps};
+    initial.rollDegrees={-start.rollDegrees,start.rollDegrees};
+    initial.pitchDegrees=start.pitchDegrees;
+    initial.slopeDegrees={-config.mission.glideDegrees-start.slopeToleranceDegrees,
+        -config.mission.glideDegrees+start.slopeToleranceDegrees};
+    config.mission.maxSeconds=std::min(config.mission.maxSeconds,config.training.captureMaxSeconds);
+}
 }
 Controls ApplyPhaseControls(Controls controls, Phase phase, InitialSettings const& initial) noexcept
 {
@@ -27,17 +42,29 @@ Observation FlightEnvironment::Reset()
     bool const reminder=stage==CurriculumStage::Glide
         && std::bernoulli_distribution(config_.training.locReminderProbability)(rng_);
     episodeConfig_.training.curriculumStage=reminder ? CurriculumStage::Loc : stage;
-    mission_.phase = !config_.mission.patrolEnabled || config_.initial.approach ? Phase::Approach : Phase::Patrol;
+    ConfigureCaptureLesson(episodeConfig_);
+    auto const active=episodeConfig_.training.curriculumStage;
+    mission_.phase = active!=CurriculumStage::Joint || !config_.mission.patrolEnabled || config_.initial.approach
+        ? Phase::Approach : Phase::Patrol;
     motion_=SampleRunway(config_,rng_);
     episodeConfig_.runway=RunwayAt(motion_,0);
     plan_=MakeFlightPlan(episodeConfig_);
     fdm_.SetRunwayMotion(motion_);
-    auto const active=episodeConfig_.training.curriculumStage;
     auto const placement=active==CurriculumStage::Loc
         ? spawnPlacements_.Next(0.0,rng_)
         : active==CurriculumStage::Glide ? SpawnPlacement::LocalizerGlide
         : spawnPlacements_.Next(config_.initial.runwayAlignedProbability,rng_);
-    auto initial=SampleAircraft(config_,episodeConfig_.runway,placement,rng_);
+    auto initial=SampleAircraft(episodeConfig_,episodeConfig_.runway,placement,rng_);
+    if(active==CurriculumStage::Loc)
+    {
+        // LOC should not begin with an unrelated large vertical recovery task.
+        auto const local=DeckCoordinates(episodeConfig_.runway,initial.position);
+        double const offset=config_.training.captureStart.localizerHeightOffsetMeters;
+        double const height=episodeConfig_.runway.thresholdHeightMeters
+            -local.north*std::tan(config_.mission.glideDegrees*DegreesToRadians)
+            +std::uniform_real_distribution<double>(-offset,offset)(rng_);
+        initial.position=FromRunway(episodeConfig_.runway,local.north,local.east,height);
+    }
     if(active==CurriculumStage::Glide)
     {
         // Start above/below the 3-degree plane instead of on it.

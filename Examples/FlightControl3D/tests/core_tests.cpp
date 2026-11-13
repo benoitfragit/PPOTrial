@@ -149,7 +149,7 @@ void Configuration()
 {
     std::ifstream source(PPO_FLIGHT_CONFIG); nlohmann::json valid; source>>valid;
     TemporaryDirectory temporary("flight-config-"); auto const path=temporary.path/"config.json";
-    for (int test=0; test<34; ++test)
+    for (int test=0; test<47; ++test)
     {
         auto json=valid;
         if (test==0) json["normalization"]["speed"]=0;
@@ -187,6 +187,26 @@ void Configuration()
         if (test==31) json["training"]["curriculum"]["gateSlopeDegrees"]=10;
         if (test==32) json["mission"]["patrolEnabled"]=1;
         if (test==33) json["mission"].erase("patrolEnabled");
+        if (test==34) json["training"]["curriculum"]["gateSpeedToleranceMps"]=0;
+        if (test==35) json["training"]["curriculum"]["gateSpeedToleranceMps"]=16;
+        if (test==36) json["training"]["curriculum"]["gateRollDegrees"]=0;
+        if (test==37) json["training"]["curriculum"]["gateRateDegreesPerSecond"]=31;
+        if (test==38) json["training"]["curriculum"]["captureMaxSeconds"]=1;
+        if (test==39) json["training"]["curriculum"]["captureStart"]["speedToleranceMps"]=20;
+        if (test==40) json["training"]["curriculum"]["captureStart"]["rollDegrees"]=31;
+        if (test==41) json["training"]["curriculum"]["captureStart"]["pitchDegrees"]={4,1};
+        if (test==42) json["training"]["curriculum"]["captureStart"]["slopeToleranceDegrees"]=10;
+        if (test==43) json["training"]["curriculum"]["captureStart"]["localizerHeightOffsetMeters"]=10000;
+        if (test==44) json["training"]["curriculum"].erase("captureStart");
+        if (test==45) json["training"]["curriculum"]["captureStart"]["unknown"]=true;
+        if (test==46)
+        {
+            json["initial"]["bearingDegrees"]={30,32};
+            json["runwayRandomization"]["pitchAmplitudeDegrees"]={0,0};
+            json["runwayRandomization"]["rollAmplitudeDegrees"]={0,0};
+            json["training"]["curriculum"]["captureStart"]["localizerHeightOffsetMeters"]=
+                15+4000*std::cos(32*DegreesToRadians)*std::tan(3*DegreesToRadians)-20+1;
+        }
         { std::ofstream stream(path); stream<<json; }
         Rejects([&] { LoadConfig(path); },"invalid JSON accepted");
     }
@@ -200,6 +220,64 @@ void Configuration()
         c.initial.runwayAlignedProbability=probability;
         Rejects([&] { Validate(c); },"non-finite spawn probability accepted");
     }
+}
+
+void CaptureLessonTermination(Config c)
+{
+    auto const plan=MakeFlightPlan(c);
+    auto aircraft=Approach(c,-5000);
+    aircraft.velocity=Add(Scale(RunwayForward(c.runway),c.mission.approachSpeed),
+        Scale(RunwayNormal(c.runway),-c.mission.approachSpeed*std::tan(c.mission.glideDegrees*DegreesToRadians)));
+    c.training.gateHoldSeconds=0.08;
+    for(auto const stage : {CurriculumStage::Loc,CurriculumStage::Glide})
+    {
+        c.training.curriculumStage=stage;
+        MissionState mission{};mission.phase=Phase::Approach;
+        mission.capturedLocalizer=true;mission.capturedGlide=true;
+        mission.rewardedLocalizerCapture=true;mission.rewardedGlideCapture=true;
+        auto const initial=mission;
+        for(int step=0;step<3;++step)
+            Check(!AdvanceMission(c,plan,mission,aircraft,aircraft).terminated,"partial hold cannot finish a lesson");
+        auto const partial=Observe(c,plan,mission,aircraft);
+        Check(Near(partial[41],mission.captureGateSeconds/c.training.gateHoldSeconds,1e-6),
+            "policy observes remaining stabilized completion through the existing hold slot");
+        auto shaking=aircraft;shaking.pitchRate=2*c.training.gateRateDegreesPerSecond*DegreesToRadians;
+        AdvanceMission(c,plan,mission,aircraft,shaking);
+        Check(mission.captureGateSeconds==0,"a physical oscillation resets the continuous capture hold");
+        StepResult result{};
+        for(int step=0;step<20 && mission.outcome==Outcome::Flying;++step)
+            result=AdvanceMission(c,plan,mission,aircraft,aircraft);
+        Check(result.terminated && !result.truncated && mission.outcome==Outcome::CaptureCompleted
+            && !mission.touchedDown && result.rewards[static_cast<std::size_t>(Reward::Stop)]==0
+            && result.rewards[static_cast<std::size_t>(Reward::Touchdown)]==0,
+            "stable LOC/Glide success ends its own task without fabricating a landing reward");
+        auto const completed=AdvanceMission(c,plan,mission,aircraft,aircraft);
+        Check(completed.terminated && completed.reward==0 && Observe(c,plan,mission,aircraft)[41]==1,
+            "completed lesson cannot emit rewards or advance again");
+        auto failure=initial;failure.captureGateSeconds=c.training.gateHoldSeconds-c.mission.physicsDt;
+        auto contact=aircraft;contact.structuralContact=true;
+        auto const crashed=AdvanceMission(c,plan,failure,aircraft,contact);
+        Check(crashed.terminated && failure.outcome==Outcome::Crash,
+            "a crash is authoritative even at the end of a capture hold");
+        auto timeout=initial;timeout.steps=static_cast<std::uint64_t>(std::ceil(c.mission.maxSeconds/c.mission.physicsDt));
+        auto const expired=AdvanceMission(c,plan,timeout,aircraft,aircraft);
+        Check(expired.truncated && !expired.terminated && timeout.outcome==Outcome::Timeout,
+            "unfinished capture at the time budget remains a bootstrap truncation");
+        auto briefLoss=initial;briefLoss.captureGateSeconds=c.training.gateHoldSeconds-c.mission.physicsDt;
+        auto edge=aircraft;auto const local=DeckCoordinates(c.runway,edge.position);
+        edge.position=FromRunway(c.runway,local.north,
+            -local.north*std::tan(1.1*c.mission.localizerCaptureDegrees*DegreesToRadians),local.up);
+        auto const lost=AdvanceMission(c,plan,briefLoss,edge,edge);
+        Check(!lost.terminated && briefLoss.capturedLocalizer && briefLoss.captureGateSeconds==0,
+            "hysteresis cannot turn an out-of-tolerance snapshot into stabilized success");
+    }
+    c.training.curriculumStage=CurriculumStage::Joint;
+    MissionState finalApproach{};finalApproach.phase=Phase::Approach;
+    finalApproach.capturedLocalizer=true;finalApproach.capturedGlide=true;
+    for(int step=0;step<30;++step)
+        Check(!AdvanceMission(c,plan,finalApproach,aircraft,aircraft).terminated,
+            "Joint must continue from captured beams through touchdown and stop");
+    Check(finalApproach.captureGateSeconds==0,"Joint does not accumulate pedagogical completion");
 }
 
 void ApproachOnly(Config c)
@@ -612,7 +690,7 @@ int main()
     try
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
-        ApproachOnly(c);Configuration();
+        ApproachOnly(c);Configuration();CaptureLessonTermination(c);
         c.mission.patrolEnabled=true; // Keep all legacy patrol/recovery regressions active.
         Geometry(c);Landing(c);OrderedNavigation(c);AlignedStarts(c);CapturePriority(c);RandomizationAndMotion(c);DisplayReferences(c);
     }

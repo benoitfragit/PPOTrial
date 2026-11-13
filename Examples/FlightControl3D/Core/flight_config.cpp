@@ -146,7 +146,8 @@ Config LoadConfig(std::filesystem::path const& path)
     READ_T(ilsCaptureScale);
     auto const& curriculum=t.at("curriculum");
     Keys(curriculum, {"stage","locReminderProbability","glideOffsetMeters","gateHoldSeconds",
-        "gateHeadingDegrees","gateRouteDegrees","gateSlopeDegrees"});
+        "gateHeadingDegrees","gateRouteDegrees","gateSlopeDegrees","gateSpeedToleranceMps",
+        "gateRollDegrees","gateRateDegreesPerSecond","captureMaxSeconds","captureStart"});
     Require(curriculum.at("stage").is_string(),"curriculum stage");
     auto const stage=curriculum.at("stage").get<std::string>();
     Require(stage=="loc" || stage=="glide" || stage=="joint","curriculum stage");
@@ -158,6 +159,14 @@ Config LoadConfig(std::filesystem::path const& path)
     training.gateHeadingDegrees=Number(curriculum,"gateHeadingDegrees");
     training.gateRouteDegrees=Number(curriculum,"gateRouteDegrees");
     training.gateSlopeDegrees=Number(curriculum,"gateSlopeDegrees");
+    training.gateSpeedToleranceMps=Number(curriculum,"gateSpeedToleranceMps");
+    training.gateRollDegrees=Number(curriculum,"gateRollDegrees");
+    training.gateRateDegreesPerSecond=Number(curriculum,"gateRateDegreesPerSecond");
+    training.captureMaxSeconds=Number(curriculum,"captureMaxSeconds");
+    auto const& start=curriculum.at("captureStart");
+    Keys(start,{"speedToleranceMps","rollDegrees","pitchDegrees","slopeToleranceDegrees","localizerHeightOffsetMeters"});
+    training.captureStart={Number(start,"speedToleranceMps"),Number(start,"rollDegrees"),
+        Number(start,"slopeToleranceDegrees"),Number(start,"localizerHeightOffsetMeters"),Bounds(start,"pitchDegrees")};
     READ_T(actorRate); READ_T(criticRate); READ_T(gamma); READ_T(lambda); READ_T(clip); READ_T(entropy);
     READ_T(valueWeight); READ_T(minLogStd); READ_T(maxLogStd); READ_T(initialLogStd); READ_T(maxGradientNorm);
     READ_T(adamBeta1); READ_T(adamBeta2); READ_T(adamEpsilon);
@@ -179,6 +188,7 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics["rewardVersion"] = 11;
     semantics["guidanceVersion"] = 14;
     semantics["spawnVersion"] = 3;
+    semantics["curriculumVersion"] = 2;
     config.checkpointSignature = semantics.dump();
     Validate(config);
     return config;
@@ -209,6 +219,7 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
             && (*signature)["guidanceVersion"]!=13 && (*signature)["guidanceVersion"]!=14) return false;
         if(signature->contains("spawnVersion") && (*signature)["spawnVersion"]!=2
             && (*signature)["spawnVersion"]!=3) return false;
+        if(signature->contains("curriculumVersion") && (*signature)["curriculumVersion"]!=2) return false;
     }
     // A checkpoint trained with tanh actuators cannot warm-start the new mapping.
     if(!previous.contains("actionMappingVersion") || !next.contains("actionMappingVersion")
@@ -251,6 +262,7 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
     previous.erase("rewardVersion"); next.erase("rewardVersion");
     previous.erase("guidanceVersion"); next.erase("guidanceVersion");
     previous.erase("spawnVersion"); next.erase("spawnVersion");
+    previous.erase("curriculumVersion"); next.erase("curriculumVersion");
     return previous==next;
 }
 
@@ -364,6 +376,36 @@ void Validate(Config const& c)
         && std::isfinite(t.gateRouteDegrees) && t.gateRouteDegrees>0 && t.gateRouteDegrees<=20
         && std::isfinite(t.gateSlopeDegrees) && t.gateSlopeDegrees>0 && t.gateSlopeDegrees<=5,
         "curriculum settings");
+    Require(std::isfinite(t.captureMaxSeconds) && t.captureMaxSeconds>=t.gateHoldSeconds
+        && t.captureMaxSeconds<=86400
+        && std::isfinite(t.gateSpeedToleranceMps) && t.gateSpeedToleranceMps>0
+        && t.gateSpeedToleranceMps<=w.speedTolerance
+        && std::isfinite(t.gateRollDegrees) && t.gateRollDegrees>0 && t.gateRollDegrees<=20
+        && std::isfinite(t.gateRateDegreesPerSecond) && t.gateRateDegreesPerSecond>0
+        && t.gateRateDegreesPerSecond<=30,"stabilized capture limits");
+    auto const& start=t.captureStart;
+    Require(std::isfinite(start.speedToleranceMps) && start.speedToleranceMps>0
+        && m.approachSpeed-start.speedToleranceMps>m.flareSpeed
+        && m.approachSpeed+start.speedToleranceMps<=n.speed
+        && std::isfinite(start.rollDegrees) && start.rollDegrees>=0 && start.rollDegrees<=30
+        && std::isfinite(start.pitchDegrees.minimum) && std::isfinite(start.pitchDegrees.maximum)
+        && start.pitchDegrees.minimum>=-15 && start.pitchDegrees.maximum<=15
+        && start.pitchDegrees.minimum<=start.pitchDegrees.maximum
+        && std::isfinite(start.slopeToleranceDegrees) && start.slopeToleranceDegrees>=0
+        && m.glideDegrees+start.slopeToleranceDegrees<=10
+        && std::isfinite(start.localizerHeightOffsetMeters) && start.localizerHeightOffsetMeters>=0,
+        "capture lesson start envelope");
+    double const minimumLocHeight=r.thresholdHeightMeters+i.distanceMeters.minimum
+        *std::cos(i.bearingDegrees.maximum*DegreesToRadians)*std::tan(m.glideDegrees*DegreesToRadians)
+        -start.localizerHeightOffsetMeters;
+    double const minimumCaptureHeight=std::min(minimumLocHeight,minimumGlideHeight-t.glideOffsetMeters);
+    double const maximumCaptureHeight=maximumGlideHeight
+        +std::max(start.localizerHeightOffsetMeters,t.glideOffsetMeters);
+    Require(minimumCaptureHeight>m.flareHeightMeters
+        && maximumCaptureHeight<m.maxAltitudeMeters
+        && minimumCaptureHeight-i.distanceMeters.maximum*maximumTilt
+            +d.deckHeightMeters.minimum-d.heaveAmplitudeMeters.maximum>d.seaHeightMeters,
+        "capture lesson starts must remain airborne above the sea");
     Require(t.ilsCaptureScale>=1.0
         && m.localizerCaptureDegrees*t.ilsCaptureScale<m.ilsSectorDegrees
         && m.glideCaptureDegrees*t.ilsCaptureScale<m.glideDegrees,

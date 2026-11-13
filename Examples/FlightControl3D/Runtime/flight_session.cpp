@@ -32,25 +32,6 @@ void LogUpdate(LearningStats const& stats)
     std::cout<<std::endl;
 }
 } // namespace
-bool CaptureGateQualified(Config const& c,CurriculumStage stage,
-    MissionState const& mission,AircraftState const& aircraft,Guidance const& guidance) noexcept
-{
-    if(stage==CurriculumStage::Joint || mission.phase!=Phase::Approach
-        || mission.outcome!=Outcome::Flying || !mission.capturedLocalizer)
-        return false;
-    double const headingError=WrapAngle(aircraft.heading-c.runway.headingDegrees*DegreesToRadians);
-    double const routeError=std::atan2(guidance.relativeVelocity.east,guidance.relativeVelocity.north);
-    if(std::abs(headingError)>c.training.gateHeadingDegrees*DegreesToRadians
-        || std::abs(routeError)>c.training.gateRouteDegrees*DegreesToRadians
-        || std::abs(aircraft.airspeed-guidance.targetSpeed)>c.reward.speedTolerance)
-        return false;
-    if(stage==CurriculumStage::Loc) return true;
-    double const slope=std::atan2(guidance.relativeVelocity.up,
-        std::hypot(guidance.relativeVelocity.north,guidance.relativeVelocity.east));
-    return mission.capturedGlide
-        && std::abs(guidance.glideError)<=c.mission.glideCaptureDegrees*DegreesToRadians
-        && std::abs(slope-guidance.targetSlope)<=c.training.gateSlopeDegrees*DegreesToRadians;
-}
 FlightSession::FlightSession(Config config, bool training, std::filesystem::path modelDirectory,
     std::optional<std::size_t> inferenceEpisodes,TrainingBudget budget)
     : config_(std::move(config)),training_(training),models_(config_,std::move(modelDirectory)),
@@ -133,7 +114,6 @@ void FlightSession::StartValidation()
 {
     validation_={};validation_.update=learner_.Stats().updates;
     validationPendingReset_=false;lastStep_={};controls_={};
-    validationHoldSeconds_=0;validationEpisodeSucceeded_=false;
     validationGateSuccesses_=0;
     validationEnvironment_=std::make_unique<FlightEnvironment>(config_,DefaultDataRoot(),config_.evaluation.seed);
     validationEnvironment_->Reset();
@@ -144,27 +124,16 @@ void FlightSession::TickValidation()
     if(validationPendingReset_)
     {
         evaluation.Reset();validationPendingReset_=false;
-        validationHoldSeconds_=0;validationEpisodeSucceeded_=false;
     }
     auto const action=learner_.Choose(evaluation.ObservationNow(),true);
     controls_=ToControls(action,config_.initial.throttle);
     lastStep_=evaluation.Step(controls_);
     // No Record/Optimize here: training rollout, optimizer and RNG remain frozen.
     auto const stage=config_.training.curriculumStage;
-    if(stage!=CurriculumStage::Joint && evaluation.Mission().outcome==Outcome::Flying)
-    {
-        auto const active=evaluation.Settings().training.curriculumStage;
-        // Validate heading in this episode's randomized moving-runway frame.
-        bool const qualified=CaptureGateQualified(evaluation.Settings(),active,
-            evaluation.Mission(),evaluation.Aircraft(),evaluation.CurrentGuidance());
-        validationHoldSeconds_=qualified ? validationHoldSeconds_+config_.StepSeconds() : 0;
-        if(validationHoldSeconds_>=config_.training.gateHoldSeconds)
-            validationEpisodeSucceeded_=true;
-    }
     if(lastStep_.terminated || lastStep_.truncated)
     {
-        if(stage!=CurriculumStage::Joint && validationEpisodeSucceeded_
-            && evaluation.Mission().outcome!=Outcome::Crash) ++validationGateSuccesses_;
+        if(stage!=CurriculumStage::Joint && evaluation.Mission().outcome==Outcome::CaptureCompleted)
+            ++validationGateSuccesses_;
         validation_.Record(evaluation.Mission());
         if(validation_.episodes<config_.evaluation.episodes) validationPendingReset_=true;
         else

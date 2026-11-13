@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iterator>
+#include <limits>
 #include <nlohmann/json.hpp>
 using namespace ppo::examples::flight;
 
@@ -45,7 +46,7 @@ void DesktopContinuation(Config c)
 enum class TrainingContractChange
 {
     HorizontalStarts, Rewards, LegacyStarts, LegacyGuidance, AlignedProbability,
-    EpisodeBoundary, ApproachOnly, ResetAttitude
+    EpisodeBoundary, ApproachOnly, ResetAttitude, LegacyCurriculum
 };
 void CommittedTrainingCheckpoint(Config c)
 {
@@ -113,6 +114,8 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     }
     else if(change==TrainingContractChange::ResetAttitude)
         signature["spawnVersion"]=2;
+    else if(change==TrainingContractChange::LegacyCurriculum)
+        signature.erase("curriculumVersion");
     else
         signature["mission"]["maxDistanceMeters"]=30000.0;
     old.checkpointSignature=signature.dump();
@@ -249,6 +252,11 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
         "independent attitude and velocity reset keeps a compatible architecture");
     signature=nlohmann::json::parse(c.checkpointSignature);signature["spawnVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown spawn contract is rejected");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("curriculumVersion");
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "previous landing-length capture lessons can warm-start the improved curriculum");
+    signature["curriculumVersion"]=999;
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown curriculum contract rejected");
 }
 int main()
 {
@@ -260,7 +268,8 @@ int main()
         for(auto change : {TrainingContractChange::HorizontalStarts,TrainingContractChange::Rewards,
             TrainingContractChange::LegacyStarts,TrainingContractChange::LegacyGuidance,
             TrainingContractChange::AlignedProbability,TrainingContractChange::EpisodeBoundary,
-            TrainingContractChange::ApproachOnly,TrainingContractChange::ResetAttitude})
+            TrainingContractChange::ApproachOnly,TrainingContractChange::ResetAttitude,
+            TrainingContractChange::LegacyCurriculum})
             ChangedTrainingContract(c,change);
         c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
         c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;
@@ -290,6 +299,7 @@ int main()
         aligned.airspeed=c.mission.approachSpeed;
         aligned.heading=c.runway.headingDegrees*DegreesToRadians;
         Guidance guidance{};
+        guidance.ilsValid=true;guidance.along=-5000;guidance.height=300;
         guidance.targetSpeed=c.mission.approachSpeed;
         guidance.targetSlope=-c.mission.glideDegrees*DegreesToRadians;
         guidance.relativeVelocity={c.mission.approachSpeed,0,
@@ -318,6 +328,29 @@ int main()
         capture.capturedGlide=false;
         Check(!CaptureGateQualified(c,CurriculumStage::Glide,capture,aligned,guidance),
             "unconfirmed glide cannot pass Glide gate");
+        capture.capturedGlide=true;
+        aligned.airspeed=c.mission.approachSpeed+c.training.gateSpeedToleranceMps+0.1;
+        Check(!CaptureGateQualified(c,CurriculumStage::Loc,capture,aligned,guidance),"unstable speed fails the capture gate");
+        aligned.airspeed=c.mission.approachSpeed;
+        aligned.roll=(c.training.gateRollDegrees+1)*DegreesToRadians;
+        Check(!CaptureGateQualified(c,CurriculumStage::Loc,capture,aligned,guidance),"excessive bank fails the capture gate");
+        aligned.roll=0;
+        for(int axis=0;axis<3;++axis)
+        {
+            auto shaking=aligned;double const rate=(c.training.gateRateDegreesPerSecond+1)*DegreesToRadians;
+            if(axis==0) shaking.rollRate=rate;
+            if(axis==1) shaking.pitchRate=rate;
+            if(axis==2) shaking.yawRate=rate;
+            Check(!CaptureGateQualified(c,CurriculumStage::Loc,capture,shaking,guidance),"body-rate oscillations fail the capture gate");
+        }
+        auto stale=guidance;stale.ilsValid=false;
+        Check(!CaptureGateQualified(c,CurriculumStage::Loc,capture,aligned,stale),"stale capture outside radio geometry cannot pass");
+        auto invalid=aligned;invalid.pitchRate=std::numeric_limits<double>::quiet_NaN();
+        Check(!CaptureGateQualified(c,CurriculumStage::Loc,capture,invalid,guidance),"non-finite flight cannot qualify");
+        ValidationMetrics pedagogical{};auto completed=capture;completed.outcome=Outcome::CaptureCompleted;
+        pedagogical.Record(completed);
+        Check(pedagogical.episodes==1 && pedagogical.stops==0 && pedagogical.touchdowns==0
+            && !Validated(c,pedagogical),"a completed capture is never recorded as a landing success");
         // A capture-only curriculum gate must never mint a landing BEST.
         auto gateConfig=c;gateConfig.training.curriculumStage=CurriculumStage::Loc;
         gateConfig.training.gateHoldSeconds=0.1;gateConfig.training.resume=false;

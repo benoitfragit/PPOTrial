@@ -37,7 +37,7 @@ struct Controls final
 };
 
 enum class Phase : std::uint8_t { Patrol, Approach, Rollout };
-enum class Outcome : std::uint8_t { Flying, Stopped, Crash, Timeout };
+enum class Outcome : std::uint8_t { Flying, Stopped, Crash, Timeout, CaptureCompleted };
 /** One policy, three independent training scenarios. The desktop defaults to Joint. */
 enum class CurriculumStage : std::uint8_t { Loc, Glide, Joint };
 inline constexpr char const* StageName(CurriculumStage stage) noexcept
@@ -77,6 +77,8 @@ struct MissionState final
     std::size_t waypoint{1};
     std::uint64_t steps{};
     double stoppedSeconds{};
+    /** @brief Continuous stabilized-capture hold; terminal only for LOC/Glide lessons. */
+    double captureGateSeconds{};
     double localizerHoldSeconds{},glideHoldSeconds{};
     /** @brief Continuous time outside each beam's release envelope. */
     double localizerLossSeconds{},glideLossSeconds{};

@@ -1,8 +1,10 @@
 # FlightControl3D — curriculum LOC / Glide et CI
 
-Date : 12 novembre 2026. Branche : feat/jsbsim-flight-control. PR : #83.
+Mise à jour : 13 novembre 2026. Branche : `fix/flight-approach-only`. PR : #87, issue #89. L’implémentation initiale provenait de la PR #83.
 
 Depuis le 13 novembre, `mission.patrolEnabled=false` maintient les trois gates en approche, sans circuit ni point hippodrome et avec `Path=0`. Les départs sont à 4–6,5 km ; LOC conserve les deux côtés (4–10°) et Glide ses écarts verticaux et rappels. La réactivation reste explicite par JSON : [architecture du correctif #86](PPOTrial_FlightControl3D_Approche_Sans_Hippodrome_Issue86.md).
+
+Le curriculum amélioré termine maintenant les épisodes LOC/Glide dès leur capture stabilisée, sans attendre un atterrissage ; leur durée maximale est de 60 secondes. Leurs départs facilitent le pilotage (56 ±2 m/s, roulis ±3°, tangage 1–3°), puis Joint retrouve les départs complets et ses 900 secondes. Les workflows et le runner CI restent inchangés : [architecture, réglages et régressions du curriculum #89](PPOTrial_FlightControl3D_Curriculum_Captures_Stabilisees_Issue89_PR87.md).
 
 ## Contrat de shaping
 
@@ -37,10 +39,10 @@ Les validations utilisent le seed d'évaluation indépendant et la tolérance de
 Les erreurs de cap sont évaluées par rapport à la piste réellement tirée dans
 l'épisode (orientation aléatoire et mobile), et non au cap nominal du JSON.
 La capture seule ne suffit pas : le cap de fuselage est contrôlé à ±5° du cap piste,
-la route relative à ±5°, la vitesse à ±15 m/s de la consigne (paramètre existant),
+la route relative à ±5°, la vitesse à ±5 m/s de la consigne,
 et en Gate Glide la pente de trajectoire est contrôlée à ±1,5° de la descente visée.
 Les trois tolérances angulaires sont configurables par gateHeadingDegrees, gateRouteDegrees
-et gateSlopeDegrees ; un crash annule la réussite pédagogique de l'épisode. LOC et Glide exigent le maintien confirmé du/des faisceaux pendant gateHoldSeconds ; les rappels LOC sont évalués comme LOC. Le succès pédagogique est >=92 % sur 20 épisodes, donc >=19/20. L'évaluation de la gate Joint conserve le contrat strict >=19/20 arrêts sûrs, seul critère de promotion du BEST. Les gates pédagogiques ne promeuvent pas de BEST ; latest est le seul point de passage. Le dernier verdict de validation apparaît sous la forme [FLIGHT_GATE] stage=... successes=... episodes=... passed=true/false.
+et gateSlopeDegrees. Le roulis relatif doit rester dans ±8° et chacune des vitesses angulaires p/q/r dans ±5°/s. La géométrie ILS stricte doit rester valide ; une capture retenue par hystérésis ne suffit pas. LOC et Glide exigent un maintien continu pendant gateHoldSeconds, vérifié à chaque sous-pas physique, puis l'épisode se termine avec CaptureCompleted ; un crash reste prioritaire et les rappels LOC sont évalués comme LOC. Le succès pédagogique est >=92 % sur 20 épisodes, donc >=19/20. L'évaluation de la gate Joint conserve le contrat strict >=19/20 arrêts sûrs, seul critère de promotion du BEST. Les gates pédagogiques ne promeuvent pas de BEST ; latest est le seul point de passage. Le dernier verdict de validation apparaît sous la forme [FLIGHT_GATE] stage=... successes=... episodes=... passed=true/false.
 
 ## Lancement GitHub CI (correctif 12 novembre 2026)
 

@@ -67,6 +67,11 @@ struct RewardSettings final
     /** @brief Absolute bound for the desired LOC intercept course, in degrees. */
     double localizerInterceptLimitDegrees{};
 };
+struct CaptureStartSettings final
+{
+    double speedToleranceMps{},rollDegrees{},slopeToleranceDegrees{},localizerHeightOffsetMeters{};
+    Range pitchDegrees{};
+};
 struct TrainingSettings final
 {
     std::uint32_t seed{};
@@ -76,6 +81,8 @@ struct TrainingSettings final
     CurriculumStage curriculumStage{CurriculumStage::Joint};
     double locReminderProbability{0.30}, glideOffsetMeters{120.0}, gateHoldSeconds{2.0};
     double gateHeadingDegrees{5.0}, gateRouteDegrees{5.0}, gateSlopeDegrees{1.5};
+    double gateSpeedToleranceMps{},gateRollDegrees{},gateRateDegreesPerSecond{},captureMaxSeconds{};
+    CaptureStartSettings captureStart{};
     double actorRate{}, criticRate{}, gamma{}, lambda{}, clip{}, entropy{}, valueWeight{};
     double minLogStd{}, maxLogStd{}, initialLogStd{}, maxGradientNorm{};
     double adamBeta1{}, adamBeta2{}, adamEpsilon{};

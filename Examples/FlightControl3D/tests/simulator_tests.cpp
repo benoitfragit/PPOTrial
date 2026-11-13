@@ -90,6 +90,29 @@ void CloseApproachStarts(Config c)
                 && !guidance.targetValid && observation[0]==0 && observation[1]==0 && observation[2]==0,
                 "real JSBSim resets remain near the cone, inbound to the moving runway and point-free");
             left=left || guidance.cross< -0.1;right=right || guidance.cross>0.1;
+            if(stage!=CurriculumStage::Joint)
+            {
+                auto const& start=c.training.captureStart;
+                auto const local=DeckCoordinates(runway,aircraft.position);
+                double const offset=local.up-(runway.thresholdHeightMeters
+                    -local.north*std::tan(c.mission.glideDegrees*DegreesToRadians));
+                Check(std::abs(aircraft.airspeed-c.mission.approachSpeed)<=start.speedToleranceMps+0.01
+                    && std::abs(aircraft.roll)<=start.rollDegrees*DegreesToRadians+1e-8
+                    && aircraft.pitch>=start.pitchDegrees.minimum*DegreesToRadians-1e-8
+                    && aircraft.pitch<=start.pitchDegrees.maximum*DegreesToRadians+1e-8
+                    && environment.Settings().mission.maxSeconds==std::min(c.mission.maxSeconds,c.training.captureMaxSeconds),
+                    "native capture lessons start within their speed/attitude envelope and bounded duration");
+                if(environment.Settings().training.curriculumStage==CurriculumStage::Loc)
+                    Check(std::abs(offset)<=start.localizerHeightOffsetMeters+0.02,
+                        "LOC starts avoid an independent large vertical recovery task");
+                else Check(std::abs(offset)<=c.training.glideOffsetMeters+0.02
+                    && std::abs(offset)>=0.25*c.training.glideOffsetMeters-0.02,
+                    "GLIDE lessons retain genuine vertical offsets");
+            }
+            else Check(environment.Settings().initial.rollDegrees.maximum==c.initial.rollDegrees.maximum
+                && environment.Settings().initial.speedMps.maximum==c.initial.speedMps.maximum
+                && environment.Settings().mission.maxSeconds==c.mission.maxSeconds,
+                "Joint restores the complete initial distribution and landing duration");
             auto const result=environment.Step({0,0,0,c.initial.throttle,0,false});
             Check(environment.Mission().phase==Phase::Approach && !environment.CurrentGuidance().targetValid
                 && result.rewards[static_cast<std::size_t>(Reward::Path)]==0,
@@ -102,6 +125,29 @@ void CloseApproachStarts(Config c)
     patrol.Reset();
     Check(patrol.Mission().phase==Phase::Patrol && patrol.Plan().count>1 && patrol.CurrentGuidance().targetValid,
         "explicit reactivation restores the original airborne patrol guidance");
+}
+
+void NativeCaptureCompletion(Config c)
+{
+    c.initial.bearingDegrees={0.5,0.5};c.initial.headingOffsetDegrees={0,0};
+    c.mission.captureHoldSeconds=0.05;
+    c.training.gateHoldSeconds=0.1;c.training.captureMaxSeconds=4;
+    c.training.captureStart.speedToleranceMps=0.1;c.training.captureStart.rollDegrees=0;
+    c.training.captureStart.pitchDegrees={2,2};c.training.captureStart.localizerHeightOffsetMeters=0;
+    c.training.glideOffsetMeters=1;c.training.locReminderProbability=0;
+    for(auto const stage : {CurriculumStage::Loc,CurriculumStage::Glide})
+    {
+        c.training.curriculumStage=stage;
+        FlightEnvironment environment(c,DefaultDataRoot(),773U);
+        environment.Reset();StepResult result{};
+        for(int step=0;step<40 && environment.Mission().outcome==Outcome::Flying;++step)
+            result=environment.Step({0,0,0,c.initial.throttle,0,false});
+        Check(result.terminated && !result.truncated && environment.Mission().outcome==Outcome::CaptureCompleted
+            && environment.ObservationNow()[41]==1 && !environment.Mission().touchedDown
+            && result.rewards[static_cast<std::size_t>(Reward::Stop)]==0,
+            "real JSBSim can complete a stabilized capture task without attempting a landing");
+        Rejects([&] {environment.Step({});},"native step after capture completion requires reset");
+    }
 }
 
 void IndependentResetAttitude(Config c)
@@ -149,6 +195,7 @@ int main()
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
         IndependentResetAttitude(c);
+        NativeCaptureCompletion(c);
         CloseApproachStarts(c);
         PhaseControlMapping(c);
         c.initial.distanceMeters={10000,10000}; c.initial.bearingDegrees={8,8}; c.initial.heightMeters={600,600};
