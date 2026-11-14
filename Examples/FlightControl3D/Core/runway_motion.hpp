@@ -14,7 +14,10 @@ Vec3 RunwayForward(Runway const& runway) noexcept;
 Vec3 RunwayRight(Runway const& runway) noexcept;
 Vec3 RunwayNormal(Runway const& runway) noexcept;
 Vec3 DeckCoordinates(Runway const& runway, Vec3 point) noexcept;
+/** Rigid-frame velocity at a point; physical surface velocity only on the deck. */
 Vec3 DeckVelocity(Runway const& runway, Vec3 point) noexcept;
+/** Velocity of the closest point on the finite deck, excluding airborne lever arms. */
+Vec3 RunwaySurfaceVelocity(Runway const& runway, Vec3 point) noexcept;
 
 struct RunwayMotion final
 {

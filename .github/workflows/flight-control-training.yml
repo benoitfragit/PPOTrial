@@ -16,6 +16,7 @@ on:
           - loc
           - glide
           - joint
+          - joint-mobile
       additional_updates:
         description: "PPO updates per gate evaluation (repeated until pass or budget)"
         required: true
@@ -110,6 +111,7 @@ jobs:
             build/flight-training/training.csv
             build/flight-training/training_*.csv
             build/flight-training/curriculum_stage.txt
+            build/flight-training/curriculum_version.txt
             build/flight-training/curriculum_status.txt
             build/flight-training/gate_*.log
           if-no-files-found: warn

@@ -2,6 +2,10 @@
 
 Date : 11 novembre 2026. Projet : PPOTrial. Issue : #82. PR : [#83](https://github.com/benoitfragit/PPOTrial/pull/83). Branche : `feat/jsbsim-flight-control`.
 
+État courant du 13 novembre 2026 : [corrections de propulsion, actions et apprentissage #91 / PR #87](PPOTrial_FlightControl3D_Convergence_Propulsion_Reward_Issue91_PR87.md). Le démarrage moteur historique, le reset des volets et la comparaison temporelle des rewards sont corrigés ; les scores de convergence restent distincts des tests logiciels.
+
+Mise à jour du 13 novembre 2026 : le scénario livré désactive temporairement l’hippodrome avec `mission.patrolEnabled=false`. Il reste en approche après perte LOC/GLIDE, sans reward Path ni point de guidage. Les départs sont rapprochés à 4–6,5 km et orientés vers le seuil. Le code hippodrome reste réactivable ; voir [approche seule, réglages et validation](PPOTrial_FlightControl3D_Approche_Sans_Hippodrome_Issue86.md). Les sections historiques ci-dessous décrivent aussi les anciens réglages.
+
 ## Livraison et lancement local
 
 `FlightControl3D.exe` est un exécutable graphique dédié. Il utilise le même `Environment`, les mêmes snapshots ECS et le même renderer raylib/ImGui que l'application actuelle. L'exemple apparaît aussi dans le catalogue de `PPO.exe`. Le contrôleur RLMission, BlueDefense et leurs modèles restent hors du diff.
@@ -376,6 +380,8 @@ créé.
 Validation locale : ni compilation ni test exécuté, conformément à la consigne.
 
 ## Tolérance ILS temporaire d'entraînement (11 novembre 2026)
+
+Évolution du 13 novembre, issue #90 : cet élargissement est désormais limité à Joint. Les leçons LOC/Glide terminent sur le même objectif nominal que leur validation ; l’ancien élargissement de leur terminal permettait des sorties anticipées non validables. Le bruit gaussien du scénario est aussi réduit, sans changement du mapping ni des rewards : [diagnostic du run #6 et limites de validation](PPOTrial_FlightControl3D_Diagnostic_Run6_Issue90_PR87.md).
 
 `training.ilsCaptureScale` multiplie uniquement les tolérances de capture LOC et
 GLIDE de l'environnement qui collecte les rollouts. La valeur locale `2.0` donne

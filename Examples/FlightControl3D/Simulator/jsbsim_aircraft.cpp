@@ -3,6 +3,7 @@
 #include <input_output/FGPropertyManager.h>
 #include <models/FGFCS.h>
 #include <models/FGPropulsion.h>
+#include <models/propulsion/FGEngine.h>
 #include <models/FGGroundReactions.h>
 #include <models/FGLGear.h>
 #include <models/FGInertial.h>
@@ -66,7 +67,7 @@ struct JsbsimAircraft::Impl final
     JSBSim::FGFDMExec fdm{};
     JSBSim::FGLocation reference;
     DeckGround* ground{}; // Owned by FGFDMExec::FGInertial through unique_ptr.
-    std::array<SGPropertyNode*,17> reads{};
+    std::array<SGPropertyNode*,18> reads{};
     SGPropertyNode* gearCommand{};
     explicit Impl(Config const& c, std::filesystem::path const& root) : config(c),reference(ReferenceLocation(c.runway))
     {
@@ -79,12 +80,12 @@ struct JsbsimAircraft::Impl final
         if (!fdm.LoadModel(config.aircraft)) throw std::runtime_error("FlightControl3D: JSBSim model loading failed");
         fdm.DisableOutput();
         auto const manager = fdm.GetPropertyManager();
-        std::array<char const*,17> const names{
+        std::array<char const*,18> const names{
             "position/lat-geod-rad", "position/long-gc-rad", "position/h-sl-ft",
             "velocities/v-north-fps", "velocities/v-east-fps", "velocities/v-down-fps",
             "velocities/vc-fps", "attitude/phi-rad", "attitude/theta-rad", "attitude/psi-rad",
             "velocities/p-rad_sec", "velocities/q-rad_sec", "velocities/r-rad_sec", "gear/gear-pos-norm",
-            "gear/unit[0]/WOW", "gear/unit[1]/WOW", "gear/unit[2]/WOW"};
+            "gear/unit[0]/WOW", "gear/unit[1]/WOW", "gear/unit[2]/WOW", "fcs/flap-pos-norm"};
         for (std::size_t i=0; i<reads.size(); ++i)
         {
             reads[i] = manager->GetNode(names[i],false);
@@ -101,7 +102,7 @@ struct JsbsimAircraft::Impl final
 
     AircraftState Read() const
     {
-        std::array<double,17> value{};
+        std::array<double,18> value{};
         for (std::size_t i=0; i<value.size(); ++i) value[i] = reads[i]->getDoubleValue();
         AircraftState a{};
         auto const propagate=fdm.GetPropagate();
@@ -110,6 +111,7 @@ struct JsbsimAircraft::Impl final
         a.airspeed = value[6]*FeetToMeters;
         a.roll = value[7]; a.pitch = value[8]; a.heading = value[9];
         a.rollRate = value[10]; a.pitchRate = value[11]; a.yawRate = value[12]; a.gearPosition = value[13];
+        a.flapPosition=value[17];
         a.weightOnWheels = value[14] != 0 || value[15] != 0 || value[16] != 0;
         auto const ground = fdm.GetGroundReactions();
         std::size_t wheelIndex=0;
@@ -133,7 +135,7 @@ JsbsimAircraft::JsbsimAircraft(Config const& config, std::filesystem::path const
     : impl_(std::make_unique<Impl>(config,dataRoot)) {}
 JsbsimAircraft::~JsbsimAircraft() = default;
 
-AircraftState JsbsimAircraft::Reset(AircraftState const& initial)
+AircraftState JsbsimAircraft::Reset(AircraftState const& initial,Phase phase)
 {
     if (!IsFinite(initial)) throw std::invalid_argument("FlightControl3D: invalid JSBSim initial state");
     auto& p = *impl_;
@@ -145,19 +147,44 @@ AircraftState JsbsimAircraft::Reset(AircraftState const& initial)
     ic->SetLongitudeDegIC(location.GetLongitude()/DegreesToRadians);
     ic->SetTerrainElevationFtIC(p.config.runway.elevationMeters/FeetToMeters);
     ic->SetAltitudeASLFtIC(location.GetGeodAltitude());
-    ic->SetPhiRadIC(initial.roll); ic->SetThetaRadIC(initial.pitch); ic->SetPsiRadIC(initial.heading);
     ic->SetVcalibratedKtsIC(initial.airspeed/(1852.0/3600.0));
-    ic->SetClimbRateFpsIC(initial.velocity.up/FeetToMeters);
+    // SetClimbRateFpsIC preserves incidence by changing theta: using it after
+    // SetThetaRadIC silently replaces the sampled pitch by the flight-path angle.
+    // Explicit NED velocity setters retain the velocity when attitude is set last.
+    double const trueSpeed=ic->GetVtrueFpsIC();
+    double const climb=initial.velocity.up/FeetToMeters;
+    if(std::abs(climb)>trueSpeed)
+        throw std::invalid_argument("FlightControl3D: initial climb exceeds true airspeed");
+    double const horizontal=std::sqrt(std::max(0.0,trueSpeed*trueSpeed-climb*climb));
+    double const requestedHorizontal=std::hypot(initial.velocity.north,initial.velocity.east);
+    double const course=requestedHorizontal>0
+        ? std::atan2(initial.velocity.east,initial.velocity.north) : initial.heading;
+    ic->SetVNorthFpsIC(horizontal*std::cos(course));
+    ic->SetVEastFpsIC(horizontal*std::sin(course));
+    ic->SetVDownFpsIC(-climb);
+    ic->SetPhiRadIC(initial.roll); ic->SetThetaRadIC(initial.pitch); ic->SetPsiRadIC(initial.heading);
     ic->SetPRadpsIC(0); ic->SetQRadpsIC(0); ic->SetRRadpsIC(0);
     p.fdm.GetFCS()->SetDaCmd(0); p.fdm.GetFCS()->SetDeCmd(0); p.fdm.GetFCS()->SetDrCmd(0);
     p.fdm.GetFCS()->SetThrottleCmd(-1,p.config.initial.throttle);
+    p.fdm.GetFCS()->SetMixtureCmd(-1,p.config.initial.mixture);
     p.fdm.GetFCS()->SetPropAdvanceCmd(-1,p.config.initial.propeller);
-    p.fdm.GetFCS()->SetDfCmd(p.config.initial.flap);
+    double const flap=phase==Phase::Patrol ? p.config.initial.flap
+        : phase==Phase::Approach ? p.config.initial.approachFlap : p.config.initial.rolloutFlap;
+    p.fdm.GetFCS()->SetDfCmd(flap);
+    // Pinned c310 actuator travel is 0..45 degrees. Start at the phase detent,
+    // instead of teaching a flap-extension transient at every airborne reset.
+    p.fdm.GetFCS()->SetDfPos(JSBSim::ofDeg,45.0*flap);
     p.fdm.GetFCS()->SetLBrake(0); p.fdm.GetFCS()->SetRBrake(0); p.fdm.GetFCS()->SetCBrake(0);
     p.gearCommand->setDoubleValue(p.config.initial.gearDown ? 1 : 0);
     p.fdm.GetFCS()->SetGearPos(p.config.initial.gearDown ? 1 : 0);
     if (!p.fdm.RunIC()) throw std::runtime_error("FlightControl3D: JSBSim RunIC failed");
-    p.fdm.GetPropulsion()->InitRunning(-1);
+    // FGPropulsion::InitRunning also solves steady propulsion with 0.5 s
+    // internal steps. For the pinned c310 propellers it collapses RPM to zero
+    // and shuts down both engines. Start them at their native initial RPM and
+    // let the ordinary 10 ms physics integrate the transient instead.
+    auto const propulsion=p.fdm.GetPropulsion();
+    for(unsigned int engine=0;engine<propulsion->GetNumEngines();++engine)
+        propulsion->GetEngine(engine)->InitRunning();
     auto state = p.Read();
     if (!IsFinite(state)) throw std::runtime_error("FlightControl3D: non-finite JSBSim reset");
     return state;

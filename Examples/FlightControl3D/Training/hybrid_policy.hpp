@@ -14,6 +14,9 @@ struct PolicyAction final
     std::array<double, ContinuousActions> raw{};
     bool gearDown{};
     double logProbability{};
+    bool brakeActive{true}, gearActive{true};
+    /** @brief Frozen collection distribution for the exact rollout KL guard. */
+    PolicyVector policy{};
 };
 
 inline double Softplus(double x) noexcept { return std::max(x,0.0)+std::log1p(std::exp(-std::abs(x))); }
@@ -26,9 +29,11 @@ inline double Sigmoid(double x) noexcept
 /** Density of the latent Gaussian sample and Bernoulli gear, not of a clipped action. */
 inline double LogProbability(PolicyVector const& output, PolicyAction const& action, TrainingSettings const& t) noexcept
 {
-    double logp = action.gearDown ? -Softplus(-output.back()) : -Softplus(output.back());
+    double logp = action.gearActive
+        ? (action.gearDown ? -Softplus(-output.back()) : -Softplus(output.back())) : 0;
     for (std::size_t i=0; i<ContinuousActions; ++i)
     {
+        if(i==4 && !action.brakeActive) continue;
         double const logStd = std::clamp(output[ContinuousActions+i],t.minLogStd,t.maxLogStd);
         double const z = (action.raw[i]-output[i])*std::exp(-logStd);
         logp -= 0.5*z*z + logStd + 0.5*std::log(2*Pi);
@@ -36,13 +41,39 @@ inline double LogProbability(PolicyVector const& output, PolicyAction const& act
     return logp;
 }
 
+/** @brief Exact old-to-new Gaussian/Bernoulli KL on the physically active controls. */
+inline double PolicyKl(PolicyVector const& previous,PolicyVector const& current,
+    PolicyAction const& action,TrainingSettings const& t) noexcept
+{
+    double result=0;
+    for(std::size_t i=0;i<ContinuousActions;++i)
+    {
+        if(i==4 && !action.brakeActive) continue;
+        double const oldStd=std::clamp(previous[ContinuousActions+i],t.minLogStd,t.maxLogStd);
+        double const newStd=std::clamp(current[ContinuousActions+i],t.minLogStd,t.maxLogStd);
+        double const logScale=oldStd-newStd;
+        double const difference=previous[i]-current[i];
+        result+=0.5*std::expm1(2*logScale)-logScale
+            +0.5*difference*difference*std::exp(-2*newStd);
+    }
+    if(action.gearActive)
+    {
+        double const probability=Sigmoid(previous.back());
+        result+=probability*(Softplus(-current.back())-Softplus(-previous.back()))
+            +(1-probability)*(Softplus(current.back())-Softplus(previous.back()));
+    }
+    return std::max(0.0,result);
+}
+
 /** Analytic entropy of the latent Gaussian x Bernoulli policy. */
-inline double Entropy(PolicyVector const& output, TrainingSettings const& t) noexcept
+inline double Entropy(PolicyVector const& output, TrainingSettings const& t,
+    bool brakeActive=true,bool gearActive=true) noexcept
 {
     double const p = Sigmoid(output.back());
-    double entropy = Softplus(output.back())-p*output.back();
+    double entropy = gearActive ? Softplus(output.back())-p*output.back() : 0;
     for (std::size_t i=0; i<ContinuousActions; ++i)
-        entropy += 0.5*std::log(2*Pi*std::exp(1.0)) + std::clamp(output[ContinuousActions+i],t.minLogStd,t.maxLogStd);
+        if(i!=4 || brakeActive)
+            entropy += 0.5*std::log(2*Pi*std::exp(1.0)) + std::clamp(output[ContinuousActions+i],t.minLogStd,t.maxLogStd);
     return entropy;
 }
 
@@ -58,18 +89,22 @@ inline Controls ToControls(PolicyAction const& action, double neutralThrottle) n
 }
 
 template<typename Engine>
-PolicyAction Sample(PolicyVector const& output, TrainingSettings const& t, Engine& rng, bool deterministic)
+PolicyAction Sample(PolicyVector const& output, TrainingSettings const& t, Engine& rng, bool deterministic,
+    bool brakeActive=true,bool gearActive=true,bool fixedGearDown=false)
 {
     for (double value : output)
         if (!std::isfinite(value)) throw std::runtime_error("FlightControl3D: non-finite actor output");
     PolicyAction action{};
+    action.policy=output;
+    action.brakeActive=brakeActive;action.gearActive=gearActive;
     for (std::size_t i=0; i<ContinuousActions; ++i)
     {
+        if(i==4 && !brakeActive) continue;
         std::normal_distribution<double> distribution(output[i],std::exp(std::clamp(output[ContinuousActions+i],t.minLogStd,t.maxLogStd)));
         action.raw[i] = deterministic ? output[i] : distribution(rng);
     }
     std::bernoulli_distribution gear(Sigmoid(output.back()));
-    action.gearDown = deterministic ? output.back() >= 0 : gear(rng);
+    action.gearDown = gearActive ? (deterministic ? output.back() >= 0 : gear(rng)) : fixedGearDown;
     action.logProbability = LogProbability(output,action,t);
     return action;
 }
@@ -85,13 +120,14 @@ inline PolicyLoss ClippedLoss(PolicyVector const& output, PolicyAction const& ac
     // Limit only exponential overflow; outside this range fail-stop is handled by the learner.
     result.ratio = std::exp(std::clamp(logRatio,-80.0,80.0));
     double const clipped = std::clamp(result.ratio,1-t.clip,1+t.clip);
-    result.entropy = Entropy(output,t);
+    result.entropy = Entropy(output,t,action.brakeActive,action.gearActive);
     result.loss = -std::min(result.ratio*advantage,clipped*advantage)-t.entropy*result.entropy;
     bool const active = (advantage >= 0 ? result.ratio <= 1+t.clip : result.ratio >= 1-t.clip)
         && logRatio > -80 && logRatio < 80;
     double const dlogp = active ? -advantage*result.ratio : 0;
     for (std::size_t i=0; i<ContinuousActions; ++i)
     {
+        if(i==4 && !action.brakeActive) continue;
         double const rawLogStd = output[ContinuousActions+i];
         double const invVariance = std::exp(-2*std::clamp(rawLogStd,t.minLogStd,t.maxLogStd));
         double const difference = action.raw[i]-output[i];
@@ -100,7 +136,8 @@ inline PolicyLoss ClippedLoss(PolicyVector const& output, PolicyAction const& ac
             result.derivative[ContinuousActions+i] = dlogp*(difference*difference*invVariance-1)-t.entropy;
     }
     double const p = Sigmoid(output.back());
-    result.derivative.back() = dlogp*(static_cast<double>(action.gearDown)-p) + t.entropy*output.back()*p*(1-p);
+    if(action.gearActive)
+        result.derivative.back() = dlogp*(static_cast<double>(action.gearDown)-p) + t.entropy*output.back()*p*(1-p);
     return result;
 }
 

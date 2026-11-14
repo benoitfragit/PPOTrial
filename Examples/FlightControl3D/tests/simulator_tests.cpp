@@ -2,6 +2,76 @@
 using namespace ppo::examples::flight;
 
 namespace {
+void FiniteSurfaceContactAuthority(Config c)
+{
+    c.training.curriculumStage=CurriculumStage::Joint;c.initial.gearDown=false;
+    c.runwayRandomization.seaHeightMeters=0;
+    for(double const heading:{0.0,90.0,181.0,359.0})
+    {
+        RunwayMotion motion{};motion.base=c.runway;
+        motion.base.headingDegrees=heading;motion.base.origin={0,0,15};
+        motion.base.pitch=0;motion.base.roll=0;motion.seaHeight=0;motion.period=10;
+        c.runway=RunwayAt(motion,0);
+        JsbsimAircraft fdm(c,DefaultDataRoot());fdm.SetRunwayMotion(motion);
+        AircraftState initial{};
+        initial.position=FromRunway(c.runway,500,c.runway.widthMeters+50,0.1);
+        initial.airspeed=56;initial.heading=heading*DegreesToRadians;
+        initial.velocity=Scale(RunwayForward(c.runway),56);
+        auto before=fdm.Reset(initial,Phase::Approach);
+        auto after=fdm.Advance({0,0,0,c.initial.throttle,0,false,c.initial.approachFlap});
+        Check(after.wheelDataValid && !after.weightOnWheels && !after.structuralContact
+            && fdm.ProbeGround(after.position).height>10,
+            "native aircraft crossing the off-deck tangent plane remains physically airborne");
+        MissionState mission{};mission.phase=Phase::Approach;
+        Check(!AdvanceMission(c,{},mission,before,after).terminated && !mission.contactAttempted,
+            "mission cannot invent native contact on the infinite runway extension");
+
+        initial.position.up=motion.seaHeight+3;initial.airspeed=3;initial.velocity={0,0,-1};
+        before=fdm.Reset(initial,Phase::Approach);mission={};mission.phase=Phase::Approach;
+        for(int step=0;step<500 && mission.outcome==Outcome::Flying;++step)
+        {
+            after=fdm.Advance({0,0,0,0,0,false,c.initial.approachFlap});
+            AdvanceMission(c,{},mission,before,after);before=after;
+        }
+        Check(mission.outcome==Outcome::Crash && (after.structuralContact || after.weightOnWheels),
+            "real native impact with the sea remains a terminal crash");
+    }
+}
+void PropulsionAndPhaseReset(Config c)
+{
+    c.initial.distanceMeters={6000,6000};c.initial.speedMps={56,56};
+    c.initial.rollDegrees={0,0};c.initial.pitchDegrees={2,2};c.initial.slopeDegrees={-3,-3};
+    c.initial.headingOffsetDegrees={0,0};
+    c.runwayRandomization.speedMps={0,0};c.runwayRandomization.heaveAmplitudeMeters={0,0};
+    c.runwayRandomization.pitchAmplitudeDegrees={0,0};c.runwayRandomization.rollAmplitudeDegrees={0,0};
+    std::mt19937 rng(91U);
+    auto const motion=SampleRunway(c,rng);
+    auto const runway=RunwayAt(motion,0);
+    auto const initial=SampleAircraft(c,runway,SpawnPlacement::LocalizerGlide,rng);
+    JsbsimAircraft fdm(c,DefaultDataRoot());fdm.SetRunwayMotion(motion);
+    std::array<double,3> speeds{};
+    for(std::size_t run=0;run<speeds.size();++run)
+    {
+        fdm.Reset(initial);
+        double const throttle=run==1 ? 1.0 : 0.0;
+        AircraftState after{};
+        for(int step=0;step<500;++step)
+            after=fdm.Advance({0,0,0,throttle,0,false,c.initial.flap});
+        Check(IsFinite(after),"native powered flight stays finite after reset");
+        speeds[run]=after.airspeed;
+    }
+    Check(speeds[1]>speeds[0]+5 && Near(speeds[0],speeds[2],1e-7),
+        "native throttle changes airspeed after reset and no propulsion state leaks between episodes");
+    for(auto phase:{Phase::Patrol,Phase::Approach,Phase::Rollout})
+    {
+        auto const requested=ApplyPhaseControls({},phase,c.initial);
+        auto const reset=fdm.Reset(initial,phase);
+        auto const after=fdm.Advance(requested);
+        Check(Near(reset.flapPosition,requested.flap,1e-10)
+            && Near(after.flapPosition,requested.flap,1e-10),
+            "native flap actuator starts at its phase detent without a first-action transient");
+    }
+}
 void PhaseControlMapping(Config const& c)
 {
     Controls const requested{0.1,-0.2,0.3,c.initial.throttle,0.8,true,0.99};
@@ -15,6 +85,9 @@ void PhaseControlMapping(Config const& c)
     Check(patrol.gearDown && approach.gearDown && rollout.gearDown
         && Near(approach.aileron,requested.aileron) && Near(approach.throttle,requested.throttle),
         "continuous controls and discrete gear survive phase mapping");
+    for(auto stage:{CurriculumStage::Loc,CurriculumStage::Glide})
+        Check(ApplyPhaseControls(requested,Phase::Approach,c.initial,stage).gearDown==c.initial.gearDown,
+            "capture lessons preserve the configured gear instead of applying untrained switches");
 }
 struct InterceptProbe final
 {
@@ -64,6 +137,215 @@ void InterceptActionReward(Config const& config)
         && neutral.localizerReward>outward.localizerReward,
         "real FDM LOC reward prefers the aileron direction that establishes the inward interception");
 }
+
+void CloseApproachStarts(Config c)
+{
+    Check(!c.mission.patrolEnabled && c.initial.distanceMeters.minimum==5000
+        && c.initial.distanceMeters.maximum==7500 && c.initial.bearingDegrees.minimum==3
+        && c.initial.bearingDegrees.maximum==6,"delivered starts leave tracking room near the ILS cone");
+    c.initial.approach=false; // Disabled patrol must override this legacy initial phase.
+    for(auto const stage : {CurriculumStage::Loc,CurriculumStage::Glide,CurriculumStage::Joint,CurriculumStage::JointMobile})
+    {
+        c.training.curriculumStage=stage;
+        FlightEnvironment environment(c,DefaultDataRoot(),981U);
+        bool left=false,right=false;
+        for(int episode=0;episode<24;++episode)
+        {
+            auto const observation=environment.Reset();
+            auto const guidance=environment.CurrentGuidance();
+            auto const& runway=environment.Settings().runway;
+            auto const& aircraft=environment.Aircraft();
+            double const heading=WrapAngle(aircraft.heading-runway.headingDegrees*DegreesToRadians);
+            Check(guidance.distance>=4999.9 && guidance.distance<=7500.1 && guidance.ilsValid
+                && std::abs(guidance.localizer)<=6.01*DegreesToRadians
+                && std::abs(heading)<=8.1*DegreesToRadians
+                && Dot(aircraft.velocity,RunwayForward(runway))>0
+                && environment.Plan().count==0 && environment.Mission().phase==Phase::Approach
+                && !guidance.targetValid && observation[0]==0 && observation[1]==0 && observation[2]==0,
+                "real JSBSim resets remain near the cone, inbound to the moving runway and point-free");
+            left=left || guidance.cross< -0.1;right=right || guidance.cross>0.1;
+            if(IsCaptureLesson(stage))
+            {
+                auto const& start=c.training.captureStart;
+                auto const local=DeckCoordinates(runway,aircraft.position);
+                double const offset=local.up-(runway.thresholdHeightMeters
+                    -local.north*std::tan(c.mission.glideDegrees*DegreesToRadians));
+                Check(std::abs(aircraft.airspeed-c.mission.approachSpeed)<=start.speedToleranceMps+0.01
+                    && std::abs(aircraft.roll)<=start.rollDegrees*DegreesToRadians+1e-8
+                    && aircraft.pitch>=start.pitchDegrees.minimum*DegreesToRadians-1e-8
+                    && aircraft.pitch<=start.pitchDegrees.maximum*DegreesToRadians+1e-8
+                    && environment.Settings().mission.maxSeconds==std::min(c.mission.maxSeconds,c.training.captureMaxSeconds),
+                    "native capture lessons start within their speed/attitude envelope and bounded duration");
+                if(environment.Settings().training.curriculumStage==CurriculumStage::Loc)
+                    Check(std::abs(offset)<=start.localizerHeightOffsetMeters+0.02,
+                        "LOC starts avoid an independent large vertical recovery task");
+                else Check(std::abs(offset)<=c.training.glideOffsetMeters+0.02
+                    && std::abs(offset)>=0.25*c.training.glideOffsetMeters-0.02,
+                    "GLIDE lessons retain genuine vertical offsets");
+            }
+            else Check(environment.Settings().initial.rollDegrees.maximum==c.initial.rollDegrees.maximum
+                && environment.Settings().initial.speedMps.maximum==c.initial.speedMps.maximum
+                && environment.Settings().mission.maxSeconds==c.mission.maxSeconds,
+                "Joint restores the complete initial distribution and landing duration");
+            auto const result=environment.Step({0,0,0,c.initial.throttle,0,false});
+            Check(environment.Mission().phase==Phase::Approach && !environment.CurrentGuidance().targetValid
+                && result.rewards[static_cast<std::size_t>(Reward::Path)]==0,
+                "the first physical action cannot reactivate disabled patrol");
+        }
+        if(stage!=CurriculumStage::Glide) Check(left && right,"closer LOC starts retain both sides");
+    }
+    c.mission.patrolEnabled=true;
+    FlightEnvironment patrol(c,DefaultDataRoot(),982U);
+    patrol.Reset();
+    Check(patrol.Mission().phase==Phase::Patrol && patrol.Plan().count>1 && patrol.CurrentGuidance().targetValid,
+        "explicit reactivation restores the original airborne patrol guidance");
+}
+
+void NativeCaptureCompletion(Config c)
+{
+    c.initial.bearingDegrees={0.5,0.5};c.initial.headingOffsetDegrees={0,0};
+    c.mission.captureHoldSeconds=0.05;
+    c.training.gateHoldSeconds=0.1;c.training.captureMaxSeconds=4;
+    c.training.captureStart.speedToleranceMps=0.1;c.training.captureStart.rollDegrees=0;
+    c.training.captureStart.pitchDegrees={2,2};c.training.captureStart.localizerHeightOffsetMeters=0;
+    c.training.glideOffsetMeters=1;c.training.locReminderProbability=0;
+    for(auto const stage : {CurriculumStage::Loc,CurriculumStage::Glide})
+    {
+        c.training.curriculumStage=stage;
+        FlightEnvironment environment(c,DefaultDataRoot(),773U);
+        environment.Reset();StepResult result{};
+        for(int step=0;step<40 && environment.Mission().outcome==Outcome::Flying;++step)
+            result=environment.Step({0,0,0,c.initial.throttle,0,false});
+        Check(result.terminated && !result.truncated && environment.Mission().outcome==Outcome::CaptureCompleted
+            && environment.ObservationNow()[41]==1 && !environment.Mission().touchedDown
+            && result.rewards[static_cast<std::size_t>(Reward::Stop)]==0,
+            "real JSBSim can complete a stabilized capture task without attempting a landing");
+        Rejects([&] {environment.Step({});},"native step after capture completion requires reset");
+    }
+}
+
+void CurriculumRunwayMotion(Config c)
+{
+    c.runwayRandomization.speedMps={2,2}; // A nonzero source range must not move the first three gates.
+    for(auto const stage : {CurriculumStage::Loc,CurriculumStage::Glide,CurriculumStage::Joint,CurriculumStage::JointMobile})
+    {
+        c.training.curriculumStage=stage;
+        FlightEnvironment environment(c,DefaultDataRoot(),92U);
+        double const speed=stage==CurriculumStage::JointMobile ? 2.0 : 0.0;
+        Runway first{};
+        bool positionVaries=false,heightVaries=false;
+        for(int episode=0;episode<8;++episode)
+        {
+            auto const observation=environment.Reset();
+            auto const initial=environment.Settings().runway;
+            auto const expected=Scale(RunwayForward(initial),speed);
+            Check(Near(initial.velocity.north,expected.north) && Near(initial.velocity.east,expected.east)
+                && initial.velocity.up==0 && Dot(initial.angularVelocity,initial.angularVelocity)==0,
+                "only the fourth JointMobile gate translates; all shipped lessons remain wave-free");
+            Check(Near(observation[42],expected.north/c.normalization.speed)
+                && Near(observation[43],expected.east/c.normalization.speed) && observation[44]==0,
+                "native policy observation receives the actual stage-specific runway velocity");
+            auto const relative=environment.CurrentGuidance().relativeVelocity;
+            double const course=std::atan2(relative.east,relative.north);
+            Check(Near(observation[27],std::sin(course)) && Near(observation[28],std::cos(course)),
+                "native JSBSim observations expose actual runway-relative course in all four stages");
+            if(episode==0) first=initial;
+            positionVaries|=initial.origin.north!=first.origin.north || initial.origin.east!=first.origin.east;
+            heightVaries|=initial.origin.up!=first.origin.up;
+            for(int step=0;step<10 && environment.Mission().outcome==Outcome::Flying;++step)
+                environment.Step({0,0,0,c.initial.throttle,0,false});
+            double const elapsed=static_cast<double>(environment.Mission().steps)*c.mission.physicsDt;
+            auto const final=environment.Settings().runway;
+            Check(elapsed>0 && Near(final.origin.north-initial.origin.north,expected.north*elapsed)
+                && Near(final.origin.east-initial.origin.east,expected.east*elapsed)
+                && Near(final.origin.up,initial.origin.up),"native steps preserve a fixed runway until JointMobile");
+            auto const action=ApplyPhaseControls({0,0,0,0,0,true},Phase::Approach,c.initial,stage);
+            Check(action.gearDown==(IsCaptureLesson(stage) ? c.initial.gearDown : true),
+                "JointMobile retains learned landing gear rather than capture-only controls");
+        }
+        Check(positionVaries && heightVaries,"a fixed runway still changes position and altitude between episodes");
+    }
+}
+
+void IndependentResetAttitude(Config c)
+{
+    c.initial.distanceMeters={6000,6000};c.initial.speedMps={60,60};
+    std::mt19937 rng(183U);
+    JsbsimAircraft fdm(c,DefaultDataRoot());
+    for(double heading : {0.,90.,181.,359.})
+    {
+        auto motion=SampleRunway(c,rng);
+        motion.base.headingDegrees=heading;
+        fdm.SetRunwayMotion(motion);
+        auto const runway=RunwayAt(motion,0);
+        for(double roll : {-15.,0.,15.}) for(double pitch : {-4.,2.,8.}) for(double slope : {-3.,0.,3.})
+        {
+            c.initial.rollDegrees={roll,roll};c.initial.pitchDegrees={pitch,pitch};c.initial.slopeDegrees={slope,slope};
+            auto const requested=SampleAircraft(c,runway,SpawnPlacement::Left,rng);
+            auto const actual=fdm.Reset(requested);
+            double const actualSlope=std::atan2(actual.velocity.up,
+                std::hypot(actual.velocity.north,actual.velocity.east))/DegreesToRadians;
+            Check(Near(actual.roll,requested.roll,1e-8) && Near(actual.pitch,requested.pitch,1e-8)
+                && Near(WrapAngle(actual.heading-requested.heading),0,1e-8)
+                && Near(actual.airspeed,requested.airspeed,1e-5)
+                && std::abs(actualSlope-slope)<0.2,
+                "native reset preserves sampled attitude independently of flight-path slope and calibrated speed");
+            for(int step=0;step<20;++step) fdm.Advance({0.2,-0.2,0.1,c.initial.throttle,0,true});
+            auto const repeated=fdm.Reset(requested);
+            Check(Near(repeated.roll,actual.roll,1e-8) && Near(repeated.pitch,actual.pitch,1e-8)
+                && Near(WrapAngle(repeated.heading-actual.heading),0,1e-8)
+                && Near(repeated.velocity.north,actual.velocity.north,1e-7)
+                && Near(repeated.velocity.east,actual.velocity.east,1e-7)
+                && Near(repeated.velocity.up,actual.velocity.up,1e-7),
+                "a previous maneuver cannot contaminate the next reset attitude or velocity");
+        }
+    }
+    auto invalid=SampleAircraft(c,RunwayAt(SampleRunway(c,rng),0),SpawnPlacement::Left,rng);
+    invalid.velocity.up=1000;
+    Rejects([&] {fdm.Reset(invalid);},"impossible initial climb must fail explicitly");
+}
+}
+
+/** Real JSBSim action (10 physical steps) must expose one gamma-discounted PPO potential. */
+void ActionLevelPotential(Config c)
+{
+    c.mission.patrolEnabled=false;
+    c.training.curriculumStage=CurriculumStage::Loc;
+    for(std::uint32_t seed : {92U,93U,94U})
+    {
+        FlightEnvironment env(c,DefaultDataRoot(),seed);
+        env.Reset();
+        auto const before=ShapingPotentials(env.Settings(),env.Plan(),env.Mission(),env.Aircraft());
+        auto const step=env.Step({0,0,0,c.initial.throttle,0,false});
+        Check(!step.terminated && !step.truncated,
+            "real JSBSim 0.1 s potential probe remains airborne");
+        auto const after=ShapingPotentials(env.Settings(),env.Plan(),env.Mission(),env.Aircraft());
+        for(auto channel:{Reward::Localizer,Reward::Glide,Reward::Speed,Reward::Slope})
+        {
+            auto const index=static_cast<std::size_t>(channel);
+            Check(Near(step.rewards[index],c.training.gamma*after[index]-before[index],1e-7),
+                "actual PPO action telescopes the discounted JSBSim substep potentials");
+        }
+    }
+    // Timeout after 0.13 s: the second PPO action executes only 3 substeps.
+    // Its bootstrap must still use one full action gamma, not gamma_sub^3.
+    c.mission.maxSeconds=0.13;
+    c.training.gateHoldSeconds=0.1; // Valid capture lesson with an intentionally early timeout.
+    FlightEnvironment partial(c,DefaultDataRoot(),95U);
+    partial.Reset();
+    auto const first=partial.Step({0,0,0,c.initial.throttle,0,false});
+    Check(!first.terminated && !first.truncated,"first 0.1 s action precedes partial timeout");
+    auto const pre=ShapingPotentials(partial.Settings(),partial.Plan(),partial.Mission(),partial.Aircraft());
+    auto const last=partial.Step({0,0,0,c.initial.throttle,0,false});
+    auto const post=ShapingPotentials(partial.Settings(),partial.Plan(),partial.Mission(),partial.Aircraft());
+    Check(last.truncated && !last.terminated && partial.Mission().outcome==Outcome::Timeout,
+        "second PPO action is the three-substep timeout");
+    for(auto channel:{Reward::Localizer,Reward::Glide,Reward::Speed,Reward::Slope})
+    {
+        auto const index=static_cast<std::size_t>(channel);
+        Check(Near(last.rewards[index],c.training.gamma*post[index]-pre[index],1e-7),
+            "partial timeout retains gamma-correct bootstrapped potential");
+    }
 }
 
 int main()
@@ -71,6 +353,13 @@ int main()
     try
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
+        ActionLevelPotential(c);
+        FiniteSurfaceContactAuthority(c);
+        PropulsionAndPhaseReset(c);
+        CurriculumRunwayMotion(c);
+        IndependentResetAttitude(c);
+        NativeCaptureCompletion(c);
+        CloseApproachStarts(c);
         PhaseControlMapping(c);
         c.initial.distanceMeters={10000,10000}; c.initial.bearingDegrees={8,8}; c.initial.heightMeters={600,600};
         c.initial.headingOffsetDegrees={0,0}; c.initial.rollDegrees={0,0}; c.initial.pitchDegrees={2,2};
@@ -134,6 +423,13 @@ int main()
         reminderEnv.Reset();
         Check(reminderEnv.Settings().training.curriculumStage==CurriculumStage::Loc,
             "gate 2 can replay true LOC-only episodes");
+        for(int step=0;step<10 && reminderEnv.Mission().outcome==Outcome::Flying;++step)
+        {
+            auto const reminderStep=reminderEnv.Step(action);
+            Check(reminderStep.rewards[static_cast<std::size_t>(Reward::Slope)]==0
+                && reminderStep.rewards[static_cast<std::size_t>(Reward::Glide)]==0,
+                "native Glide reminders use the LOC reward without any vertical shaping");
+        }
         c.mission.maxSeconds=0.2; c.mission.actionSubsteps=1;
         FlightEnvironment shortEpisode(c); shortEpisode.Reset();
         StepResult last{};
@@ -141,6 +437,10 @@ int main()
         Check(last.truncated && !last.terminated,"actual FDM time limit");
         Rejects([&] { shortEpisode.Step(action); },"step after reset boundary");
         auto random=LoadConfig(PPO_FLIGHT_CONFIG);
+        // Keep native moving/tilted contact coverage with waves disabled by default.
+        random.runwayRandomization.heaveAmplitudeMeters={0.4,0.8};
+        random.runwayRandomization.pitchAmplitudeDegrees={0.1,0.25};
+        random.runwayRandomization.rollAmplitudeDegrees={0.2,0.4};
         random.initial.runwayAlignedProbability=1;
         FlightEnvironment randomized(random);
         for(int episode=0;episode<32;++episode)

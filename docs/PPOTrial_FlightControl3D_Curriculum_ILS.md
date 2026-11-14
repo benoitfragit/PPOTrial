@@ -1,6 +1,58 @@
 # FlightControl3D — curriculum LOC / Glide et CI
 
-Date : 12 novembre 2026. Branche : feat/jsbsim-flight-control. PR : #83.
+Mise à jour : 13 novembre 2026. Branche : `fix/flight-approach-only`. PR : #87, issues #89 et #90. L’implémentation initiale provenait de la PR #83.
+
+Correctif approfondi #91 : démarrage effectif des deux moteurs C310, volets initialisés à la configuration de la phase, train fixe dans les leçons LOC/Glide, composantes inutilisées exclues de PPO, comparaison des vrais instantanés pour le reward et arrêt acteur sur dérive KL. Les critères de passage sont conservés. [Architecture, expériences et limites du correctif #91](PPOTrial_FlightControl3D_Convergence_Propulsion_Reward_Issue91_PR87.md).
+
+Depuis le 13 novembre, `mission.patrolEnabled=false` maintient les quatre gates en approche, sans circuit ni point hippodrome et avec `Path=0`. Le correctif #99 place les départs à 5–7,5 km, avec un écart latéral de 3–6° pour LOC : un peu plus de distance et moins de déport pour apprendre le maintien. LOC conserve les deux côtés et Glide ses écarts verticaux et rappels. Ces paramètres `initial` sont communs aux quatre phases ; Glide reste initialisé dans l'axe. La réactivation reste explicite par JSON : [architecture du correctif #86](PPOTrial_FlightControl3D_Approche_Sans_Hippodrome_Issue86.md).
+
+Le curriculum amélioré termine les épisodes LOC/Glide dès leur capture stabilisée, sans attendre un atterrissage ; leur durée maximale est de 120 secondes (correctif #94 : les 60 secondes précédentes coupaient les interceptions éloignées avant stabilisation). Leurs départs facilitent le pilotage (56 ±2 m/s, roulis ±3°, tangage 1–3°), puis les deux phases Joint retrouvent les départs complets et leurs 900 secondes. Le correctif #92 étend le même workflow et son runner à une quatrième gate, après le [curriculum de capture #89](PPOTrial_FlightControl3D_Curriculum_Captures_Stabilisees_Issue89_PR87.md).
+
+**Progression actuelle : LOC fixe → Glide fixe → Joint fixe → Joint mobile.** La vitesse de piste est exactement nulle pendant les trois premières gates ; seule `joint-mobile` utilise `runwayRandomization.speedMps=[0,3]`. La houle est coupée partout : amplitudes de pilonnement, tangage et roulis `[0,0]`. Position, cap et altitude de piste (14–16 m dans le repère local) restent aléatoires entre épisodes ; l'altitude ne varie plus pendant l'épisode. [Architecture et régressions du correctif #92](PPOTrial_FlightControl3D_Piste_Fixe_Joint_Mobile_Vitesse_Issue92_PR87.md).
+
+Le correctif #93 expose explicitement la route relative à la piste dans `course_error_sin/cos` en approche, sans point de guidage concurrent ni dimension réseau supplémentaire. Dans LOC/Glide, les bonus existants sont reportés à `CaptureCompleted`, après le maintien stabilisé complet. Les deux phases Joint conservent les événements d'entrée géométrique. [Observations, objectifs et régressions #93](PPOTrial_FlightControl3D_Observations_Route_Capture_Stabilisee_Issue93_PR87.md).
+
+Après l’échec du run curriculum #6 (1 000 updates, 100 validations à 0/20), les leçons LOC/Glide utilisent les mêmes tolérances nominales en apprentissage et en validation. `ilsCaptureScale` ne détend plus leur terminal ; il reste disponible pour Joint. Le scénario borne désormais le bruit gaussien : `initialLogStd=-3` (σ≈0,050), `maxLogStd=-2` (σ≈0,135), bonus d’entropie nul. Le mapping linéaire des gouvernes et leur pleine autorité restent identiques. Un ancien latest peut reprendre à une frontière d’update, avec de nouvelles vraisemblances ; le BEST exige une revalidation du contrat exact. Ces corrections ne constituent pas une preuve de convergence : [diagnostic, expériences et limites du correctif #90](PPOTrial_FlightControl3D_Diagnostic_Run6_Issue90_PR87.md).
+
+## Maintien de la capture — correctif #99
+
+`training.curriculum.gateHoldSeconds=10` demande maintenant dix secondes
+consécutives de qualification dans les leçons LOC et Glide, y compris les rappels
+LOC. Le compteur existant retombe à zéro dès qu'un critère n'est plus satisfait.
+La durée géométrique d'acquisition radio reste de 0,5 seconde ; elle ne vaut pas
+succès d'apprentissage. Les tolérances, poids et canaux de reward restent ceux
+décrits ci-dessous, et LOC ne reçoit aucun objectif de pente.
+
+Le critère précédent de deux secondes acceptait un arc coordonné à ±7° de roulis,
+56 m/s, à cinq kilomètres du seuil : succès à 2,49 s, malgré une route encore en
+rotation. La régression couvre les deux sens et trois caps de piste. Avec dix
+secondes, ces arcs n'obtiennent plus de bonus ; la trajectoire rectiligne réussit.
+Cela réduit un succès prématuré, sans garantir qu'aucune courbe lente ne puisse
+jamais satisfaire une fenêtre finie ni prouver la convergence d'une politique.
+
+Les anciens latest peuvent reprendre, sans réinitialiser les poids. Les scores
+de validation à deux secondes ne qualifient pas ce nouvel objectif : revalider
+LOC avant de poursuivre Glide. Le budget de capture reste de 120 s ; la
+régression cinématique d'interception vérifie les distances et déports extrêmes
+du scénario livré, puis le maintien complet.
+
+## Protection de la politique PPO — correctif #97
+
+Le seuil `targetKl=0.02` porte désormais sur la KL analytique moyenne de l'ancienne
+distribution vers la nouvelle, évaluée sur le rollout complet et les commandes
+actives. Avant de conserver un pas acteur, le learner contrôle sa proposition.
+Un dépassement restaure poids, moments et âge Adam, puis réduit le pas par deux,
+au plus 16 fois. La première réduction arrête ensuite l'acteur pour le reste du
+rollout ; le critic continue. Si aucune proposition ne convient, l'acteur reste
+exactement dans son état précédent. Le taux configuré est rétabli pour l'update
+suivante ; le format des checkpoints reste compatible.
+
+Les logs distinguent `policy_kl` (politique conservée, <= `targetKl`), `proposed_kl`
+(plus grande proposition), `actor_rejections` et l'ancien `approx_kl` par minibatch.
+Un `kl_stop=1` peut donc rester fréquent avec une politique conservée conforme.
+Ce contrôle couvre les observations collectées, pas tous les états LOC possibles ;
+il ne garantit pas la rétention d'une compétence ni la convergence. Son calcul
+ajoute des évaluations réseau sur CPU.
 
 ## Contrat de shaping
 
@@ -19,37 +71,76 @@ Par sous-pas physique de 0,01 s (sans décadence ni maintien constant) :
 - r_LOC = 30 (Q_LOC_après - Q_LOC_avant).
 - r_GLIDE = 10 (Q_GLIDE_après - Q_GLIDE_avant).
 - r_V = 1 (Q_V_après - Q_V_avant), Q_V = 15/(15+|Vair - Vcible|).
-- r_pente = 1 (Q_pente_après - Q_pente_avant).
+- r_pente = 1 (Q_pente_après - Q_pente_avant), uniquement dans les épisodes Glide et les phases Joint ; zéro en LOC.
 
-Le reward total d'une action PPO est la somme de ses sous-pas JSBSim. Une transition hors enveloppe annule le delta de la composante correspondante ; une progression négative vers le seuil interdit un reward LOC/Glide positif. Ces exceptions signifient que le retour n'est pas strictement un potentiel global garanti invariant pour PPO avec gamma<1 : ce choix de façonnage est à évaluer expérimentalement. Les bonus événementiels +2/+2/+100/+100/−100 sont inchangés.
+Correctif #98 : le LOC n'impose aucune pente verticale. Son shaping est uniquement
+`30 ΔQ_LOC + ΔQ_V`, avec le bonus de succès stabilisé et les pénalités physiques
+existants. Cela vaut aussi pour chaque épisode de rappel LOC tiré pendant la phase
+Glide : c'est la leçon active de l'épisode qui choisit le reward. Les observations,
+les critères de capture et les commandes restent identiques. Glide conserve son
+shaping vertical actuel ; sa double contribution de pente n'est pas modifiée par
+ce correctif ciblé. `rewardVersion=14` distingue le contrat corrigé : les latest
+précédents peuvent reprendre l'entraînement, mais une ancienne qualification BEST
+ne vaut pas validation du nouveau contrat.
+
+Le reward total d'une action PPO est la somme de ses sous-pas JSBSim. Une transition hors enveloppe annule le delta de la composante correspondante ; une progression négative vers le seuil interdit un reward LOC/Glide positif. Ces exceptions signifient que le retour n'est pas strictement un potentiel global garanti invariant pour PPO avec gamma<1 : ce choix de façonnage est à évaluer expérimentalement. Les poids événementiels +2/+2/+100/+100/−100 restent identiques. En LOC, `EnterLocalizer=+2` est versé uniquement au succès stabilisé ; en Glide, `EnterLocalizer=+2` et `EnterGlide=+2` le sont au succès stabilisé complet. Aucun de ces bonus n'est versé lors d'un simple passage, d'une stabilisation interrompue, d'un timeout ou d'un crash. En Joint fixe/mobile, leur attribution géométrique historique est conservée.
 
 ## Curriculum à réseau unique
 
 Le paramétrage est dans training.curriculum du JSON (stage, locReminderProbability, glideOffsetMeters, gateHoldSeconds) et peut être surchargé par --stage pour FlightControlHeadless sans changer le réseau.
 
-- Gate LOC : départs gauche/droite équilibrés, reward Glide et bonus de capture Glide éteints. Signal vitesse/pente de sécurité conservé même avant capture LOC.
+- Gate LOC : départs gauche/droite équilibrés, rewards Glide et Slope ainsi que bonus de capture Glide éteints. Signal vitesse et sécurité physique conservés même avant capture LOC ; aucun objectif vertical ajouté à l'alignement latéral.
 - Gate Glide : 70 % d'épisodes démarrant sur le LOC mais ±(0,25..1)*glideOffsetMeters au-dessus ou au-dessous du plan ; 30 % d'épisodes de rappel LOC avec les mêmes règles que Gate 1. LOC reste récompensé à chaque épisode.
-- Gate Joint : distributions complètes habituelles, les deux canaux de reward actifs, puis atterrissage et arrêt.
+- Gate Joint : piste fixe à 0 m/s, distributions complètes habituelles, les deux canaux de reward actifs, puis atterrissage et arrêt.
+- Gate Joint mobile (`joint-mobile`) : même objectif complet, avec translation de piste tirée dans `runwayRandomization.speedMps` ; elle commence uniquement après validation de Joint fixe en mode progressif. La houle reste coupée.
 
 Les validations utilisent le seed d'évaluation indépendant et la tolérance de capture stricte.
+Depuis le correctif #95, la validation Glide utilise uniquement des épisodes Glide ;
+elle est suivie de 20 épisodes LOC séparés pour mesurer la rétention, sans les ajouter
+au score Glide. La ligne `[FLIGHT_RETENTION]` rapporte ce contrôle diagnostique.
+Les 30 % de rappels LOC sont conservés uniquement pendant l'entraînement.
 Les erreurs de cap sont évaluées par rapport à la piste réellement tirée dans
 l'épisode (orientation aléatoire et mobile), et non au cap nominal du JSON.
 La capture seule ne suffit pas : le cap de fuselage est contrôlé à ±5° du cap piste,
-la route relative à ±5°, la vitesse à ±15 m/s de la consigne (paramètre existant),
+la route relative à ±5°, la vitesse à ±5 m/s de la consigne,
 et en Gate Glide la pente de trajectoire est contrôlée à ±1,5° de la descente visée.
 Les trois tolérances angulaires sont configurables par gateHeadingDegrees, gateRouteDegrees
-et gateSlopeDegrees ; un crash annule la réussite pédagogique de l'épisode. LOC et Glide exigent le maintien confirmé du/des faisceaux pendant gateHoldSeconds ; les rappels LOC sont évalués comme LOC. Le succès pédagogique est >=92 % sur 20 épisodes, donc >=19/20. L'évaluation de la gate Joint conserve le contrat strict >=19/20 arrêts sûrs, seul critère de promotion du BEST. Les gates pédagogiques ne promeuvent pas de BEST ; latest est le seul point de passage. Le dernier verdict de validation apparaît sous la forme [FLIGHT_GATE] stage=... successes=... episodes=... passed=true/false.
+et gateSlopeDegrees. Le roulis relatif doit rester dans ±8° et chacune des vitesses angulaires p/q/r dans ±5°/s. La géométrie ILS stricte doit rester valide ; une capture retenue par hystérésis ne suffit pas. LOC et Glide exigent un maintien continu pendant gateHoldSeconds, vérifié à chaque sous-pas physique, puis l'épisode se termine avec CaptureCompleted ; un crash reste prioritaire et les rappels LOC sont évalués comme LOC. Le succès pédagogique est >=92 % sur 20 épisodes, donc >=19/20. Les deux gates Joint exigent chacune >=19/20 arrêts sûrs. Leur BEST est qualifié pour son propre mode fixe ou mobile : réussir l'un ne valide pas l'autre. Les gates pédagogiques ne promeuvent pas de BEST ; latest est le point de passage entre toutes les phases. Le dernier verdict de validation apparaît sous la forme [FLIGHT_GATE] stage=... successes=... episodes=... passed=true/false.
 
 ## Lancement GitHub CI (correctif 12 novembre 2026)
 
 GitHub Actions > **FlightControl3D Curriculum Training** > **Run workflow**, branche contenant le correctif, `stage=progressive`. Le déclencheur par label `flight-curriculum` reste possible sur une PR.
 
-- `additional_updates=10` : **intervalle d'évaluation** (10 updates PPO, puis 20 épisodes indépendants). Ce n'est plus le budget total d'un lancement.
-- `max_additional_updates=1000` : budget cumulé maximal de l'exécution CI, partagé entre LOC, Glide et Joint.
+- `additional_updates=10` : **intervalle d'évaluation** (10 updates PPO, puis 20 épisodes indépendants ; en Glide, 20 autres épisodes LOC mesurent séparément la rétention). Ce n'est plus le budget total d'un lancement.
+- `max_additional_updates=1000` : budget cumulé maximal de l'exécution CI, partagé entre les quatre gates.
 - Le workflow répète la gate courante après `passed=false`, sans avancer. Après `passed=true`, il passe automatiquement à la gate suivante. Le critère >=19/20 reste inchangé, sans requalification fictive des BEST.
 - Une limite de 280 minutes de pilotage avant chaque bloc protège le job GitHub (`timeout-minutes=350`). Si le budget global ou la durée sont atteints sans achever la cible, le job est indiqué **incomplete** et quitte avec code 2 (pas de faux vert).
 - Même si le run est incomplet ou échoue, `if: always()` publie l'artefact `flight-control-training` (30 jours) avec `latest`, `curriculum_stage.txt`, `curriculum_status.txt`, logs et CSV. Reprendre via `resume_run_id` contenant l'identifiant du run, même s'il était rouge pour budget insuffisant.
-- Lancement sur une gate explicite (`stage=loc|glide|joint`) : répète cette seule gate jusqu'à validation (ou limite), et enregistre la gate suivante pour une reprise progressive.
-- Un état `done` restauré est idempotent : aucun nouvel update ne doit être demandé pour une campagne déjà achevée.
+- Lancement sur une gate explicite (`stage=loc|glide|joint|joint-mobile`) : répète cette seule gate jusqu'à validation (ou limite), et enregistre la gate suivante pour une reprise progressive.
+- `curriculum_version.txt=5` accompagne les artefacts. Un `done` de cette version est idempotent. Un ancien `done` sans version reprend en Joint fixe, puis exige Joint mobile ; il ne valide pas implicitement la nouvelle progression.
 
-La CI compile toujours FlightControlHeadless en Release, exécute CTest, puis cinq tests de régression Python à simulateur factice. Le vrai entraînement et la convergence des politiques restent **non vérifiés** tant qu'un run CI réel n'est pas inspecté.
+La même CI compile FlightControlHeadless en Release, exécute CTest, puis dix-huit tests de régression Python à simulateur factice. Le run #6 a été inspecté : il n’a pas validé LOC. Les tests fonctionnels ne prouvent pas la convergence d’une politique.
+
+## Rejouer le latest et reprendre après le run 13
+
+Avec l'artefact du run `43406061312` extrait dans `build/flight-training`, ce rejeu utilise le latest à l'update 8 000 et la configuration corrigée :
+
+```bash
+build/release/Examples/FlightControl3D/FlightControlHeadless \
+  --config resources/settings/Scenarios/FlightControl3D.json \
+  --output build/flight-training --stage loc --updates 8000
+```
+
+`--updates` est une borne absolue : en la faisant correspondre au compteur du latest, la session passe directement en validation, sans update PPO ni écriture du checkpoint. Les leçons de capture n'ont pas de BEST d'atterrissage ; ce chemin permet de vérifier le latest avec le verdict officiel `[FLIGHT_GATE]`. Un compteur supérieur au latest autoriserait de l'entraînement.
+
+Avec `training.resume=true`, le runner réévalue désormais un latest repris en LOC/Glide avant toute nouvelle update PPO. Cette validation indépendante utilise une copie temporaire, contrôle l'intégrité du modèle et conserve le journal `gate_recheck_*.log` ; les checkpoints, BEST et CSV d'entraînement originaux sont préservés. Une réussite avance la gate sans consommer d'updates ; un échec laisse le budget d'entraînement entier. Joint fixe/mobile gardent leur chemin normal de promotion BEST.
+
+Pour un essai diagnostique après le run 15, utiliser la même CI et la branche
+`fix/flight-approach-only`, `stage=progressive`, `resume_run_id=43406061312`,
+`additional_updates=10`, `max_additional_updates=100`.
+La reprise conserve les 8 000 updates et réévalue d'abord LOC avec 120 secondes,
+puis avance après un nouveau verdict réussi. Comparer ensuite Glide et
+`FLIGHT_RETENTION` avant de prolonger. Depuis #99, le maintien est de 10 s et les
+départs sont à 5–7,5 km / 3–6° ; les tolérances et le seuil 19/20 sont conservés.
+Le run 15 reste sauvegardé, mais sa rétention LOC est
+dégradée. Les anciens scores ne qualifient pas Glide ou Joint.

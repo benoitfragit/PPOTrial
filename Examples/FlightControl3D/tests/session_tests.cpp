@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iterator>
+#include <limits>
 #include <nlohmann/json.hpp>
 using namespace ppo::examples::flight;
 
@@ -45,7 +46,7 @@ void DesktopContinuation(Config c)
 enum class TrainingContractChange
 {
     HorizontalStarts, Rewards, LegacyStarts, LegacyGuidance, AlignedProbability,
-    EpisodeBoundary
+    EpisodeBoundary, ApproachOnly, ResetAttitude, LegacyCurriculum, Exploration, PoweredFlight, WavesDisabled, CourseObservation, LegacyContacts
 };
 void CommittedTrainingCheckpoint(Config c)
 {
@@ -102,6 +103,42 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     }
     else if(change==TrainingContractChange::AlignedProbability)
         signature["initial"]["runwayAlignedProbability"]=0.25;
+    else if(change==TrainingContractChange::ApproachOnly)
+    {
+        signature["guidanceVersion"]=13;
+        signature["mission"].erase("patrolEnabled");
+        signature["initial"]["distanceMeters"]={5000,14000};
+        signature["initial"]["bearingDegrees"]={12,30};
+        signature["initial"]["heightMeters"]={400,1000};
+        signature["initial"]["headingOffsetDegrees"]={-3,3};
+    }
+    else if(change==TrainingContractChange::ResetAttitude)
+        signature["spawnVersion"]=2;
+    else if(change==TrainingContractChange::PoweredFlight)
+    {
+        signature["spawnVersion"]=3;signature["rewardVersion"]=11;signature["curriculumVersion"]=3;
+        signature.erase("policyLikelihoodVersion");signature.erase("curriculum");
+        signature["initial"].erase("mixture");
+    }
+    else if(change==TrainingContractChange::LegacyCurriculum)
+        signature.erase("curriculumVersion");
+    else if(change==TrainingContractChange::WavesDisabled)
+    {
+        signature["rewardVersion"]=12;signature["guidanceVersion"]=14;signature["curriculumVersion"]=4;
+        signature["runwayRandomization"]["heaveAmplitudeMeters"]={0,0.8};
+        signature["runwayRandomization"]["pitchAmplitudeDegrees"]={0,0.25};
+        signature["runwayRandomization"]["rollAmplitudeDegrees"]={0,0.4};
+    }
+    else if(change==TrainingContractChange::CourseObservation)
+    {signature["guidanceVersion"]=15;signature["rewardVersion"]=12;}
+    else if(change==TrainingContractChange::LegacyContacts)
+        signature.erase("contactVersion");
+    else if(change==TrainingContractChange::Exploration)
+    {
+        old.training.initialLogStd=-1;old.training.maxLogStd=0.5;
+        signature["distribution"]={old.training.minLogStd,old.training.maxLogStd};
+        signature["curriculumVersion"]=2;
+    }
     else
         signature["mission"]["maxDistanceMeters"]=30000.0;
     old.checkpointSignature=signature.dump();
@@ -138,6 +175,18 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     signature=nlohmann::json::parse(c.checkpointSignature);signature["actionMappingVersion"]=1;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
         "different action mapping versions are incompatible");
+    signature=nlohmann::json::parse(c.checkpointSignature);
+    signature.erase("observationNormalizationVersion");
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "unversioned legacy observations must never warm-start a re-scaled actor");
+    signature=nlohmann::json::parse(c.checkpointSignature);
+    signature["observationNormalizationVersion"]=1;
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "old observation version cannot be used with conditioned observations");
+    signature=nlohmann::json::parse(c.checkpointSignature);
+    signature["normalization"]["cross"]=30000.0;
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "changing a single observation scale invalidates the checkpoint contract");
     signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("reward");
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"missing reward contract is not a warm start");
     signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=2;
@@ -214,15 +263,169 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
         "guidance V12 with the retired LOC scale remains usable as a training warm start");
     signature=nlohmann::json::parse(c.checkpointSignature);signature["guidanceVersion"]=13;
     Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "current guidance V13 remains compatible");
+        "guidance V13 remains a compatible warm start");
+    signature["guidanceVersion"]=14;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "approach-only guidance V14 remains compatible");
+    signature["mission"]["patrolEnabled"]=true;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "explicitly re-enabling patrol keeps a compatible training architecture");
+    signature["mission"]["patrolEnabled"]=1;
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "non-boolean patrol setting is rejected from warm-start contracts");
+    signature=nlohmann::json::parse(c.checkpointSignature);
     signature["guidanceVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown guidance contract is rejected");
+    signature=nlohmann::json::parse(c.checkpointSignature);
+    signature["runwayRandomization"]["speedMps"]={0,5};
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unrelated runway-speed changes remain incompatible");
+    for(auto const& invalid : {nlohmann::json{},nlohmann::json::array({0}),nlohmann::json::array({0,"1"}),
+        nlohmann::json::array({-1,1}),nlohmann::json::array({2,1}),nlohmann::json::array({0,6})})
+    {
+        signature=nlohmann::json::parse(c.checkpointSignature);
+        signature["runwayRandomization"]["heaveAmplitudeMeters"]=invalid;
+        Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"invalid wave range cannot bypass warm-start compatibility");
+    }
     signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("spawnVersion");
     Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
         "legacy random placement remains usable as a training warm start");
+    signature["spawnVersion"]=2;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "old reset attitude semantics remain usable as a training warm start");
+    signature["spawnVersion"]=3;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "independent attitude and velocity reset keeps a compatible architecture");
     signature=nlohmann::json::parse(c.checkpointSignature);signature["spawnVersion"]=999;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown spawn contract is rejected");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("curriculumVersion");
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "previous landing-length capture lessons can warm-start the improved curriculum");
+    signature["curriculumVersion"]=2;
+    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "widened-terminal capture lessons can warm-start the nominal objective");
+    signature["curriculumVersion"]=999;
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown curriculum contract rejected");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature["policyLikelihoodVersion"]=999;
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown action mask contract rejected");
+    signature=nlohmann::json::parse(c.checkpointSignature);signature["contactVersion"]=999;
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown contact contract rejected");
+    auto changed=c;signature=nlohmann::json::parse(c.checkpointSignature);
+    signature["curriculum"]["gateHeadingDegrees"]=4.0;changed.checkpointSignature=signature.dump();
+    Check(changed.checkpointSignature!=c.checkpointSignature
+        && CompatibleTrainingSignature(c.checkpointSignature,changed.checkpointSignature),
+        "changing a capture gate invalidates the exact BEST contract but permits a training warm start");
+    for(auto const& invalid : {nlohmann::json{},nlohmann::json::array({-5}),
+        nlohmann::json::array({-5,"0.5"}),nlohmann::json::array({-5,-6}),
+        nlohmann::json::array({-11,0.5}),nlohmann::json::array({-5,3})})
+    {
+        signature=nlohmann::json::parse(c.checkpointSignature);signature["distribution"]=invalid;
+        Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+            "malformed exploration contract cannot warm-start training");
+    }
 }
+
+void NominalCaptureLessons(Config c)
+{
+    c.training.gateHoldSeconds=2; // Keep the two-second fixture independent of the delivered tracking hold.
+    c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
+    c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;
+    for(auto stage : {CurriculumStage::Loc,CurriculumStage::Glide})
+    {
+        c.training.curriculumStage=stage;
+        TemporaryDirectory directory("flight-nominal-capture-");
+        FlightSession training(c,true,directory.path);
+        auto const before=training.Snapshot();
+        Check(before.localizerCaptureDegrees==c.mission.localizerCaptureDegrees
+            && before.glideCaptureDegrees==c.mission.glideCaptureDegrees,
+            "capture training must use the nominal independent gate tolerances");
+        for(std::size_t step=0;step<c.training.rolloutSteps;++step) training.Tick();
+        auto const validation=training.Snapshot();
+        Check(validation.validating && validation.localizerCaptureDegrees==before.localizerCaptureDegrees
+            && validation.glideCaptureDegrees==before.glideCaptureDegrees,
+            "entering validation cannot tighten a capture lesson's terminal objective");
+    }
+}
+void RunwayBestQualification(Config c)
+{
+    TemporaryDirectory directory("flight-runway-best-");
+    c.training.curriculumStage=CurriculumStage::Joint;
+    FlightLearner fixed(c);FlightModelStore fixedStore(c,directory.path);
+    fixed.Save(fixedStore.Latest());
+    // Controlled manifest fixture, not a claim about a trained landing policy.
+    ValidationMetrics successful{};successful.episodes=c.evaluation.episodes;
+    successful.touchdowns=successful.stops=successful.episodes;
+    successful.touchdownSumMeters=100;successful.stopSumMeters=600;
+    Check(fixedStore.Promote(fixed,successful) && fixedStore.BestMetrics().has_value(),
+        "fixed landing can qualify a fixed-runway BEST");
+    c.training.curriculumStage=CurriculumStage::JointMobile;
+    FlightLearner mobile(c);mobile.Load(fixedStore.Latest());
+    Check(mobile.Evaluate({})==fixed.Evaluate({}),"JointMobile starts from the same latest policy");
+    FlightModelStore mobileStore(c,directory.path);
+    Check(!mobileStore.BestMetrics(true),"fixed-runway success does not qualify JointMobile");
+    Rejects([&] {mobileStore.LoadBest(mobile);},"inference cannot use a fixed BEST as a mobile qualification");
+    Check(mobileStore.Promote(mobile,successful) && mobileStore.BestMetrics().has_value(),
+        "JointMobile requires its own independent landing validation before BEST promotion");
+    Check(!fixedStore.BestMetrics(true),"mobile and fixed BEST scores cannot be interchanged");
+}
+
+void SeparateGlideValidation(Config c)
+{
+    c.training.gateHoldSeconds=2; // This fixture tests sample isolation within a two-second episode.
+    c.training.curriculumStage=CurriculumStage::Glide;
+    c.training.locReminderProbability=1.0;
+    c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
+    c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;
+    TemporaryDirectory directory("flight-pure-glide-validation-");
+    FlightSession session(c,true,directory.path);
+    Check(std::abs(session.Snapshot().guidance.localizer)>3*DegreesToRadians,
+        "training retains the forced LOC reminder's off-axis placement");
+    for(std::size_t step=0;step<c.training.rolloutSteps;++step) session.Tick();
+    Check(session.Snapshot().validating && std::abs(session.Snapshot().guidance.localizer)<0.1*DegreesToRadians,
+        "Glide validation starts on the localizer even when training uses only LOC reminders");
+    Check(session.Snapshot().episodeStage==CurriculumStage::Glide,
+        "validation exposes its actual Glide lesson independently of training reminders");
+    FlightModelStore store(c,directory.path);
+    auto const checkpoint=ReadFile(store.Latest());
+    bool checkedRetention=false;
+    for(int step=0;step<1000 && !session.Finished();++step)
+    {
+        auto const snapshot=session.Snapshot();
+        if(snapshot.validating && snapshot.episodeStage==CurriculumStage::Loc)
+        {
+            checkedRetention=true;
+            Check(snapshot.gateEvaluated==c.evaluation.episodes && snapshot.validationCampaigns==0,
+                "LOC retention begins after the full Glide sample without publishing an incomplete campaign");
+        }
+        session.Tick();
+    }
+    auto const completed=session.Snapshot();
+    Check(session.Finished() && checkedRetention && completed.validationCampaigns==1
+        && completed.gateEvaluated==c.evaluation.episodes
+        && completed.lastValidation.episodes==c.evaluation.episodes
+        && completed.locRetentionEvaluated==c.evaluation.episodes,
+        "Glide and LOC retention each evaluate a separate full sample");
+    session.Learner().Save(directory.path/"after-validation.txt");
+    Check(ReadFile(directory.path/"after-validation.txt")==checkpoint && session.Learner().Collected()==0
+        && !std::filesystem::exists(directory.path/"best/current.json"),
+        "both validation samples preserve weights, Adam, RNG, rollout and landing BEST");
+
+    // Controlled pilotage tolerances make LOC easy while an offset Glide cannot
+    // enter its narrow beam during this one-second fixture. No trained success is claimed.
+    c.mission.maxSeconds=1;c.mission.captureHoldSeconds=c.mission.physicsDt;
+    c.mission.localizerCaptureDegrees=11;c.mission.glideCaptureDegrees=0.001;
+    c.training.gateHoldSeconds=c.mission.physicsDt;
+    c.training.gateHeadingDegrees=20;c.training.gateRouteDegrees=20;
+    c.training.gateRollDegrees=20;c.training.gateRateDegreesPerSecond=30;
+    c.training.gateSpeedToleranceMps=15;
+    TemporaryDirectory countedDirectory("flight-retention-not-glide-");
+    FlightSession counted(c,true,countedDirectory.path);
+    for(int step=0;step<1000 && !counted.Finished();++step) counted.Tick();
+    auto const separate=counted.Snapshot();
+    Check(counted.Finished() && separate.locRetentionSuccesses==c.evaluation.episodes
+        && separate.gateSuccesses==0 && separate.gateEvaluated==c.evaluation.episodes,
+        "successful LOC retention episodes cannot count as Glide successes");
+}
+
 int main()
 {
     try
@@ -230,9 +433,16 @@ int main()
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
         CommittedTrainingCheckpoint(c);
         DesktopContinuation(c);
+        RunwayBestQualification(c);
+        NominalCaptureLessons(c);
+        SeparateGlideValidation(c);
         for(auto change : {TrainingContractChange::HorizontalStarts,TrainingContractChange::Rewards,
             TrainingContractChange::LegacyStarts,TrainingContractChange::LegacyGuidance,
-            TrainingContractChange::AlignedProbability,TrainingContractChange::EpisodeBoundary})
+            TrainingContractChange::AlignedProbability,TrainingContractChange::EpisodeBoundary,
+            TrainingContractChange::ApproachOnly,TrainingContractChange::ResetAttitude,
+            TrainingContractChange::LegacyCurriculum,TrainingContractChange::Exploration,
+            TrainingContractChange::PoweredFlight,TrainingContractChange::WavesDisabled,TrainingContractChange::CourseObservation,
+            TrainingContractChange::LegacyContacts})
             ChangedTrainingContract(c,change);
         c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
         c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;
@@ -240,6 +450,8 @@ int main()
         FlightModelStore store(c,directory.path);auto const checkpoint=store.Latest();
         FlightSession training(c,true,directory.path);
         auto const display=training.Snapshot();
+        Check(display.plan.count==0 && display.mission.phase==Phase::Approach && !display.guidance.targetValid,
+            "desktop and validation snapshots carry no disabled racetrack or guidance point");
         Check(display.localizerCaptureDegrees==c.mission.localizerCaptureDegrees*c.training.ilsCaptureScale
             && display.glideCaptureDegrees==c.mission.glideCaptureDegrees*c.training.ilsCaptureScale
             && display.gearDownMinimum==c.mission.gearDownMinimum,
@@ -260,6 +472,7 @@ int main()
         aligned.airspeed=c.mission.approachSpeed;
         aligned.heading=c.runway.headingDegrees*DegreesToRadians;
         Guidance guidance{};
+        guidance.ilsValid=true;guidance.along=-5000;guidance.height=300;
         guidance.targetSpeed=c.mission.approachSpeed;
         guidance.targetSlope=-c.mission.glideDegrees*DegreesToRadians;
         guidance.relativeVelocity={c.mission.approachSpeed,0,
@@ -288,6 +501,29 @@ int main()
         capture.capturedGlide=false;
         Check(!CaptureGateQualified(c,CurriculumStage::Glide,capture,aligned,guidance),
             "unconfirmed glide cannot pass Glide gate");
+        capture.capturedGlide=true;
+        aligned.airspeed=c.mission.approachSpeed+c.training.gateSpeedToleranceMps+0.1;
+        Check(!CaptureGateQualified(c,CurriculumStage::Loc,capture,aligned,guidance),"unstable speed fails the capture gate");
+        aligned.airspeed=c.mission.approachSpeed;
+        aligned.roll=(c.training.gateRollDegrees+1)*DegreesToRadians;
+        Check(!CaptureGateQualified(c,CurriculumStage::Loc,capture,aligned,guidance),"excessive bank fails the capture gate");
+        aligned.roll=0;
+        for(int axis=0;axis<3;++axis)
+        {
+            auto shaking=aligned;double const rate=(c.training.gateRateDegreesPerSecond+1)*DegreesToRadians;
+            if(axis==0) shaking.rollRate=rate;
+            if(axis==1) shaking.pitchRate=rate;
+            if(axis==2) shaking.yawRate=rate;
+            Check(!CaptureGateQualified(c,CurriculumStage::Loc,capture,shaking,guidance),"body-rate oscillations fail the capture gate");
+        }
+        auto stale=guidance;stale.ilsValid=false;
+        Check(!CaptureGateQualified(c,CurriculumStage::Loc,capture,aligned,stale),"stale capture outside radio geometry cannot pass");
+        auto invalid=aligned;invalid.pitchRate=std::numeric_limits<double>::quiet_NaN();
+        Check(!CaptureGateQualified(c,CurriculumStage::Loc,capture,invalid,guidance),"non-finite flight cannot qualify");
+        ValidationMetrics pedagogical{};auto completed=capture;completed.outcome=Outcome::CaptureCompleted;
+        pedagogical.Record(completed);
+        Check(pedagogical.episodes==1 && pedagogical.stops==0 && pedagogical.touchdowns==0
+            && !Validated(c,pedagogical),"a completed capture is never recorded as a landing success");
         // A capture-only curriculum gate must never mint a landing BEST.
         auto gateConfig=c;gateConfig.training.curriculumStage=CurriculumStage::Loc;
         gateConfig.training.gateHoldSeconds=0.1;gateConfig.training.resume=false;

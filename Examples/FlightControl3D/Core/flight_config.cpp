@@ -3,6 +3,7 @@
 #include <fstream>
 #include <algorithm>
 #include <stdexcept>
+#include <string_view>
 
 namespace ppo::examples::flight {
 namespace {
@@ -73,7 +74,7 @@ Config LoadConfig(std::filesystem::path const& path)
         Bounds(d,"speedMps"),Bounds(d,"heaveAmplitudeMeters"),Bounds(d,"wavePeriodSeconds"),Bounds(d,"pitchAmplitudeDegrees"),
         Bounds(d,"rollAmplitudeDegrees"),Bounds(d,"phaseDegrees"),Number(d,"seaHeightMeters")};
     auto const& m = root.at("mission");
-    Keys(m, {"physicsDt", "actionSubsteps", "maxSeconds", "maxDistanceMeters", "maxAltitudeMeters",
+    Keys(m, {"patrolEnabled", "physicsDt", "actionSubsteps", "maxSeconds", "maxDistanceMeters", "maxAltitudeMeters",
         "switchDistanceMeters", "ilsRangeMeters", "ilsSectorDegrees", "glideDegrees",
         "localizerCaptureDegrees", "glideCaptureDegrees", "captureHoldSeconds", "captureHysteresis", "requiredLaps", "pathCorridorMeters", "maximumWaypointStepMeters",
         "patrolHeadingToleranceDegrees", "approachHeadingToleranceDegrees", "approachCrossToleranceMeters", "approachAltitudeToleranceMeters", "patrolSpeed", "approachSpeed", "flareSpeed", "flareHeightMeters",
@@ -81,6 +82,7 @@ Config LoadConfig(std::filesystem::path const& path)
         "gearDownMinimum", "contactHeightMeters", "stoppedSpeed", "stoppedHoldSeconds", "racetrackCenterAlong", "racetrackCenterCross",
         "racetrackHalfStraight", "racetrackRadius", "patrolAltitude", "waypointRadius", "patrolLookaheadSeconds", "turnSamples", "straightSamples"});
     auto& mission = config.mission;
+    mission.patrolEnabled=Boolean(m,"patrolEnabled");
 #define READ_M(field) mission.field = Number(m, #field)
     READ_M(physicsDt); READ_M(maxSeconds); READ_M(maxDistanceMeters); READ_M(maxAltitudeMeters);
     READ_M(switchDistanceMeters); READ_M(ilsRangeMeters); READ_M(ilsSectorDegrees); READ_M(glideDegrees);
@@ -100,7 +102,7 @@ Config LoadConfig(std::filesystem::path const& path)
     mission.requiredLaps=Integer(m,"requiredLaps",100);
     auto const& i = root.at("initial");
     Keys(i, {"approach", "gearDown", "runwayAlignedProbability", "distanceMeters", "bearingDegrees", "heightMeters", "speedMps", "headingOffsetDegrees",
-        "rollDegrees", "pitchDegrees", "slopeDegrees", "throttle", "flap", "approachFlap", "rolloutFlap", "propeller"});
+        "rollDegrees", "pitchDegrees", "slopeDegrees", "throttle", "flap", "approachFlap", "rolloutFlap", "propeller", "mixture"});
     auto& initial = config.initial;
     initial.approach = Boolean(i, "approach"); initial.gearDown = Boolean(i, "gearDown");
     initial.runwayAlignedProbability=Number(i,"runwayAlignedProbability");
@@ -109,11 +111,13 @@ Config LoadConfig(std::filesystem::path const& path)
     initial.headingOffsetDegrees=Bounds(i,"headingOffsetDegrees"); initial.rollDegrees=Bounds(i,"rollDegrees");
     initial.pitchDegrees=Bounds(i,"pitchDegrees"); initial.slopeDegrees=Bounds(i,"slopeDegrees");
     initial.throttle=Number(i,"throttle"); initial.flap=Number(i,"flap"); initial.propeller=Number(i,"propeller");
+    initial.mixture=Number(i,"mixture");
     initial.approachFlap=Number(i,"approachFlap");initial.rolloutFlap=Number(i,"rolloutFlap");
     auto const& n = root.at("normalization");
-    Keys(n, {"distance", "altitude", "speed", "rate", "path", "glideDegrees"});
+    Keys(n, {"distance", "altitude", "speed", "rate", "path", "glideDegrees",
+        "cross", "verticalSpeed", "slopeDegrees"});
     config.normalization = {Number(n,"distance"), Number(n,"altitude"), Number(n,"speed"), Number(n,"rate"),
-        Number(n,"path"), Number(n,"glideDegrees")};
+        Number(n,"path"), Number(n,"glideDegrees"), Number(n,"cross"), Number(n,"verticalSpeed"), Number(n,"slopeDegrees")};
     auto const& w = root.at("reward");
     Keys(w, {"weights", "pathTolerance", "localizerToleranceDegrees", "glideToleranceDegrees", "speedTolerance", "slopeToleranceDegrees",
         "localizerCourseBlend", "localizerInterceptGain", "localizerInterceptLimitDegrees"});
@@ -132,7 +136,7 @@ Config LoadConfig(std::filesystem::path const& path)
     auto const& t = root.at("training");
     Keys(t, {"seed", "rolloutSteps", "minibatch", "epochs", "maxUpdates", "checkpointEvery", "hiddenWidth", "actorRate", "criticRate", "gamma", "lambda",
         "clip", "entropy", "valueWeight", "minLogStd", "maxLogStd", "initialLogStd", "maxGradientNorm", "adamBeta1", "adamBeta2", "adamEpsilon",
-        "ilsCaptureScale", "curriculum", "resume", "checkpointDirectory"});
+        "ilsCaptureScale", "curriculum", "resume", "checkpointDirectory", "targetKl"});
     auto& training = config.training;
     training.seed = static_cast<std::uint32_t>(Integer(t,"seed", UINT32_MAX));
     training.rolloutSteps = Integer(t,"rolloutSteps", 65536);
@@ -145,20 +149,31 @@ Config LoadConfig(std::filesystem::path const& path)
     READ_T(ilsCaptureScale);
     auto const& curriculum=t.at("curriculum");
     Keys(curriculum, {"stage","locReminderProbability","glideOffsetMeters","gateHoldSeconds",
-        "gateHeadingDegrees","gateRouteDegrees","gateSlopeDegrees"});
+        "gateHeadingDegrees","gateRouteDegrees","gateSlopeDegrees","gateSpeedToleranceMps",
+        "gateRollDegrees","gateRateDegreesPerSecond","captureMaxSeconds","captureStart"});
     Require(curriculum.at("stage").is_string(),"curriculum stage");
     auto const stage=curriculum.at("stage").get<std::string>();
-    Require(stage=="loc" || stage=="glide" || stage=="joint","curriculum stage");
+    Require(stage=="loc" || stage=="glide" || stage=="joint" || stage=="joint-mobile","curriculum stage");
     training.curriculumStage=stage=="loc" ? CurriculumStage::Loc
-        : stage=="glide" ? CurriculumStage::Glide : CurriculumStage::Joint;
+        : stage=="glide" ? CurriculumStage::Glide
+        : stage=="joint" ? CurriculumStage::Joint : CurriculumStage::JointMobile;
     training.locReminderProbability=Number(curriculum,"locReminderProbability");
     training.glideOffsetMeters=Number(curriculum,"glideOffsetMeters");
     training.gateHoldSeconds=Number(curriculum,"gateHoldSeconds");
     training.gateHeadingDegrees=Number(curriculum,"gateHeadingDegrees");
     training.gateRouteDegrees=Number(curriculum,"gateRouteDegrees");
     training.gateSlopeDegrees=Number(curriculum,"gateSlopeDegrees");
+    training.gateSpeedToleranceMps=Number(curriculum,"gateSpeedToleranceMps");
+    training.gateRollDegrees=Number(curriculum,"gateRollDegrees");
+    training.gateRateDegreesPerSecond=Number(curriculum,"gateRateDegreesPerSecond");
+    training.captureMaxSeconds=Number(curriculum,"captureMaxSeconds");
+    auto const& start=curriculum.at("captureStart");
+    Keys(start,{"speedToleranceMps","rollDegrees","pitchDegrees","slopeToleranceDegrees","localizerHeightOffsetMeters"});
+    training.captureStart={Number(start,"speedToleranceMps"),Number(start,"rollDegrees"),
+        Number(start,"slopeToleranceDegrees"),Number(start,"localizerHeightOffsetMeters"),Bounds(start,"pitchDegrees")};
     READ_T(actorRate); READ_T(criticRate); READ_T(gamma); READ_T(lambda); READ_T(clip); READ_T(entropy);
     READ_T(valueWeight); READ_T(minLogStd); READ_T(maxLogStd); READ_T(initialLogStd); READ_T(maxGradientNorm);
+    READ_T(targetKl);
     READ_T(adamBeta1); READ_T(adamBeta2); READ_T(adamEpsilon);
 #undef READ_T
     training.resume = Boolean(t,"resume");
@@ -175,9 +190,16 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics["distribution"] = {training.minLogStd,training.maxLogStd};
     // The raw-Gaussian-to-FCS mapping is part of the checkpoint policy contract.
     semantics["actionMappingVersion"] = 2;
-    semantics["rewardVersion"] = 11;
-    semantics["guidanceVersion"] = 13;
-    semantics["spawnVersion"] = 2;
+    // Changing the observation scale changes the learned input representation.
+    semantics["observationNormalizationVersion"] = 2;
+    semantics["rewardVersion"] = 15;
+    semantics["guidanceVersion"] = 16;
+    semantics["contactVersion"] = 2;
+    semantics["spawnVersion"] = 4;
+    semantics["curriculumVersion"] = 5;
+    semantics["policyLikelihoodVersion"] = 2;
+    semantics["curriculum"] = curriculum;
+    semantics["curriculum"].erase("stage"); // A checkpoint passes between LOC, Glide and Joint.
     config.checkpointSignature = semantics.dump();
     Validate(config);
     return config;
@@ -189,7 +211,7 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
     auto previous=Json::parse(stored,nullptr,false),next=Json::parse(current,nullptr,false);
     if(!previous.is_object() || !next.is_object() || !previous.contains("initial") || !next.contains("initial")
         || !previous["initial"].is_object() || !next["initial"].is_object()) return false;
-    for(auto const* signature : {&previous,&next})
+    for(auto* signature : {&previous,&next})
     {
         if(!signature->contains("reward") || !(*signature)["reward"].is_object()
             || !(*signature)["initial"].contains("approach") || !(*signature)["initial"]["approach"].is_boolean()) return false;
@@ -198,26 +220,73 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
             && (*signature)["rewardVersion"]!=5 && (*signature)["rewardVersion"]!=6
             && (*signature)["rewardVersion"]!=7 && (*signature)["rewardVersion"]!=8
             && (*signature)["rewardVersion"]!=9 && (*signature)["rewardVersion"]!=10
-            && (*signature)["rewardVersion"]!=11) return false;
+            && (*signature)["rewardVersion"]!=11 && (*signature)["rewardVersion"]!=12
+            && (*signature)["rewardVersion"]!=13 && (*signature)["rewardVersion"]!=14
+        && (*signature)["rewardVersion"]!=15) return false;
         if(signature->contains("guidanceVersion") && (*signature)["guidanceVersion"]!=2
             && (*signature)["guidanceVersion"]!=3 && (*signature)["guidanceVersion"]!=4
             && (*signature)["guidanceVersion"]!=5 && (*signature)["guidanceVersion"]!=6
             && (*signature)["guidanceVersion"]!=7 && (*signature)["guidanceVersion"]!=8
             && (*signature)["guidanceVersion"]!=9 && (*signature)["guidanceVersion"]!=10
             && (*signature)["guidanceVersion"]!=11 && (*signature)["guidanceVersion"]!=12
-            && (*signature)["guidanceVersion"]!=13) return false;
-        if(signature->contains("spawnVersion") && (*signature)["spawnVersion"]!=2) return false;
+            && (*signature)["guidanceVersion"]!=13 && (*signature)["guidanceVersion"]!=14
+            && (*signature)["guidanceVersion"]!=15 && (*signature)["guidanceVersion"]!=16) return false;
+        if(signature->contains("spawnVersion") && (*signature)["spawnVersion"]!=2
+            && (*signature)["spawnVersion"]!=3 && (*signature)["spawnVersion"]!=4) return false;
+        if(signature->contains("contactVersion") && (*signature)["contactVersion"]!=1
+            && (*signature)["contactVersion"]!=2) return false;
+        if(signature->contains("curriculumVersion") && (*signature)["curriculumVersion"]!=2
+            && (*signature)["curriculumVersion"]!=3 && (*signature)["curriculumVersion"]!=4
+            && (*signature)["curriculumVersion"]!=5) return false;
+        if(signature->contains("policyLikelihoodVersion") && (*signature)["policyLikelihoodVersion"]!=2) return false;
+        if(signature->contains("curriculum") && !(*signature)["curriculum"].is_object()) return false;
+        auto& initial=(*signature)["initial"];
+        if(!initial.contains("mixture")) initial["mixture"]=1.0; // Historical full-rich startup.
+        if(!initial["mixture"].is_number() || !std::isfinite(initial["mixture"].get<double>())
+            || initial["mixture"].get<double>()<0 || initial["mixture"].get<double>()>1) return false;
     }
     // A checkpoint trained with tanh actuators cannot warm-start the new mapping.
     if(!previous.contains("actionMappingVersion") || !next.contains("actionMappingVersion")
         || previous["actionMappingVersion"]!=next["actionMappingVersion"]) return false;
-    for(char const* name : {"distanceMeters","bearingDegrees","headingOffsetDegrees"})
+    // A fixed actor's weights cannot be reused with a different observation encoding.
+    if(!previous.contains("observationNormalizationVersion") || !next.contains("observationNormalizationVersion")
+        || previous["observationNormalizationVersion"]!=2
+        || previous["observationNormalizationVersion"]!=next["observationNormalizationVersion"]) return false;
+    // Only complete update-boundary checkpoints are loaded. New rollouts use
+    // the new Gaussian bounds and likelihoods, so changed exploration may
+    // warm-start the same actor/critic without reusing old on-policy samples.
+    for(auto* signature : {&previous,&next})
+    {
+        if(!signature->contains("distribution")) return false;
+        auto const& bounds=(*signature)["distribution"];
+        if(!bounds.is_array() || bounds.size()!=2 || !bounds[0].is_number() || !bounds[1].is_number()) return false;
+        double const minimum=bounds[0].get<double>(),maximum=bounds[1].get<double>();
+        if(!std::isfinite(minimum) || !std::isfinite(maximum)
+            || minimum<-10 || maximum>2 || !(minimum<maximum)) return false;
+        signature->erase("distribution");
+    }
+    for(char const* name : {"distanceMeters","bearingDegrees","heightMeters","headingOffsetDegrees"})
     {
         if(!previous["initial"].contains(name) || !next["initial"].contains(name)) return false;
         previous["initial"].erase(name); next["initial"].erase(name);
     }
     // These changes keep the network dimensions and may warm-start training.
     // Old scores are never reused: production compares the complete signature.
+    for(auto* signature : {&previous,&next})
+    {
+        if(!signature->contains("runwayRandomization") || !(*signature)["runwayRandomization"].is_object()) return false;
+        auto& motion=(*signature)["runwayRandomization"];
+        for(char const* name : {"heaveAmplitudeMeters","pitchAmplitudeDegrees","rollAmplitudeDegrees"})
+        {
+            if(!motion.contains(name)) return false;
+            auto const& range=motion[name];
+            if(!range.is_array() || range.size()!=2 || !range[0].is_number() || !range[1].is_number()) return false;
+            double const minimum=range[0].get<double>(),maximum=range[1].get<double>();
+            double const limit=std::string_view{name}=="heaveAmplitudeMeters" ? 5.0 : 2.0;
+            if(!std::isfinite(minimum) || !std::isfinite(maximum) || minimum<0 || minimum>maximum || maximum>limit) return false;
+            motion.erase(name);
+        }
+    }
     previous["initial"].erase("runwayAlignedProbability"); next["initial"].erase("runwayAlignedProbability");
     previous["initial"].erase("approach"); next["initial"].erase("approach");
     if(!previous.contains("normalization") || !next.contains("normalization")
@@ -227,6 +296,14 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
     next["normalization"].erase("localizerDegrees");
     if(!previous.contains("mission") || !next.contains("mission")
         || !previous["mission"].is_object() || !next["mission"].is_object()) return false;
+    // Legacy contracts always enabled patrol. Either setting can warm-start
+    // the same policy, while production still requires the full signature.
+    for(auto* signature : {&previous,&next})
+    {
+        auto& mission=(*signature)["mission"];
+        if(mission.contains("patrolEnabled") && !mission["patrolEnabled"].is_boolean()) return false;
+        mission.erase("patrolEnabled");
+    }
     previous["mission"].erase("patrolLookaheadSeconds"); next["mission"].erase("patrolLookaheadSeconds");
     previous["mission"].erase("patrolHeadingToleranceDegrees"); next["mission"].erase("patrolHeadingToleranceDegrees");
     previous["mission"].erase("waypointRadius"); next["mission"].erase("waypointRadius");
@@ -240,7 +317,11 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
     previous.erase("reward"); next.erase("reward");
     previous.erase("rewardVersion"); next.erase("rewardVersion");
     previous.erase("guidanceVersion"); next.erase("guidanceVersion");
+    previous.erase("contactVersion"); next.erase("contactVersion");
     previous.erase("spawnVersion"); next.erase("spawnVersion");
+    previous.erase("curriculumVersion"); next.erase("curriculumVersion");
+    previous.erase("policyLikelihoodVersion"); next.erase("policyLikelihoodVersion");
+    previous.erase("curriculum"); next.erase("curriculum");
     return previous==next;
 }
 
@@ -301,7 +382,8 @@ void Validate(Config const& c)
         && i.bearingDegrees.maximum+maximumHeadingJitter<=m.approachHeadingToleranceDegrees,
         "left/right starts must point inward within the LOC capture heading envelope");
     Require(i.throttle >= 0 && i.throttle <= 1 && i.flap >= 0 && i.flap <= 1 && i.approachFlap>=0 && i.approachFlap<=1
-        && i.rolloutFlap>=0 && i.rolloutFlap<=1 && i.propeller >= 0 && i.propeller <= 1, "initial and phase controls");
+        && i.rolloutFlap>=0 && i.rolloutFlap<=1 && i.propeller >= 0 && i.propeller <= 1
+        && std::isfinite(i.mixture) && i.mixture>=0 && i.mixture<=1, "initial and phase controls");
     Require(d.heaveAmplitudeMeters.minimum>=0 && d.heaveAmplitudeMeters.maximum<=5 && d.wavePeriodSeconds.minimum>=3
         && d.wavePeriodSeconds.maximum<=60 && d.pitchAmplitudeDegrees.minimum>=0 && d.pitchAmplitudeDegrees.maximum<=2
         && d.rollAmplitudeDegrees.minimum>=0 && d.rollAmplitudeDegrees.maximum<=2
@@ -322,7 +404,8 @@ void Validate(Config const& c)
         > d.seaHeightMeters,"deck must remain above sea");
     auto const& n = c.normalization;
     Require(n.distance > 0 && n.altitude > 0 && n.speed > 0 && n.rate > 0 && n.path > 0
-        && n.glideDegrees > 0, "normalization scales");
+        && n.glideDegrees > 0 && n.cross > 0 && n.verticalSpeed > 0
+        && n.slopeDegrees >= m.glideDegrees && n.slopeDegrees <= 90, "normalization scales");
     auto const& w = c.reward;
     Require(w.pathTolerance > 0 && w.localizerToleranceDegrees > 0 && w.glideToleranceDegrees > 0
         && w.speedTolerance > 0 && w.slopeToleranceDegrees > 0, "reward tolerances");
@@ -341,6 +424,7 @@ void Validate(Config const& c)
     Require(t.hiddenWidth == 32 || t.hiddenWidth == 64 || t.hiddenWidth == 128, "hiddenWidth must be 32, 64 or 128");
     Require(t.actorRate > 0 && t.criticRate > 0 && t.gamma > 0 && t.gamma <= 1 && t.lambda >= 0 && t.lambda <= 1
         && t.clip > 0 && t.clip < 1 && t.entropy >= 0 && t.valueWeight > 0 && t.maxGradientNorm > 0, "PPO hyperparameters");
+    Require(std::isfinite(t.targetKl) && t.targetKl>0 && t.targetKl<=1,"positive PPO target KL within (0,1]");
     Require(t.minLogStd >= -10 && t.maxLogStd <= 2 && t.minLogStd < t.initialLogStd && t.initialLogStd < t.maxLogStd,
         "Gaussian log standard deviations");
     Require(t.adamBeta1 >= 0 && t.adamBeta1 < 1 && t.adamBeta2 >= 0 && t.adamBeta2 < 1 && t.adamEpsilon > 0,
@@ -349,11 +433,41 @@ void Validate(Config const& c)
         && t.locReminderProbability<=1 && std::isfinite(t.glideOffsetMeters)
         && t.glideOffsetMeters>0 && t.glideOffsetMeters<minimumGlideHeight-m.flareHeightMeters
         && std::isfinite(t.gateHoldSeconds) && t.gateHoldSeconds>=m.physicsDt
-        && (t.curriculumStage==CurriculumStage::Joint || t.gateHoldSeconds<=m.maxSeconds)
+        && (!IsCaptureLesson(t.curriculumStage) || t.gateHoldSeconds<=m.maxSeconds)
         && std::isfinite(t.gateHeadingDegrees) && t.gateHeadingDegrees>0 && t.gateHeadingDegrees<=20
         && std::isfinite(t.gateRouteDegrees) && t.gateRouteDegrees>0 && t.gateRouteDegrees<=20
         && std::isfinite(t.gateSlopeDegrees) && t.gateSlopeDegrees>0 && t.gateSlopeDegrees<=5,
         "curriculum settings");
+    Require(std::isfinite(t.captureMaxSeconds) && t.captureMaxSeconds>=t.gateHoldSeconds
+        && t.captureMaxSeconds<=86400
+        && std::isfinite(t.gateSpeedToleranceMps) && t.gateSpeedToleranceMps>0
+        && t.gateSpeedToleranceMps<=w.speedTolerance
+        && std::isfinite(t.gateRollDegrees) && t.gateRollDegrees>0 && t.gateRollDegrees<=20
+        && std::isfinite(t.gateRateDegreesPerSecond) && t.gateRateDegreesPerSecond>0
+        && t.gateRateDegreesPerSecond<=30,"stabilized capture limits");
+    auto const& start=t.captureStart;
+    Require(std::isfinite(start.speedToleranceMps) && start.speedToleranceMps>0
+        && m.approachSpeed-start.speedToleranceMps>m.flareSpeed
+        && m.approachSpeed+start.speedToleranceMps<=n.speed
+        && std::isfinite(start.rollDegrees) && start.rollDegrees>=0 && start.rollDegrees<=30
+        && std::isfinite(start.pitchDegrees.minimum) && std::isfinite(start.pitchDegrees.maximum)
+        && start.pitchDegrees.minimum>=-15 && start.pitchDegrees.maximum<=15
+        && start.pitchDegrees.minimum<=start.pitchDegrees.maximum
+        && std::isfinite(start.slopeToleranceDegrees) && start.slopeToleranceDegrees>=0
+        && m.glideDegrees+start.slopeToleranceDegrees<=10
+        && std::isfinite(start.localizerHeightOffsetMeters) && start.localizerHeightOffsetMeters>=0,
+        "capture lesson start envelope");
+    double const minimumLocHeight=r.thresholdHeightMeters+i.distanceMeters.minimum
+        *std::cos(i.bearingDegrees.maximum*DegreesToRadians)*std::tan(m.glideDegrees*DegreesToRadians)
+        -start.localizerHeightOffsetMeters;
+    double const minimumCaptureHeight=std::min(minimumLocHeight,minimumGlideHeight-t.glideOffsetMeters);
+    double const maximumCaptureHeight=maximumGlideHeight
+        +std::max(start.localizerHeightOffsetMeters,t.glideOffsetMeters);
+    Require(minimumCaptureHeight>m.flareHeightMeters
+        && maximumCaptureHeight<m.maxAltitudeMeters
+        && minimumCaptureHeight-i.distanceMeters.maximum*maximumTilt
+            +d.deckHeightMeters.minimum-d.heaveAmplitudeMeters.maximum>d.seaHeightMeters,
+        "capture lesson starts must remain airborne above the sea");
     Require(t.ilsCaptureScale>=1.0
         && m.localizerCaptureDegrees*t.ilsCaptureScale<m.ilsSectorDegrees
         && m.glideCaptureDegrees*t.ilsCaptureScale<m.glideDegrees,

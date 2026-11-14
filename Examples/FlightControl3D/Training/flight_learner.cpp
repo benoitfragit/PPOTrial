@@ -91,6 +91,10 @@ class Learner final : public FlightLearner::Impl
     Device device_{};
     Network<Width,PolicyOutputs> actor_{};
     Network<Width,1> critic_{};
+    // Static RLtools matrices own self-pointers: use its copy operation, never
+    // C++ network assignment. Allocate this rollback buffer once, off-stack.
+    std::unique_ptr<Network<Width,PolicyOutputs>> actorBeforeStep_
+        =std::make_unique<Network<Width,PolicyOutputs>>();
     Optimizer actorOptimizer_{}, criticOptimizer_{};
     Matrix<ObservationSize> input_{};
     Matrix<PolicyOutputs> actorOutput_{}, actorDerivative_{};
@@ -172,6 +176,47 @@ class Learner final : public FlightLearner::Impl
         auto layer = [&](auto& l) { VisitParameter(l.weights,matrix); VisitParameter(l.biases,matrix); };
         VisitLayers(net,layer);
     }
+    double RolloutKl()
+    {
+        double result=0;
+        for(auto const& row:rows)
+        {
+            auto const output=Evaluate(row.observation);
+            result+=PolicyKl(row.action.policy,output,row.action,config.training)
+                /static_cast<double>(collected);
+        }
+        return result;
+    }
+    void StepActor()
+    {
+        rlt::copy(device_,device_,actor_,*actorBeforeStep_);
+        auto const optimizerBefore=actorOptimizer_;
+        // Bounded line search; after 16 halvings a failed proposal is rejected.
+        // Only a proposal that cannot be reduced sufficiently closes actor
+        // optimization for this rollout. The critic always continues.
+        constexpr unsigned maximumHalvings=16;
+        for(unsigned halving=0;halving<=maximumHalvings;++halving)
+        {
+            actorOptimizer_.parameters.alpha=std::ldexp(optimizerBefore.parameters.alpha,-static_cast<int>(halving));
+            rlt::step(device_,actorOptimizer_,actor_);
+            double const kl=RolloutKl();
+            if(!std::isfinite(kl)) throw std::runtime_error("FlightControl3D: non-finite policy KL");
+            stats.maximumProposedKl=std::max(stats.maximumProposedKl,kl);
+            if(kl<=config.training.targetKl)
+            {
+                stats.acceptedPolicyKl=kl;++stats.actorSteps;
+                actorOptimizer_.parameters.alpha=optimizerBefore.parameters.alpha;
+                return;
+            }
+            ++stats.actorStepRejections;
+            rlt::copy(device_,device_,*actorBeforeStep_,actor_);
+            actorOptimizer_=optimizerBefore;
+        }
+        // Stop the remaining actor minibatches only when every transactional
+        // retry failed. A rejected large proposal followed by an accepted
+        // reduced step must not freeze actor learning for this rollout.
+        stats.actorStoppedByKl=true;
+    }
 public:
     template<typename Net> static void ValidateNetwork(Net const& net)
     {
@@ -241,6 +286,8 @@ public:
             double const sigma = std::sqrt(variance);
             for (auto& row : rows) row.advantage = sigma > std::numeric_limits<double>::epsilon() ? (row.advantage-mean)/sigma : 0;
             stats.policyLoss=0; stats.valueLoss=0; stats.entropy=0;
+            stats.maximumApproximateKl=0;stats.actorSteps=0;stats.actorStoppedByKl=false;
+            stats.acceptedPolicyKl=0;stats.maximumProposedKl=0;stats.actorStepRejections=0;
             double const samples = static_cast<double>(collected*config.training.epochs);
             for (std::size_t epoch=0; epoch<config.training.epochs; ++epoch)
             {
@@ -249,6 +296,7 @@ public:
                 for (std::size_t start=0; start<collected; start+=config.training.minibatch)
                 {
                     rlt::zero_gradient(device_,actor_); rlt::zero_gradient(device_,critic_);
+                    double approximateKl=0;
                     for (std::size_t j=0; j<config.training.minibatch; ++j)
                     {
                         auto const& row = rows[order[start+j]];
@@ -257,10 +305,14 @@ public:
                         PolicyVector output{};
                         for (Index k=0; k<PolicyOutputs; ++k) output[k]=rlt::get(actorOutput_,0,k);
                         auto const loss=ClippedLoss(output,row.action,row.advantage,config.training);
+                        double const logRatio=LogProbability(output,row.action,config.training)-row.action.logProbability;
+                        approximateKl+=(std::expm1(std::clamp(logRatio,-80.0,80.0))
+                            -std::clamp(logRatio,-80.0,80.0))/static_cast<double>(config.training.minibatch);
                         if (!std::isfinite(loss.loss)) throw std::runtime_error("FlightControl3D: invalid PPO loss");
                         for (Index k=0; k<PolicyOutputs; ++k)
                             rlt::set(actorDerivative_,0,k,static_cast<float>(loss.derivative[k]/static_cast<double>(config.training.minibatch)));
-                        rlt::backward(device_,actor_,input_,actorDerivative_,actorBuffer_);
+                        if(!stats.actorStoppedByKl)
+                            rlt::backward(device_,actor_,input_,actorDerivative_,actorBuffer_);
                         rlt::forward(device_,critic_,input_,valueOutput_);
                         double const difference=rlt::get(valueOutput_,0,0)-row.target;
                         rlt::set(valueDerivative_,0,0,static_cast<float>(config.training.valueWeight*difference/static_cast<double>(config.training.minibatch)));
@@ -270,7 +322,9 @@ public:
                         stats.valueLoss += 0.5*difference*difference/samples;
                     }
                     ClipGradients(actor_); ClipGradients(critic_);
-                    rlt::step(device_,actorOptimizer_,actor_); rlt::step(device_,criticOptimizer_,critic_);
+                    stats.maximumApproximateKl=std::max(stats.maximumApproximateKl,approximateKl);
+                    if(!stats.actorStoppedByKl) StepActor();
+                    rlt::step(device_,criticOptimizer_,critic_);
                     ValidateNetwork(actor_);ValidateNetwork(critic_);
                 }
             }
@@ -341,7 +395,13 @@ FlightLearner::FlightLearner(Config const& c)
 FlightLearner::~FlightLearner() = default;
 PolicyVector FlightLearner::Evaluate(Observation const& observation) { return impl_->Evaluate(observation); }
 PolicyAction FlightLearner::Choose(Observation const& observation, bool deterministic)
-{ return Sample(impl_->Evaluate(observation),impl_->config.training,impl_->rng,deterministic); }
+{
+    auto const& config=impl_->config;
+    bool const landingLesson=!IsCaptureLesson(config.training.curriculumStage);
+    bool const rollout=observation[RolloutObservation]>0.5F;
+    return Sample(impl_->Evaluate(observation),config.training,impl_->rng,deterministic,
+        rollout,landingLesson,config.initial.gearDown);
+}
 bool FlightLearner::Ready() const noexcept { return impl_->collected==impl_->rows.size(); }
 std::size_t FlightLearner::Collected() const noexcept { return impl_->collected; }
 LearningStats const& FlightLearner::Stats() const noexcept { return impl_->stats; }
@@ -353,6 +413,8 @@ void FlightLearner::Record(Observation const& observation, PolicyAction const& a
     if (Ready()) throw std::logic_error("FlightControl3D: rollout full");
     if (!std::isfinite(step.reward) || !std::isfinite(action.logProbability) || (step.terminated && step.truncated))
         throw std::invalid_argument("FlightControl3D: invalid transition");
+    for(double const parameter:action.policy)
+        if(!std::isfinite(parameter)) throw std::invalid_argument("FlightControl3D: invalid collection policy");
     for(double const reward:step.rewards)
         if(!std::isfinite(reward)) throw std::invalid_argument("FlightControl3D: invalid reward channel");
     auto& row=impl_->rows[impl_->collected];

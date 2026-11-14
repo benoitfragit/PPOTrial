@@ -18,6 +18,12 @@ struct LearningStats final
 {
     std::uint64_t updates{};
     double policyLoss{}, valueLoss{}, entropy{}, meanReward{};
+    double maximumApproximateKl{};
+    /** @brief Exact mean old-to-new KL of the retained actor on the complete rollout. */
+    double acceptedPolicyKl{},maximumProposedKl{};
+    std::size_t actorSteps{};
+    std::size_t actorStepRejections{};
+    bool actorStoppedByKl{};
     /** @brief Mean weighted reward contribution per actor action and channel. */
     std::array<double,RewardCount> meanRewards{};
 };

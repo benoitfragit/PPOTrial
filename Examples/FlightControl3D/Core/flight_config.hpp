@@ -22,6 +22,8 @@ struct RunwayRandomization final
 };
 struct MissionSettings final
 {
+    /** @brief Enables racetrack guidance and fallback; false keeps airborne flight in approach. */
+    bool patrolEnabled{true};
     double physicsDt{}, maxSeconds{}, maxDistanceMeters{}, maxAltitudeMeters{};
     std::size_t actionSubsteps{};
     double switchDistanceMeters{}, ilsRangeMeters{}, ilsSectorDegrees{}, glideDegrees{};
@@ -47,11 +49,13 @@ struct InitialSettings final
     double runwayAlignedProbability{};
     Range distanceMeters{}, bearingDegrees{}, heightMeters{}, speedMps{}, headingOffsetDegrees{};
     Range rollDegrees{}, pitchDegrees{}, slopeDegrees{};
-    double throttle{}, flap{}, approachFlap{},rolloutFlap{},propeller{};
+    double throttle{}, flap{}, approachFlap{},rolloutFlap{},propeller{},mixture{1.0};
 };
 struct Normalization final
 {
     double distance{}, altitude{}, speed{}, rate{}, path{}, glideDegrees{};
+    /** Independent SI scales for lateral error, vertical speed and target flight-path angle. */
+    double cross{}, verticalSpeed{}, slopeDegrees{};
 };
 struct RewardSettings final
 {
@@ -65,16 +69,23 @@ struct RewardSettings final
     /** @brief Absolute bound for the desired LOC intercept course, in degrees. */
     double localizerInterceptLimitDegrees{};
 };
+struct CaptureStartSettings final
+{
+    double speedToleranceMps{},rollDegrees{},slopeToleranceDegrees{},localizerHeightOffsetMeters{};
+    Range pitchDegrees{};
+};
 struct TrainingSettings final
 {
     std::uint32_t seed{};
     std::size_t rolloutSteps{}, minibatch{}, epochs{}, maxUpdates{}, checkpointEvery{}, hiddenWidth{};
-    /** @brief Training-only multiplier for LOC and glide capture tolerances. */
+    /** @brief Joint-training multiplier; capture lessons keep the nominal objective. */
     double ilsCaptureScale{1.0};
     CurriculumStage curriculumStage{CurriculumStage::Joint};
-    double locReminderProbability{0.30}, glideOffsetMeters{120.0}, gateHoldSeconds{2.0};
+    double locReminderProbability{0.30}, glideOffsetMeters{120.0}, gateHoldSeconds{10.0};
     double gateHeadingDegrees{5.0}, gateRouteDegrees{5.0}, gateSlopeDegrees{1.5};
-    double actorRate{}, criticRate{}, gamma{}, lambda{}, clip{}, entropy{}, valueWeight{};
+    double gateSpeedToleranceMps{},gateRollDegrees{},gateRateDegreesPerSecond{},captureMaxSeconds{};
+    CaptureStartSettings captureStart{};
+    double actorRate{}, criticRate{}, gamma{}, lambda{}, clip{}, entropy{}, valueWeight{}, targetKl{};
     double minLogStd{}, maxLogStd{}, initialLogStd{}, maxGradientNorm{};
     double adamBeta1{}, adamBeta2{}, adamEpsilon{};
     bool resume{};
@@ -110,8 +121,9 @@ void Validate(Config const& config);
  * @param current Serialized checkpoint signature for the requested session.
  * @return True for compatible training-only changes; BEST still requires an exact contract.
  *
- * Compatible changes include horizontal starts, their mixture, entry phase,
- * reward settings and the terminal distance boundary.
+ * Compatible changes include spawn position ranges, their mixture, entry phase,
+ * patrol activation, reward settings, Gaussian exploration bounds and the
+ * terminal distance boundary. New rollouts never reuse old likelihoods.
  */
 bool CompatibleTrainingSignature(std::string const& stored,std::string const& current);
 

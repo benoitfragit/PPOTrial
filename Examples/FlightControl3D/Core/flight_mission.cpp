@@ -11,7 +11,7 @@ double Distance(Vec3 const& a, Vec3 const& b) noexcept
 }
 Vec3 RelativeVelocity(Runway const& r, AircraftState const& state) noexcept
 {
-    auto const velocity=Subtract(state.velocity,DeckVelocity(r,state.position));
+    auto const velocity=Subtract(state.velocity,RunwaySurfaceVelocity(r,state.position));
     return {Dot(velocity,RunwayForward(r)),Dot(velocity,RunwayRight(r)),Dot(velocity,RunwayNormal(r))};
 }
 double GuidanceQuality(double error, double tolerance) noexcept
@@ -181,7 +181,7 @@ Vec3 LookAheadOnPlan(FlightPlan const& plan,PlanProjection const& projection,dou
 double AdvancePatrol(Config const& c,FlightPlan const& plan,MissionState& s,
     AircraftState const& before,AircraftState const& after,Runway const& previousDeck) noexcept
 {
-    if(s.phase!=Phase::Patrol || plan.count<2) return 0;
+    if(!c.mission.patrolEnabled || s.phase!=Phase::Patrol || plan.count<2) return 0;
     auto const referenceBefore=InCurrentDeckFrame(previousDeck,c.runway,before);
     auto const previousProjection=ProjectOnPlan(plan,referenceBefore.position);
     auto const currentProjection=ProjectOnPlan(plan,after.position);
@@ -382,6 +382,16 @@ bool OnRunway(Config const& c, Guidance const& g) noexcept
 {
     return g.along >= 0 && g.along <= c.runway.lengthMeters && std::abs(g.cross) <= c.runway.widthMeters/2;
 }
+bool ContactDetected(Config const& c,AircraftState const& aircraft,Guidance const& guidance) noexcept
+{
+    if(aircraft.weightOnWheels || aircraft.structuralContact) return true;
+    // Native JSBSim contacts use the finite deck and the sea outside it.
+    // A tangent-plane height cannot override a valid physical contact sample.
+    if(aircraft.wheelDataValid) return false;
+    double const height=OnRunway(c,guidance) ? guidance.height
+        : aircraft.position.up-c.runwayRandomization.seaHeightMeters;
+    return height<=c.mission.contactHeightMeters;
+}
 bool WheelsInside(Config const& c,AircraftState const& a) noexcept
 {
     if(!a.wheelDataValid) return true;
@@ -434,6 +444,7 @@ std::array<double,2> ToRunway(Runway const& r, Vec3 const& point) noexcept
 FlightPlan MakeFlightPlan(Config const& c) noexcept
 {
     FlightPlan plan{};
+    if(!c.mission.patrolEnabled) return plan;
     auto const& m = c.mission;
     // One closed counter-clockwise stadium, bounded by validated capacity.
     for (std::size_t side = 0; side < 2; ++side)
@@ -470,21 +481,23 @@ std::size_t ClosestPatrolWaypoint(FlightPlan const& plan,Vec3 position) noexcept
     return closest;
 }
 
-Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& mission, AircraftState const& a) noexcept
+Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& mission, AircraftState const& a,
+    Runway const* runway) noexcept
 {
     Guidance g{};
-    auto const runway = ToRunway(c.runway,a.position);
-    g.along = runway[0]; g.cross = runway[1];
-    g.height=DeckCoordinates(c.runway,a.position).up;
-    g.relativeVelocity=RelativeVelocity(c.runway,a);
+    auto const& deck=runway ? *runway : c.runway;
+    auto const local = ToRunway(deck,a.position);
+    g.along = local[0]; g.cross = local[1];
+    g.height=DeckCoordinates(deck,a.position).up;
+    g.relativeVelocity=RelativeVelocity(deck,a);
     g.distance = std::hypot(g.along,g.cross);
     g.localizer = std::atan2(g.cross, -g.along);
     double const slope = c.mission.glideDegrees*DegreesToRadians;
-    g.glideError = std::atan2(g.height-c.runway.thresholdHeightMeters, -g.along)-slope;
+    g.glideError = std::atan2(g.height-deck.thresholdHeightMeters, -g.along)-slope;
     g.ilsValid = g.along < 0 && g.distance <= c.mission.ilsRangeMeters && g.height > 0
         && std::abs(g.localizer) <= c.mission.ilsSectorDegrees*DegreesToRadians;
     g.targetSpeed = c.mission.patrolSpeed;
-    if (mission.phase == Phase::Patrol && plan.count > 1)
+    if (c.mission.patrolEnabled && mission.phase == Phase::Patrol && plan.count > 1)
     {
         g.mode=GuidanceMode::Patrol;
         auto const projection=ProjectOnPlan(plan,a.position);
@@ -512,12 +525,97 @@ Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& miss
         // Keep the stored value at the aircraft as a defensive no-op for any
         // consumer that does not inspect targetValid.
         g.target = a.position;
-        g.pathDistance = std::hypot(g.cross, g.height-(c.runway.thresholdHeightMeters-std::min(g.along,0.0)*std::tan(slope)));
+        g.pathDistance = std::hypot(g.cross, g.height-(deck.thresholdHeightMeters-std::min(g.along,0.0)*std::tan(slope)));
         g.targetValid=false;
     }
     g.courseError = g.targetValid
-        ? WrapAngle(std::atan2(g.target.east-a.position.east,g.target.north-a.position.north)-a.heading) : 0;
+        ? WrapAngle(std::atan2(g.target.east-a.position.east,g.target.north-a.position.north)-a.heading)
+        : std::atan2(g.relativeVelocity.east,g.relativeVelocity.north);
     return g;
+}
+
+std::array<double, RewardCount> ShapingPotentials(Config const& c, FlightPlan const& plan,
+    MissionState const& mission, AircraftState const& aircraft, Runway const* runway) noexcept
+{
+    std::array<double, RewardCount> potential{};
+    if(!IsFinite(aircraft) || mission.outcome==Outcome::Crash
+        || mission.outcome==Outcome::Stopped || mission.outcome==Outcome::CaptureCompleted)
+        return potential;
+    auto const guidance=Guide(c,plan,mission,aircraft,runway);
+    auto set=[&](Reward channel,double quality) noexcept
+    {
+        auto const index=static_cast<std::size_t>(channel);
+        potential[index]=c.reward.weights[index]*quality;
+    };
+    if(mission.phase!=Phase::Rollout)
+    {
+        if(LocalizerShapingEnvelope(c,guidance))
+            set(Reward::Localizer,LocalizerQuality(c,guidance));
+        if(c.training.curriculumStage!=CurriculumStage::Loc
+            && (mission.phase==Phase::Approach || mission.capturedLocalizer)
+            && GlideShapingEnvelope(c,guidance))
+            set(Reward::Glide,GlideQuality(c,guidance));
+    }
+    if(mission.phase==Phase::Approach)
+    {
+        set(Reward::Speed,GuidanceQuality(aircraft.airspeed-guidance.targetSpeed,c.reward.speedTolerance));
+        if(c.training.curriculumStage!=CurriculumStage::Loc)
+        {
+            auto const slope=std::atan2(guidance.relativeVelocity.up,
+                std::hypot(guidance.relativeVelocity.north,guidance.relativeVelocity.east));
+            set(Reward::Slope,GuidanceQuality(slope-guidance.targetSlope,
+                c.reward.slopeToleranceDegrees*DegreesToRadians));
+        }
+    }
+    return potential;
+}
+
+std::uint16_t CaptureGateFailureMask(Config const& c,CurriculumStage stage,
+    MissionState const& mission,AircraftState const& aircraft,Guidance const& g) noexcept
+{
+    std::uint16_t failures=0;
+    auto mark=[&](CaptureGateFailure reason,bool failed) noexcept
+    {
+        if(failed) failures|=GateBit(reason);
+    };
+    bool const valid=IsFinite(aircraft);
+    mark(CaptureGateFailure::State,!IsCaptureLesson(stage)
+        || mission.phase!=Phase::Approach || mission.outcome!=Outcome::Flying
+        || !valid || aircraft.weightOnWheels || aircraft.structuralContact);
+    if(!valid) return failures;
+    mark(CaptureGateFailure::Localizer,!mission.capturedLocalizer || !g.ilsValid
+        || !(g.along<0) || !(g.height>c.mission.flareHeightMeters)
+        || !(g.relativeVelocity.north>0)
+        || !(std::abs(g.localizer)<=c.mission.localizerCaptureDegrees*DegreesToRadians));
+    auto const attitude=RelativeAttitude(c.runway,aircraft);
+    double const route=std::atan2(g.relativeVelocity.east,g.relativeVelocity.north);
+    double const rate=c.training.gateRateDegreesPerSecond*DegreesToRadians;
+    mark(CaptureGateFailure::Heading,
+        !(std::abs(attitude[2])<=c.training.gateHeadingDegrees*DegreesToRadians));
+    mark(CaptureGateFailure::Route,
+        !(std::abs(route)<=c.training.gateRouteDegrees*DegreesToRadians));
+    mark(CaptureGateFailure::Speed,
+        !(std::abs(aircraft.airspeed-g.targetSpeed)<=c.training.gateSpeedToleranceMps));
+    mark(CaptureGateFailure::Roll,
+        !(std::abs(attitude[0])<=c.training.gateRollDegrees*DegreesToRadians));
+    mark(CaptureGateFailure::Rates,
+        !(std::abs(aircraft.rollRate)<=rate) || !(std::abs(aircraft.pitchRate)<=rate)
+        || !(std::abs(aircraft.yawRate)<=rate));
+    if(stage==CurriculumStage::Glide)
+    {
+        double const slope=std::atan2(g.relativeVelocity.up,
+            std::hypot(g.relativeVelocity.north,g.relativeVelocity.east));
+        mark(CaptureGateFailure::Glide,!mission.capturedGlide
+            || !(std::abs(g.glideError)<=c.mission.glideCaptureDegrees*DegreesToRadians)
+            || !(std::abs(slope-g.targetSlope)<=c.training.gateSlopeDegrees*DegreesToRadians));
+    }
+    return failures;
+}
+
+bool CaptureGateQualified(Config const& c,CurriculumStage stage,
+    MissionState const& mission,AircraftState const& aircraft,Guidance const& g) noexcept
+{
+    return CaptureGateFailureMask(c,stage,mission,aircraft,g)==0;
 }
 
 StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState& s,
@@ -530,11 +628,23 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         result.truncated = s.outcome == Outcome::Timeout;
         return result;
     }
+    // Enforce approach-only operation even for a stale Patrol state or plan.
+    // Capture hysteresis remains active, but losing a beam cannot enable HIPP.
+    if(!c.mission.patrolEnabled)
+    {
+        if(s.phase==Phase::Patrol) s.phase=Phase::Approach;
+        s.waypoint=0;s.waypointsPassed=0;s.completedLaps=0;
+        s.pathQualified=false;s.rallyCorridorLatched=false;
+        s.approachRecoverySeconds=0;
+        s.approachRecoveryPending=false;s.approachRecoveryRequiresGlide=false;
+    }
+    auto const priorMission=s;
+    auto const& previousDeck=previousRunway ? *previousRunway : c.runway;
+    auto const previousPotentials=ShapingPotentials(c,plan,priorMission,before,&previousDeck);
     ++s.steps;
     auto g = Guide(c,plan,s,after);
-    auto const& previousDeck=previousRunway ? *previousRunway : c.runway;
     double const pathProgress=AdvancePatrol(c,plan,s,before,after,previousDeck);
-    bool const contact = after.weightOnWheels || after.structuralContact || g.height <= c.mission.contactHeightMeters;
+    bool const contact = ContactDetected(c,after,g);
     double const headingError=WrapAngle(after.heading-c.runway.headingDegrees*DegreesToRadians);
     bool const headingCompatible=std::abs(headingError)<=c.mission.approachHeadingToleranceDegrees*DegreesToRadians;
     bool enteredLocalizer{},enteredGlide{},lostLocalizer{},lostGlide{};
@@ -587,9 +697,9 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
     // A confirmed beam loss first leaves a short approach-only grace period.
     // This prevents an immediate HIPP/APPROACH point and reward toggle. The
     // lost beam must be recaptured; otherwise the racetrack returns later.
-    if(s.phase==Phase::Approach && (lostLocalizer || lostGlide))
+    if(c.mission.patrolEnabled && s.phase==Phase::Approach && (lostLocalizer || lostGlide))
         BeginApproachRecovery(s,lostGlide && !lostLocalizer);
-    else if(s.phase==Phase::Approach && s.approachRecoveryPending)
+    else if(c.mission.patrolEnabled && s.phase==Phase::Approach && s.approachRecoveryPending)
     {
         bool const recovered=s.capturedLocalizer
             && (!s.approachRecoveryRequiresGlide || s.capturedGlide);
@@ -647,53 +757,16 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         };
         double const dt = c.mission.physicsDt;
         auto const referenceBefore=InCurrentDeckFrame(previousDeck,c.runway,before);
-        // Use the same phase and waypoint for both ends, including a gate pass.
-        auto const previousGuidance=Guide(c,plan,s,referenceBefore);
-        if (s.phase == Phase::Patrol)
+        // Approach qualities compare each actual aircraft/runway/mission snapshot.
+        // Patrol tracking retains its transported point and active waypoint.
+        if (c.mission.patrolEnabled && s.phase == Phase::Patrol)
             add(Reward::Path,PatrolTrackingReward(c,plan,referenceBefore,after,pathProgress));
-        if (s.phase != Phase::Rollout)
-        {
-            bool const retreat=g.along<previousGuidance.along;
-            for(auto const channel : {Reward::Localizer,Reward::Glide})
-            {
-                bool const localizer=channel==Reward::Localizer;
-                bool const enabled=localizer || ((s.phase==Phase::Approach || s.capturedLocalizer)
-                    && c.training.curriculumStage!=CurriculumStage::Loc);
-                bool const previousValid=enabled && (localizer
-                    ? LocalizerShapingEnvelope(c,previousGuidance)
-                    : GlideShapingEnvelope(c,previousGuidance));
-                bool const currentValid=enabled && (localizer
-                    ? LocalizerShapingEnvelope(c,g) : GlideShapingEnvelope(c,g));
-                double const before=previousValid
-                    ? (localizer ? LocalizerQuality(c,previousGuidance)
-                        : GlideQuality(c,previousGuidance)) : 0;
-                double const quality=currentValid
-                    ? (localizer ? LocalizerQuality(c,g) : GlideQuality(c,g)) : 0;
-                // Do not create fictitious progress at the envelope boundary.
-                double const improvement=previousValid && currentValid
-                    ? QualityImprovement(before,quality) : 0;
-                add(channel,retreat ? std::min(improvement,0.0) : improvement);
-            }
-        }
-        if (s.phase == Phase::Approach)
+        // LOC, Glide, Speed and Slope are applied as discounted state
+        // potentials below, including the absorbing terminal transitions.
+        if (s.phase == Phase::Approach && !IsCaptureLesson(c.training.curriculumStage))
         {
             if(enteredLocalizer) add(Reward::EnterLocalizer,1);
             if(enteredGlide && c.training.curriculumStage!=CurriculumStage::Loc) add(Reward::EnterGlide,1);
-        }
-        if (s.phase == Phase::Approach)
-        {
-            // Safety guidance must exist before LOC capture, including Gate 1.
-            double const priorSpeed=GuidanceQuality(referenceBefore.airspeed-previousGuidance.targetSpeed,c.reward.speedTolerance);
-            double const speed=GuidanceQuality(after.airspeed-g.targetSpeed,c.reward.speedTolerance);
-            add(Reward::Speed,QualityImprovement(priorSpeed,speed));
-            double const priorSlope=std::atan2(previousGuidance.relativeVelocity.up,
-                std::hypot(previousGuidance.relativeVelocity.north,previousGuidance.relativeVelocity.east));
-            double const slope=std::atan2(g.relativeVelocity.up,
-                std::hypot(g.relativeVelocity.north,g.relativeVelocity.east));
-            double const tol=c.reward.slopeToleranceDegrees*DegreesToRadians;
-            add(Reward::Slope,QualityImprovement(
-                GuidanceQuality(priorSlope-previousGuidance.targetSlope,tol),
-                GuidanceQuality(slope-g.targetSlope,tol)));
         }
         if (contact && !s.touchedDown)
         {
@@ -717,11 +790,42 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
                 add(Reward::Stop,1);
             }
         }
+        // Capture lessons end at their own stabilized objective; Joint still
+        // requires touchdown and a complete safe stop. Check every FDM substep.
+        if(s.outcome==Outcome::Flying && IsCaptureLesson(c.training.curriculumStage))
+        {
+            auto const failures=CaptureGateFailureMask(c,c.training.curriculumStage,s,after,g);
+            s.captureGateLastFailureMask=failures;
+            if(failures!=0)
+                for(std::size_t bit=0;bit<s.captureGateFailureSamples.size();++bit)
+                    if((failures & (1u<<bit))!=0) ++s.captureGateFailureSamples[bit];
+            s.captureGateSeconds=failures==0
+                ? std::min(s.captureGateSeconds+dt,c.training.gateHoldSeconds) : 0;
+            s.maximumCaptureGateSeconds=std::max(s.maximumCaptureGateSeconds,s.captureGateSeconds);
+            if(s.captureGateSeconds>=c.training.gateHoldSeconds)
+            {
+                s.outcome=Outcome::CaptureCompleted;
+                // Reuse each lesson's existing event budget at its true objective.
+                // Geometric entries remain authoritative only in full landing lessons.
+                add(Reward::EnterLocalizer,1);
+                if(c.training.curriculumStage==CurriculumStage::Glide) add(Reward::EnterGlide,1);
+            }
+        }
         if (s.outcome == Outcome::Flying && static_cast<double>(s.steps)*dt >= c.mission.maxSeconds)
             s.outcome = Outcome::Timeout;
     }
+    // Each JSBSim substep contributes F = gamma_sub * Phi(s') - Phi(s).
+    // A terminal state has zero potential; truncated Timeout keeps its
+    // potential for the critic bootstrap. The environment discounts these
+    // substep terms before presenting the full 0.1 s transition to PPO.
+    double const gammaSub=std::pow(c.training.gamma,1.0/static_cast<double>(c.mission.actionSubsteps));
+    auto const currentPotentials=ShapingPotentials(c,plan,s,after);
+    for(std::size_t channel=0;channel<RewardCount;++channel)
+        if(IsPotentialReward(static_cast<Reward>(channel)))
+            result.rewards[channel]+=gammaSub*currentPotentials[channel]-previousPotentials[channel];
     for (double reward : result.rewards) result.reward += reward;
-    result.terminated = s.outcome == Outcome::Crash || s.outcome == Outcome::Stopped;
+    result.terminated = s.outcome == Outcome::Crash || s.outcome == Outcome::Stopped
+        || s.outcome==Outcome::CaptureCompleted;
     result.truncated = s.outcome == Outcome::Timeout;
     return result;
 }
@@ -740,21 +844,24 @@ Observation Observe(Config const& c, FlightPlan const& plan, MissionState const&
     // Front-side LOC lies in [-pi/2, pi/2], where sine is signed and strictly
     // monotonic. Unlike the former sector-based scale, it never clips at 35°.
     double const localizerObservation=LocalizerShapingEnvelope(c,g) ? std::sin(g.localizer) : 0;
-    auto const deckVelocity=DeckVelocity(c.runway,a.position);
+    auto const deckVelocity=RunwaySurfaceVelocity(c.runway,a.position);
     auto const normal=RunwayNormal(c.runway);
+    // Keep sin(localizer) for global interception even when the fine lateral channel clips.
     return {Unit(forward/n.distance), Unit(right/n.distance),
         Unit(g.targetValid ? (g.target.up-a.position.up)/n.altitude : 0),
-        Unit(g.along/n.distance), Unit(g.cross/n.distance), Unit(g.distance/n.distance), Unit(g.height/n.altitude),
-        Unit(a.airspeed/n.speed), Unit(a.velocity.north/n.speed), Unit(a.velocity.east/n.speed), Unit(a.velocity.up/n.speed),
+        Unit(g.along/n.distance), Unit(g.cross/n.cross), Unit(g.distance/n.distance), Unit(g.height/n.altitude),
+        Unit(a.airspeed/n.speed), Unit(a.velocity.north/n.speed), Unit(a.velocity.east/n.speed), Unit(a.velocity.up/n.verticalSpeed),
         Unit(std::sin(a.roll)), Unit(std::cos(a.roll)), Unit(std::sin(a.pitch)), Unit(std::cos(a.pitch)),
         Unit(std::sin(heading)), Unit(std::cos(heading)), Unit(a.rollRate/n.rate), Unit(a.pitchRate/n.rate), Unit(a.yawRate/n.rate),
         Unit(std::sin(slope)), Unit(std::cos(slope)), Unit(localizerObservation),
         Unit(GlideShapingEnvelope(c,g) ? g.glideError/(n.glideDegrees*DegreesToRadians) : 0), Unit(g.ilsValid), Unit(g.targetSpeed/n.speed),
-        Unit(g.targetSlope/Pi), Unit(std::sin(g.courseError)), Unit(std::cos(g.courseError)), Unit(g.pathDistance/n.path),
+        Unit(g.targetSlope/(n.slopeDegrees*DegreesToRadians)), Unit(std::sin(g.courseError)), Unit(std::cos(g.courseError)), Unit(g.pathDistance/n.path),
         Unit(a.gearPosition), Unit(a.weightOnWheels), Unit(s.phase==Phase::Patrol), Unit(s.phase==Phase::Approach), Unit(s.phase==Phase::Rollout),
         Unit(static_cast<double>(s.steps)*c.mission.physicsDt/c.mission.maxSeconds), Unit(s.capturedLocalizer), Unit(s.capturedGlide),
         Unit(s.touchedDown), Unit(s.touchdownFromThreshold/n.distance), Unit((c.runway.lengthMeters-g.along)/n.distance),
-        Unit(s.stoppedSeconds/c.mission.stoppedHoldSeconds),Unit(deckVelocity.north/n.speed),Unit(deckVelocity.east/n.speed),Unit(deckVelocity.up/n.speed),
+        Unit(IsCaptureLesson(c.training.curriculumStage) && s.phase==Phase::Approach
+            ? s.captureGateSeconds/c.training.gateHoldSeconds : s.stoppedSeconds/c.mission.stoppedHoldSeconds),
+        Unit(deckVelocity.north/n.speed),Unit(deckVelocity.east/n.speed),Unit(deckVelocity.up/n.speed),
         Unit(normal.north),Unit(normal.east),Unit(normal.up),Unit(c.runway.angularVelocity.north/n.rate),
         Unit(c.runway.angularVelocity.east/n.rate),Unit(c.runway.angularVelocity.up/n.rate),
         Unit(plan.count ? static_cast<double>(s.waypointsPassed)/static_cast<double>(plan.count) : 0),

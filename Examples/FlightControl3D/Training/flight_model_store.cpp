@@ -25,7 +25,10 @@ std::optional<BestRecord> ReadBest(Config const& config,std::filesystem::path co
     if(!std::filesystem::exists(pointer)) return std::nullopt;
     std::ifstream stream(pointer);Json json;stream>>json;
     auto const signature=json.at("signature").get<std::string>();
-    bool const changedContract=signature!=config.checkpointSignature;
+    // A static-runway BEST cannot inherit a mobile-runway qualification (or vice versa).
+    // Historical manifests predate this distinction and used the moving runway.
+    bool const mobile=config.training.curriculumStage==CurriculumStage::JointMobile;
+    bool const changedContract=signature!=config.checkpointSignature || json.value("mobileRunway",true)!=mobile;
     if(json.at("formatVersion")!=1 || (changedContract && (!allowTrainingChanges || !CompatibleTrainingSignature(signature,config.checkpointSignature)))
         || json.at("seed").get<std::uint32_t>()!=config.evaluation.seed
         || json.at("requiredEpisodes").get<std::size_t>()!=config.evaluation.episodes)
@@ -118,7 +121,8 @@ bool FlightModelStore::Promote(FlightLearner const& learner,ValidationMetrics co
         std::filesystem::remove(pending);
     }
     else std::filesystem::rename(pending,destination);
-    Json manifest{{"formatVersion",1},{"signature",config_.checkpointSignature},{"seed",config_.evaluation.seed},
+    Json manifest{{"formatVersion",1},{"signature",config_.checkpointSignature},
+        {"mobileRunway",config_.training.curriculumStage==CurriculumStage::JointMobile},{"seed",config_.evaluation.seed},
         {"requiredEpisodes",config_.evaluation.episodes},{"update",metrics.update},{"episodes",metrics.episodes},
         {"touchdowns",metrics.touchdowns},{"stops",metrics.stops},{"crashes",metrics.crashes},{"timeouts",metrics.timeouts},
         {"touchdownSumMeters",metrics.touchdownSumMeters},{"stopSumMeters",metrics.stopSumMeters},

@@ -1,16 +1,32 @@
 #include "flight_environment.hpp"
+#include <algorithm>
 #include <stdexcept>
 #include <utility>
 
 namespace ppo::examples::flight {
 namespace {
 Config Checked(Config config) { Validate(config); return config; }
+/** Limit early lessons to capture and basic pilotage; Joint retains the full distribution. */
+void ConfigureCaptureLesson(Config& config) noexcept
+{
+    if(!IsCaptureLesson(config.training.curriculumStage)) return;
+    auto const& start=config.training.captureStart;
+    auto& initial=config.initial;
+    initial.speedMps={config.mission.approachSpeed-start.speedToleranceMps,
+        config.mission.approachSpeed+start.speedToleranceMps};
+    initial.rollDegrees={-start.rollDegrees,start.rollDegrees};
+    initial.pitchDegrees=start.pitchDegrees;
+    initial.slopeDegrees={-config.mission.glideDegrees-start.slopeToleranceDegrees,
+        -config.mission.glideDegrees+start.slopeToleranceDegrees};
+    config.mission.maxSeconds=std::min(config.mission.maxSeconds,config.training.captureMaxSeconds);
 }
-Controls ApplyPhaseControls(Controls controls, Phase phase, InitialSettings const& initial) noexcept
+}
+Controls ApplyPhaseControls(Controls controls, Phase phase, InitialSettings const& initial,CurriculumStage stage) noexcept
 {
     controls.flap=phase==Phase::Patrol ? initial.flap
         : phase==Phase::Approach ? initial.approachFlap : initial.rolloutFlap;
     if(phase!=Phase::Rollout) controls.brake=0.0;
+    if(IsCaptureLesson(stage)) controls.gearDown=initial.gearDown;
     return controls;
 }
 FlightEnvironment::FlightEnvironment(Config config, std::filesystem::path const& data, std::optional<std::uint32_t> randomSeed)
@@ -27,17 +43,31 @@ Observation FlightEnvironment::Reset()
     bool const reminder=stage==CurriculumStage::Glide
         && std::bernoulli_distribution(config_.training.locReminderProbability)(rng_);
     episodeConfig_.training.curriculumStage=reminder ? CurriculumStage::Loc : stage;
-    mission_.phase = config_.initial.approach ? Phase::Approach : Phase::Patrol;
-    motion_=SampleRunway(config_,rng_);
+    // Static landing must be learned before the separate JointMobile gate.
+    if(stage!=CurriculumStage::JointMobile) episodeConfig_.runwayRandomization.speedMps={0,0};
+    ConfigureCaptureLesson(episodeConfig_);
+    auto const active=episodeConfig_.training.curriculumStage;
+    mission_.phase = IsCaptureLesson(active) || !config_.mission.patrolEnabled || config_.initial.approach
+        ? Phase::Approach : Phase::Patrol;
+    motion_=SampleRunway(episodeConfig_,rng_);
     episodeConfig_.runway=RunwayAt(motion_,0);
     plan_=MakeFlightPlan(episodeConfig_);
     fdm_.SetRunwayMotion(motion_);
-    auto const active=episodeConfig_.training.curriculumStage;
     auto const placement=active==CurriculumStage::Loc
         ? spawnPlacements_.Next(0.0,rng_)
         : active==CurriculumStage::Glide ? SpawnPlacement::LocalizerGlide
         : spawnPlacements_.Next(config_.initial.runwayAlignedProbability,rng_);
-    auto initial=SampleAircraft(config_,episodeConfig_.runway,placement,rng_);
+    auto initial=SampleAircraft(episodeConfig_,episodeConfig_.runway,placement,rng_);
+    if(active==CurriculumStage::Loc)
+    {
+        // LOC should not begin with an unrelated large vertical recovery task.
+        auto const local=DeckCoordinates(episodeConfig_.runway,initial.position);
+        double const offset=config_.training.captureStart.localizerHeightOffsetMeters;
+        double const height=episodeConfig_.runway.thresholdHeightMeters
+            -local.north*std::tan(config_.mission.glideDegrees*DegreesToRadians)
+            +std::uniform_real_distribution<double>(-offset,offset)(rng_);
+        initial.position=FromRunway(episodeConfig_.runway,local.north,local.east,height);
+    }
     if(active==CurriculumStage::Glide)
     {
         // Start above/below the 3-degree plane instead of on it.
@@ -47,7 +77,7 @@ Observation FlightEnvironment::Reset()
         initial.position=Add(initial.position,Scale(RunwayNormal(episodeConfig_.runway),sign*magnitude));
     }
     mission_.waypoint=ClosestPatrolWaypoint(plan_,initial.position);
-    aircraft_ = fdm_.Reset(initial);
+    aircraft_ = fdm_.Reset(initial,mission_.phase);
     return ObservationNow();
 }
 
@@ -55,7 +85,11 @@ StepResult FlightEnvironment::Step(Controls const& action)
 {
     if (mission_.outcome != Outcome::Flying) throw std::logic_error("FlightControl3D: reset required after episode boundary");
     StepResult total{};
-    auto const controls=ApplyPhaseControls(action,mission_.phase,config_.initial);
+    auto const controls=ApplyPhaseControls(action,mission_.phase,config_.initial,episodeConfig_.training.curriculumStage);
+    double const gammaSub=std::pow(config_.training.gamma,
+        1.0/static_cast<double>(config_.mission.actionSubsteps));
+    double discount=1.0;
+    std::size_t executed=0;
     for (std::size_t substep=0; substep<config_.mission.actionSubsteps; ++substep)
     {
         auto const previous = aircraft_;
@@ -64,11 +98,27 @@ StepResult FlightEnvironment::Step(Controls const& action)
         episodeConfig_.runway=RunwayAt(motion_,static_cast<double>(mission_.steps+1)*config_.mission.physicsDt);
         plan_=MakeFlightPlan(episodeConfig_);
         auto const step = AdvanceMission(episodeConfig_,plan_,mission_,previous,aircraft_,&previousRunway);
-        total.reward += step.reward;
-        for (std::size_t i=0; i<RewardCount; ++i) total.rewards[i] += step.rewards[i];
+        for (std::size_t i=0; i<RewardCount; ++i)
+            total.rewards[i] += IsPotentialReward(static_cast<Reward>(i))
+                ? discount*step.rewards[i] : step.rewards[i];
         total.terminated = step.terminated; total.truncated = step.truncated;
+        ++executed;
         if (total.terminated || total.truncated) break;
+        discount*=gammaSub;
     }
+    // A timeout can truncate an action after fewer than actionSubsteps.
+    // PPO still bootstraps with gamma for that transition, so match gamma
+    // rather than gamma_sub^executed on its non-absorbing end potential.
+    if(total.truncated && executed<config_.mission.actionSubsteps)
+    {
+        auto const terminalPotentials=ShapingPotentials(episodeConfig_,plan_,mission_,aircraft_);
+        double const correction=config_.training.gamma-std::pow(gammaSub,static_cast<double>(executed));
+        for(std::size_t i=0;i<RewardCount;++i)
+            if(IsPotentialReward(static_cast<Reward>(i)))
+                total.rewards[i]+=correction*terminalPotentials[i];
+    }
+    // Telescopes to gamma*Phi(s_next)-Phi(s_now) for the PPO transition.
+    for(double const reward:total.rewards) total.reward+=reward;
     return total;
 }
 } // namespace ppo::examples::flight

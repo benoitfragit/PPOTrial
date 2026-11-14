@@ -40,7 +40,8 @@ Vec3 AircraftPoint(AircraftState const& a,double forward,double right,double up)
 char const* PhaseName(Phase p) noexcept
 { return p==Phase::Patrol ? "Hippodrome" : p==Phase::Approach ? "ILS / flare" : "Rollout"; }
 char const* OutcomeName(Outcome p) noexcept
-{ return p==Outcome::Flying ? "In flight" : p==Outcome::Stopped ? "Stopped on runway" : p==Outcome::Crash ? "Crash" : "Time limit"; }
+{ return p==Outcome::Flying ? "In flight" : p==Outcome::Stopped ? "Stopped on runway"
+    : p==Outcome::CaptureCompleted ? "Stable capture completed" : p==Outcome::Crash ? "Crash" : "Time limit"; }
 char const* GuidanceModeName(GuidanceMode mode) noexcept
 {
     switch(mode)

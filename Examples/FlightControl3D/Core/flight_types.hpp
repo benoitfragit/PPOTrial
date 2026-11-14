@@ -13,6 +13,7 @@ inline constexpr double DegreesToRadians = Pi / 180.0;
 inline constexpr std::size_t ContinuousActions = 5; // elevator, aileron, rudder, throttle, brake
 inline constexpr std::size_t PolicyOutputs = 2 * ContinuousActions + 1;
 inline constexpr std::size_t ObservationSize = 56;
+inline constexpr std::size_t RolloutObservation = 34;
 inline constexpr std::size_t MaximumWaypoints = 128;
 
 struct Vec3 final { double north{}, east{}, up{}; };
@@ -23,7 +24,7 @@ struct AircraftState final
 {
     Vec3 position{}, velocity{};
     double airspeed{}, roll{}, pitch{}, heading{};
-    double rollRate{}, pitchRate{}, yawRate{}, gearPosition{};
+    double rollRate{}, pitchRate{}, yawRate{}, gearPosition{}, flapPosition{};
     bool weightOnWheels{}, structuralContact{}, finite{true};
     std::array<WheelContact,3> wheels{};
     bool wheelDataValid{};
@@ -37,12 +38,17 @@ struct Controls final
 };
 
 enum class Phase : std::uint8_t { Patrol, Approach, Rollout };
-enum class Outcome : std::uint8_t { Flying, Stopped, Crash, Timeout };
-/** One policy, three independent training scenarios. The desktop defaults to Joint. */
-enum class CurriculumStage : std::uint8_t { Loc, Glide, Joint };
+enum class Outcome : std::uint8_t { Flying, Stopped, Crash, Timeout, CaptureCompleted };
+/** One policy: fixed-runway capture/landing, then a separate moving-runway lesson. */
+enum class CurriculumStage : std::uint8_t { Loc, Glide, Joint, JointMobile };
+inline constexpr bool IsCaptureLesson(CurriculumStage stage) noexcept
+{
+    return stage==CurriculumStage::Loc || stage==CurriculumStage::Glide;
+}
 inline constexpr char const* StageName(CurriculumStage stage) noexcept
 {
-    return stage==CurriculumStage::Loc ? "loc" : stage==CurriculumStage::Glide ? "glide" : "joint";
+    return stage==CurriculumStage::Loc ? "loc" : stage==CurriculumStage::Glide ? "glide"
+        : stage==CurriculumStage::Joint ? "joint" : "joint-mobile";
 }
 /** @brief Active navigation reference exposed to the policy snapshot and renderer. */
 enum class GuidanceMode : std::uint8_t { Patrol, Localizer, Glide, Flare, Rollout };
@@ -50,12 +56,17 @@ enum class GuidanceMode : std::uint8_t { Patrol, Localizer, Glide, Flare, Rollou
 struct Guidance final
 {
     double along{}, cross{}, distance{}, localizer{}, glideError{};
-    double targetSpeed{}, targetSlope{}, pathDistance{}, courseError{};
+    double targetSpeed{}, targetSlope{}, pathDistance{};
+    /** Patrol: target bearing minus heading. Approach/rollout: physical course relative to runway. */
+    double courseError{};
     double height{};
-    Vec3 target{}, relativeVelocity{};
+    Vec3 target{};
+    /** Aircraft minus nearest deck-surface velocity, expressed in runway axes.
+     * Physical relative velocity, not the derivative of rotating coordinates. */
+    Vec3 relativeVelocity{};
     /** @brief Source that owns the current target point and speed/slope commands. */
     GuidanceMode mode{GuidanceMode::Patrol};
-    /** @brief True only when target/course-error fields are an active control reference. */
+    /** @brief True only when the geometric target point is an active control reference. */
     bool targetValid{};
     bool ilsValid{};
 };
@@ -77,6 +88,11 @@ struct MissionState final
     std::size_t waypoint{1};
     std::uint64_t steps{};
     double stoppedSeconds{};
+    /** @brief Continuous stabilized-capture hold; terminal only for LOC/Glide lessons. */
+    double captureGateSeconds{};
+    double maximumCaptureGateSeconds{};
+    std::uint16_t captureGateLastFailureMask{};
+    std::array<std::uint64_t,8> captureGateFailureSamples{};
     double localizerHoldSeconds{},glideHoldSeconds{};
     /** @brief Continuous time outside each beam's release envelope. */
     double localizerLossSeconds{},glideLossSeconds{};
@@ -115,11 +131,11 @@ inline double WrapAngle(double angle) noexcept
 
 inline bool IsFinite(AircraftState const& state) noexcept
 {
-    std::array<double, 17> const values{
+    std::array<double, 18> const values{
         state.position.north, state.position.east, state.position.up,
         state.velocity.north, state.velocity.east, state.velocity.up,
         state.airspeed, state.roll, state.pitch, state.heading,
-        state.rollRate, state.pitchRate, state.yawRate, state.gearPosition,
+        state.rollRate, state.pitchRate, state.yawRate, state.gearPosition, state.flapPosition,
         std::hypot(state.velocity.north, state.velocity.east),
         std::hypot(state.position.north, state.position.east), state.velocity.up};
     for (double const value : values)

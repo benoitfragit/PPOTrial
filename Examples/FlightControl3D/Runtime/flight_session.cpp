@@ -13,7 +13,10 @@ std::uint64_t AdditionalUpdateLimit(std::uint64_t updates,std::size_t additional
 }
 Config EnvironmentConfig(Config config,bool training)
 {
-    if(!training) return config;
+    if(!training) config.training.locReminderProbability=0;
+    // Capture lessons terminate at their objective: widening that objective
+    // teaches early exits that cannot pass the nominal independent gate.
+    if(!training || IsCaptureLesson(config.training.curriculumStage)) return config;
     config.mission.localizerCaptureDegrees*=config.training.ilsCaptureScale;
     config.mission.glideCaptureDegrees*=config.training.ilsCaptureScale;
     config.training.ilsCaptureScale=1.0;
@@ -26,31 +29,16 @@ void LogUpdate(LearningStats const& stats)
         <<" mean_reward="<<stats.meanReward
         <<" policy_loss="<<stats.policyLoss
         <<" value_loss="<<stats.valueLoss
-        <<" entropy="<<stats.entropy;
+        <<" entropy="<<stats.entropy
+        <<" approx_kl="<<stats.maximumApproximateKl<<" actor_steps="<<stats.actorSteps
+        <<" kl_stop="<<stats.actorStoppedByKl
+        <<" policy_kl="<<stats.acceptedPolicyKl<<" proposed_kl="<<stats.maximumProposedKl
+        <<" actor_rejections="<<stats.actorStepRejections;
     for(std::size_t channel=0;channel<RewardCount;++channel)
         std::cout<<' '<<RewardNames[channel]<<'='<<stats.meanRewards[channel];
     std::cout<<std::endl;
 }
 } // namespace
-bool CaptureGateQualified(Config const& c,CurriculumStage stage,
-    MissionState const& mission,AircraftState const& aircraft,Guidance const& guidance) noexcept
-{
-    if(stage==CurriculumStage::Joint || mission.phase!=Phase::Approach
-        || mission.outcome!=Outcome::Flying || !mission.capturedLocalizer)
-        return false;
-    double const headingError=WrapAngle(aircraft.heading-c.runway.headingDegrees*DegreesToRadians);
-    double const routeError=std::atan2(guidance.relativeVelocity.east,guidance.relativeVelocity.north);
-    if(std::abs(headingError)>c.training.gateHeadingDegrees*DegreesToRadians
-        || std::abs(routeError)>c.training.gateRouteDegrees*DegreesToRadians
-        || std::abs(aircraft.airspeed-guidance.targetSpeed)>c.reward.speedTolerance)
-        return false;
-    if(stage==CurriculumStage::Loc) return true;
-    double const slope=std::atan2(guidance.relativeVelocity.up,
-        std::hypot(guidance.relativeVelocity.north,guidance.relativeVelocity.east));
-    return mission.capturedGlide
-        && std::abs(guidance.glideError)<=c.mission.glideCaptureDegrees*DegreesToRadians
-        && std::abs(slope-guidance.targetSlope)<=c.training.gateSlopeDegrees*DegreesToRadians;
-}
 FlightSession::FlightSession(Config config, bool training, std::filesystem::path modelDirectory,
     std::optional<std::size_t> inferenceEpisodes,TrainingBudget budget)
     : config_(std::move(config)),training_(training),models_(config_,std::move(modelDirectory)),
@@ -127,15 +115,27 @@ FlightSnapshot FlightSession::Snapshot() const noexcept
     state.trainingUpdateLimit=trainingUpdateLimit_;state.resumed=resumed_;
     state.curriculumStage=config_.training.curriculumStage;
     state.gateSuccesses=lastGateSuccesses_;state.gateEvaluated=lastGateEvaluated_;
+    state.episodeStage=active.Settings().training.curriculumStage;
+    state.locRetentionSuccesses=lastLocRetentionSuccesses_;
+    state.locRetentionEvaluated=lastLocRetentionEvaluated_;
     return state;
 }
 void FlightSession::StartValidation()
 {
+    validatingLocRetention_=false;
+    lastLocRetentionSuccesses_=0;lastLocRetentionEvaluated_=0;
+    BeginValidationStage(config_.training.curriculumStage);
+}
+void FlightSession::BeginValidationStage(CurriculumStage stage)
+{
     validation_={};validation_.update=learner_.Stats().updates;
     validationPendingReset_=false;lastStep_={};controls_={};
-    validationHoldSeconds_=0;validationEpisodeSucceeded_=false;
     validationGateSuccesses_=0;
-    validationEnvironment_=std::make_unique<FlightEnvironment>(config_,DefaultDataRoot(),config_.evaluation.seed);
+    validationFailureCounts_.fill(0);
+    validationMaximumHoldSeconds_=0;
+    auto validationConfig=EnvironmentConfig(config_,false);
+    validationConfig.training.curriculumStage=stage;
+    validationEnvironment_=std::make_unique<FlightEnvironment>(validationConfig,DefaultDataRoot(),config_.evaluation.seed);
     validationEnvironment_->Reset();
 }
 void FlightSession::TickValidation()
@@ -144,37 +144,62 @@ void FlightSession::TickValidation()
     if(validationPendingReset_)
     {
         evaluation.Reset();validationPendingReset_=false;
-        validationHoldSeconds_=0;validationEpisodeSucceeded_=false;
     }
     auto const action=learner_.Choose(evaluation.ObservationNow(),true);
     controls_=ToControls(action,config_.initial.throttle);
     lastStep_=evaluation.Step(controls_);
     // No Record/Optimize here: training rollout, optimizer and RNG remain frozen.
-    auto const stage=config_.training.curriculumStage;
-    if(stage!=CurriculumStage::Joint && evaluation.Mission().outcome==Outcome::Flying)
-    {
-        auto const active=evaluation.Settings().training.curriculumStage;
-        // Validate heading in this episode's randomized moving-runway frame.
-        bool const qualified=CaptureGateQualified(evaluation.Settings(),active,
-            evaluation.Mission(),evaluation.Aircraft(),evaluation.CurrentGuidance());
-        validationHoldSeconds_=qualified ? validationHoldSeconds_+config_.StepSeconds() : 0;
-        if(validationHoldSeconds_>=config_.training.gateHoldSeconds)
-            validationEpisodeSucceeded_=true;
-    }
+    auto const stage=validatingLocRetention_ ? CurriculumStage::Loc : config_.training.curriculumStage;
     if(lastStep_.terminated || lastStep_.truncated)
     {
-        if(stage!=CurriculumStage::Joint && validationEpisodeSucceeded_
-            && evaluation.Mission().outcome!=Outcome::Crash) ++validationGateSuccesses_;
+        if(IsCaptureLesson(stage))
+        {
+            auto const& mission=evaluation.Mission();
+            for(std::size_t i=0;i<validationFailureCounts_.size();++i)
+                validationFailureCounts_[i]+=mission.captureGateFailureSamples[i];
+            validationMaximumHoldSeconds_=std::max(
+                validationMaximumHoldSeconds_,mission.maximumCaptureGateSeconds);
+        }
+        if(IsCaptureLesson(stage) && evaluation.Settings().training.curriculumStage==stage
+            && evaluation.Mission().outcome==Outcome::CaptureCompleted)
+            ++validationGateSuccesses_;
         validation_.Record(evaluation.Mission());
         if(validation_.episodes<config_.evaluation.episodes) validationPendingReset_=true;
         else
         {
-            // Intermediate capture gates never promote a landing BEST.
-            if(stage==CurriculumStage::Joint) models_.Promote(learner_,validation_);
-            best_=models_.BestMetrics(true);lastValidation_=validation_;++validationCampaigns_;
-            lastGateSuccesses_=stage==CurriculumStage::Joint ? validation_.stops : validationGateSuccesses_;
-            lastGateEvaluated_=validation_.episodes;
+            if(IsCaptureLesson(stage))
+            {
+                std::cout<<"[FLIGHT_CAPTURE_DIAG] stage="<<StageName(stage)
+                    <<" update="<<validation_.update
+                    <<" episodes="<<validation_.episodes
+                    <<" best_hold_s="<<validationMaximumHoldSeconds_;
+                for(std::size_t i=0;i<validationFailureCounts_.size();++i)
+                    std::cout<<' '<<CaptureGateFailureNames[i]<<'='<<validationFailureCounts_[i];
+                std::cout<<std::endl;
+            }
+            if(validatingLocRetention_)
+            {
+                lastLocRetentionSuccesses_=validationGateSuccesses_;
+                lastLocRetentionEvaluated_=validation_.episodes;
+            }
+            else
+            {
+                // Intermediate capture gates never promote a landing BEST.
+                if(!IsCaptureLesson(stage)) models_.Promote(learner_,validation_);
+                best_=models_.BestMetrics(true);lastValidation_=validation_;
+                lastGateSuccesses_=IsCaptureLesson(stage) ? validationGateSuccesses_ : validation_.stops;
+                lastGateEvaluated_=validation_.episodes;
+                if(stage==CurriculumStage::Glide)
+                {
+                    // Report retention separately; LOC captures cannot inflate the Glide gate.
+                    validatingLocRetention_=true;
+                    BeginValidationStage(CurriculumStage::Loc);
+                    return;
+                }
+            }
+            ++validationCampaigns_;
             validationEnvironment_.reset();
+            validatingLocRetention_=false;
             lastStep_={};controls_={};
             finished_=learner_.Stats().updates>=trainingUpdateLimit_;
         }
