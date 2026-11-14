@@ -846,15 +846,16 @@ Observation Observe(Config const& c, FlightPlan const& plan, MissionState const&
     double const localizerObservation=LocalizerShapingEnvelope(c,g) ? std::sin(g.localizer) : 0;
     auto const deckVelocity=RunwaySurfaceVelocity(c.runway,a.position);
     auto const normal=RunwayNormal(c.runway);
+    // Keep sin(localizer) for global interception even when the fine lateral channel clips.
     return {Unit(forward/n.distance), Unit(right/n.distance),
         Unit(g.targetValid ? (g.target.up-a.position.up)/n.altitude : 0),
-        Unit(g.along/n.distance), Unit(g.cross/n.distance), Unit(g.distance/n.distance), Unit(g.height/n.altitude),
-        Unit(a.airspeed/n.speed), Unit(a.velocity.north/n.speed), Unit(a.velocity.east/n.speed), Unit(a.velocity.up/n.speed),
+        Unit(g.along/n.distance), Unit(g.cross/n.cross), Unit(g.distance/n.distance), Unit(g.height/n.altitude),
+        Unit(a.airspeed/n.speed), Unit(a.velocity.north/n.speed), Unit(a.velocity.east/n.speed), Unit(a.velocity.up/n.verticalSpeed),
         Unit(std::sin(a.roll)), Unit(std::cos(a.roll)), Unit(std::sin(a.pitch)), Unit(std::cos(a.pitch)),
         Unit(std::sin(heading)), Unit(std::cos(heading)), Unit(a.rollRate/n.rate), Unit(a.pitchRate/n.rate), Unit(a.yawRate/n.rate),
         Unit(std::sin(slope)), Unit(std::cos(slope)), Unit(localizerObservation),
         Unit(GlideShapingEnvelope(c,g) ? g.glideError/(n.glideDegrees*DegreesToRadians) : 0), Unit(g.ilsValid), Unit(g.targetSpeed/n.speed),
-        Unit(g.targetSlope/Pi), Unit(std::sin(g.courseError)), Unit(std::cos(g.courseError)), Unit(g.pathDistance/n.path),
+        Unit(g.targetSlope/(n.slopeDegrees*DegreesToRadians)), Unit(std::sin(g.courseError)), Unit(std::cos(g.courseError)), Unit(g.pathDistance/n.path),
         Unit(a.gearPosition), Unit(a.weightOnWheels), Unit(s.phase==Phase::Patrol), Unit(s.phase==Phase::Approach), Unit(s.phase==Phase::Rollout),
         Unit(static_cast<double>(s.steps)*c.mission.physicsDt/c.mission.maxSeconds), Unit(s.capturedLocalizer), Unit(s.capturedGlide),
         Unit(s.touchedDown), Unit(s.touchdownFromThreshold/n.distance), Unit((c.runway.lengthMeters-g.along)/n.distance),

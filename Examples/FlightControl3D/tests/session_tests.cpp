@@ -175,6 +175,18 @@ void ChangedTrainingContract(Config c,TrainingContractChange change)
     signature=nlohmann::json::parse(c.checkpointSignature);signature["actionMappingVersion"]=1;
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
         "different action mapping versions are incompatible");
+    signature=nlohmann::json::parse(c.checkpointSignature);
+    signature.erase("observationNormalizationVersion");
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "unversioned legacy observations must never warm-start a re-scaled actor");
+    signature=nlohmann::json::parse(c.checkpointSignature);
+    signature["observationNormalizationVersion"]=1;
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "old observation version cannot be used with conditioned observations");
+    signature=nlohmann::json::parse(c.checkpointSignature);
+    signature["normalization"]["cross"]=30000.0;
+    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
+        "changing a single observation scale invalidates the checkpoint contract");
     signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("reward");
     Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"missing reward contract is not a warm start");
     signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=2;

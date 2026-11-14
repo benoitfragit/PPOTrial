@@ -114,9 +114,10 @@ Config LoadConfig(std::filesystem::path const& path)
     initial.mixture=Number(i,"mixture");
     initial.approachFlap=Number(i,"approachFlap");initial.rolloutFlap=Number(i,"rolloutFlap");
     auto const& n = root.at("normalization");
-    Keys(n, {"distance", "altitude", "speed", "rate", "path", "glideDegrees"});
+    Keys(n, {"distance", "altitude", "speed", "rate", "path", "glideDegrees",
+        "cross", "verticalSpeed", "slopeDegrees"});
     config.normalization = {Number(n,"distance"), Number(n,"altitude"), Number(n,"speed"), Number(n,"rate"),
-        Number(n,"path"), Number(n,"glideDegrees")};
+        Number(n,"path"), Number(n,"glideDegrees"), Number(n,"cross"), Number(n,"verticalSpeed"), Number(n,"slopeDegrees")};
     auto const& w = root.at("reward");
     Keys(w, {"weights", "pathTolerance", "localizerToleranceDegrees", "glideToleranceDegrees", "speedTolerance", "slopeToleranceDegrees",
         "localizerCourseBlend", "localizerInterceptGain", "localizerInterceptLimitDegrees"});
@@ -189,6 +190,8 @@ Config LoadConfig(std::filesystem::path const& path)
     semantics["distribution"] = {training.minLogStd,training.maxLogStd};
     // The raw-Gaussian-to-FCS mapping is part of the checkpoint policy contract.
     semantics["actionMappingVersion"] = 2;
+    // Changing the observation scale changes the learned input representation.
+    semantics["observationNormalizationVersion"] = 2;
     semantics["rewardVersion"] = 15;
     semantics["guidanceVersion"] = 16;
     semantics["contactVersion"] = 2;
@@ -245,6 +248,10 @@ bool CompatibleTrainingSignature(std::string const& stored,std::string const& cu
     // A checkpoint trained with tanh actuators cannot warm-start the new mapping.
     if(!previous.contains("actionMappingVersion") || !next.contains("actionMappingVersion")
         || previous["actionMappingVersion"]!=next["actionMappingVersion"]) return false;
+    // A fixed actor's weights cannot be reused with a different observation encoding.
+    if(!previous.contains("observationNormalizationVersion") || !next.contains("observationNormalizationVersion")
+        || previous["observationNormalizationVersion"]!=2
+        || previous["observationNormalizationVersion"]!=next["observationNormalizationVersion"]) return false;
     // Only complete update-boundary checkpoints are loaded. New rollouts use
     // the new Gaussian bounds and likelihoods, so changed exploration may
     // warm-start the same actor/critic without reusing old on-policy samples.
@@ -397,7 +404,8 @@ void Validate(Config const& c)
         > d.seaHeightMeters,"deck must remain above sea");
     auto const& n = c.normalization;
     Require(n.distance > 0 && n.altitude > 0 && n.speed > 0 && n.rate > 0 && n.path > 0
-        && n.glideDegrees > 0, "normalization scales");
+        && n.glideDegrees > 0 && n.cross > 0 && n.verticalSpeed > 0
+        && n.slopeDegrees >= m.glideDegrees && n.slopeDegrees <= 90, "normalization scales");
     auto const& w = c.reward;
     Require(w.pathTolerance > 0 && w.localizerToleranceDegrees > 0 && w.glideToleranceDegrees > 0
         && w.speedTolerance > 0 && w.slopeToleranceDegrees > 0, "reward tolerances");

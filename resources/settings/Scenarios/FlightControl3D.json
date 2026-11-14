@@ -35,8 +35,9 @@
     "throttle": 0.65, "flap": 0.0, "approachFlap": 0.33, "rolloutFlap": 0.33, "propeller": 1.0, "mixture": 1.0
   },
   "normalization": {
-    "distance": 30000.0, "altitude": 5000.0, "speed": 150.0, "rate": 2.0,
-    "path": 3000.0, "glideDegrees": 10.0
+    "distance": 30000.0, "altitude": 5000.0, "speed": 150.0, "rate": 0.25,
+    "path": 3000.0, "glideDegrees": 10.0,
+    "cross": 1500.0, "verticalSpeed": 10.0, "slopeDegrees": 10.0
   },
   "reward": {
     "weights": { "Path": 0.002, "Localizer": 30.0, "Glide": 10.0, "Speed": 1.0, "Slope": 1.0,
@@ -59,6 +60,6 @@
     "actorRate": 0.0001, "criticRate": 0.0003, "gamma": 0.99, "lambda": 0.95, "clip": 0.2, "targetKl": 0.02,
     "entropy": 0.0, "valueWeight": 0.5, "minLogStd": -3.5, "maxLogStd": -2.0, "initialLogStd": -3.0,
     "maxGradientNorm": 0.5, "adamBeta1": 0.9, "adamBeta2": 0.999, "adamEpsilon": 1e-8,
-    "resume": true, "checkpointDirectory": "model/FlightControl3D/clamped_v2"
+    "resume": true, "checkpointDirectory": "model/FlightControl3D/conditioned_v3"
   }
 }

@@ -54,6 +54,8 @@ struct InitialSettings final
 struct Normalization final
 {
     double distance{}, altitude{}, speed{}, rate{}, path{}, glideDegrees{};
+    /** Independent SI scales for lateral error, vertical speed and target flight-path angle. */
+    double cross{}, verticalSpeed{}, slopeDegrees{};
 };
 struct RewardSettings final
 {

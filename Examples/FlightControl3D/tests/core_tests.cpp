@@ -195,11 +195,56 @@ void FiniteSurfaceContacts(Config c)
             "native structural contact cannot be masked by the geometric fallback");
     }
 }
+/** Detect small ILS corrections without losing long-range LOC or changing the network size. */
+void ObservationConditioning(Config const& config)
+{
+    Check(ObservationSize==56,"conditioned observations preserve network topology");
+    for(double heading : {0.0,90.0,181.0,359.0})
+    {
+        auto c=config;
+        c.runway.headingDegrees=heading;
+        auto const plan=MakeFlightPlan(c);
+        MissionState mission{};mission.phase=Phase::Approach;
+        auto aircraft=Approach(c,-6000,300);
+        aircraft.velocity.up=-3;
+        aircraft.rollRate=2*DegreesToRadians;
+        aircraft.pitchRate=-2*DegreesToRadians;
+        aircraft.yawRate=DegreesToRadians;
+        auto const observation=Observe(c,plan,mission,aircraft);
+        Check(Near(observation[3],-6000/c.normalization.distance,1e-6)
+            && Near(observation[4],300/c.normalization.cross,1e-6)
+            && Near(observation[10],-3/c.normalization.verticalSpeed,1e-6),
+            "long-range distance remains global while lateral and vertical cues gain precision");
+        Check(Near(observation[17],aircraft.rollRate/c.normalization.rate,1e-6)
+            && Near(observation[18],aircraft.pitchRate/c.normalization.rate,1e-6)
+            && Near(observation[19],aircraft.yawRate/c.normalization.rate,1e-6),
+            "body rate magnitudes and signs are preserved");
+        Check(Near(observation[26],-c.mission.glideDegrees/c.normalization.slopeDegrees,1e-6)
+            && observation[22]>0 && observation[22]<1,
+            "glide target and global localizer angle remain observable");
+        auto opposite=Approach(c,-6000,-300);
+        auto const left=Observe(c,plan,mission,opposite);
+        Check(Near(left[4],-observation[4],1e-6)
+            && Near(left[22],-observation[22],1e-6),
+            "left and right localizer signs remain symmetric for any runway heading");
+        auto distant=Approach(c,-6000,3000);
+        auto const wide=Observe(c,plan,mission,distant);
+        Check(wide[4]==1 && wide[22]>observation[22] && wide[22]<1,
+            "fine cross-track clipping cannot erase the long-range LOC angle");
+        distant.velocity.up=-100;
+        distant.rollRate=5;
+        auto const bounded=Observe(c,plan,mission,distant);
+        Check(bounded[10]==-1 && bounded[17]==1,"large finite rates clip safely");
+        for(float value : bounded)
+            Check(std::isfinite(value) && std::abs(value)<=1,"every conditioned observation is finite and bounded");
+    }
+}
+
 void Configuration()
 {
     std::ifstream source(PPO_FLIGHT_CONFIG); nlohmann::json valid; source>>valid;
     TemporaryDirectory temporary("flight-config-"); auto const path=temporary.path/"config.json";
-    for (int test=0; test<47; ++test)
+    for (int test=0; test<53; ++test)
     {
         auto json=valid;
         if (test==0) json["normalization"]["speed"]=0;
@@ -249,6 +294,12 @@ void Configuration()
         if (test==43) json["training"]["curriculum"]["captureStart"]["localizerHeightOffsetMeters"]=10000;
         if (test==44) json["training"]["curriculum"].erase("captureStart");
         if (test==45) json["training"]["curriculum"]["captureStart"]["unknown"]=true;
+        if (test==47) json["normalization"]["cross"]=0;
+        if (test==48) json["normalization"]["verticalSpeed"]=-1;
+        if (test==49) json["normalization"]["slopeDegrees"]=0;
+        if (test==50) json["normalization"].erase("cross");
+        if (test==51) json["normalization"]["rate"]=0;
+        if (test==52) json["normalization"]["slopeDegrees"]=true;
         if (test==46)
         {
             double const minimumDistance=json["initial"]["distanceMeters"][0].get<double>();
@@ -919,7 +970,7 @@ int main()
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
         LocalizerRewardContract(c);
-        RunwayCourseObservation(c);SurfaceRelativeFlightPath(c);NoWaveScenario(c);CaptureLessonInterceptBudget(c);
+        ObservationConditioning(c);RunwayCourseObservation(c);SurfaceRelativeFlightPath(c);NoWaveScenario(c);CaptureLessonInterceptBudget(c);
         ApproachOnly(c);Configuration();CaptureLessonTermination(c);
         c.mission.patrolEnabled=true; // Keep all legacy patrol/recovery regressions active.
         Geometry(c);Landing(c);FiniteSurfaceContacts(c);OrderedNavigation(c);AlignedStarts(c);CapturePriority(c);RandomizationAndMotion(c);DisplayReferences(c);
