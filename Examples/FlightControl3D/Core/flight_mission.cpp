@@ -570,32 +570,52 @@ std::array<double, RewardCount> ShapingPotentials(Config const& c, FlightPlan co
     return potential;
 }
 
-bool CaptureGateQualified(Config const& c,CurriculumStage stage,
+std::uint16_t CaptureGateFailureMask(Config const& c,CurriculumStage stage,
     MissionState const& mission,AircraftState const& aircraft,Guidance const& g) noexcept
 {
-    if(!IsCaptureLesson(stage) || mission.phase!=Phase::Approach
-        || mission.outcome!=Outcome::Flying || !mission.capturedLocalizer || !IsFinite(aircraft)
-        || aircraft.weightOnWheels || aircraft.structuralContact || !g.ilsValid
+    std::uint16_t failures=0;
+    auto mark=[&](CaptureGateFailure reason,bool failed) noexcept
+    {
+        if(failed) failures|=GateBit(reason);
+    };
+    bool const valid=IsFinite(aircraft);
+    mark(CaptureGateFailure::State,!IsCaptureLesson(stage)
+        || mission.phase!=Phase::Approach || mission.outcome!=Outcome::Flying
+        || !valid || aircraft.weightOnWheels || aircraft.structuralContact);
+    if(!valid) return failures;
+    mark(CaptureGateFailure::Localizer,!mission.capturedLocalizer || !g.ilsValid
         || !(g.along<0) || !(g.height>c.mission.flareHeightMeters)
         || !(g.relativeVelocity.north>0)
-        || !(std::abs(g.localizer)<=c.mission.localizerCaptureDegrees*DegreesToRadians))
-        return false;
+        || !(std::abs(g.localizer)<=c.mission.localizerCaptureDegrees*DegreesToRadians));
     auto const attitude=RelativeAttitude(c.runway,aircraft);
     double const route=std::atan2(g.relativeVelocity.east,g.relativeVelocity.north);
     double const rate=c.training.gateRateDegreesPerSecond*DegreesToRadians;
-    if(!(std::abs(attitude[2])<=c.training.gateHeadingDegrees*DegreesToRadians)
-        || !(std::abs(route)<=c.training.gateRouteDegrees*DegreesToRadians)
-        || !(std::abs(aircraft.airspeed-g.targetSpeed)<=c.training.gateSpeedToleranceMps)
-        || !(std::abs(attitude[0])<=c.training.gateRollDegrees*DegreesToRadians)
-        || !(std::abs(aircraft.rollRate)<=rate) || !(std::abs(aircraft.pitchRate)<=rate)
-        || !(std::abs(aircraft.yawRate)<=rate))
-        return false;
-    if(stage==CurriculumStage::Loc) return true;
-    double const slope=std::atan2(g.relativeVelocity.up,
-        std::hypot(g.relativeVelocity.north,g.relativeVelocity.east));
-    return mission.capturedGlide
-        && std::abs(g.glideError)<=c.mission.glideCaptureDegrees*DegreesToRadians
-        && std::abs(slope-g.targetSlope)<=c.training.gateSlopeDegrees*DegreesToRadians;
+    mark(CaptureGateFailure::Heading,
+        !(std::abs(attitude[2])<=c.training.gateHeadingDegrees*DegreesToRadians));
+    mark(CaptureGateFailure::Route,
+        !(std::abs(route)<=c.training.gateRouteDegrees*DegreesToRadians));
+    mark(CaptureGateFailure::Speed,
+        !(std::abs(aircraft.airspeed-g.targetSpeed)<=c.training.gateSpeedToleranceMps));
+    mark(CaptureGateFailure::Roll,
+        !(std::abs(attitude[0])<=c.training.gateRollDegrees*DegreesToRadians));
+    mark(CaptureGateFailure::Rates,
+        !(std::abs(aircraft.rollRate)<=rate) || !(std::abs(aircraft.pitchRate)<=rate)
+        || !(std::abs(aircraft.yawRate)<=rate));
+    if(stage==CurriculumStage::Glide)
+    {
+        double const slope=std::atan2(g.relativeVelocity.up,
+            std::hypot(g.relativeVelocity.north,g.relativeVelocity.east));
+        mark(CaptureGateFailure::Glide,!mission.capturedGlide
+            || !(std::abs(g.glideError)<=c.mission.glideCaptureDegrees*DegreesToRadians)
+            || !(std::abs(slope-g.targetSlope)<=c.training.gateSlopeDegrees*DegreesToRadians));
+    }
+    return failures;
+}
+
+bool CaptureGateQualified(Config const& c,CurriculumStage stage,
+    MissionState const& mission,AircraftState const& aircraft,Guidance const& g) noexcept
+{
+    return CaptureGateFailureMask(c,stage,mission,aircraft,g)==0;
 }
 
 StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState& s,
@@ -774,8 +794,14 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         // requires touchdown and a complete safe stop. Check every FDM substep.
         if(s.outcome==Outcome::Flying && IsCaptureLesson(c.training.curriculumStage))
         {
-            s.captureGateSeconds=CaptureGateQualified(c,c.training.curriculumStage,s,after,g)
+            auto const failures=CaptureGateFailureMask(c,c.training.curriculumStage,s,after,g);
+            s.captureGateLastFailureMask=failures;
+            if(failures!=0)
+                for(std::size_t bit=0;bit<s.captureGateFailureSamples.size();++bit)
+                    if((failures & (1u<<bit))!=0) ++s.captureGateFailureSamples[bit];
+            s.captureGateSeconds=failures==0
                 ? std::min(s.captureGateSeconds+dt,c.training.gateHoldSeconds) : 0;
+            s.maximumCaptureGateSeconds=std::max(s.maximumCaptureGateSeconds,s.captureGateSeconds);
             if(s.captureGateSeconds>=c.training.gateHoldSeconds)
             {
                 s.outcome=Outcome::CaptureCompleted;

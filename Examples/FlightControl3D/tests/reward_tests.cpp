@@ -382,6 +382,34 @@ Outcome ArcCaptureOutcome(Config const& c,double bankDegrees,double& successBonu
     }
     return mission.outcome;
 }
+void GateFailureDiagnostics(Config c)
+{
+    c.mission.patrolEnabled=false;c.training.curriculumStage=CurriculumStage::Loc;
+    auto aircraft=WithCourse(c,At(c,-6000,0,350),0);
+    MissionState state{};state.phase=Phase::Approach;state.capturedLocalizer=true;
+    auto const guidance=Guide(c,{},state,aircraft);
+    Check(CaptureGateFailureMask(c,CurriculumStage::Loc,state,aircraft,guidance)==0,
+        "straight stable LOC meets all independently diagnosed gate conditions");
+    auto bad=WithCourse(c,aircraft,12);
+    bad.airspeed+=10;bad.roll=12*DegreesToRadians;bad.rollRate=8*DegreesToRadians;
+    auto const mask=CaptureGateFailureMask(c,CurriculumStage::Loc,state,bad,Guide(c,{},state,bad));
+    Check((mask&GateBit(CaptureGateFailure::Route))!=0
+        && (mask&GateBit(CaptureGateFailure::Speed))!=0
+        && (mask&GateBit(CaptureGateFailure::Roll))!=0
+        && (mask&GateBit(CaptureGateFailure::Rates))!=0
+        && (mask&GateBit(CaptureGateFailure::Glide))==0,
+        "simultaneous failed flight conditions retain separate causal masks");
+    MissionState unqualified{};unqualified.phase=Phase::Approach;
+    auto result=AdvanceMission(c,{},unqualified,aircraft,aircraft);
+    Check(!result.terminated && unqualified.captureGateSeconds==0
+        && unqualified.captureGateFailureSamples[1]==1
+        && (unqualified.captureGateLastFailureMask & GateBit(CaptureGateFailure::Localizer))!=0,
+        "failed beam acquisition increments exactly one physical sample");
+    state.captureGateSeconds=0.1;
+    result=AdvanceMission(c,{},state,aircraft,aircraft);
+    Check(state.maximumCaptureGateSeconds>=0.1 && state.captureGateFailureSamples[1]==0,
+        "continuous qualified gate hold records a separate maximum");
+}
 void PotentialTerminalAndTimeout(Config c)
 {
     c.training.curriculumStage=CurriculumStage::Loc;
@@ -434,6 +462,7 @@ int main()
     try
     {
         auto config=LoadConfig(PPO_FLIGHT_CONFIG);
+        GateFailureDiagnostics(config);
         PotentialTerminalAndTimeout(config);
         LocalizerTrackingRejectsBriefTurn(config);
         LocalizerLessonHasNoVerticalObjective(config);

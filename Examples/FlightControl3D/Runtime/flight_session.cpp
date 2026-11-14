@@ -131,6 +131,8 @@ void FlightSession::BeginValidationStage(CurriculumStage stage)
     validation_={};validation_.update=learner_.Stats().updates;
     validationPendingReset_=false;lastStep_={};controls_={};
     validationGateSuccesses_=0;
+    validationFailureCounts_.fill(0);
+    validationMaximumHoldSeconds_=0;
     auto validationConfig=EnvironmentConfig(config_,false);
     validationConfig.training.curriculumStage=stage;
     validationEnvironment_=std::make_unique<FlightEnvironment>(validationConfig,DefaultDataRoot(),config_.evaluation.seed);
@@ -150,6 +152,14 @@ void FlightSession::TickValidation()
     auto const stage=validatingLocRetention_ ? CurriculumStage::Loc : config_.training.curriculumStage;
     if(lastStep_.terminated || lastStep_.truncated)
     {
+        if(IsCaptureLesson(stage))
+        {
+            auto const& mission=evaluation.Mission();
+            for(std::size_t i=0;i<validationFailureCounts_.size();++i)
+                validationFailureCounts_[i]+=mission.captureGateFailureSamples[i];
+            validationMaximumHoldSeconds_=std::max(
+                validationMaximumHoldSeconds_,mission.maximumCaptureGateSeconds);
+        }
         if(IsCaptureLesson(stage) && evaluation.Settings().training.curriculumStage==stage
             && evaluation.Mission().outcome==Outcome::CaptureCompleted)
             ++validationGateSuccesses_;
@@ -157,6 +167,16 @@ void FlightSession::TickValidation()
         if(validation_.episodes<config_.evaluation.episodes) validationPendingReset_=true;
         else
         {
+            if(IsCaptureLesson(stage))
+            {
+                std::cout<<"[FLIGHT_CAPTURE_DIAG] stage="<<StageName(stage)
+                    <<" update="<<validation_.update
+                    <<" episodes="<<validation_.episodes
+                    <<" best_hold_s="<<validationMaximumHoldSeconds_;
+                for(std::size_t i=0;i<validationFailureCounts_.size();++i)
+                    std::cout<<' '<<CaptureGateFailureNames[i]<<'='<<validationFailureCounts_[i];
+                std::cout<<std::endl;
+            }
             if(validatingLocRetention_)
             {
                 lastLocRetentionSuccesses_=validationGateSuccesses_;

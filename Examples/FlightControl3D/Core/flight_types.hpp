@@ -90,6 +90,9 @@ struct MissionState final
     double stoppedSeconds{};
     /** @brief Continuous stabilized-capture hold; terminal only for LOC/Glide lessons. */
     double captureGateSeconds{};
+    double maximumCaptureGateSeconds{};
+    std::uint16_t captureGateLastFailureMask{};
+    std::array<std::uint64_t,8> captureGateFailureSamples{};
     double localizerHoldSeconds{},glideHoldSeconds{};
     /** @brief Continuous time outside each beam's release envelope. */
     double localizerLossSeconds{},glideLossSeconds{};

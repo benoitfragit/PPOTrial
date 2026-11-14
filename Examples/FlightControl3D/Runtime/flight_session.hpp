@@ -73,6 +73,8 @@ private:
     std::size_t inferenceEpisodeLimit_{};
     bool validationPendingReset_{};
     std::size_t validationGateSuccesses_{},lastGateSuccesses_{},lastGateEvaluated_{};
+    std::array<std::uint64_t,8> validationFailureCounts_{};
+    double validationMaximumHoldSeconds_{};
     bool validatingLocRetention_{};
     std::size_t lastLocRetentionSuccesses_{},lastLocRetentionEvaluated_{};
     void StartValidation();
