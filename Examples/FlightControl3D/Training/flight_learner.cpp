@@ -192,8 +192,8 @@ class Learner final : public FlightLearner::Impl
         rlt::copy(device_,device_,actor_,*actorBeforeStep_);
         auto const optimizerBefore=actorOptimizer_;
         // Bounded line search; after 16 halvings a failed proposal is rejected.
-        // Any rejection closes actor optimization for this rollout, even if a
-        // smaller proposal fits. The critic still consumes every minibatch.
+        // Only a proposal that cannot be reduced sufficiently closes actor
+        // optimization for this rollout. The critic always continues.
         constexpr unsigned maximumHalvings=16;
         for(unsigned halving=0;halving<=maximumHalvings;++halving)
         {
@@ -208,10 +208,14 @@ class Learner final : public FlightLearner::Impl
                 actorOptimizer_.parameters.alpha=optimizerBefore.parameters.alpha;
                 return;
             }
-            ++stats.actorStepRejections;stats.actorStoppedByKl=true;
+            ++stats.actorStepRejections;
             rlt::copy(device_,device_,*actorBeforeStep_,actor_);
             actorOptimizer_=optimizerBefore;
         }
+        // Stop the remaining actor minibatches only when every transactional
+        // retry failed. A rejected large proposal followed by an accepted
+        // reduced step must not freeze actor learning for this rollout.
+        stats.actorStoppedByKl=true;
     }
 public:
     template<typename Net> static void ValidateNetwork(Net const& net)

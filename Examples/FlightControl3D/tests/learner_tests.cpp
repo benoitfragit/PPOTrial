@@ -210,11 +210,12 @@ void KlStopsActorOnly(Config c)
     learner.Optimize();auto const& stats=learner.Stats();
     double const retainedKl=PolicyKl(before,learner.Evaluate(observation),PolicyAction{},c.training);
     Check(retainedKl<=c.training.targetKl,"retained actor must respect the exact target KL");
-    Check(stats.actorStoppedByKl && stats.maximumProposedKl>c.training.targetKl
+    Check(stats.maximumProposedKl>c.training.targetKl
         && stats.actorStepRejections>0 && stats.acceptedPolicyKl<=c.training.targetKl
         && retainedKl<=c.training.targetKl && Near(retainedKl,stats.acceptedPolicyKl,1e-10)
-        && stats.actorSteps==1 && stats.updates==1,
-        "oversized actor proposals are reduced before the retained policy exceeds exact target KL");
+        && stats.actorSteps>=1 && stats.actorSteps<=c.training.epochs*c.training.rolloutSteps/c.training.minibatch
+        && stats.updates==1,
+        "rejected proposals are rolled back; the retained policy respects exact target KL");
     TemporaryDirectory directory("flight-kl-");auto const path=directory.path/"checkpoint.txt";
     learner.Save(path);
     std::ifstream stream(path);std::string line,signature;
