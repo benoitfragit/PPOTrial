@@ -330,6 +330,7 @@ void ActionLevelPotential(Config c)
     // Timeout after 0.13 s: the second PPO action executes only 3 substeps.
     // Its bootstrap must still use one full action gamma, not gamma_sub^3.
     c.mission.maxSeconds=0.13;
+    c.training.gateHoldSeconds=0.1; // Valid capture lesson with an intentionally early timeout.
     FlightEnvironment partial(c,DefaultDataRoot(),95U);
     partial.Reset();
     auto const first=partial.Step({0,0,0,c.initial.throttle,0,false});
