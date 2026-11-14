@@ -16,6 +16,14 @@ AircraftState Approach(Config const& c, double along=-1000, double cross=0)
     a.gearPosition=1;
     return a;
 }
+double ExpectedCrashReward(Config const& c,FlightPlan const& plan,
+    MissionState const& mission,AircraftState const& before)
+{
+    double expected=c.reward.weights[static_cast<std::size_t>(Reward::Crash)];
+    for(double potential : ShapingPotentials(c,plan,mission,before))
+        expected-=potential; // Absorbing crash has Phi(next)=0.
+    return expected;
+}
 void Geometry(Config const& c)
 {
     auto const plan=MakeFlightPlan(c);
@@ -82,15 +90,18 @@ void Geometry(Config const& c)
     for (float value : obs) Check(std::isfinite(value) && std::abs(value)<=1,"normalized finite observation");
     a.velocity.up=std::numeric_limits<double>::quiet_NaN();
     for (float value : Observe(c,plan,s,a)) Check(value==0,"invalid terminal observation");
+    double const invalidCrashReward=ExpectedCrashReward(c,plan,s,far);
     auto failure=AdvanceMission(c,plan,s,far,a);
-    Check(failure.terminated && !failure.truncated && failure.reward==c.reward.weights[9],"NaN FDM crash");
+    Check(failure.terminated && !failure.truncated
+        && Near(failure.reward,invalidCrashReward,1e-10),"NaN FDM crash");
 
     MissionState escaped{};escaped.phase=Phase::Approach;
     auto const insideBoundary=Approach(c,-c.mission.maxDistanceMeters+1);
     auto const outsideBoundary=Approach(c,-c.mission.maxDistanceMeters-1);
+    double const boundaryCrashReward=ExpectedCrashReward(c,plan,escaped,insideBoundary);
     auto const rangeFailure=AdvanceMission(c,plan,escaped,insideBoundary,outsideBoundary);
     Check(rangeFailure.terminated && !rangeFailure.truncated && escaped.outcome==Outcome::Crash
-        && rangeFailure.reward==c.reward.weights[static_cast<std::size_t>(Reward::Crash)],
+        && Near(rangeFailure.reward,boundaryCrashReward,1e-10),
         "leaving the recoverable distance is a penalized terminal failure");
 }
 void Landing(Config c)
