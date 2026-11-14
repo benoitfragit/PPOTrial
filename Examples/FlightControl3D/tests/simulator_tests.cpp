@@ -327,6 +327,24 @@ void ActionLevelPotential(Config c)
                 "actual PPO action telescopes the discounted JSBSim substep potentials");
         }
     }
+    // Timeout after 0.13 s: the second PPO action executes only 3 substeps.
+    // Its bootstrap must still use one full action gamma, not gamma_sub^3.
+    c.mission.maxSeconds=0.13;
+    FlightEnvironment partial(c,DefaultDataRoot(),95U);
+    partial.Reset();
+    auto const first=partial.Step({0,0,0,c.initial.throttle,0,false});
+    Check(!first.terminated && !first.truncated,"first 0.1 s action precedes partial timeout");
+    auto const pre=ShapingPotentials(partial.Settings(),partial.Plan(),partial.Mission(),partial.Aircraft());
+    auto const last=partial.Step({0,0,0,c.initial.throttle,0,false});
+    auto const post=ShapingPotentials(partial.Settings(),partial.Plan(),partial.Mission(),partial.Aircraft());
+    Check(last.truncated && !last.terminated && partial.Mission().outcome==Outcome::Timeout,
+        "second PPO action is the three-substep timeout");
+    for(auto channel:{Reward::Localizer,Reward::Glide,Reward::Speed,Reward::Slope})
+    {
+        auto const index=static_cast<std::size_t>(channel);
+        Check(Near(last.rewards[index],c.training.gamma*post[index]-pre[index],1e-7),
+            "partial timeout retains gamma-correct bootstrapped potential");
+    }
 }
 
 int main()

@@ -89,6 +89,7 @@ StepResult FlightEnvironment::Step(Controls const& action)
     double const gammaSub=std::pow(config_.training.gamma,
         1.0/static_cast<double>(config_.mission.actionSubsteps));
     double discount=1.0;
+    std::size_t executed=0;
     for (std::size_t substep=0; substep<config_.mission.actionSubsteps; ++substep)
     {
         auto const previous = aircraft_;
@@ -101,10 +102,22 @@ StepResult FlightEnvironment::Step(Controls const& action)
             total.rewards[i] += IsPotentialReward(static_cast<Reward>(i))
                 ? discount*step.rewards[i] : step.rewards[i];
         total.terminated = step.terminated; total.truncated = step.truncated;
+        ++executed;
         if (total.terminated || total.truncated) break;
         discount*=gammaSub;
     }
-    // Telescopes to gamma*Phi(s_next)-Phi(s_now) for a full PPO action.
+    // A timeout can truncate an action after fewer than actionSubsteps.
+    // PPO still bootstraps with gamma for that transition, so match gamma
+    // rather than gamma_sub^executed on its non-absorbing end potential.
+    if(total.truncated && executed<config_.mission.actionSubsteps)
+    {
+        auto const terminalPotentials=ShapingPotentials(episodeConfig_,plan_,mission_,aircraft_);
+        double const correction=config_.training.gamma-std::pow(gammaSub,static_cast<double>(executed));
+        for(std::size_t i=0;i<RewardCount;++i)
+            if(IsPotentialReward(static_cast<Reward>(i)))
+                total.rewards[i]+=correction*terminalPotentials[i];
+    }
+    // Telescopes to gamma*Phi(s_next)-Phi(s_now) for the PPO transition.
     for(double const reward:total.rewards) total.reward+=reward;
     return total;
 }
