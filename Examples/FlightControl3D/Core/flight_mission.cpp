@@ -534,6 +534,42 @@ Guidance Guide(Config const& c, FlightPlan const& plan, MissionState const& miss
     return g;
 }
 
+std::array<double, RewardCount> ShapingPotentials(Config const& c, FlightPlan const& plan,
+    MissionState const& mission, AircraftState const& aircraft, Runway const* runway) noexcept
+{
+    std::array<double, RewardCount> potential{};
+    if(!IsFinite(aircraft) || mission.outcome==Outcome::Crash
+        || mission.outcome==Outcome::Stopped || mission.outcome==Outcome::CaptureCompleted)
+        return potential;
+    auto const guidance=Guide(c,plan,mission,aircraft,runway);
+    auto set=[&](Reward channel,double quality) noexcept
+    {
+        auto const index=static_cast<std::size_t>(channel);
+        potential[index]=c.reward.weights[index]*quality;
+    };
+    if(mission.phase!=Phase::Rollout)
+    {
+        if(LocalizerShapingEnvelope(c,guidance))
+            set(Reward::Localizer,LocalizerQuality(c,guidance));
+        if(c.training.curriculumStage!=CurriculumStage::Loc
+            && (mission.phase==Phase::Approach || mission.capturedLocalizer)
+            && GlideShapingEnvelope(c,guidance))
+            set(Reward::Glide,GlideQuality(c,guidance));
+    }
+    if(mission.phase==Phase::Approach)
+    {
+        set(Reward::Speed,GuidanceQuality(aircraft.airspeed-guidance.targetSpeed,c.reward.speedTolerance));
+        if(c.training.curriculumStage!=CurriculumStage::Loc)
+        {
+            auto const slope=std::atan2(guidance.relativeVelocity.up,
+                std::hypot(guidance.relativeVelocity.north,guidance.relativeVelocity.east));
+            set(Reward::Slope,GuidanceQuality(slope-guidance.targetSlope,
+                c.reward.slopeToleranceDegrees*DegreesToRadians));
+        }
+    }
+    return potential;
+}
+
 bool CaptureGateQualified(Config const& c,CurriculumStage stage,
     MissionState const& mission,AircraftState const& aircraft,Guidance const& g) noexcept
 {
@@ -583,9 +619,10 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         s.approachRecoveryPending=false;s.approachRecoveryRequiresGlide=false;
     }
     auto const priorMission=s;
+    auto const& previousDeck=previousRunway ? *previousRunway : c.runway;
+    auto const previousPotentials=ShapingPotentials(c,plan,priorMission,before,&previousDeck);
     ++s.steps;
     auto g = Guide(c,plan,s,after);
-    auto const& previousDeck=previousRunway ? *previousRunway : c.runway;
     double const pathProgress=AdvancePatrol(c,plan,s,before,after,previousDeck);
     bool const contact = ContactDetected(c,after,g);
     double const headingError=WrapAngle(after.heading-c.runway.headingDegrees*DegreesToRadians);
@@ -702,56 +739,14 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         auto const referenceBefore=InCurrentDeckFrame(previousDeck,c.runway,before);
         // Approach qualities compare each actual aircraft/runway/mission snapshot.
         // Patrol tracking retains its transported point and active waypoint.
-        auto const previousGuidance=Guide(c,plan,priorMission,before,&previousDeck);
         if (c.mission.patrolEnabled && s.phase == Phase::Patrol)
             add(Reward::Path,PatrolTrackingReward(c,plan,referenceBefore,after,pathProgress));
-        if (s.phase != Phase::Rollout)
-        {
-            bool const retreat=g.along<previousGuidance.along;
-            for(auto const channel : {Reward::Localizer,Reward::Glide})
-            {
-                bool const localizer=channel==Reward::Localizer;
-                bool const enabled=localizer || ((s.phase==Phase::Approach || s.capturedLocalizer)
-                    && c.training.curriculumStage!=CurriculumStage::Loc);
-                bool const previousValid=enabled && (localizer
-                    ? LocalizerShapingEnvelope(c,previousGuidance)
-                    : GlideShapingEnvelope(c,previousGuidance));
-                bool const currentValid=enabled && (localizer
-                    ? LocalizerShapingEnvelope(c,g) : GlideShapingEnvelope(c,g));
-                double const before=previousValid
-                    ? (localizer ? LocalizerQuality(c,previousGuidance)
-                        : GlideQuality(c,previousGuidance)) : 0;
-                double const quality=currentValid
-                    ? (localizer ? LocalizerQuality(c,g) : GlideQuality(c,g)) : 0;
-                // Do not create fictitious progress at the envelope boundary.
-                double const improvement=previousValid && currentValid
-                    ? QualityImprovement(before,quality) : 0;
-                add(channel,retreat ? std::min(improvement,0.0) : improvement);
-            }
-        }
+        // LOC, Glide, Speed and Slope are applied as discounted state
+        // potentials below, including the absorbing terminal transitions.
         if (s.phase == Phase::Approach && !IsCaptureLesson(c.training.curriculumStage))
         {
             if(enteredLocalizer) add(Reward::EnterLocalizer,1);
             if(enteredGlide && c.training.curriculumStage!=CurriculumStage::Loc) add(Reward::EnterGlide,1);
-        }
-        if (s.phase == Phase::Approach)
-        {
-            // Safety guidance must exist before LOC capture, including Gate 1.
-            double const priorSpeed=GuidanceQuality(referenceBefore.airspeed-previousGuidance.targetSpeed,c.reward.speedTolerance);
-            double const speed=GuidanceQuality(after.airspeed-g.targetSpeed,c.reward.speedTolerance);
-            add(Reward::Speed,QualityImprovement(priorSpeed,speed));
-            // The active LOC lesson, including Glide reminders, has no vertical objective.
-            if(c.training.curriculumStage!=CurriculumStage::Loc)
-            {
-                double const priorSlope=std::atan2(previousGuidance.relativeVelocity.up,
-                    std::hypot(previousGuidance.relativeVelocity.north,previousGuidance.relativeVelocity.east));
-                double const slope=std::atan2(g.relativeVelocity.up,
-                    std::hypot(g.relativeVelocity.north,g.relativeVelocity.east));
-                double const tol=c.reward.slopeToleranceDegrees*DegreesToRadians;
-                add(Reward::Slope,QualityImprovement(
-                    GuidanceQuality(priorSlope-previousGuidance.targetSlope,tol),
-                    GuidanceQuality(slope-g.targetSlope,tol)));
-            }
         }
         if (contact && !s.touchedDown)
         {
@@ -793,6 +788,15 @@ StepResult AdvanceMission(Config const& c, FlightPlan const& plan, MissionState&
         if (s.outcome == Outcome::Flying && static_cast<double>(s.steps)*dt >= c.mission.maxSeconds)
             s.outcome = Outcome::Timeout;
     }
+    // Each JSBSim substep contributes F = gamma_sub * Phi(s') - Phi(s).
+    // A terminal state has zero potential; truncated Timeout keeps its
+    // potential for the critic bootstrap. The environment discounts these
+    // substep terms before presenting the full 0.1 s transition to PPO.
+    double const gammaSub=std::pow(c.training.gamma,1.0/static_cast<double>(c.mission.actionSubsteps));
+    auto const currentPotentials=ShapingPotentials(c,plan,s,after);
+    for(std::size_t channel=0;channel<RewardCount;++channel)
+        if(IsPotentialReward(static_cast<Reward>(channel)))
+            result.rewards[channel]+=gammaSub*currentPotentials[channel]-previousPotentials[channel];
     for (double reward : result.rewards) result.reward += reward;
     result.terminated = s.outcome == Outcome::Crash || s.outcome == Outcome::Stopped
         || s.outcome==Outcome::CaptureCompleted;

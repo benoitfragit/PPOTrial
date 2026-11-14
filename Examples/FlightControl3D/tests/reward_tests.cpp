@@ -31,67 +31,89 @@ double Channel(StepResult const& step,Reward reward)
 }
 void Convergence(Config const& c)
 {
-    auto far=WithCourse(c,At(c,-6000,2000,700),0);
-    auto closer=WithCourse(c,At(c,-6000,1999.8,699.8),0);
+    auto const far=WithCourse(c,At(c,-6000,2000,700),0);
+    auto const closer=WithCourse(c,At(c,-6000,1800,600),0);
+    auto const middle=WithCourse(c,At(c,-6000,1900,650),0);
     auto const improvement=ApproachStep(c,far,closer);
     auto const regression=ApproachStep(c,closer,far);
+    MissionState mission{};mission.phase=Phase::Approach;mission.capturedLocalizer=true;
+    auto const initial=ShapingPotentials(c,{},mission,far);
+    auto const final=ShapingPotentials(c,{},mission,closer);
+    double const gammaSub=std::pow(c.training.gamma,1.0/c.mission.actionSubsteps);
     for(auto channel : {Reward::Localizer,Reward::Glide})
-        Check(Channel(improvement,channel)>0 && Channel(regression,channel)<0
-            && Near(Channel(improvement,channel)+Channel(regression,channel),0,1e-12)
-            && Channel(ApproachStep(c,far,far),channel)==0,
-            "signed delta Q gives positive/negative/zero without recurrence");
+    {
+        auto const i=static_cast<std::size_t>(channel);
+        Check(Near(Channel(improvement,channel),gammaSub*final[i]-initial[i],1e-10)
+            && Near(Channel(regression,channel),gammaSub*initial[i]-final[i],1e-10)
+            && Near(Channel(improvement,channel)+gammaSub*Channel(regression,channel),
+                (gammaSub*gammaSub-1)*initial[i],1e-10),
+            "discounted potential telescopes on out-and-back without farming");
+    }
     auto const right=At(c,-6000,1000,700),left=At(c,-6000,-1000,700);
     auto const ri=ApproachStep(c,WithCourse(c,right,0),WithCourse(c,right,-5));
     auto const ro=ApproachStep(c,WithCourse(c,right,0),WithCourse(c,right,5));
     auto const li=ApproachStep(c,WithCourse(c,left,0),WithCourse(c,left,5));
     auto const lo=ApproachStep(c,WithCourse(c,left,0),WithCourse(c,left,-5));
-    Check(Channel(ri,Reward::Localizer)>0 && Channel(ro,Reward::Localizer)<0
+    Check(Channel(ri,Reward::Localizer)>Channel(ro,Reward::Localizer)
         && Near(Channel(ri,Reward::Localizer),Channel(li,Reward::Localizer),1e-10)
         && Near(Channel(ro,Reward::Localizer),Channel(lo,Reward::Localizer),1e-10),
-        "inward vs outward route rewards are symmetric");
+        "inward vs outward route rewards remain symmetric");
     auto glide=At(c,-6000,0,c.runway.thresholdHeightMeters
         +6000*std::tan(c.mission.glideDegrees*DegreesToRadians));
     auto down=WithCourse(c,glide,0),up=WithCourse(c,glide,0);
     down.velocity.up=-glide.airspeed*std::tan(c.mission.glideDegrees*DegreesToRadians);
     up.velocity.up=glide.airspeed*std::tan(c.mission.glideDegrees*DegreesToRadians);
-    Check(Channel(ApproachStep(c,glide,down),Reward::Glide)>0
-        && Channel(ApproachStep(c,glide,up),Reward::Glide)<0,
-        "glide includes physical descent slope, not just location");
+    Check(Channel(ApproachStep(c,glide,down),Reward::Glide)
+        >Channel(ApproachStep(c,glide,up),Reward::Glide),
+        "Glide potential includes physical descent slope");
     auto locOnly=c;locOnly.training.curriculumStage=CurriculumStage::Loc;
     Check(Channel(ApproachStep(locOnly,far,closer),Reward::Glide)==0
-        && Channel(ApproachStep(locOnly,far,closer),Reward::Localizer)>0,
-        "LOC gate disables glide shaping only");
+        && Channel(ApproachStep(locOnly,far,closer),Reward::Localizer)!=0,
+        "LOC disables glide potential");
     MissionState acquisition{};acquisition.phase=Phase::Approach;
-    auto improvedSpeed=closer;
-    improvedSpeed.airspeed+=1;
-    auto const ungated=AdvanceMission(c,MakeFlightPlan(c),acquisition,far,improvedSpeed);
-    Check(Channel(ungated,Reward::Speed)!=0,
-        "speed shaping is active before LOC capture");
+    auto improvedSpeed=closer;improvedSpeed.airspeed+=1;
+    Check(Channel(AdvanceMission(c,{},acquisition,far,improvedSpeed),Reward::Speed)!=0,
+        "speed potential active before LOC capture");
     auto const outside=At(c,-c.mission.ilsRangeMeters-1,0,700);
     auto const inside=At(c,-c.mission.ilsRangeMeters+1,0,700);
-    Check(Channel(ApproachStep(c,outside,inside),Reward::Glide)==0,
-        "glide envelope transition does not fabricate delta Q");
-    auto half=c;half.mission.physicsDt/=2;
-    auto const middle=WithCourse(c,At(c,-6000,1999.9,699.9),0);
+    auto const edge=ApproachStep(c,outside,inside);
+    Check(Near(Channel(edge,Reward::Glide),
+        gammaSub*ShapingPotentials(c,{},mission,inside)[static_cast<std::size_t>(Reward::Glide)],1e-10),
+        "entering the Glide envelope preserves a well-defined potential");
+    auto half=c;half.mission.actionSubsteps*=2;
+    double const gammaHalf=std::sqrt(gammaSub);
     Check(Near(Channel(ApproachStep(half,far,middle),Reward::Localizer)
-        +Channel(ApproachStep(half,middle,closer),Reward::Localizer),
-        Channel(improvement,Reward::Localizer),1e-12),
-        "substep subdivision preserves additive quality difference");
+        +gammaHalf*Channel(ApproachStep(half,middle,closer),Reward::Localizer),
+        Channel(improvement,Reward::Localizer),1e-10),
+        "substep subdivision preserves the gamma-discounted shaping");
 }
 void ProgressAndAmplitude(Config const& c)
 {
     auto aligned=WithCourse(c,At(c,-6000,0,c.runway.thresholdHeightMeters
         +6000*std::tan(c.mission.glideDegrees*DegreesToRadians)),0);
-    Check(Channel(ApproachStep(c,aligned,aligned),Reward::Localizer)==0
-        && Channel(ApproachStep(c,aligned,aligned),Reward::Glide)==0,
-        "perfect stationary beams cannot accumulate time reward");
-    auto const prior=WithCourse(c,At(c,-6000,1000,600),0);
-    auto const receding=WithCourse(c,At(c,-6010,1000,600),0);
+    MissionState state{};state.phase=Phase::Approach;state.capturedLocalizer=true;
+    double const gammaSub=std::pow(c.training.gamma,1.0/c.mission.actionSubsteps);
+    auto const potentials=ShapingPotentials(c,{},state,aligned);
+    for(auto channel:{Reward::Localizer,Reward::Glide,Reward::Speed,Reward::Slope})
+    {
+        auto const i=static_cast<std::size_t>(channel);
+        Check(Near(Channel(ApproachStep(c,aligned,aligned),channel),
+                (gammaSub-1)*potentials[i],1e-10),
+            "stationary holding has the exact discounted baseline, not a positive recurrent reward");
+    }
+    auto prior=WithCourse(c,At(c,-6000,1000,600),0);
+    auto receding=WithCourse(c,At(c,-6010,1000,600),0);
     auto const r=ApproachStep(c,prior,receding);
-    Check(Channel(r,Reward::Localizer)<=0 && Channel(r,Reward::Glide)<=0,
-        "receding cannot farm angular quality");
+    auto const previous=ShapingPotentials(c,{},state,prior);
+    auto const next=ShapingPotentials(c,{},state,receding);
+    for(auto channel:{Reward::Localizer,Reward::Glide})
+    {
+        auto const i=static_cast<std::size_t>(channel);
+        Check(Near(Channel(r,channel),gammaSub*next[i]-previous[i],1e-10),
+            "receding must use full potential, not asymmetric gain clipping");
+    }
     Check(c.reward.weights[7]==100 && c.reward.weights[8]==100 && c.reward.weights[9]==-100,
-        "terminal outcomes unchanged");
+        "terminal event weights unchanged");
 }
 void SpeedAndSlopeShaping(Config const& c)
 {
@@ -101,10 +123,11 @@ void SpeedAndSlopeShaping(Config const& c)
     good.airspeed+=1;good.velocity.up=-bad.airspeed*0.10;
     wrong.airspeed-=1;wrong.velocity.up=bad.airspeed*0.10;
     for(auto channel:{Reward::Speed,Reward::Slope})
-        Check(Channel(ApproachStep(c,bad,good),channel)>0
-            && Channel(ApproachStep(c,bad,wrong),channel)<0
-            && Channel(ApproachStep(c,bad,bad),channel)==0,
-            "speed and slope improve/recede with no constant baseline");
+        Check(Channel(ApproachStep(c,bad,good),channel)
+                >Channel(ApproachStep(c,bad,bad),channel)
+            && Channel(ApproachStep(c,bad,wrong),channel)
+                <Channel(ApproachStep(c,bad,bad),channel),
+            "speed and slope potentials favor improved physical quality");
 }
 void LocalizerLessonHasNoVerticalObjective(Config c)
 {
@@ -113,7 +136,7 @@ void LocalizerLessonHasNoVerticalObjective(Config c)
     before.airspeed=c.mission.approachSpeed-5;
     before=WithCourse(c,before,0);
     auto after=before;
-    after.position=FromRunway(c.runway,-6000,499.8,400);
+    after.position=FromRunway(c.runway,-6000,470.0,400);
     after.airspeed+=1;
     after=WithCourse(c,after,0);
     for(auto const stage : {CurriculumStage::Loc,CurriculumStage::Glide,
@@ -132,8 +155,9 @@ void LocalizerLessonHasNoVerticalObjective(Config c)
             else
             {
                 double const tolerance=c.reward.slopeToleranceDegrees;
+                double const gammaSub=std::pow(c.training.gamma,1.0/c.mission.actionSubsteps);
                 double const expected=c.reward.weights[static_cast<std::size_t>(Reward::Slope)]
-                    *(tolerance/(tolerance+std::abs(slopeDegrees+c.mission.glideDegrees))
+                    *(gammaSub*tolerance/(tolerance+std::abs(slopeDegrees+c.mission.glideDegrees))
                         -tolerance/(tolerance+c.mission.glideDegrees));
                 Check(Near(Channel(result,Reward::Slope),expected,1e-12),
                     "Glide and landing lessons preserve their signed slope shaping");
@@ -198,7 +222,7 @@ void SecondaryGuidance(Config const& c)
     Check(missed.waypoint!=1 && !missed.pathQualified && missed.waypointsPassed==0 && missed.completedLaps==0,
         "a missed gate advances guidance through reacquisition without crediting a shortcut");
 
-    auto const outside=At(c,-4000,5000,600),intercepting=At(c,-4000,4999.8,599.8);
+    auto const outside=At(c,-4000,5000,600),intercepting=At(c,-4000,4500,550);
     auto const fallback=ApproachStep(c,outside,intercepting);
     Check(Channel(fallback,Reward::Path)==0 && Channel(fallback,Reward::Localizer)>0
         && Channel(fallback,Reward::Glide)>0,
@@ -220,8 +244,12 @@ void MovingFrame(Config c)
     auto aircraftBefore=before;aircraftBefore.position=FromRunway(previous,-6000,2000,700);
     MissionState mission{};mission.phase=Phase::Approach;
     auto const reward=AdvanceMission(c,MakeFlightPlan(c),mission,aircraftBefore,before,&previous);
-    Check(Near(Channel(reward,Reward::Localizer),0,1e-12) && Near(Channel(reward,Reward::Glide),0,1e-12),
-        "rigid runway motion alone does not create progress or convergence");
+    MissionState prior{};prior.phase=Phase::Approach;
+    auto const beforePotential=ShapingPotentials(c,{},prior,aircraftBefore,&previous);
+    double const gammaSub=std::pow(c.training.gamma,1.0/c.mission.actionSubsteps);
+    for(auto channel:{Reward::Localizer,Reward::Glide})
+        Check(Near(Channel(reward,channel),(gammaSub-1)*beforePotential[static_cast<std::size_t>(channel)],1e-10),
+            "rigid runway motion alone yields only the discounted potential baseline");
     c.reward.localizerCourseBlend=-0.01;
     Rejects([&] {Validate(c);},"negative LOC course blend rejected");
     c.reward.localizerCourseBlend=1.01;
@@ -317,9 +345,12 @@ void TrueSnapshotCycle(Config c)
     MissionState forward{},reverse{};forward.phase=reverse.phase=Phase::Approach;
     auto const outward=AdvanceMission(moved,{},forward,aircraft,next,&firstDeck);
     auto const inward=AdvanceMission(c,{},reverse,next,aircraft,&moved.runway);
+    auto const initialPotential=ShapingPotentials(c,{},forward,aircraft,&firstDeck);
+    double const gammaSub=std::pow(c.training.gamma,1.0/c.mission.actionSubsteps);
     for(auto channel:{Reward::Speed,Reward::Slope})
-        Check(Near(Channel(outward,channel)+Channel(inward,channel),0,1e-11),
-            "true state and runway snapshots telescope across a closed moving-deck cycle");
+        Check(Near(Channel(outward,channel)+gammaSub*Channel(inward,channel),
+                (gammaSub*gammaSub-1)*initialPotential[static_cast<std::size_t>(channel)],1e-10),
+            "true state and runway snapshots telescope with physical discounting");
 }
 /** Kinematic probe for a constant-speed coordinated turn, with SI gravity. */
 AircraftState CoordinatedArc(Config const& c,double bankDegrees,double seconds)
@@ -351,6 +382,28 @@ Outcome ArcCaptureOutcome(Config const& c,double bankDegrees,double& successBonu
     }
     return mission.outcome;
 }
+void PotentialTerminalAndTimeout(Config c)
+{
+    c.training.curriculumStage=CurriculumStage::Loc;
+    c.mission.patrolEnabled=false;
+    auto before=WithCourse(c,At(c,-6000,500,350),0);
+    MissionState state{};state.phase=Phase::Approach;
+    auto const phi=ShapingPotentials(c,{},state,before);
+    auto crashed=before;crashed.structuralContact=true;
+    auto crash=AdvanceMission(c,{},state,before,crashed);
+    Check(crash.terminated && state.outcome==Outcome::Crash
+        && Near(Channel(crash,Reward::Localizer),-phi[static_cast<std::size_t>(Reward::Localizer)],1e-10)
+        && Channel(crash,Reward::Crash)==c.reward.weights[static_cast<std::size_t>(Reward::Crash)],
+        "terminal crash has zero next potential and retains its physical penalty");
+    MissionState timed{};timed.phase=Phase::Approach;
+    timed.steps=static_cast<std::uint64_t>(std::ceil(c.mission.maxSeconds/c.mission.physicsDt));
+    auto const timeout=AdvanceMission(c,{},timed,before,before);
+    double const gammaSub=std::pow(c.training.gamma,1.0/c.mission.actionSubsteps);
+    Check(timeout.truncated && !timeout.terminated && timed.outcome==Outcome::Timeout
+        && Near(Channel(timeout,Reward::Localizer),
+            (gammaSub-1)*phi[static_cast<std::size_t>(Reward::Localizer)],1e-10),
+        "truncated timeout preserves next-state potential for critic bootstrap");
+}
 void LocalizerTrackingRejectsBriefTurn(Config c)
 {
     c.training.curriculumStage=CurriculumStage::Loc;
@@ -381,6 +434,7 @@ int main()
     try
     {
         auto config=LoadConfig(PPO_FLIGHT_CONFIG);
+        PotentialTerminalAndTimeout(config);
         LocalizerTrackingRejectsBriefTurn(config);
         LocalizerLessonHasNoVerticalObjective(config);
         StabilizedCaptureBonuses(config);

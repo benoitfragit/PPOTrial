@@ -86,6 +86,9 @@ StepResult FlightEnvironment::Step(Controls const& action)
     if (mission_.outcome != Outcome::Flying) throw std::logic_error("FlightControl3D: reset required after episode boundary");
     StepResult total{};
     auto const controls=ApplyPhaseControls(action,mission_.phase,config_.initial,episodeConfig_.training.curriculumStage);
+    double const gammaSub=std::pow(config_.training.gamma,
+        1.0/static_cast<double>(config_.mission.actionSubsteps));
+    double discount=1.0;
     for (std::size_t substep=0; substep<config_.mission.actionSubsteps; ++substep)
     {
         auto const previous = aircraft_;
@@ -94,11 +97,15 @@ StepResult FlightEnvironment::Step(Controls const& action)
         episodeConfig_.runway=RunwayAt(motion_,static_cast<double>(mission_.steps+1)*config_.mission.physicsDt);
         plan_=MakeFlightPlan(episodeConfig_);
         auto const step = AdvanceMission(episodeConfig_,plan_,mission_,previous,aircraft_,&previousRunway);
-        total.reward += step.reward;
-        for (std::size_t i=0; i<RewardCount; ++i) total.rewards[i] += step.rewards[i];
+        for (std::size_t i=0; i<RewardCount; ++i)
+            total.rewards[i] += IsPotentialReward(static_cast<Reward>(i))
+                ? discount*step.rewards[i] : step.rewards[i];
         total.terminated = step.terminated; total.truncated = step.truncated;
         if (total.terminated || total.truncated) break;
+        discount*=gammaSub;
     }
+    // Telescopes to gamma*Phi(s_next)-Phi(s_now) for a full PPO action.
+    for(double const reward:total.rewards) total.reward+=reward;
     return total;
 }
 } // namespace ppo::examples::flight

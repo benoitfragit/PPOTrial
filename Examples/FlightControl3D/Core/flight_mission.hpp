@@ -26,6 +26,19 @@ std::size_t ClosestPatrolWaypoint(FlightPlan const& plan,Vec3 position) noexcept
  */
 Guidance Guide(Config const& config, FlightPlan const& plan,
     MissionState const& mission, AircraftState const& aircraft, Runway const* runway = nullptr) noexcept;
+/** Which channels are potential-based and therefore discounted within one PPO action. */
+inline constexpr bool IsPotentialReward(Reward channel) noexcept
+{
+    return channel == Reward::Localizer || channel == Reward::Glide
+        || channel == Reward::Speed || channel == Reward::Slope;
+}
+/**
+ * Weighted state potentials. Physical rewards use gamma^(1/actionSubsteps) per
+ * JSBSim step and are compounded back into one gamma-discounted PPO action.
+ * Capture/crash/stopped are absorbing (zero potential); Timeout is truncated.
+ */
+std::array<double, RewardCount> ShapingPotentials(Config const&,FlightPlan const&,
+    MissionState const&,AircraftState const&,Runway const* runway=nullptr) noexcept;
 /** Confirm actual beam geometry and stable physical flight before a lesson can end. */
 bool CaptureGateQualified(Config const&,CurriculumStage,MissionState const&,
     AircraftState const&,Guidance const&) noexcept;
