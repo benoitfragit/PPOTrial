@@ -410,6 +410,62 @@ void GateFailureDiagnostics(Config c)
     Check(state.maximumCaptureGateSeconds>=0.1 && state.captureGateFailureSamples[1]==0,
         "continuous qualified gate hold records a separate maximum");
 }
+/** Full 100 s closed orbit reproduces the former positive discounted-LOC loophole. */
+void DiscountedOrbitRejectsFarming(Config c)
+{
+    c.training.curriculumStage=CurriculumStage::Loc;
+    c.mission.patrolEnabled=false;
+    c.mission.maxSeconds=120;
+    MissionState mission{};mission.phase=Phase::Approach;
+    constexpr double period=100.0;
+    constexpr double phase=210.0*DegreesToRadians;
+    double const speed=c.mission.approachSpeed;
+    double const omega=2*Pi/period;
+    double const radius=speed/omega;
+    auto at=[&](double t)
+    {
+        double const theta=phase+omega*t;
+        auto plane=FromRunway(c.runway,-6500+radius*std::cos(theta),
+            700+radius*std::sin(theta),350);
+        AircraftState aircraft{};
+        aircraft.position=plane;
+        aircraft.velocity=Add(Scale(RunwayForward(c.runway),-radius*omega*std::sin(theta)),
+            Scale(RunwayRight(c.runway),radius*omega*std::cos(theta)));
+        aircraft.airspeed=speed;
+        aircraft.heading=c.runway.headingDegrees*DegreesToRadians
+            +std::atan2(radius*omega*std::cos(theta),-radius*omega*std::sin(theta));
+        aircraft.roll=std::atan(speed*omega/9.80665);
+        aircraft.pitchRate=omega*std::sin(aircraft.roll);
+        aircraft.yawRate=omega*std::cos(aircraft.roll);
+        return aircraft;
+    };
+    auto previous=at(0);
+    double const initial=ShapingPotentials(c,{},mission,previous)[static_cast<std::size_t>(Reward::Localizer)];
+    double discounted=0, actionValue=0, subDiscount=1.0, actionDiscount=1.0;
+    double const gammaSub=std::pow(c.training.gamma,1.0/c.mission.actionSubsteps);
+    auto const count=static_cast<int>(std::round(period/c.mission.physicsDt));
+    for(int i=1;i<=count;++i)
+    {
+        auto const after=at(i*c.mission.physicsDt);
+        auto const step=AdvanceMission(c,{},mission,previous,after);
+        Check(!step.terminated && !step.truncated,
+            "closed orbit cannot pass 10 s capture or crash");
+        actionValue+=subDiscount*Channel(step,Reward::Localizer);
+        if(i%static_cast<int>(c.mission.actionSubsteps)==0)
+        {
+            discounted+=actionDiscount*actionValue;
+            actionDiscount*=c.training.gamma;
+            actionValue=0;subDiscount=1;
+        }
+        else subDiscount*=gammaSub;
+        previous=after;
+    }
+    auto const final=ShapingPotentials(c,{},mission,previous)[static_cast<std::size_t>(Reward::Localizer)];
+    Check(Near(discounted,actionDiscount*final-initial,1e-7) && discounted<0
+        && mission.outcome==Outcome::Flying && mission.maximumCaptureGateSeconds==0,
+        "full discounted orbit returns only endpoint potential, never a farmable positive reward");
+}
+
 void PotentialTerminalAndTimeout(Config c)
 {
     c.training.curriculumStage=CurriculumStage::Loc;
@@ -462,6 +518,7 @@ int main()
     try
     {
         auto config=LoadConfig(PPO_FLIGHT_CONFIG);
+        DiscountedOrbitRejectsFarming(config);
         GateFailureDiagnostics(config);
         PotentialTerminalAndTimeout(config);
         LocalizerTrackingRejectsBriefTurn(config);

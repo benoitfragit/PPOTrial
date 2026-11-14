@@ -306,11 +306,35 @@ void IndependentResetAttitude(Config c)
 }
 }
 
+/** Real JSBSim action (10 physical steps) must expose one gamma-discounted PPO potential. */
+void ActionLevelPotential(Config c)
+{
+    c.mission.patrolEnabled=false;
+    c.training.curriculumStage=CurriculumStage::Loc;
+    for(std::uint32_t seed : {92U,93U,94U})
+    {
+        FlightEnvironment env(c,DefaultDataRoot(),seed);
+        env.Reset();
+        auto const before=ShapingPotentials(env.Settings(),env.Plan(),env.Mission(),env.Aircraft());
+        auto const step=env.Step({0,0,0,c.initial.throttle,0,false});
+        Check(!step.terminated && !step.truncated,
+            "real JSBSim 0.1 s potential probe remains airborne");
+        auto const after=ShapingPotentials(env.Settings(),env.Plan(),env.Mission(),env.Aircraft());
+        for(auto channel:{Reward::Localizer,Reward::Glide,Reward::Speed,Reward::Slope})
+        {
+            auto const index=static_cast<std::size_t>(channel);
+            Check(Near(step.rewards[index],c.training.gamma*after[index]-before[index],1e-7),
+                "actual PPO action telescopes the discounted JSBSim substep potentials");
+        }
+    }
+}
+
 int main()
 {
     try
     {
         auto c=LoadConfig(PPO_FLIGHT_CONFIG);
+        ActionLevelPotential(c);
         FiniteSurfaceContactAuthority(c);
         PropulsionAndPhaseReset(c);
         CurriculumRunwayMotion(c);
