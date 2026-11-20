@@ -1,3 +1,15 @@
+/**
+ * @file learner_tests.cpp
+ * @brief Regressions of the PPO learner: Gaussian policy, gradients, KL guard and checkpoints.
+ *
+ * Protects: the portable RNG checkpoint (libstdc++ and MSVC streams), the finite-difference
+ * check of the clipped PPO gradients, exploration, the inactive brake axis in flight,
+ * observation bounds, the KL guard and its frozen actor state, the analytic KL and the
+ * trimmed neutral approach mapping. Also links a second RLtools backend to check that the
+ * namespace wrapper avoids symbol clashes.
+ *
+ * Read next: Training/flight_policy.hpp, Training/flight_learner.cpp.
+ */
 #include "test_support.hpp"
 #include "flight_learner.hpp"
 #include "flight_rng_checkpoint.hpp"

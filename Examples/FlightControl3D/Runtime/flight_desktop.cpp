@@ -1,3 +1,14 @@
+/**
+ * @file flight_desktop.cpp
+ * @brief Entry point of the dedicated FlightControl3D desktop executable.
+ *
+ * Role in the chain: command line -> **desktop** -> Environment + EnvironmentRenderer.
+ * Options: --config FILE, --inference (validated BEST, no training), --auto-run (start
+ * unpaused), --max-speed (unthrottled), --check-example (bootstrap check used by the CI,
+ * exits before opening a window).
+ *
+ * Read next: flight_example.cpp, Renderer/flight_view.cpp.
+ */
 #include "flight_example.hpp"
 #include "environment.hpp"
 #include "environmentrenderer.hpp"
@@ -10,7 +21,8 @@ namespace {
 int RunFlightDesktop(int argc,char** argv)
 {
     bool inference=false,check=false,autoRun=false,maxSpeed=false;
-    std::filesystem::path config=std::filesystem::path{RESOURCE_PATH}/"Scenarios/FlightControl3D_T6_Joint.json";
+    std::filesystem::path config=
+        std::filesystem::path{RESOURCE_PATH}/"Scenarios/FlightControl3D_T6_Joint.json";
     for(int i=1;i<argc;++i)
     {
         std::string_view const option(argv[i]);
@@ -19,9 +31,15 @@ int RunFlightDesktop(int argc,char** argv)
         else if(option=="--auto-run") autoRun=true;
         else if(option=="--max-speed") maxSpeed=true;
         else if(option=="--config" && i+1<argc) config=argv[++i];
-        else { std::cerr<<"Usage: FlightControl3D [--config FILE] [--inference] [--auto-run] [--max-speed] [--check-example]\n"; return 2; }
+        else
+        {
+            std::cerr<<"Usage: FlightControl3D [--config FILE] [--inference] [--auto-run] [--max-speed] "
+                "[--check-example]\n";
+            return 2;
+        }
     }
-    auto const example=inference ? ppo::examples::flight::InferenceDefinition() : ppo::examples::flight::Definition();
+    auto const example=inference ? ppo::examples::flight::InferenceDefinition()
+        : ppo::examples::flight::Definition();
     auto& serializer=ppo::serialization::Serializer::GetInstance();
     serializer.SetPath(std::filesystem::path{RESOURCE_PATH});
     ppo::model::Environment environment;

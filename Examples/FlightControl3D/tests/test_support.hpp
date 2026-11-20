@@ -1,3 +1,9 @@
+/**
+ * @file test_support.hpp
+ * @brief Minimal assertion helpers, temporary directories and checkpoint comparison for the tests.
+ *
+ * Read next: learner_tests.cpp (SameLearnerCheckpoint), session_tests.cpp.
+ */
 #pragma once
 #include "flight_environment.hpp"
 #include "flight_rng_checkpoint.hpp"

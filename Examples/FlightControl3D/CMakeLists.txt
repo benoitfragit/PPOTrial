@@ -65,13 +65,15 @@ target_compile_definitions(FlightControlHeadless PRIVATE
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     enable_testing()
-    foreach(test_name IN ITEMS core reward simulator learner session)
+    foreach(test_name IN ITEMS core reward simulator learner session golden_trace)
         add_executable(FlightControl_${test_name}_tests tests/${test_name}_tests.cpp)
         target_link_libraries(FlightControl_${test_name}_tests PRIVATE FlightControlRuntime)
         target_compile_definitions(FlightControl_${test_name}_tests PRIVATE
             PPO_FLIGHT_CONFIG="${CMAKE_SOURCE_DIR}/resources/settings/Scenarios/FlightControl3D_T6_Joint.json")
         add_test(NAME FlightControl_${test_name}_tests COMMAND FlightControl_${test_name}_tests)
     endforeach()
+    # The golden trace is only frozen on its reference platform; elsewhere it reports a skip.
+    set_tests_properties(FlightControl_golden_trace_tests PROPERTIES SKIP_RETURN_CODE 77)
     target_sources(FlightControl_learner_tests PRIVATE tests/other_rltools_backend.cpp)
     target_link_libraries(FlightControl_learner_tests PRIVATE RLtools::Core)
 endif()

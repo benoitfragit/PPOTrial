@@ -1,3 +1,16 @@
+/**
+ * @file core_tests.cpp
+ * @brief Deterministic regressions of Core/: configuration, geometry, guidance, landing,
+ *        observation, spawns, curriculum starts, evaluation plans and display references.
+ *
+ * Protects: the strict JSON schema and its validation rules, the checkpoint signature
+ * compatibility rules, the frame conversions, the aim point and the flare reference, the
+ * touchdown limits and crash diagnostics, the observation bounds and resolutions, the start
+ * samplers and the stratified evaluation plan. Uses the production scenario
+ * (PPO_FLIGHT_CONFIG); no JSBSim and no network.
+ *
+ * Read next: reward_tests.cpp, simulator_tests.cpp.
+ */
 #include "test_support.hpp"
 #include "flight_landing.hpp"
 #include "flight_mission.hpp"

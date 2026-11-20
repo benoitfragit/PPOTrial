@@ -1,4 +1,23 @@
+/**
+ * @file flight_spawn.hpp
+ * @brief Episode starts: runway pose, airborne approaches, rolling starts and evaluation plans.
+ *
+ * Role in the chain: first step of every episode, before JSBSim is reset. The samplers
+ * draw from a std::mt19937 owned by the environment; the number and order of the draws are
+ * part of the reproducibility contract (seeded validation episodes, golden trace).
+ *
+ * Difficulty d in [0, 1] interpolates the airborne envelope: the start distance range moves
+ * linearly from curriculum.firstDistanceMeters (d = 0) to initial.distanceMeters (d = 1),
+ * while the bearing, heading and height offsets are scaled by d. The side of the extended
+ * centreline is chosen by the caller.
+ *
+ * Not here: the training difficulty draw (sqrt density, FlightEnvironment::Reset) and the
+ * curriculum promotion (Training/flight_curriculum.cpp).
+ *
+ * Read next: flight_spawn.cpp, Simulator/flight_environment.cpp.
+ */
 #pragma once
+
 #include "runway_geometry.hpp"
 #include <random>
 
@@ -35,9 +54,11 @@ EpisodeStart EvaluationStart(std::size_t episode, std::size_t episodes, double r
 
 /**
  * @brief Draws the episode runway pose from the configured randomization.
+ *
+ * Draw order: north, east, deck height, heading offset (four uniform draws).
  * @param config Validated configuration.
  * @param rng Episode random generator.
- * @return Level runway with a random origin, deck height and heading.
+ * @return Level runway with a random origin, deck height and heading in [0, 360) degrees.
  */
 Runway SampleRunway(Config const& config, std::mt19937& rng);
 

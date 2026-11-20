@@ -1,3 +1,24 @@
+/**
+ * @file flight_guidance.hpp
+ * @brief Approach, flare and rollout reference shared by rewards, observations and rendering.
+ *
+ * Role in the chain: between the aircraft state (JSBSim) and the learning signals. Guide()
+ * turns the mission phase and the aircraft state into a commanded direction, a commanded
+ * flight-path angle and a reference airspeed. The reward potentials, the observation and
+ * the renderer all consume the same Guidance value, so the policy sees exactly what it is
+ * rewarded for.
+ *
+ * Geometry: the glide plane crosses the threshold at Runway::thresholdHeightMeters and
+ * meets the runway at the aim point, AimPointAlongMeters() past the threshold. Far out the
+ * command points at the aim point; within CentrelineLookaheadMeters of it the horizontal
+ * target slides along the centreline. Below the flare height the descent blends into a
+ * gentle contact sink. All lengths are in metres, speeds in m/s and angles in radians.
+ *
+ * Not here: no controller. Guidance never commands a surface; it only defines the
+ * reference the policy learns to follow.
+ *
+ * Read next: flight_guidance.cpp, flight_reward.hpp, flight_observation.hpp.
+ */
 #pragma once
 
 #include "runway_geometry.hpp"
@@ -5,7 +26,7 @@
 namespace ppo::examples::flight {
 
 /**
- * @brief Horizontal look-ahead used to converge onto the centreline near and past the aim point.
+ * @brief Horizontal look-ahead used to converge onto the centreline near and past the aim point, in metres.
  *
  * Far out, the commanded direction points straight at the aim point. Within
  * this distance of it, the horizontal target slides along the centreline so
@@ -19,7 +40,7 @@ Vec3 ThresholdPoint(Runway const& runway) noexcept;
 /**
  * @brief Distance past the threshold where the approach plane meets the runway.
  * @param config Episode configuration: threshold crossing height and glide slope.
- * @return Aim-point distance, so that the plane crosses the threshold at its crossing height.
+ * @return Aim-point distance, in metres: thresholdHeightMeters / tan(glide slope).
  */
 double AimPointAlongMeters(Config const& config) noexcept;
 
@@ -30,14 +51,18 @@ Vec3 AimPoint(Config const& config) noexcept;
  * @brief Height of the approach plane above the deck, for display and diagnostics.
  * @param config Episode configuration.
  * @param along Distance past the threshold, in metres.
- * @return Glide-plane height, zero at and beyond the aim point.
+ * @return Glide-plane height, in metres, zero at and beyond the aim point.
  */
 double ApproachPathHeight(Config const& config, double along) noexcept;
 
 /** @brief Target point and commanded unit direction in world axes. */
 struct ApproachReference final
 {
-    Vec3 target{}, direction{};
+    /** @brief Horizontal target point on the centreline, in world metres. */
+    Vec3 target{};
+    /** @brief Unit commanded direction, in world axes. */
+    Vec3 direction{};
+    /** @brief Commanded flight-path angle, in radians (atan of the vertical gradient). */
     double slope{};
 };
 

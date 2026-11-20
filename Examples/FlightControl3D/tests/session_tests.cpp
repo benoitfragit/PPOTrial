@@ -1,3 +1,14 @@
+/**
+ * @file session_tests.cpp
+ * @brief Regressions of FlightSession: resumption, contracts, validation, BEST, reward
+ *        tuning, crash snapshot and curriculum.
+ *
+ * Protects: desktop continuation without losing a rollout, warm starts across reward
+ * changes, the frozen learner during validation, BEST promotion and its immutability, the
+ * reward-tuning round trip through the scenario file, and the curriculum persistence.
+ *
+ * Read next: Runtime/flight_session.cpp, Training/flight_model_store.cpp.
+ */
 #include "test_support.hpp"
 #include "flight_session.hpp"
 #include <fstream>

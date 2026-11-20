@@ -1,3 +1,12 @@
+/**
+ * @file ecs_tests.cpp
+ * @brief Integration checks of the desktop ECS bridge (desktop builds only).
+ *
+ * Protects: the step pacing of the generic Environment with the flight session, and the
+ * reward-scaling command round trip from the desktop to the scenario file.
+ *
+ * Read next: Runtime/flight_example.cpp.
+ */
 #include "test_support.hpp"
 #include "flight_example.hpp"
 #include "flight_session.hpp"

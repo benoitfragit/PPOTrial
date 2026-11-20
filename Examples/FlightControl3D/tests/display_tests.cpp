@@ -1,3 +1,12 @@
+/**
+ * @file display_tests.cpp
+ * @brief Headless ImGui checks of the instrument and profile panels (desktop builds only).
+ *
+ * Renders frames into ImGui log buffers and checks the displayed texts; no window is
+ * opened.
+ *
+ * Read next: Renderer/flight_view.cpp, Renderer/flight_profile_view.cpp.
+ */
 #include "test_support.hpp"
 #include "flight_view.hpp"
 #include "flight_display.hpp"

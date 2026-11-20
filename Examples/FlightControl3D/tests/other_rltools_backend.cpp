@@ -1,3 +1,8 @@
+/**
+ * @file other_rltools_backend.cpp
+ * @brief Link regression: a translation unit using the default RLtools namespace, linked with
+ *        the namespace-wrapped FlightControl3D backend into the same test executable.
+ */
 // Link regression: the existing BlueDefense backend uses the default namespace.
 #include <rl_tools/operations/cpu_mux.h>
 

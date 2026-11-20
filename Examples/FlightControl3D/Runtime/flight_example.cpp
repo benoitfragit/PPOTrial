@@ -1,3 +1,19 @@
+/**
+ * @file flight_example.cpp
+ * @brief ECS bridge between FlightSession and the generic desktop Environment.
+ *
+ * Role in the chain: session -> **ECS agent, entity and world rules** -> desktop renderer.
+ * - AircraftEntity mirrors the aircraft position in the ECS registry (kinematic only: the
+ *   legacy planar integrator must not move it);
+ * - FlightAgent ticks the session once per environment step, forwards reward-weight edits
+ *   (rounded to 0.001) and publishes the generic agent snapshot shown by the desktop panels;
+ * - FlightWorldRules copies the value-only FlightSnapshot into the render registry.
+ *
+ * The session owns episode resets and PPO updates; the generic ECS rollout scheduler is
+ * bypassed (SetNewState always returns false).
+ *
+ * Read next: flight_session.hpp, flight_desktop.cpp, Renderer/flight_view.cpp.
+ */
 #include "flight_example.hpp"
 #include "flight_session.hpp"
 #include "environment.hpp"
@@ -12,11 +28,15 @@ class AircraftEntity final : public ppo::model::Entity
 public:
     explicit AircraftEntity(entt::registry* registry)
         : Entity(registry,ppo::model::eEntitySide::Friend,ppo::model::eEntityType::Mobile)
-    { add<ppo::model::sEntityMetadata>(ppo::model::sEntityMetadata{"JSBSim T-6 Texan II","FlightControl3D"}); }
+    {
+        add<ppo::model::sEntityMetadata>(
+            ppo::model::sEntityMetadata{"JSBSim T-6 Texan II","FlightControl3D"});
+    }
     void Run() noexcept override {}
     void Init() noexcept override {}
 };
 
+/** Generic agent adapter: ticks the session and publishes its learning snapshot. */
 class FlightAgent final : public ppo::model::IAgent
 {
     std::shared_ptr<FlightSession> session_;
@@ -57,7 +77,8 @@ public:
     }
     void ProcessCommand(ppo::model::sAgentRealTimeCommand const& command) noexcept override
     {
-        if(command.m_id==id_ && command.m_type==ppo::model::sAgentRealTimeCommand::eTypeCommand::RewardScaling)
+        if(command.m_id==id_
+            && command.m_type==ppo::model::sAgentRealTimeCommand::eTypeCommand::RewardScaling)
         {
             double const value=std::round(static_cast<double>(command.m_rewardScaling)*1000.0)/1000.0;
             std::size_t const index=command.m_rewardScalingType;
@@ -79,7 +100,8 @@ public:
         result.m_common.m_latestEvaluationSuccessRate=static_cast<float>(latestSuccessRate);
         result.m_common.m_latestEvaluationTestCount=static_cast<unsigned int>(config_.evaluation.episodes);
         result.m_common.m_evaluationTestsFinished=static_cast<unsigned int>(state.validation.episodes);
-        result.m_common.m_evaluationprogress=static_cast<float>(state.validation.episodes)/static_cast<float>(config_.evaluation.episodes);
+        result.m_common.m_evaluationprogress=static_cast<float>(state.validation.episodes)
+            /static_cast<float>(config_.evaluation.episodes);
         result.m_common.m_done=state.lastStep.terminated || state.lastStep.truncated;
         result.m_common.m_version=static_cast<unsigned int>(state.learning.updates);
         result.m_common.m_step=static_cast<long long>(session_->Learner().Collected());
@@ -88,7 +110,8 @@ public:
         result.m_common.m_actorloss=static_cast<float>(state.learning.policyLoss);
         result.m_common.m_valueloss=static_cast<float>(state.learning.valueLoss);
         result.m_common.m_entropyloss=static_cast<float>(state.learning.entropy);
-        result.m_common.m_loss=static_cast<float>(state.learning.policyLoss+config_.training.valueWeight*state.learning.valueLoss);
+        result.m_common.m_loss=static_cast<float>(state.learning.policyLoss
+            +config_.training.valueWeight*state.learning.valueLoss);
         for(std::size_t i=0;i<RewardCount;++i)
         {
             result.m_rewardnames.emplace_back(RewardNames[i]);
@@ -100,6 +123,7 @@ public:
     bool Failed() const noexcept { return failed_; }
 };
 
+/** No world physics: copies the session snapshot into the render registry after each step. */
 class FlightWorldRules final : public ppo::model::IWorldRules
 {
     std::shared_ptr<FlightSession> session_;
@@ -118,17 +142,24 @@ public:
     }
 };
 void RegisterTypes() {} // Direct typed construction; no legacy agent factories are needed.
+/**
+ * Builds the session, its entity, agent and world rules in the environment.
+ * The model directory is <repository>/<checkpointDirectory>, the scenario living in
+ * resources/settings/Scenarios. Reward edits are written back to the scenario file.
+ */
 bool Load(std::filesystem::path const& path,ppo::model::Environment& env,bool training)
 {
     try
     {
         auto const config=LoadConfig(path);
         env.SetHeadlessMode(config.runtime.maxSpeed);
-        auto const directory=path.parent_path().parent_path().parent_path()/config.training.checkpointDirectory;
+        auto const directory=path.parent_path().parent_path().parent_path()
+            /config.training.checkpointDirectory;
         auto session=std::make_shared<FlightSession>(config,training,directory,std::nullopt,
             TrainingBudget::AdditionalUpdates,path);
         auto const initial=session->Snapshot();
-        std::cout<<"[FLIGHT_SESSION] "<<(training ? (initial.resumed ? "Resumed latest" : "New policy") : "Validated BEST")
+        std::cout<<"[FLIGHT_SESSION] "<<(training ? (initial.resumed ? "Resumed latest" : "New policy")
+            : "Validated BEST")
             <<" | update="<<initial.learning.updates<<" | limit="<<initial.trainingUpdateLimit<<std::endl;
         auto entity=env.CreateEntity<AircraftEntity>();
         auto agent=env.CreateAgent<FlightAgent>(session,entity,config);
@@ -137,8 +168,14 @@ bool Load(std::filesystem::path const& path,ppo::model::Environment& env,bool tr
     }
     catch(std::exception const& error) { std::cerr<<"[FLIGHT_ERROR] "<<error.what()<<'\n'; return false; }
 }
-bool LoadTraining(std::filesystem::path const& path,ppo::model::Environment& env) { return Load(path,env,true); }
-bool LoadInference(std::filesystem::path const& path,ppo::model::Environment& env) { return Load(path,env,false); }
+bool LoadTraining(std::filesystem::path const& path,ppo::model::Environment& env)
+{
+    return Load(path,env,true);
+}
+bool LoadInference(std::filesystem::path const& path,ppo::model::Environment& env)
+{
+    return Load(path,env,false);
+}
 }
 bool LoadDesktop(std::filesystem::path const& path,ppo::model::Environment& environment,bool inference)
 {
@@ -147,11 +184,14 @@ bool LoadDesktop(std::filesystem::path const& path,ppo::model::Environment& envi
 ppo::app::ExampleDefinition Definition()
 {
     return {"flight-control-3d","FLIGHT CONTROL 3D - JSBSim / PPO", "Scenarios/FlightControl3D_T6_Joint.json",
-        &RegisterTypes,&LoadTraining,"Native JSBSim T-6: randomized airborne starts and direct Joint landing with hybrid PPO."};
+        &RegisterTypes,&LoadTraining,
+        "Native JSBSim T-6: randomized airborne starts and direct Joint landing with hybrid PPO."};
 }
 ppo::app::ExampleDefinition InferenceDefinition()
 {
-    return {"flight-control-3d-inference","FLIGHT CONTROL 3D - JSBSim / INFERENCE", "Scenarios/FlightControl3D_T6_Joint.json",
-        &RegisterTypes,&LoadInference,"Evaluate a FlightControl3D checkpoint on independent randomized starts without training."};
+    return {"flight-control-3d-inference","FLIGHT CONTROL 3D - JSBSim / INFERENCE",
+        "Scenarios/FlightControl3D_T6_Joint.json",
+        &RegisterTypes,&LoadInference,
+        "Evaluate a FlightControl3D checkpoint on independent randomized starts without training."};
 }
 } // namespace ppo::examples::flight

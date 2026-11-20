@@ -1,3 +1,13 @@
+/**
+ * @file reward_tests.cpp
+ * @brief Regressions of the reward channels and of the potential-based shaping.
+ *
+ * Protects: the sign and saturation of each potential, the zero potential of absorbing
+ * states, the telescoping of gamma_sub * Phi(s') - Phi(s) over an action, the Path
+ * potential past the threshold, and the touchdown quality factors.
+ *
+ * Read next: Core/flight_reward.hpp (channel table), simulator_tests.cpp (action level).
+ */
 #include "test_support.hpp"
 #include "flight_mission.hpp"
 #include "flight_reward.hpp"
