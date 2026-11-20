@@ -1,14 +1,16 @@
 #include "flight_learner.hpp"
+#include "flight_rng_checkpoint.hpp"
 // Upstream CPU headers define non-inline symbols. Use its supported namespace
 // wrapper so this backend can coexist with BlueDefense in the same executable.
 #define RL_TOOLS_NAMESPACE_WRAPPER ppo_flight_backend
 #include <rl_tools/operations/cpu_mux.h>
 #include <rl_tools/nn/operations_cpu_mux.h>
-#include <rl_tools/nn_models/mlp/operations_generic.h>
+#include <rl_tools/nn_models/mlp_unconditional_stddev/operations_generic.h>
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <numeric>
 #include <vector>
 
@@ -42,7 +44,7 @@ struct FlightLearner::Impl
     explicit Impl(Config const& c) : config(c), rng(c.training.seed), rows(c.training.rolloutSteps), order(rows.size())
     { std::iota(order.begin(),order.end(),0U); }
     virtual ~Impl() = default;
-    virtual PolicyVector Evaluate(Observation const&) = 0;
+    virtual PolicyDistribution Evaluate(Observation const&) = 0;
     virtual double Value(Observation const&) = 0;
     virtual void Optimize() = 0;
     virtual void Write(std::ostream&) const = 0;
@@ -61,12 +63,19 @@ using Structure = rlt::nn_models::mlp::StructureSpecification<float,Index,Observ
     rlt::nn::activation_functions::TANH,rlt::nn::activation_functions::IDENTITY,1,rlt::MatrixStaticTag>;
 template<Index Width, Index Outputs>
 using Network = rlt::nn_models::mlp::NeuralNetworkAdam<rlt::nn_models::mlp::AdamSpecification<Structure<Width,Outputs>>>;
+template<Index Width>
+using Actor = rlt::nn_models::mlp_unconditional_stddev::NeuralNetworkAdam<
+    rlt::nn_models::mlp::AdamSpecification<Structure<Width,PolicyOutputs>>>;
 template<Index Columns> using Matrix = rlt::MatrixStatic<rlt::matrix::Specification<float,Index,1,Columns>>;
+
+/** @brief Header tag of the serialized actor, critic, optimizer and RNG state. */
+constexpr char CheckpointMagic[]="PPO_FLIGHT_POLICY_V3";
 
 void CheckObservation(Observation const& observation)
 {
-    for (float value : observation)
-        if (!std::isfinite(value) || std::abs(value)>1.F) throw std::invalid_argument("FlightControl3D: observation is not normalized");
+    for (std::size_t index=0;index<observation.size();++index)
+        if (!std::isfinite(observation[index]) || std::abs(observation[index])>ObservationBound)
+            throw std::invalid_argument("FlightControl3D: observation is not normalized");
 }
 
 template<typename Net, typename Visitor>
@@ -89,13 +98,13 @@ template<Index Width>
 class Learner final : public FlightLearner::Impl
 {
     Device device_{};
-    Network<Width,PolicyOutputs> actor_{};
+    Actor<Width> actor_{};
     Network<Width,1> critic_{};
     Optimizer actorOptimizer_{}, criticOptimizer_{};
     Matrix<ObservationSize> input_{};
     Matrix<PolicyOutputs> actorOutput_{}, actorDerivative_{};
     Matrix<1> valueOutput_{}, valueDerivative_{};
-    typename Network<Width,PolicyOutputs>::template Buffer<1,rlt::MatrixStaticTag> actorBuffer_{};
+    typename Actor<Width>::template Buffer<1,rlt::MatrixStaticTag> actorBuffer_{};
     typename Network<Width,1>::template Buffer<1,rlt::MatrixStaticTag> criticBuffer_{};
 
     void Input(Observation const& observation)
@@ -110,69 +119,99 @@ class Learner final : public FlightLearner::Impl
         optimizer.parameters.beta_2 = static_cast<float>(config.training.adamBeta2);
         optimizer.parameters.epsilon = static_cast<float>(config.training.adamEpsilon);
     }
-    template<typename Net>
-    void ClipGradients(Net& net)
+    void ClampActiveLogStandardDeviations() noexcept
     {
-        double normSquared = 0;
-        auto sum = [&](auto& layer)
-        {
-            SumMatrix(layer.weights.gradient,normSquared);
-            SumMatrix(layer.biases.gradient,normSquared);
-        };
-        VisitLayers(net,sum);
-        if (!std::isfinite(normSquared)) throw std::runtime_error("FlightControl3D: non-finite PPO gradient");
-        double const scale = normSquared > 0 ? std::min(1.0,config.training.maxGradientNorm/std::sqrt(normSquared)) : 1;
-        auto clip = [scale](auto& layer)
-        {
-            ScaleMatrix(layer.weights.gradient,scale);
-            ScaleMatrix(layer.biases.gradient,scale);
-        };
-        VisitLayers(net,clip);
+        for(Index action=0;action<ContinuousActions;++action)
+            rlt::set(actor_.log_std.parameters,0,action,std::clamp(
+                rlt::get(actor_.log_std.parameters,0,action),
+                static_cast<float>(MinimumLogStandardDeviation),
+                static_cast<float>(MaximumLogStandardDeviation)));
     }
-    template<typename M> static void SumMatrix(M const& matrix, double& sum)
+    template<typename M> static void WriteMatrix(std::ostream& stream,M const& matrix)
     {
-        for (Index i=0; i<M::ROWS; ++i) for (Index j=0; j<M::COLS; ++j)
-        { double const v=rlt::get(matrix,i,j); sum += v*v; }
+        bool first=true;
+        for(Index row=0;row<M::ROWS;++row)
+            for(Index column=0;column<M::COLS;++column)
+            {
+                if(!first) stream<<' ';
+                stream<<rlt::get(matrix,row,column);
+                first=false;
+            }
+        stream<<'\n';
     }
-    template<typename M> static void ScaleMatrix(M& matrix, double scale)
+    template<typename Parameter>
+    static void WriteParameter(std::ostream& stream,Parameter const& parameter)
     {
-        for (Index i=0; i<M::ROWS; ++i) for (Index j=0; j<M::COLS; ++j)
-            rlt::set(matrix,i,j,static_cast<float>(rlt::get(matrix,i,j)*scale));
+        VisitParameter(parameter,[&](auto const& matrix)
+        {
+            WriteMatrix(stream,matrix);
+        });
     }
     template<typename Net> static void WriteNetwork(std::ostream& stream, Net const& net)
     {
-        auto matrix = [&](auto const& m)
+        auto layer=[&](auto const& value)
         {
-            using M = std::decay_t<decltype(m)>;
-            bool first=true;
-            for (Index i=0; i<M::ROWS; ++i)
-                for (Index j=0; j<M::COLS; ++j)
-                {
-                    if (!first) stream << ' ';
-                    stream << rlt::get(m,i,j);
-                    first=false;
-                }
-            stream << '\n';
+            WriteParameter(stream,value.weights);
+            WriteParameter(stream,value.biases);
         };
-        auto layer = [&](auto const& l) { VisitParameter(l.weights,matrix); VisitParameter(l.biases,matrix); };
         VisitLayers(net,layer);
+    }
+    template<typename M> static void ReadMatrix(std::istream& stream,M& matrix)
+    {
+        for(Index row=0;row<M::ROWS;++row)
+            for(Index column=0;column<M::COLS;++column)
+        {
+            float value{};
+            if(!(stream>>value) || !std::isfinite(value))
+                throw std::runtime_error("FlightControl3D: corrupt checkpoint parameter");
+            rlt::set(matrix,row,column,value);
+        }
+    }
+    template<typename Parameter>
+    static void ReadParameter(std::istream& stream,Parameter& parameter)
+    {
+        VisitParameter(parameter,[&](auto& matrix)
+        {
+            ReadMatrix(stream,matrix);
+        });
     }
     template<typename Net> static void ReadNetwork(std::istream& stream, Net& net)
     {
-        auto matrix = [&](auto& m)
+        auto layer=[&](auto& value)
         {
-            using M = std::decay_t<decltype(m)>;
-            for (Index i=0; i<M::ROWS; ++i) for (Index j=0; j<M::COLS; ++j)
-            {
-                float value{};
-                if (!(stream >> value) || !std::isfinite(value)) throw std::runtime_error("FlightControl3D: corrupt checkpoint parameter");
-                rlt::set(m,i,j,value);
-            }
+            ReadParameter(stream,value.weights);
+            ReadParameter(stream,value.biases);
         };
-        auto layer = [&](auto& l) { VisitParameter(l.weights,matrix); VisitParameter(l.biases,matrix); };
         VisitLayers(net,layer);
     }
 public:
+    template<typename Parameter>
+    void ValidateLogStandardDeviations(Parameter const& parameter) const
+    {
+        auto matrix=[](auto const& values,bool nonnegative)
+        {
+            using M=std::decay_t<decltype(values)>;
+            for(Index row=0;row<M::ROWS;++row)
+                for(Index column=0;column<M::COLS;++column)
+                {
+                    float const value=rlt::get(values,row,column);
+                    if(!std::isfinite(value) || (nonnegative && value<0))
+                        throw std::runtime_error(
+                            "FlightControl3D: invalid global log standard deviation or Adam moment");
+                }
+        };
+        matrix(parameter.parameters,false);
+        matrix(parameter.gradient_first_order_moment,false);
+        matrix(parameter.gradient_second_order_moment,true);
+        for(Index action=0;action<ContinuousActions;++action)
+        {
+            float const value=rlt::get(parameter.parameters,0,action);
+            if(value<MinimumLogStandardDeviation
+                || value>MaximumLogStandardDeviation)
+                throw std::runtime_error(
+                    "FlightControl3D: global log standard deviation outside flight bounds");
+        }
+    }
     template<typename Net> static void ValidateNetwork(Net const& net)
     {
         auto matrix=[](auto const& m,bool nonnegative)
@@ -193,32 +232,38 @@ public:
     explicit Learner(Config const& c) : Impl(c)
     {
         rlt::init_weights(device_,actor_,rng); rlt::init_weights(device_,critic_,rng);
+        for(Index action=0;action<ContinuousActions;++action)
+            rlt::set(actor_.log_std.parameters,0,action,
+                static_cast<float>(InitialLogStandardDeviation));
         rlt::reset_optimizer_state(device_,actorOptimizer_,actor_);
         rlt::reset_optimizer_state(device_,criticOptimizer_,critic_);
         Setup(actorOptimizer_,c.training.actorRate); Setup(criticOptimizer_,c.training.criticRate);
-        // Zero output weights give an observation-independent, explicit initial exploration scale.
-        for (Index i=0; i<PolicyOutputs; ++i)
-        {
-            for (Index j=0; j<Width; ++j) rlt::set(actor_.output_layer.weights.parameters,i,j,0.F);
-            rlt::set(actor_.output_layer.biases.parameters,0,i,
-                i>=ContinuousActions && i<2*ContinuousActions ? static_cast<float>(c.training.initialLogStd) : 0.F);
-        }
         rlt::set_all(device_,input_,0.F);
-        rlt::zero_gradient(device_,actor_); rlt::zero_gradient(device_,critic_);
+        rlt::zero_gradient(device_,actor_);
+        rlt::zero_gradient(device_,critic_);
         rlt::forward(device_,actor_,input_,actorOutput_);
         rlt::forward(device_,critic_,input_,valueOutput_);
     }
-    PolicyVector Evaluate(Observation const& observation) override
+    PolicyDistribution Evaluate(Observation const& observation) override
     {
         Check(); Input(observation);
         rlt::evaluate(device_,actor_,input_,actorOutput_,actorBuffer_);
-        PolicyVector output{};
+        PolicyDistribution policy{};
         for (Index i=0; i<PolicyOutputs; ++i)
         {
-            output[i] = rlt::get(actorOutput_,0,i);
-            if (!std::isfinite(output[i])) throw std::runtime_error("FlightControl3D: invalid actor");
+            policy.output[i]=rlt::get(actorOutput_,0,i);
+            if(!std::isfinite(policy.output[i]))
+                throw std::runtime_error("FlightControl3D: invalid actor");
         }
-        return output;
+        for(Index i=0;i<ContinuousActions;++i)
+        {
+            policy.logStandardDeviations[i]=
+                rlt::get(actor_.log_std.parameters,0,i);
+            if(!std::isfinite(policy.logStandardDeviations[i]))
+                throw std::runtime_error(
+                    "FlightControl3D: invalid global log standard deviation");
+        }
+        return policy;
     }
     double Value(Observation const& observation) override
     {
@@ -238,40 +283,79 @@ public:
             double mean=0, variance=0;
             for (auto const& row : rows) mean += row.advantage/static_cast<double>(collected);
             for (auto const& row : rows) variance += (row.advantage-mean)*(row.advantage-mean)/static_cast<double>(collected);
-            double const sigma = std::sqrt(variance);
-            for (auto& row : rows) row.advantage = sigma > std::numeric_limits<double>::epsilon() ? (row.advantage-mean)/sigma : 0;
+            constexpr double AdvantageEpsilon=1e-8;
+            double const advantageScale=1/std::sqrt(variance+AdvantageEpsilon);
+            for(auto& row:rows) row.advantage=(row.advantage-mean)*advantageScale;
             stats.policyLoss=0; stats.valueLoss=0; stats.entropy=0;
+            stats.maximumApproximateKl=0;
+            stats.maximumSampledKl=std::numeric_limits<double>::lowest();
+            stats.actorSteps=0;stats.criticSteps=0;stats.actorKlSkips=0;
             double const samples = static_cast<double>(collected*config.training.epochs);
             for (std::size_t epoch=0; epoch<config.training.epochs; ++epoch)
             {
-                std::iota(order.begin(),order.end(),0U);
                 std::shuffle(order.begin(),order.end(),rng);
                 for (std::size_t start=0; start<collected; start+=config.training.minibatch)
                 {
-                    rlt::zero_gradient(device_,actor_); rlt::zero_gradient(device_,critic_);
+                    rlt::zero_gradient(device_,actor_);
+                    rlt::zero_gradient(device_,critic_);
+                    double approximateKl=0,sampledKl=0;
                     for (std::size_t j=0; j<config.training.minibatch; ++j)
                     {
                         auto const& row = rows[order[start+j]];
                         Input(row.observation);
                         rlt::forward(device_,actor_,input_,actorOutput_);
-                        PolicyVector output{};
-                        for (Index k=0; k<PolicyOutputs; ++k) output[k]=rlt::get(actorOutput_,0,k);
-                        auto const loss=ClippedLoss(output,row.action,row.advantage,config.training);
+                        PolicyDistribution policy{};
+                        for(Index k=0;k<PolicyOutputs;++k)
+                            policy.output[k]=rlt::get(actorOutput_,0,k);
+                        for(Index k=0;k<ContinuousActions;++k)
+                            policy.logStandardDeviations[k]=
+                                rlt::get(actor_.log_std.parameters,0,k);
+                        auto const loss=ClippedLoss(
+                            policy,row.action,row.advantage,config.training);
+                        double const logRatio=
+                            LogProbability(policy,row.action)-row.action.logProbability;
+                        if(!std::isfinite(logRatio)) throw std::runtime_error("FlightControl3D: invalid PPO log ratio");
+                        sampledKl-=logRatio/static_cast<double>(config.training.minibatch);
+                        double const boundedLogRatio=std::clamp(logRatio,-20.0,20.0);
+                        approximateKl+=std::max(0.0,std::expm1(boundedLogRatio)-boundedLogRatio)
+                            /static_cast<double>(config.training.minibatch);
                         if (!std::isfinite(loss.loss)) throw std::runtime_error("FlightControl3D: invalid PPO loss");
                         for (Index k=0; k<PolicyOutputs; ++k)
-                            rlt::set(actorDerivative_,0,k,static_cast<float>(loss.derivative[k]/static_cast<double>(config.training.minibatch)));
+                            rlt::set(actorDerivative_,0,k,static_cast<float>(
+                                loss.outputDerivative[k]
+                                /static_cast<double>(config.training.minibatch)));
                         rlt::backward(device_,actor_,input_,actorDerivative_,actorBuffer_);
+                        for(Index k=0;k<ContinuousActions;++k)
+                            rlt::increment(actor_.log_std.gradient,0,k,
+                                static_cast<float>(
+                                    loss.logStandardDeviationDerivative[k]
+                                    /static_cast<double>(config.training.minibatch)));
                         rlt::forward(device_,critic_,input_,valueOutput_);
                         double const difference=rlt::get(valueOutput_,0,0)-row.target;
-                        rlt::set(valueDerivative_,0,0,static_cast<float>(config.training.valueWeight*difference/static_cast<double>(config.training.minibatch)));
+                        rlt::set(valueDerivative_,0,0,static_cast<float>(
+                            2*difference/static_cast<double>(config.training.minibatch)));
                         rlt::backward(device_,critic_,input_,valueDerivative_,criticBuffer_);
-                        stats.policyLoss += loss.loss/samples;
+                        stats.policyLoss+=(loss.loss+config.training.entropy*loss.entropy)/samples;
                         stats.entropy += loss.entropy/samples;
-                        stats.valueLoss += 0.5*difference*difference/samples;
+                        stats.valueLoss += difference*difference/samples;
                     }
-                    ClipGradients(actor_); ClipGradients(critic_);
-                    rlt::step(device_,actorOptimizer_,actor_); rlt::step(device_,criticOptimizer_,critic_);
-                    ValidateNetwork(actor_);ValidateNetwork(critic_);
+                    if(!std::isfinite(sampledKl)) throw std::runtime_error("FlightControl3D: invalid minibatch KL");
+                    stats.maximumApproximateKl=std::max(stats.maximumApproximateKl,approximateKl);
+                    stats.maximumSampledKl=std::max(stats.maximumSampledKl,sampledKl);
+                    // Match RLMission's sampled old-logp minus new-logp guard.
+                    // The separate critic can still learn from this minibatch.
+                    if(sampledKl>=1.5*config.training.targetKl) ++stats.actorKlSkips;
+                    else
+                    {
+                        rlt::step(device_,actorOptimizer_,actor_);
+                        ClampActiveLogStandardDeviations();
+                        ++stats.actorSteps;
+                    }
+                    rlt::step(device_,criticOptimizer_,critic_);
+                    ++stats.criticSteps;
+                    ValidateNetwork(actor_);
+                    ValidateLogStandardDeviations(actor_.log_std);
+                    ValidateNetwork(critic_);
                 }
             }
             if (!std::isfinite(stats.policyLoss) || !std::isfinite(stats.valueLoss)) throw std::runtime_error("FlightControl3D: invalid training diagnostics");
@@ -283,6 +367,7 @@ public:
             for(double const reward:stats.meanRewards)
                 if(!std::isfinite(reward))
                     throw std::runtime_error("FlightControl3D: invalid mean reward-channel diagnostic");
+            stats.hasRewardMeans=true;
             rewardSum=0;
             rewardSums.fill(0);
             ++stats.updates; collected=0;
@@ -292,34 +377,47 @@ public:
     void Write(std::ostream& stream) const override
     {
         Check();
-        ValidateNetwork(actor_);ValidateNetwork(critic_);
-        stream << "PPO_FLIGHT_HYBRID_V1 " << ObservationSize << ' ' << ContinuousActions << ' ' << Width << ' ' << stats.updates << '\n';
+        ValidateNetwork(actor_);
+        ValidateLogStandardDeviations(actor_.log_std);
+        ValidateNetwork(critic_);
+        stream << CheckpointMagic << ' ' << ObservationSize << ' '
+            << ContinuousActions << ' ' << PolicyOutputs << ' ' << Width << ' '
+            << stats.updates << '\n';
         stream << std::quoted(config.checkpointSignature) << '\n' << std::setprecision(std::numeric_limits<float>::max_digits10);
         stream << actorOptimizer_.age << ' ' << criticOptimizer_.age << '\n' << rng << '\n';
-        WriteNetwork(stream,actor_); WriteNetwork(stream,critic_);
+        WriteNetwork(stream,actor_);
+        WriteParameter(stream,actor_.log_std);
+        WriteNetwork(stream,critic_);
     }
     void Read(std::istream& stream) override
     {
         Check();
         std::string magic, signature;
-        std::size_t observations{}, actions{}, width{};
+        std::size_t observations{},actions{},outputs{},width{};
         std::uint64_t updates{};
         Index actorAge{},criticAge{};
         std::mt19937 candidateRng;
-        if (!(stream >> magic >> observations >> actions >> width >> updates >> std::quoted(signature) >> actorAge >> criticAge >> candidateRng)
-            || magic!="PPO_FLIGHT_HYBRID_V1" || observations!=ObservationSize || actions!=ContinuousActions || width!=Width
+        if (!(stream >> magic >> observations >> actions >> outputs >> width
+            >> updates >> std::quoted(signature) >> actorAge >> criticAge)
+            || magic!=CheckpointMagic || observations!=ObservationSize
+            || actions!=ContinuousActions || outputs!=PolicyOutputs || width!=Width
             || !CompatibleTrainingSignature(signature,config.checkpointSignature) || actorAge==0 || criticAge==0)
             throw std::runtime_error("FlightControl3D: incompatible/corrupt checkpoint header");
+        candidateRng=detail::ReadCheckpointRng(stream);
         // RLtools static matrices contain self-pointers: never use C++ copies.
         // Stage independent networks on the heap (including on Windows' small stack).
-        auto candidateActor=std::make_unique<Network<Width,PolicyOutputs>>();
+        auto candidateActor=std::make_unique<Actor<Width>>();
         auto candidateCritic=std::make_unique<Network<Width,1>>();
         rlt::forward(device_,actor_,input_,actorOutput_);
         rlt::forward(device_,critic_,input_,valueOutput_);
         rlt::copy(device_,device_,actor_,*candidateActor);
         rlt::copy(device_,device_,critic_,*candidateCritic);
-        ReadNetwork(stream,*candidateActor); ReadNetwork(stream,*candidateCritic);
-        ValidateNetwork(*candidateActor);ValidateNetwork(*candidateCritic);
+        ReadNetwork(stream,*candidateActor);
+        ReadParameter(stream,candidateActor->log_std);
+        ReadNetwork(stream,*candidateCritic);
+        ValidateNetwork(*candidateActor);
+        ValidateLogStandardDeviations(candidateActor->log_std);
+        ValidateNetwork(*candidateCritic);
         stream >> std::ws;
         if (!stream.eof()) throw std::runtime_error("FlightControl3D: trailing checkpoint data");
         rlt::copy(device_,device_,*candidateActor,actor_);
@@ -336,14 +434,27 @@ FlightLearner::FlightLearner(Config const& c)
     Validate(c);
     if (c.training.hiddenWidth==32) impl_=std::make_unique<Learner<32>>(c);
     else if (c.training.hiddenWidth==64) impl_=std::make_unique<Learner<64>>(c);
-    else impl_=std::make_unique<Learner<128>>(c);
+    else if (c.training.hiddenWidth==128) impl_=std::make_unique<Learner<128>>(c);
+    else impl_=std::make_unique<Learner<256>>(c);
 }
 FlightLearner::~FlightLearner() = default;
-PolicyVector FlightLearner::Evaluate(Observation const& observation) { return impl_->Evaluate(observation); }
+PolicyDistribution FlightLearner::Evaluate(Observation const& observation)
+{
+    return impl_->Evaluate(observation);
+}
 PolicyAction FlightLearner::Choose(Observation const& observation, bool deterministic)
-{ return Sample(impl_->Evaluate(observation),impl_->config.training,impl_->rng,deterministic); }
+{
+    bool const rollout=observation[RolloutObservation]>0.5F;
+    return Sample(impl_->Evaluate(observation),impl_->rng,deterministic,rollout);
+}
 bool FlightLearner::Ready() const noexcept { return impl_->collected==impl_->rows.size(); }
 std::size_t FlightLearner::Collected() const noexcept { return impl_->collected; }
+void FlightLearner::SetRewardContract(RewardSettings const& settings,std::string const& signature)
+{
+    if(impl_->collected!=0) throw std::logic_error("FlightControl3D: reward changes require a rollout boundary");
+    impl_->config.reward=settings;
+    impl_->config.checkpointSignature=signature;
+}
 LearningStats const& FlightLearner::Stats() const noexcept { return impl_->stats; }
 void FlightLearner::Optimize() { impl_->Optimize(); }
 
@@ -353,6 +464,11 @@ void FlightLearner::Record(Observation const& observation, PolicyAction const& a
     if (Ready()) throw std::logic_error("FlightControl3D: rollout full");
     if (!std::isfinite(step.reward) || !std::isfinite(action.logProbability) || (step.terminated && step.truncated))
         throw std::invalid_argument("FlightControl3D: invalid transition");
+    for(double const parameter:action.policy.output)
+        if(!std::isfinite(parameter)) throw std::invalid_argument("FlightControl3D: invalid collection policy");
+    for(double const parameter:action.policy.logStandardDeviations)
+        if(!std::isfinite(parameter))
+            throw std::invalid_argument("FlightControl3D: invalid collection deviation");
     for(double const reward:step.rewards)
         if(!std::isfinite(reward)) throw std::invalid_argument("FlightControl3D: invalid reward channel");
     auto& row=impl_->rows[impl_->collected];

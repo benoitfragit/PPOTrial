@@ -13,6 +13,23 @@ repository. Adapted from the MFDStudio AGENTS.md engineering conventions.
 ## C++17 and architecture
 - Strict, portable C++17, RAII, const-correctness, explicit names and noexcept
   for pure non-throwing helpers.
+- Write clear, clean and readable C++17: use consistent formatting, descriptive
+  names, explicit control flow and small functions with one understandable
+  responsibility. Avoid dense expressions, nested ternaries, surprising side
+  effects, magic values and unnecessary abstractions.
+- Keep classes and translation units cohesive. Split long functions when a
+  named operation clarifies the algorithm; do not create monoliths or expose
+  public interfaces that have no caller. Use familiar design patterns only
+  when they make ownership and responsibilities clearer.
+- Document interfaces and non-trivial implementation helpers with Doxygen
+  (`@brief`, `@param`, and `@return` when applicable). In `.cpp` files, add
+  concise comments explaining the purpose of important steps, algorithms,
+  physical assumptions and non-obvious decisions. Keep comments accurate and
+  useful; do not merely repeat the code or comment every obvious statement.
+- Re-read modified functions and their callers for clarity as well as
+  correctness. Simplify confusing existing code in the scope of the change and
+  remove obsolete branches, settings, data and comments instead of leaving dead
+  compatibility paths behind.
 - Prefer named, documented functions to broad captures, hidden lambdas,
   dummy variables, unsafe casts and overly clever templates.
 - Keep data and interfaces minimal. Use fixed-capacity storage in hot paths.

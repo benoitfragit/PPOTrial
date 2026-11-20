@@ -5,6 +5,7 @@
 #include "camera_follow.hpp"
 #include "tactical_role.hpp"
 #include "tactical_view_layout.hpp"
+#include "reward_slider_draft.hpp"
 
 #include <cmath>
 #include <cstddef>
@@ -37,6 +38,24 @@ void RequireNear(float const actual, float const expected,
 {
     if (std::fabs(actual - expected) > tolerance)
         throw std::runtime_error(message);
+}
+
+/** @brief Slider edits survive stale snapshots, consecutive commands and rejection. */
+void CheckRewardSliderDraft()
+{
+    ppo::renderer::RewardSliderDraft first{},second{};
+    first.Sync(5.F,0);second.Sync(8.F,0);
+    first.value=0.1F;first.editing=true;first.Submitted(0);
+    first.Sync(5.F,0);
+    RequireNear(first.value,0.1F,1e-6F,"a stale snapshot overwrote an active slider");
+    first.value=0.2F;first.Submitted(0);first.editing=false;
+    first.Sync(0.1F,1);
+    RequireNear(first.value,0.2F,1e-6F,"an earlier acknowledgement overwrote the latest edit");
+    first.Sync(0.2F,2);second.Sync(8.F,0);
+    RequireNear(first.value,0.2F,1e-6F,"latest accepted edit was not synchronized");
+    RequireNear(second.value,8.F,1e-6F,"editing one reward changed another reward");
+    first.value=200.F;first.Submitted(2);first.Sync(0.2F,3);
+    RequireNear(first.value,0.2F,1e-6F,"a rejected edit did not restore the authoritative value");
 }
 
 /** @brief Verifies canonical leader and teammate markers without allocations. */
@@ -109,5 +128,6 @@ int main()
     }
     CheckRoleMarkers();
     CheckCameraFollow();
+    CheckRewardSliderDraft();
     return 0;
 }

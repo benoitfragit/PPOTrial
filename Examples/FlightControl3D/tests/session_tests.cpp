@@ -1,334 +1,302 @@
 #include "test_support.hpp"
 #include "flight_session.hpp"
 #include <fstream>
-#include <iomanip>
 #include <iterator>
+#include <limits>
 #include <nlohmann/json.hpp>
 using namespace ppo::examples::flight;
 
+namespace {
 std::string ReadFile(std::filesystem::path const& path)
 {
     std::ifstream stream(path,std::ios::binary);
     return {std::istreambuf_iterator<char>(stream),std::istreambuf_iterator<char>()};
 }
-void DesktopContinuation(Config c)
+/** @brief A tiny, fast training contract on the production scenario. */
+Config SmallConfig()
 {
+    auto c=LoadConfig(PPO_FLIGHT_CONFIG);
     c.training.rolloutSteps=8;c.training.minibatch=4;c.training.epochs=1;c.training.maxUpdates=1;
-    c.training.resume=true;c.training.checkpointEvery=1;c.mission.maxSeconds=1;c.evaluation.episodes=2;
+    c.training.hiddenWidth=32;c.training.resume=true;c.training.checkpointEvery=1;
+    c.training.randomizeEnvironmentSeed=false;c.training.curriculum.rolloutStartShare=0;
+    c.mission.maxSeconds=1;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;
+    return c;
+}
+ValidationMetrics Successful(Config const& c,std::uint64_t update)
+{
+    // Controlled manifest fixture, not a claim about a trained landing policy.
+    ValidationMetrics metrics{};
+    metrics.update=update;metrics.episodes=c.evaluation.episodes;
+    metrics.touchdowns=metrics.stops=metrics.episodes;
+    metrics.touchdownSumMeters=100;metrics.stopSumMeters=600;
+    return metrics;
+}
+void DesktopContinuation()
+{
+    auto const c=SmallConfig();
     TemporaryDirectory directory("flight-desktop-resume-");
     FlightModelStore store(c,directory.path);
     {
         FlightSession session(c,true,directory.path,std::nullopt,TrainingBudget::AdditionalUpdates);
-        Check(!session.Snapshot().resumed && session.Snapshot().learning.updates==0,"missing latest creates a first policy");
+        Check(!session.Snapshot().resumed && session.Snapshot().learning.updates==0,"a missing latest creates a first policy");
         for(int i=0;i<3;++i) session.Tick();
         session.ContinueTraining();
         Check(session.Learner().Collected()==3,"Play during a partial rollout preserves the collector");
         for(int i=0;i<1000 && !session.Finished();++i) session.Tick();
-        Check(session.Finished() && session.Snapshot().learning.updates==1,"desktop block completes validation");
+        Check(session.Finished() && session.Snapshot().learning.updates==1,"a desktop block completes its validation");
         auto const before=ReadFile(store.Latest());
         session.ContinueTraining();
         auto const comparison=directory.path/"continued.txt";session.Learner().Save(comparison);
         Check(!session.Finished() && session.Snapshot().trainingUpdateLimit==2 && ReadFile(comparison)==before,
-            "second Play extends the budget without resetting weights, Adam or RNG");
+            "a second Play extends the budget without resetting weights, Adam or RNG");
         for(int i=0;i<1000 && !session.Finished();++i) session.Tick();
-        Check(session.Finished() && session.Snapshot().learning.updates==2,"second block advances the same model");
+        Check(session.Finished() && session.Snapshot().learning.updates==2,"the second block advances the same model");
     }
     FlightSession relaunched(c,true,directory.path,std::nullopt,TrainingBudget::AdditionalUpdates);
     Check(relaunched.Snapshot().resumed && relaunched.Snapshot().learning.updates==2
         && relaunched.Snapshot().trainingUpdateLimit==3 && !relaunched.Snapshot().validating,
-        "relaunch resumes latest with a fresh additional update budget");
+        "a relaunch resumes latest with a fresh additional update budget");
     auto const comparison=directory.path/"relaunched.txt";relaunched.Learner().Save(comparison);
-    Check(ReadFile(comparison)==ReadFile(store.Latest()),"relaunch restores the complete training checkpoint exactly");
+    Check(SameLearnerCheckpoint(comparison,store.Latest()),"a relaunch preserves weights, Adam and the future RNG sequence");
     {std::ofstream broken(store.Latest());broken<<"broken";}
-    Rejects([&] {FlightSession invalid(c,true,directory.path);},"corrupt latest must not silently create a new policy");
+    Rejects([&] {FlightSession invalid(c,true,directory.path);},"a corrupt latest must not silently create a new policy");
 }
-enum class TrainingContractChange
+/** @brief A warm-startable contract change resumes the policy but never reuses the old BEST score. */
+void ChangedTrainingContract()
 {
-    HorizontalStarts, Rewards, LegacyStarts, LegacyGuidance, AlignedProbability,
-    EpisodeBoundary
-};
-void CommittedTrainingCheckpoint(Config c)
-{
-    std::filesystem::path const checkpoint{PPO_FLIGHT_COMMITTED_CHECKPOINT};
-    if(!std::filesystem::exists(checkpoint)) return;
-    // Legacy snapshots contain the old tanh mapping and must not be replayed as clamped policies.
-    std::ifstream stream(checkpoint);
-    std::string magic,signature;
-    std::size_t observations{},actions{},width{};
-    std::uint64_t updates{};
-    Check(static_cast<bool>(stream>>magic>>observations>>actions>>width>>updates>>std::quoted(signature)),
-        "read committed checkpoint signature");
-    if(!CompatibleTrainingSignature(signature,c.checkpointSignature))
-    {
-        Check(!nlohmann::json::parse(signature).contains("actionMappingVersion"),
-            "only the historical tanh checkpoint may be incompatible in this fixture");
-        Rejects([&] { FlightLearner rejected(c);rejected.Load(checkpoint); },
-            "old tanh checkpoint cannot warm-start clamped controls");
-        return;
-    }
-    c.training.resume=true;
-    auto const modelDirectory=checkpoint.parent_path().parent_path();
-    FlightSession resumed(c,true,modelDirectory,std::nullopt,TrainingBudget::AdditionalUpdates);
-    auto const snapshot=resumed.Snapshot();
-    Check(snapshot.resumed && snapshot.learning.updates>0
-        && snapshot.trainingUpdateLimit==snapshot.learning.updates+c.training.maxUpdates,
-        "compatible FlightControl3D checkpoint is a complete additional-training warm start");
-    Check(resumed.Learner().Collected()==0,
-        "committed FlightControl3D checkpoint starts at an update boundary");
-}
-void ChangedTrainingContract(Config c,TrainingContractChange change)
-{
-    c.training.rolloutSteps=8;c.training.minibatch=4;c.training.epochs=1;c.training.maxUpdates=1;
-    c.training.resume=true;c.training.checkpointEvery=1;c.mission.maxSeconds=1;c.evaluation.episodes=2;
-    TemporaryDirectory directory("flight-changed-starts-");
+    auto const c=SmallConfig();
+    TemporaryDirectory directory("flight-changed-contract-");
     auto old=c;
     auto signature=nlohmann::json::parse(c.checkpointSignature);
-    if(change==TrainingContractChange::Rewards)
-    {
-        signature.erase("rewardVersion");signature["reward"].erase("convergenceSeconds");
-        signature["reward"].erase("ilsDecaySeconds");
-        signature["reward"]["weights"]["Path"]=0.02;signature["reward"]["weights"]["Speed"]=0.02;
-        signature["reward"]["weights"]["Slope"]=0.02;signature["initial"]["approach"]=false;
-    }
-    else if(change==TrainingContractChange::HorizontalStarts)
-    {signature["initial"]["distanceMeters"]={7000,14000};signature["initial"]["bearingDegrees"]={-180,180};}
-    else if(change==TrainingContractChange::LegacyStarts) signature["initial"].erase("runwayAlignedProbability");
-    else if(change==TrainingContractChange::LegacyGuidance)
-    {
-        signature.erase("guidanceVersion");
-        signature["mission"].erase("patrolLookaheadSeconds");
-        signature["mission"]["approachHeadingToleranceDegrees"]=60;
-        signature["mission"]["racetrackCenterCross"]=0;
-    }
-    else if(change==TrainingContractChange::AlignedProbability)
-        signature["initial"]["runwayAlignedProbability"]=0.25;
-    else
-        signature["mission"]["maxDistanceMeters"]=30000.0;
+    signature["reward"]["weights"]["Path"]=1.0;signature["initial"]["distanceMeters"]={8000,9000};
     old.checkpointSignature=signature.dump();
     FlightModelStore oldStore(old,directory.path);
     FlightLearner oldPolicy(old);oldPolicy.Save(oldStore.Latest());
-    ValidationMetrics successful{};successful.episodes=2;successful.touchdowns=2;successful.stops=2;
-    successful.touchdownSumMeters=100;successful.stopSumMeters=600;
-    Check(oldStore.Promote(oldPolicy,successful),"controlled old-distribution BEST fixture");
+    Check(oldStore.Promote(oldPolicy,Successful(old,0)),"controlled old-contract BEST fixture");
     auto const pointer=directory.path/"best/current.json";
     auto const previous=ReadFile(pointer);
     auto const generation=directory.path/"best"/nlohmann::json::parse(previous).at("checkpoint").get<std::string>();
     FlightSession resumed(c,true,directory.path,std::nullopt,TrainingBudget::AdditionalUpdates);
-    Check(resumed.Snapshot().resumed && !resumed.Snapshot().hasBest
-        && ReadFile(pointer)==previous,"changed training contract resumes while preserving the old BEST without reusing its score");
-    Check(resumed.Learner().Collected()==0,"new episode starts with an empty collector");
+    Check(resumed.Snapshot().resumed && !resumed.Snapshot().hasBest && ReadFile(pointer)==previous,
+        "a changed training contract resumes while preserving the old BEST without reusing its score");
     FlightLearner comparison(c);comparison.Load(oldStore.Latest());
-    Check(comparison.Evaluate({})==oldPolicy.Evaluate({}),"warm start preserves learned policy outputs");
-    Rejects([&] {FlightSession inference(c,false,directory.path);},"inference rejects BEST validated on a different contract");
+    Check(comparison.Evaluate({})==oldPolicy.Evaluate({}),"a warm start preserves the learned policy outputs");
+    Rejects([&] {FlightSession inference(c,false,directory.path);},"inference rejects a BEST validated on another contract");
     for(int i=0;i<1000 && !resumed.Finished();++i) resumed.Tick();
     Check(resumed.Finished() && ReadFile(pointer)==previous && std::filesystem::exists(generation),
-        "failed revalidation keeps the previous BEST generation and pointer intact");
-    FlightModelStore newStore(c,directory.path);successful.update=resumed.Snapshot().learning.updates;
-    Check(newStore.Promote(resumed.Learner(),successful) && newStore.BestMetrics().has_value()
-        && std::filesystem::exists(generation),"a newly validated candidate preserves the old generation");
+        "a failed revalidation keeps the previous BEST generation and pointer intact");
+    FlightModelStore newStore(c,directory.path);
+    Check(newStore.Promote(resumed.Learner(),Successful(c,resumed.Snapshot().learning.updates))
+        && newStore.BestMetrics().has_value() && std::filesystem::exists(generation),
+        "a newly validated candidate preserves the old generation");
     auto incompatible=c;signature=nlohmann::json::parse(c.checkpointSignature);signature["mission"]["glideDegrees"]=4;
     incompatible.checkpointSignature=signature.dump();
     Rejects([&] {FlightLearner rejected(incompatible);rejected.Load(oldStore.Latest());},"guidance changes remain incompatible");
-    signature=nlohmann::json::parse(c.checkpointSignature);signature["initial"]["speedMps"]={60,80};
-    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature)
-        && !CompatibleTrainingSignature("broken",c.checkpointSignature),"other observation/physics changes remain incompatible");
-    signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("actionMappingVersion");
-    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "legacy tanh checkpoint cannot warm-start clamped controls");
-    signature=nlohmann::json::parse(c.checkpointSignature);signature["actionMappingVersion"]=1;
-    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "different action mapping versions are incompatible");
-    signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("reward");
-    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"missing reward contract is not a warm start");
-    signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=2;
-    signature["reward"].erase("ilsDecaySeconds");
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "previous reward V2 remains usable as a training warm start");
-    signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=3;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "previous reward V3 remains usable as a training warm start");
-    signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=4;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "previous reward V4 remains usable as a training warm start");
-    signature["rewardVersion"]=5;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "previous reward V5 remains usable as a training warm start");
-    signature["rewardVersion"]=6;
-    signature["reward"].erase("localizerConvergenceScale");
-    signature["reward"].erase("localizerSustainScale");
-    signature["reward"].erase("localizerCourseBlend");
-    signature["reward"].erase("localizerInterceptGain");
-    signature["reward"].erase("localizerInterceptLimitDegrees");
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "previous reward V6 remains usable as a training warm start");
-    signature["rewardVersion"]=7;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "previous reward V7 remains usable as a training warm start");
-    signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=8;
-    signature["reward"].erase("localizerCourseBlend");
-    signature["reward"].erase("localizerInterceptGain");
-    signature["reward"].erase("localizerInterceptLimitDegrees");
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "previous reward V8 remains usable as a training warm start");
-    signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=9;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "previous reward V9 remains usable as a training warm start");
-    signature["rewardVersion"]=10;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "current reward V10 remains compatible");
-    signature=nlohmann::json::parse(c.checkpointSignature);signature["rewardVersion"]=999;
-    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown shaping contract is rejected");
-    signature=nlohmann::json::parse(c.checkpointSignature);signature["guidanceVersion"]=2;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "guidance V2 remains usable as a training warm start");
-    signature["guidanceVersion"]=3;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "guidance V3 remains usable as a training warm start");
-    signature["guidanceVersion"]=4;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "guidance V4 remains usable as a training warm start");
-    signature["guidanceVersion"]=5;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "guidance V5 remains usable as a training warm start");
-    signature["guidanceVersion"]=6;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "guidance V6 remains usable as a training warm start");
-    signature["guidanceVersion"]=7;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "guidance V7 remains usable as a training warm start");
-    signature["guidanceVersion"]=8;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "guidance V8 remains usable as a training warm start");
-    signature["guidanceVersion"]=9;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "guidance V9 remains usable as a training warm start");
-    signature["guidanceVersion"]=10;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "guidance V10 remains usable as a training warm start");
-    signature["guidanceVersion"]=11;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "guidance V11 remains usable as a training warm start");
-    signature["guidanceVersion"]=12;
-    signature["normalization"]["localizerDegrees"]=35.0;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "guidance V12 with the retired LOC scale remains usable as a training warm start");
-    signature=nlohmann::json::parse(c.checkpointSignature);signature["guidanceVersion"]=13;
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "current guidance V13 remains compatible");
-    signature["guidanceVersion"]=999;
-    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown guidance contract is rejected");
-    signature=nlohmann::json::parse(c.checkpointSignature);signature.erase("spawnVersion");
-    Check(CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),
-        "legacy random placement remains usable as a training warm start");
-    signature=nlohmann::json::parse(c.checkpointSignature);signature["spawnVersion"]=999;
-    Check(!CompatibleTrainingSignature(signature.dump(),c.checkpointSignature),"unknown spawn contract is rejected");
 }
+/** @brief Training validates, promotes only eligible candidates and evaluation never writes. */
+void TrainingValidationAndBest()
+{
+    auto c=SmallConfig();
+    c.training.rolloutSteps=16;c.training.minibatch=8;c.mission.maxSeconds=2;
+    TemporaryDirectory directory("flight-session-");
+    FlightModelStore store(c,directory.path);auto const checkpoint=store.Latest();
+    FlightSession training(c,true,directory.path);
+    auto const display=training.Snapshot();
+    Check(display.mission.phase==Phase::Approach && display.guidance.targetValid
+        && display.gearDownMinimum==c.mission.gearDownMinimum,"the training snapshot carries the approach and gear threshold");
+    for(std::size_t i=0;i<16;++i) training.Tick();
+    Check(!training.Finished() && training.Snapshot().validating && training.Snapshot().learning.updates==1,
+        "the final update requires a completed validation");
+    auto const original=ReadFile(checkpoint);
+    Check(!original.empty(),"the completed training checkpoint exists");
+    for(std::size_t i=0;i<1000 && !training.Finished();++i) training.Tick();
+    auto const finished=training.Snapshot();
+    Check(training.Finished() && finished.validationCampaigns==1 && finished.lastValidation.episodes==2
+        && finished.gateEvaluated==2 && finished.gateSuccesses==finished.lastValidation.stops,
+        "a complete independent candidate validation is reported");
+    Check(finished.curriculumLevel==0 && finished.lastValidation.difficulty==0,
+        "the validation campaign evaluates the current curriculum level");
+    Check(!store.BestMetrics() && !finished.hasBest,"a failed candidate is never promoted as BEST");
+    training.Learner().Save(directory.path/"after-validation.txt");
+    Check(ReadFile(directory.path/"after-validation.txt")==original,"validation leaves weights, Adam and RNG frozen");
+    Rejects([&] { FlightSession noBest(c,false,directory.path); },"production must not fall back to unvalidated training");
+    auto const successful=Successful(c,1);
+    Check(store.Promote(training.Learner(),successful),"first complete eligible BEST");
+    auto const pointer=directory.path/"best/current.json";
+    auto const initialBest=ReadFile(pointer);
+    auto partial=successful;partial.episodes=1;
+    Check(!store.Promote(training.Learner(),partial) && ReadFile(pointer)==initialBest,"a partial validation cannot replace BEST");
+    auto worse=successful;worse.stopSumMeters=800;
+    Check(!store.Promote(training.Learner(),worse) && !store.Promote(training.Learner(),successful),
+        "a worse or tied candidate retains the incumbent");
+    FlightSession evaluation(c,false,directory.path),sameEvaluation(c,false,directory.path);
+    Check(evaluation.Snapshot().aircraft.position.north==sameEvaluation.Snapshot().aircraft.position.north,
+        "independent evaluation seeds are repeatable");
+    for(std::size_t i=0;i<1000 && !evaluation.Finished();++i) evaluation.Tick();
+    Check(evaluation.Finished() && evaluation.Snapshot().episodes==2 && evaluation.Snapshot().learning.updates==1,
+        "bounded inference runs without PPO updates");
+    Check(ReadFile(checkpoint)==original && ReadFile(pointer)==initialBest,"evaluation never writes latest or BEST");
+    auto improved=successful;improved.stopSumMeters=500;
+    Check(store.Promote(training.Learner(),improved) && store.BestMetrics()->MeanStop()==250,
+        "equal success prefers a shorter safe stop");
+    // A harder curriculum campaign supersedes an easier one, whatever their stop rates.
+    auto easier=improved;easier.difficulty=0.4;
+    auto harder=improved;harder.difficulty=0.6;harder.stopSumMeters=1200;
+    Check(Better(harder,easier) && !Better(easier,harder),"a harder validated campaign always ranks higher");
+    Check(!store.Promote(training.Learner(),easier) && store.BestMetrics()->difficulty==1,
+        "an easier campaign never replaces a full-task BEST");
+    auto const newBest=ReadFile(pointer);
+    Check(nlohmann::json::parse(newBest).at("difficulty").get<double>()==1,"the BEST manifest records its difficulty");
+    FlightSession resumed(c,true,directory.path);
+    Check(resumed.Snapshot().hasBest && resumed.Snapshot().bestDifficulty==1 && resumed.Snapshot().bestUpdate==1,
+        "the snapshot reports the difficulty and update of the BEST campaign");
+    Check(resumed.Snapshot().validating,"a resume with an exhausted budget finishes the pending validation");
+    for(std::size_t i=0;i<1000 && !resumed.Finished();++i) resumed.Tick();
+    Check(resumed.Finished() && ReadFile(pointer)==newBest,"a failed resumed validation preserves BEST");
+    auto const manifest=nlohmann::json::parse(newBest);
+    auto const bestFile=directory.path/"best"/manifest.at("checkpoint").get<std::string>();
+    { std::ofstream stream(bestFile,std::ios::app);stream<<"corruption"; }
+    Rejects([&] { store.BestMetrics(); },"a BEST checksum mismatch fails closed");
+    Check(ReadFile(pointer)==newBest,"a failed BEST read never rewrites metadata");
+}
+/** @brief Every reward control round-trips independently through JSON. */
+void RewardControlsRoundTrip()
+{
+    TemporaryDirectory directory("flight-reward-controls-");
+    auto const scenario=directory.path/"scenario.json";
+    std::filesystem::copy_file(PPO_FLIGHT_CONFIG,scenario);
+    auto config=LoadConfig(scenario);
+    for(std::size_t index=0;index<RewardCount;++index)
+    {
+        double const value=static_cast<Reward>(index)==Reward::Crash ? -0.1 : 0.1;
+        auto const next=WithRewardTuning(config,index,value);
+        SaveRewardTuning(scenario,index,value);
+        auto const loaded=LoadConfig(scenario);
+        Check(loaded.checkpointSignature==next.checkpointSignature && Near(RewardTuningValue(loaded.reward,index),value),
+            "each reward persists independently");
+        for(std::size_t other=0;other<RewardCount;++other)
+            if(other!=index) Check(Near(loaded.reward.weights[other],config.reward.weights[other]),
+                "other weights remain unchanged");
+        config=loaded;
+    }
+}
+/** @brief Reward edits preserve the policy, persist settings and wait for a PPO boundary. */
+void RewardTuning()
+{
+    TemporaryDirectory directory("flight-reward-tuning-");
+    auto const scenario=directory.path/"scenario.json";
+    std::filesystem::copy_file(PPO_FLIGHT_CONFIG,scenario);
+    auto config=LoadConfig(scenario);
+    config.training.rolloutSteps=4;config.training.minibatch=4;config.training.epochs=1;config.training.hiddenWidth=32;
+    config.training.maxUpdates=3;config.training.resume=false;config.evaluation.everyUpdates=100;
+    FlightSession session(config,true,directory.path/"model",std::nullopt,TrainingBudget::TotalUpdates,scenario);
+    auto const direction=static_cast<std::size_t>(Reward::Direction);
+    auto const path=static_cast<std::size_t>(Reward::Path);
+    auto const before=directory.path/"before.txt",after=directory.path/"after.txt";
+    session.Learner().Save(before);
+    Check(session.SetRewardTuning(direction,0.1),"the direction weight can be edited at a rollout boundary");
+    session.Learner().Save(after);
+    std::ifstream oldFile(before),newFile(after);
+    std::string oldHeader,newHeader,oldSignature,newSignature;
+    std::getline(oldFile,oldHeader);std::getline(newFile,newHeader);
+    std::getline(oldFile,oldSignature);std::getline(newFile,newSignature);
+    std::string const oldData((std::istreambuf_iterator<char>(oldFile)),{});
+    std::string const newData((std::istreambuf_iterator<char>(newFile)),{});
+    Check(oldHeader==newHeader && oldData==newData && oldSignature!=newSignature
+        && Near(LoadConfig(scenario).reward.weights[direction],0.1),"editing a weight preserves the network and optimizer");
+    session.Tick();
+    Check(session.SetRewardTuning(path,12) && session.Snapshot().rewardTuningPending
+        && Near(LoadConfig(scenario).reward.weights[path],12),"mid-rollout edits are queued and saved");
+    for(int step=0;step<3;++step) session.Tick();
+    auto const state=session.Snapshot();
+    Check(!state.rewardTuningPending && Near(state.rewardSettings.weights[path],12)
+        && state.learning.hasRewardMeans && state.learning.updates==1,"queued edits activate after the rollout boundary");
+}
+/** @brief Crash poses and details remain available to the renderer across episode resets. */
+void CrashRenderingSnapshot()
+{
+    auto c=SmallConfig();
+    // Impossible attitude limits turn the first rolling start into a deterministic crash.
+    c.mission.minTouchdownPitchDegrees=5;c.mission.maxTouchdownPitchDegrees=10;
+    c.mission.maxSeconds=0.2;c.training.rolloutSteps=64;c.training.minibatch=8;
+    c.training.curriculum.rolloutStartShare=0.9;
+    TemporaryDirectory directory("flight-crash-render-snapshot-");
+    FlightSession session(c,true,directory.path);
+    Check(session.Snapshot().crashEvent==0,"a new session has no crash event");
+    for(int tick=0;tick<50 && session.Snapshot().crashEvent==0;++tick) session.Tick();
+    auto const first=session.Snapshot();
+    auto const& pitch=first.crashDiagnostic.conditions[static_cast<std::size_t>(CrashReason::PitchLow)];
+    Check(first.crashEvent==1 && IsFinite(first.crashAircraft) && first.hasCrashDiagnostic
+        && pitch.failed && Near(pitch.limit,c.mission.minTouchdownPitchDegrees),
+        "the terminal crash publishes the physical aircraft pose and the failed limit");
+    session.ResetEpisode();
+    auto const reset=session.Snapshot();
+    Check(reset.hasCrashDiagnostic && reset.crashDiagnostic.conditions[static_cast<std::size_t>(CrashReason::PitchLow)].failed,
+        "the last crash details survive the next episode reset");
+}
+/** @brief The curriculum promotes on a full successful window and never past the full task. */
+void CurriculumProgression()
+{
+    CurriculumSettings settings{};
+    settings.firstDistanceMeters={1500,3000};settings.levels=3;settings.windowEpisodes=2;
+    settings.promotionSuccessRate=0.5;settings.rolloutStartShare=0.1;
+    FlightCurriculum curriculum(settings);
+    Check(curriculum.Level()==0 && curriculum.Difficulty()==0,"training starts at the easiest level");
+    Check(!curriculum.Record(false) && !curriculum.Record(false) && curriculum.Level()==0 && curriculum.WindowEpisodes()==0,
+        "a failed window keeps the level and starts a new window");
+    Check(!curriculum.Record(true) && curriculum.Record(false) && curriculum.Level()==1 && Near(curriculum.Difficulty(),0.5),
+        "a window at the promotion rate advances one level");
+    Check(!curriculum.Record(true) && curriculum.Record(true) && curriculum.Level()==2 && curriculum.Difficulty()==1,
+        "the last level is the full task");
+    for(int episode=0;episode<5;++episode) Check(!curriculum.Record(true),"the full task is never exceeded");
+    curriculum.Restore(10);
+    Check(curriculum.Level()==2 && curriculum.WindowEpisodes()==0,"a restored level is clamped to the configured levels");
+    settings.levels=1;
+    Check(FlightCurriculum(settings).Difficulty()==1,"a single-level curriculum trains on the full task");
+
+    TemporaryDirectory directory("flight-curriculum-level-");
+    auto const path=directory.path/"latest/curriculum_level.txt";
+    Check(!LoadCurriculumLevel(path),"a missing level file has no saved level");
+    SaveCurriculumLevel(path,3);SaveCurriculumLevel(path,4);
+    Check(LoadCurriculumLevel(path)==std::optional<std::size_t>{4},"the saved level round-trips and is replaced");
+    {std::ofstream broken(path);broken<<"4 extra";}
+    Rejects([&] { LoadCurriculumLevel(path); },"a malformed level file fails closed");
+}
+
+/** @brief The level is saved with latest and restored only when training resumes it. */
+void CurriculumPersistence()
+{
+    auto c=SmallConfig();
+    TemporaryDirectory directory("flight-curriculum-session-");
+    FlightModelStore store(c,directory.path);
+    {
+        FlightSession session(c,true,directory.path,std::nullopt,TrainingBudget::AdditionalUpdates);
+        Check(session.Snapshot().curriculumLevel==0 && session.Snapshot().curriculumLevels==c.training.curriculum.levels,
+            "a new policy starts at the first curriculum level");
+        for(int i=0;i<1000 && !session.Finished();++i) session.Tick();
+        Check(LoadCurriculumLevel(store.CurriculumLevel()).has_value(),"the level is saved together with latest");
+    }
+    SaveCurriculumLevel(store.CurriculumLevel(),2);
+    FlightSession resumed(c,true,directory.path,std::nullopt,TrainingBudget::AdditionalUpdates);
+    Check(resumed.Snapshot().resumed && resumed.Snapshot().curriculumLevel==2,"a resumed session restores its level");
+    auto fresh=c;fresh.training.resume=false;
+    FlightSession restarted(fresh,true,directory.path,std::nullopt,TrainingBudget::AdditionalUpdates);
+    Check(restarted.Snapshot().curriculumLevel==0,"a new policy does not inherit a saved level");
+}
+} // namespace
+
 int main()
 {
     try
     {
-        auto c=LoadConfig(PPO_FLIGHT_CONFIG);
-        CommittedTrainingCheckpoint(c);
-        DesktopContinuation(c);
-        for(auto change : {TrainingContractChange::HorizontalStarts,TrainingContractChange::Rewards,
-            TrainingContractChange::LegacyStarts,TrainingContractChange::LegacyGuidance,
-            TrainingContractChange::AlignedProbability,TrainingContractChange::EpisodeBoundary})
-            ChangedTrainingContract(c,change);
-        c.training.rolloutSteps=16;c.training.minibatch=8;c.training.epochs=1;c.training.maxUpdates=1;
-        c.mission.maxSeconds=2;c.evaluation.episodes=2;c.evaluation.everyUpdates=1;
-        TemporaryDirectory directory("flight-session-");
-        FlightModelStore store(c,directory.path);auto const checkpoint=store.Latest();
-        FlightSession training(c,true,directory.path);
-        auto const display=training.Snapshot();
-        Check(display.localizerCaptureDegrees==c.mission.localizerCaptureDegrees*c.training.ilsCaptureScale
-            && display.glideCaptureDegrees==c.mission.glideCaptureDegrees*c.training.ilsCaptureScale
-            && display.gearDownMinimum==c.mission.gearDownMinimum,
-            "training snapshot carries widened ILS angles and the physical gear threshold");
-        for(std::size_t i=0;i<16;++i) training.Tick();
-        Check(!training.Finished() && training.Snapshot().validating && training.Snapshot().learning.updates==1,"final update requires completed validation");
-        Check(training.Snapshot().localizerCaptureDegrees==c.mission.localizerCaptureDegrees
-            && training.Snapshot().glideCaptureDegrees==c.mission.glideCaptureDegrees,
-            "validation restores the nominal ILS capture tolerances");
-        auto const original=ReadFile(checkpoint);
-        Check(!original.empty(),"completed training checkpoint exists");
-        for(std::size_t i=0;i<1000 && !training.Finished();++i) training.Tick();
-        Check(training.Finished() && training.Snapshot().validationCampaigns==1 && training.Snapshot().lastValidation.episodes==2,"complete independent candidate validation");
-        Check(!store.BestMetrics() && !training.Snapshot().hasBest,"failed candidate is never promoted as BEST");
-        MissionState capture{};capture.phase=Phase::Approach;
-        capture.capturedLocalizer=true;capture.capturedGlide=true;
-        AircraftState aligned{};
-        aligned.airspeed=c.mission.approachSpeed;
-        aligned.heading=c.runway.headingDegrees*DegreesToRadians;
-        Guidance guidance{};
-        guidance.targetSpeed=c.mission.approachSpeed;
-        guidance.targetSlope=-c.mission.glideDegrees*DegreesToRadians;
-        guidance.relativeVelocity={c.mission.approachSpeed,0,
-            -c.mission.approachSpeed*std::tan(c.mission.glideDegrees*DegreesToRadians)};
-        Check(CaptureGateQualified(c,CurriculumStage::Loc,capture,aligned,guidance)
-            && CaptureGateQualified(c,CurriculumStage::Glide,capture,aligned,guidance),
-            "ideal stabilized LOC and Glide qualify for their gates");
-        auto rotated=c;rotated.runway.headingDegrees+=25;
-        auto rotatedAircraft=aligned;
-        rotatedAircraft.heading=rotated.runway.headingDegrees*DegreesToRadians;
-        Check(CaptureGateQualified(rotated,CurriculumStage::Loc,capture,rotatedAircraft,guidance)
-            && !CaptureGateQualified(c,CurriculumStage::Loc,capture,rotatedAircraft,guidance),
-            "gate heading uses the actual randomized runway rather than default JSON heading");
-        aligned.heading+=20*DegreesToRadians;
-        Check(!CaptureGateQualified(c,CurriculumStage::Loc,capture,aligned,guidance),
-            "radio capture with wrong runway heading cannot clear LOC gate");
-        aligned.heading=c.runway.headingDegrees*DegreesToRadians;
-        guidance.relativeVelocity.east=20;
-        Check(!CaptureGateQualified(c,CurriculumStage::Loc,capture,aligned,guidance),
-            "radio capture with lateral ground track cannot clear LOC gate");
-        guidance.relativeVelocity.east=0;guidance.relativeVelocity.up=5;
-        Check(!CaptureGateQualified(c,CurriculumStage::Glide,capture,aligned,guidance)
-            && CaptureGateQualified(c,CurriculumStage::Loc,capture,aligned,guidance),
-            "climbing on Glide is a regression even with correct LOC");
-        guidance.relativeVelocity.up=-c.mission.approachSpeed*std::tan(c.mission.glideDegrees*DegreesToRadians);
-        capture.capturedGlide=false;
-        Check(!CaptureGateQualified(c,CurriculumStage::Glide,capture,aligned,guidance),
-            "unconfirmed glide cannot pass Glide gate");
-        // A capture-only curriculum gate must never mint a landing BEST.
-        auto gateConfig=c;gateConfig.training.curriculumStage=CurriculumStage::Loc;
-        gateConfig.training.gateHoldSeconds=0.1;gateConfig.training.resume=false;
-        TemporaryDirectory gateDirectory("flight-session-gate-");
-        FlightSession gateTraining(gateConfig,true,gateDirectory.path);
-        for(std::size_t step=0;step<600 && !gateTraining.Finished();++step) gateTraining.Tick();
-        Check(gateTraining.Finished() && gateTraining.Snapshot().gateEvaluated==gateConfig.evaluation.episodes
-            && !std::filesystem::exists(gateDirectory.path/"best/current.json"),
-            "independent LOC gate evaluation cannot promote an unvalidated landing BEST");
-        training.Learner().Save(directory.path/"after-validation.txt");
-        Check(ReadFile(directory.path/"after-validation.txt")==original,"candidate validation leaves weights, Adam and RNG frozen");
-        Rejects([&] { FlightSession noBest(c,false,directory.path); },"production must not fall back to unvalidated training");
-        // Controlled successful metrics exercise promotion; no learned success is claimed.
-        ValidationMetrics successful{};successful.update=1;successful.episodes=2;successful.touchdowns=2;successful.stops=2;
-        successful.touchdownSumMeters=100;successful.stopSumMeters=600;
-        Check(store.Promote(training.Learner(),successful),"first complete eligible BEST");
-        auto const pointer=directory.path/"best/current.json";
-        auto const initialBest=ReadFile(pointer);
-        auto partial=successful;partial.episodes=1;
-        Check(!store.Promote(training.Learner(),partial) && ReadFile(pointer)==initialBest,"partial validation cannot replace BEST");
-        auto worse=successful;worse.stopSumMeters=800;
-        Check(!store.Promote(training.Learner(),worse) && !store.Promote(training.Learner(),successful),"worse/tied candidate retains incumbent");
-        FlightSession evaluation(c,false,directory.path),sameEvaluation(c,false,directory.path);
-        Check(evaluation.Snapshot().aircraft.position.north==sameEvaluation.Snapshot().aircraft.position.north,"independent evaluation seed repeatability");
-        Check(evaluation.Snapshot().aircraft.position.north!=training.Snapshot().aircraft.position.north,"evaluation uses independent starts");
-        for(std::size_t i=0;i<1000 && !evaluation.Finished();++i) evaluation.Tick();
-        Check(evaluation.Finished() && evaluation.Snapshot().episodes==2 && evaluation.Snapshot().learning.updates==1,"bounded inference without PPO updates");
-        Check(ReadFile(checkpoint)==original && ReadFile(pointer)==initialBest,"evaluation never writes latest or BEST");
-        auto improved=successful;improved.stopSumMeters=500;
-        Check(store.Promote(training.Learner(),improved) && store.BestMetrics()->MeanStop()==250,"equal success prefers shorter safe stop");
-        auto const newBest=ReadFile(pointer);
-        c.training.resume=true;
-        FlightSession resumed(c,true,directory.path);
-        Check(resumed.Snapshot().validating,"resume with exhausted training budget finishes pending validation");
-        for(std::size_t i=0;i<1000 && !resumed.Finished();++i) resumed.Tick();
-        Check(resumed.Finished() && ReadFile(pointer)==newBest,"failed resumed validation preserves BEST");
-        auto const manifest=nlohmann::json::parse(newBest);
-        auto const bestFile=directory.path/"best"/manifest.at("checkpoint").get<std::string>();
-        { std::ofstream stream(bestFile,std::ios::app);stream<<"corruption"; }
-        Rejects([&] { store.BestMetrics(); },"BEST checksum mismatch must fail closed");
-        Check(ReadFile(pointer)==newBest,"failed BEST read never rewrites metadata");
+        DesktopContinuation();
+        ChangedTrainingContract();
+        TrainingValidationAndBest();
+        RewardControlsRoundTrip();
+        RewardTuning();
+        CrashRenderingSnapshot();
+        CurriculumProgression();
+        CurriculumPersistence();
     }
     catch(std::exception const& e) { std::cerr<<e.what()<<'\n';return 1; }
     std::cout<<"Shared desktop/headless session regressions passed\n";

@@ -1,191 +1,457 @@
 #include "test_support.hpp"
+#include "flight_mission.hpp"
+#include "flight_reward.hpp"
+#include "flight_policy.hpp"
+#include <utility>
 using namespace ppo::examples::flight;
 
 namespace {
-void PhaseControlMapping(Config const& c)
+Config T6Config()
 {
-    Controls const requested{0.1,-0.2,0.3,c.initial.throttle,0.8,true,0.99};
-    auto const patrol=ApplyPhaseControls(requested,Phase::Patrol,c.initial);
+    return LoadConfig(std::filesystem::path(PPO_FLIGHT_CONFIG));
+}
+/** @brief Trimmed approach controls with an optional brake command. */
+Controls Neutral(Config const& c,double brake=0)
+{
+    Controls controls{};
+    controls.elevator=c.initial.elevatorTrim;
+    controls.throttle=c.initial.throttle;
+    controls.brake=brake;
+    return controls;
+}
+std::size_t ControlObservation(std::size_t axis) { return ObservationSize-ContinuousActions+axis; }
+
+/** @brief Check first-order command filtering and its observable reset state. */
+void FilteredControls()
+{
+    auto const c=T6Config();
+    FlightEnvironment env(c,DefaultDataRoot(),778U);
+    auto observation=env.Reset(778U);
+    double const trim=c.initial.elevatorTrim;
+    Check(Near(observation[ControlObservation(0)],trim,1e-6) && Near(observation[ControlObservation(1)],0)
+        && Near(observation[ControlObservation(3)],c.initial.throttle),"reset exposes the trimmed applied controls");
+    Controls target{};target.elevator=0.3;target.aileron=-0.6;target.rudder=0.2;target.throttle=1.0;
+    double const actionSeconds=c.StepSeconds();
+    double const rudderAuthority=c.mission.airborneRudderAuthority;
+    for(int step=1;step<=2;++step)
+    {
+        auto const result=env.Step(target);
+        Check(!result.terminated && !result.truncated,"the filter test remains in flight");
+        double const alpha=-std::expm1(-step*actionSeconds/c.mission.controlFilterTimeConstantSeconds);
+        auto const applied=env.Mission().filteredControls;
+        observation=env.ObservationNow();
+        Check(Near(applied.elevator,trim+(0.3-trim)*alpha) && Near(applied.aileron,-0.6*alpha)
+            && Near(applied.rudder,0.2*rudderAuthority*alpha)
+            && Near(applied.throttle,c.initial.throttle+(1.0-c.initial.throttle)*alpha),
+            "continuous commands follow the physics-step first-order response");
+        Check(Near(observation[ControlObservation(0)],applied.elevator,1e-6)
+            && Near(observation[ControlObservation(1)],applied.aileron,1e-6)
+            && Near(observation[ControlObservation(2)],applied.rudder,1e-6)
+            && Near(observation[ControlObservation(3)],applied.throttle,1e-6),
+            "the policy sees the commands actually applied to JSBSim");
+    }
+    auto invalid=target;invalid.aileron=std::numeric_limits<double>::quiet_NaN();
+    auto const before=env.Mission().filteredControls;
+    Rejects([&] { env.Step(invalid); },"a non-finite command is rejected");
+    Check(Near(before.aileron,env.Mission().filteredControls.aileron),"a rejected command cannot advance the filter");
+    observation=env.Reset(778U);
+    Check(Near(observation[ControlObservation(0)],trim,1e-6) && Near(observation[ControlObservation(1)],0)
+        && Near(observation[ControlObservation(3)],c.initial.throttle),
+        "a new episode does not inherit the prior filter state");
+}
+
+/** @brief Training starts follow the curriculum difficulty and rolling share; rudder authority is reduced only in flight. */
+void TrainingStartsAndRudderAuthority()
+{
+    auto c=T6Config();
+    c.training.curriculum.rolloutStartShare=0.5;
+    auto const& first=c.training.curriculum.firstDistanceMeters;
+    double const alpha=-std::expm1(-c.StepSeconds()/c.mission.controlFilterTimeConstantSeconds);
+    auto rudder=Neutral(c);rudder.rudder=0.8;
+    FlightEnvironment environment(c,DefaultDataRoot(),123U);
+    environment.SetDifficulty(0);
+    bool sawRolling=false,sawAirborne=false;
+    for(int episode=0;episode<12;++episode)
+    {
+        environment.Reset();
+        auto const guidance=environment.CurrentGuidance();
+        if(environment.StartedAirborne())
+        {
+            Check(environment.Mission().phase==Phase::Approach && !environment.Aircraft().weightOnWheels
+                && guidance.distance>=first.minimum-1 && guidance.distance<=first.maximum+1 && std::abs(guidance.cross)<1,
+                "difficulty zero training starts are short aligned finals");
+            if(!sawAirborne)
+            {
+                environment.Step(rudder);
+                Check(Near(environment.Mission().filteredControls.rudder,0.8*c.mission.airborneRudderAuthority*alpha),
+                    "airborne rudder scaling precedes filtering");
+            }
+            sawAirborne=true;
+            continue;
+        }
+        Check(environment.Mission().phase==Phase::Rollout && environment.Mission().touchedDown
+            && environment.Aircraft().weightOnWheels && !environment.Aircraft().structuralContact
+            && environment.ObservationNow()[RolloutObservation]>0.5F,
+            "a rolling start uses native wheel contact without a touchdown reward");
+        for(auto const& wheel:environment.Aircraft().wheels) Check(wheel.onGround,"all rollout wheels touch the runway");
+        Check(environment.Mission().filteredControls.elevator==0 && environment.Mission().filteredControls.throttle==0,
+            "a rolling start begins at idle with a neutral elevator");
+        if(!sawRolling)
+        {
+            environment.Step(rudder);
+            Check(Near(environment.Mission().filteredControls.rudder,0.8*alpha),"rudder authority remains full during rollout");
+        }
+        sawRolling=true;
+    }
+    Check(sawRolling && sawAirborne,"training mixes rolling and airborne starts");
+    environment.Reset(4342U);
+    Check(environment.StartedAirborne() && environment.CurrentGuidance().distance>=c.initial.distanceMeters.minimum-1,
+        "a seeded episode defaults to the full task whatever the curriculum level");
+    // Seeded evaluation episodes follow their explicit start, independently of the training stream.
+    environment.SetDifficulty(1);
+    environment.Reset(4342U,EpisodeStart{false,0.0});
+    auto const shortFinal=environment.CurrentGuidance();
+    Check(environment.StartedAirborne() && shortFinal.distance>=first.minimum-1 && shortFinal.distance<=first.maximum+1
+        && std::abs(shortFinal.cross)<1,"a seeded difficulty-zero start is a short aligned final");
+    environment.Reset();
+    environment.Reset(4342U,EpisodeStart{false,0.0});
+    Check(Near(environment.CurrentGuidance().along,shortFinal.along,1e-9),
+        "a seeded start is reproducible after training episodes");
+    environment.Reset(4343U,EpisodeStart{true,0.0});
+    Check(!environment.StartedAirborne() && environment.Mission().phase==Phase::Rollout
+        && environment.Mission().touchedDown && environment.Aircraft().weightOnWheels,
+        "a seeded rolling start begins on the runway without a touchdown reward");
+}
+/** @brief Opposite aileron, rudder and throttle commands produce ordered native responses. */
+void ControlProbes()
+{
+    auto const config=T6Config();
+    for(std::uint32_t seed : {42U,4342U,4343U})
+    {
+        std::array<double,3> rolls{};
+        constexpr std::array<double,3> commands{-0.15,0.0,0.15};
+        for(std::size_t trial=0;trial<commands.size();++trial)
+        {
+            FlightEnvironment env(config,DefaultDataRoot(),seed);env.Reset(seed);
+            auto controls=Neutral(config);controls.aileron=commands[trial];
+            for(int step=0;step<30 && env.Mission().outcome==Outcome::Flying;++step) env.Step(controls);
+            Check(env.Mission().outcome==Outcome::Flying && IsFinite(env.Aircraft()),"the aileron probe stays in flight");
+            rolls[trial]=env.Aircraft().roll;
+        }
+        Check(rolls[0]<rolls[1] && rolls[1]<rolls[2],"opposite aileron commands produce ordered roll responses");
+    }
+    constexpr std::array<double,3> rudderCommands{-0.21,0.0,0.21};
+    std::array<double,3> headingChanges{};
+    for(std::size_t trial=0;trial<rudderCommands.size();++trial)
+    {
+        FlightEnvironment env(config,DefaultDataRoot(),4342U);env.Reset(4342U);
+        auto const initial=env.Aircraft();
+        auto controls=Neutral(config);controls.rudder=rudderCommands[trial];
+        for(int step=0;step<50 && env.Mission().outcome==Outcome::Flying;++step) env.Step(controls);
+        Check(env.Mission().outcome==Outcome::Flying && IsFinite(env.Aircraft()),"the rudder probe stays in flight");
+        headingChanges[trial]=WrapAngle(env.Aircraft().heading-initial.heading);
+    }
+    Check(headingChanges[0]>headingChanges[1] && headingChanges[1]>headingChanges[2],
+        "opposite rudder commands produce opposite yaw responses");
+    std::array<double,2> speeds{};
+    for(std::size_t trial=0;trial<speeds.size();++trial)
+    {
+        FlightEnvironment env(config,DefaultDataRoot(),4342U);env.Reset(4342U);
+        auto controls=Neutral(config);controls.throttle=trial==0 ? 0.0 : 1.0;
+        for(int step=0;step<100 && env.Mission().outcome==Outcome::Flying;++step) env.Step(controls);
+        Check(env.Mission().outcome==Outcome::Flying && IsFinite(env.Aircraft()),"the propulsion probe stays in flight");
+        speeds[trial]=env.Aircraft().airspeed;
+    }
+    Check(speeds[1]>speeds[0]+1.0,"throttle changes the native T-6 speed");
+}
+
+/** @brief Native contacts use the finite deck; the sea surrounds it. */
+void FiniteSurfaceContactAuthority()
+{
+    auto c=T6Config();
+    c.runway.landingMarginMeters=0;
+    for(double const heading:{0.0,90.0,181.0,359.0})
+    {
+        c.runway.headingDegrees=heading;c.runway.origin={0,0,15};
+        JsbsimAircraft fdm(c,DefaultDataRoot());fdm.SetRunway(c.runway);
+        Check(Near(fdm.ProbeGround(FromRunway(c.runway,500,0,10)).height,10,1e-6),"JSBSim uses the deck plane");
+        auto const offDeck=FromRunway(c.runway,500,c.runway.widthMeters+100,10);
+        Check(Near(fdm.ProbeGround(offDeck).height,offDeck.up-c.runwayRandomization.seaHeightMeters,1e-6),
+            "the finite deck falls back to the sea outside the runway");
+        AircraftState initial{};
+        initial.position=FromRunway(c.runway,500,c.runway.widthMeters+50,0.1);
+        initial.airspeed=56;initial.heading=heading*DegreesToRadians;initial.gearPosition=1;
+        initial.velocity=Scale(RunwayForward(c.runway),56);
+        auto before=fdm.Reset(initial);
+        Controls controls=Neutral(c);controls.flap=c.initial.approachFlap;
+        auto after=fdm.Advance(controls);
+        Check(after.wheelDataValid && !after.weightOnWheels && !after.structuralContact,
+            "a native aircraft crossing the off-deck plane remains airborne");
+        MissionState mission{};
+        Check(!AdvanceMission(c,mission,before,after).terminated && !mission.contactAttempted,
+            "the mission cannot invent contact on the infinite runway extension");
+        initial.position.up=c.runwayRandomization.seaHeightMeters+6;initial.airspeed=3;initial.velocity={0,0,-1};
+        before=fdm.Reset(initial);mission={};
+        controls.throttle=0;
+        for(int step=0;step<500 && mission.outcome==Outcome::Flying;++step)
+        {
+            after=fdm.Advance(controls);
+            AdvanceMission(c,mission,before,after);before=after;
+        }
+        Check(mission.outcome==Outcome::Crash && (after.structuralContact || after.weightOnWheels),
+            "a real native impact with the sea remains a terminal crash");
+    }
+}
+
+void PhaseControlMapping()
+{
+    auto const c=T6Config();
+    Controls requested{};requested.elevator=0.1;requested.aileron=-0.2;requested.rudder=0.3;
+    requested.throttle=c.initial.throttle;requested.brake=0.8;requested.flap=0.99;
     auto const approach=ApplyPhaseControls(requested,Phase::Approach,c.initial);
     auto const rollout=ApplyPhaseControls(requested,Phase::Rollout,c.initial);
-    Check(patrol.brake==0 && approach.brake==0 && rollout.brake==0.8,
-        "brakes remain disabled in flight and enabled during rollout");
-    Check(Near(patrol.flap,c.initial.flap) && Near(approach.flap,c.initial.approachFlap)
-        && Near(rollout.flap,c.initial.rolloutFlap),"flaps are phase-controlled");
-    Check(patrol.gearDown && approach.gearDown && rollout.gearDown
-        && Near(approach.aileron,requested.aileron) && Near(approach.throttle,requested.throttle),
-        "continuous controls and discrete gear survive phase mapping");
+    Check(approach.brake==0 && rollout.brake==0.8,"brakes are disabled in flight and enabled during rollout");
+    Check(Near(approach.flap,c.initial.approachFlap) && Near(rollout.flap,c.initial.rolloutFlap),"flaps are phase-controlled");
+    Check(Near(approach.aileron,requested.aileron) && Near(approach.throttle,requested.throttle),
+        "continuous controls survive phase mapping");
 }
-struct InterceptProbe final
-{
-    double initialError{},finalError{},localizerReward{};
-    bool ended{};
-};
 
-InterceptProbe ProbeIntercept(Config config,double aileron)
+/** @brief Compares a reused T-6 with a fresh simulator after a terminal contact. */
+void CheckResetAfterContact(JsbsimAircraft& reused,Config const& config)
 {
-    config.initial.runwayAlignedProbability=0;
-    config.initial.distanceMeters={10000,10000};config.initial.bearingDegrees={20,20};
-    config.initial.heightMeters={600,600};config.initial.speedMps={65,65};
-    config.initial.headingOffsetDegrees={0,0};config.initial.rollDegrees={0,0};
-    config.initial.pitchDegrees={2,2};config.initial.slopeDegrees={0,0};
-    auto& randomization=config.runwayRandomization;
-    randomization.northMeters={0,0};randomization.eastMeters={0,0};
-    randomization.headingOffsetDegrees={0,0};randomization.deckHeightMeters={15,15};
-    randomization.speedMps={0,0};randomization.heaveAmplitudeMeters={0,0};
-    randomization.pitchAmplitudeDegrees={0,0};randomization.rollAmplitudeDegrees={0,0};
-    FlightEnvironment environment(config,DefaultDataRoot(),731U);
-    environment.Reset();
-    InterceptProbe probe{};
-    probe.initialError=std::abs(environment.CurrentGuidance().localizer);
-    Controls const controls{0,aileron,0,config.initial.throttle,0,false};
-    for(std::size_t action=0;action<15;++action)
+    JsbsimAircraft fresh(config,DefaultDataRoot());fresh.SetRunway(config.runway);
+    AircraftState initial{};
+    initial.position=FromRunway(config.runway,-6000,400,500);
+    initial.airspeed=65;initial.heading=0;initial.gearPosition=1;
+    initial.pitch=2*DegreesToRadians;initial.velocity={65,0,0};
+    auto actual=reused.Reset(initial);
+    auto expected=fresh.Reset(initial);
+    Controls controls=Neutral(config);controls.flap=config.initial.approachFlap;
+    for(int step=0;step<=100;++step)
     {
-        auto const step=environment.Step(controls);
-        probe.localizerReward+=step.rewards[static_cast<std::size_t>(Reward::Localizer)];
-        if(step.terminated || step.truncated) {probe.ended=true;break;}
+        Check(IsFinite(actual) && IsFinite(expected) && !actual.weightOnWheels && !actual.structuralContact
+            && Near(actual.position.north,expected.position.north,1e-5) && Near(actual.position.up,expected.position.up,1e-5)
+            && Near(actual.velocity.north,expected.velocity.north,1e-5) && Near(actual.velocity.up,expected.velocity.up,1e-5)
+            && Near(actual.roll,expected.roll,1e-6) && Near(actual.pitch,expected.pitch,1e-6)
+            && Near(actual.airspeed,expected.airspeed,1e-5) && Near(actual.flapPosition,expected.flapPosition,1e-6),
+            "a reset after a ground episode must not retain any previous state");
+        if(step<100) {actual=reused.Advance(controls);expected=fresh.Advance(controls);}
     }
-    probe.finalError=std::abs(environment.CurrentGuidance().localizer);
-    return probe;
 }
 
-void InterceptActionReward(Config const& config)
+/** @brief Native T-6 wheels can touch safely and brake to a Stop; a hard touchdown crashes. */
+void NativeTouchdownAndStop()
 {
-    auto const neutral=ProbeIntercept(config,0);
-    auto const positive=ProbeIntercept(config,0.2);
-    auto const negative=ProbeIntercept(config,-0.2);
-    auto const& inward=positive.finalError<negative.finalError ? positive : negative;
-    auto const& outward=positive.finalError<negative.finalError ? negative : positive;
-    Check(neutral.initialError>0 && Near(neutral.initialError,positive.initialError,1e-9)
-        && Near(neutral.initialError,negative.initialError,1e-9)
-        && !neutral.ended && !positive.ended && !negative.ended
-        && !Near(positive.finalError,negative.finalError,1e-8)
-        && inward.localizerReward>neutral.localizerReward
-        && neutral.localizerReward>outward.localizerReward,
-        "real FDM LOC reward prefers the aileron direction that establishes the inward interception");
+    auto config=T6Config();
+    config.runway.origin={0,0,15};config.runway.headingDegrees=0;config.initial.throttle=0;
+    JsbsimAircraft fdm(config,DefaultDataRoot());fdm.SetRunway(config.runway);
+    AircraftState initial{};initial.position=FromRunway(config.runway,100,0,3);
+    initial.airspeed=config.mission.flareSpeed;initial.heading=0;initial.gearPosition=1;
+    initial.velocity={initial.airspeed,0,-1};initial.pitch=1.5*DegreesToRadians;
+    auto const measured=fdm.Reset(initial);
+    double lowestWheel=100;
+    for(auto const& wheel:measured.wheels) lowestWheel=std::min(lowestWheel,DeckCoordinates(config.runway,wheel.point).up);
+    initial.position.up+=0.02-lowestWheel;
+    auto before=fdm.Reset(initial);
+    Check(before.wheelDataValid && !before.weightOnWheels && !before.structuralContact,
+        "the contact regression starts with native wheels above the deck");
+    MissionState mission{};
+    double touchdownReward=0,stopReward=0;
+    for(int step=0;step<12000 && mission.outcome==Outcome::Flying;++step)
+    {
+        auto const controls=ApplyPhaseControls(Neutral(config,1),mission.phase,config.initial);
+        auto const after=fdm.Advance(controls);
+        auto const result=AdvanceMission(config,mission,before,after);
+        touchdownReward+=result.rewards[static_cast<std::size_t>(Reward::Touchdown)];
+        stopReward+=result.rewards[static_cast<std::size_t>(Reward::Stop)];
+        Check(IsFinite(after),"native touchdown and braking remain finite");
+        before=after;
+    }
+    Check(mission.firstWheelContact && mission.touchedDown && mission.touchdownSinkMps<config.mission.maxTouchdownSink,
+        "native JSBSim contact satisfies the touchdown limits");
+    Check(mission.outcome==Outcome::Stopped && mission.touchdownQuality>0.9
+        && Near(touchdownReward,Weight(config.reward,Reward::Touchdown)*mission.touchdownQuality)
+        && Near(stopReward,Weight(config.reward,Reward::Stop)),"native braking reaches Stop and pays both landing events");
+    CheckResetAfterContact(fdm,config);
+
+    initial.position=FromRunway(config.runway,100,0,5);
+    initial.velocity={initial.airspeed,0,-15};
+    before=fdm.Reset(initial);
+    mission={};
+    Controls idle{};idle.flap=config.initial.approachFlap;
+    for(int step=0;step<500 && mission.outcome==Outcome::Flying;++step)
+    {
+        auto const after=fdm.Advance(idle);
+        AdvanceMission(config,mission,before,after);
+        before=after;
+    }
+    Check(mission.outcome==Outcome::Crash,"a hard T6 touchdown produces a terminal crash");
+    CheckResetAfterContact(fdm,config);
 }
+
+/**
+ * @brief Rolls a seeded landed T-6 under one constant raw policy output until the episode ends.
+ * @param brakeRaw Raw brake action; every other raw action is neutral.
+ * @return Final mission state.
+ */
+MissionState RollWithRawBrake(double brakeRaw)
+{
+    auto c=T6Config();
+    // A landing at the flare speed near the end of the touchdown zone.
+    c.initial.rolloutStart.speedMps={c.mission.flareSpeed,c.mission.flareSpeed};
+    c.initial.rolloutStart.alongMeters={900,900};
+    c.initial.rolloutStart.crossMeters={0,0};
+    FlightEnvironment environment(c,DefaultDataRoot(),31U);
+    environment.Reset(31U,EpisodeStart{true,0.0});
+    PolicyAction action{};
+    action.brakeActive=true;
+    action.raw[BrakeAction]=brakeRaw;
+    while(environment.Mission().outcome==Outcome::Flying) environment.Step(ToControls(action,c.initial));
+    return environment.Mission();
 }
+
+/** @brief A neutral policy output brakes the native T-6 to a stop; released brakes overrun the runway. */
+void NeutralRolloutBrakesToStop()
+{
+    auto const neutral=RollWithRawBrake(0.0);
+    Check(neutral.outcome==Outcome::Stopped && neutral.stopFromThreshold<T6Config().runway.lengthMeters,
+        "neutral ground actions stop the T-6 on the runway");
+    // The previous trained mean (-0.19) clamped to no brake at all: it now brakes.
+    Check(RollWithRawBrake(-0.19).outcome==Outcome::Stopped,"a slightly negative brake output still stops");
+    Check(RollWithRawBrake(-1.0).outcome==Outcome::Crash,"without brakes the T-6 rolls off the runway end");
+}
+
+/**
+ * @brief Rolls a seeded landed T-6 at taxi speed with a constant rudder command.
+ * @param rudder Rudder pedal command in [-1, 1].
+ * @return Heading change relative to the runway after two seconds, in radians.
+ */
+double TaxiHeadingChange(double rudder)
+{
+    auto c=T6Config();
+    // At taxi speed the rudder has almost no aerodynamic authority: only the
+    // nose wheel can turn the aircraft.
+    constexpr double TaxiSpeedMps=8.0;
+    c.initial.rolloutStart.speedMps={TaxiSpeedMps,TaxiSpeedMps};
+    c.initial.rolloutStart.alongMeters={900,900};
+    c.initial.rolloutStart.crossMeters={0,0};
+    FlightEnvironment environment(c,DefaultDataRoot(),37U);
+    environment.Reset(37U,EpisodeStart{true,0.0});
+    double const initialHeading=environment.Aircraft().heading;
+    auto controls=Neutral(c);
+    controls.rudder=rudder;
+    for(int step=0;step<20 && environment.Mission().outcome==Outcome::Flying;++step) environment.Step(controls);
+    Check(environment.Mission().outcome==Outcome::Flying,"the taxi steering probe stays on the runway");
+    return WrapAngle(environment.Aircraft().heading-initialHeading);
+}
+
+/** @brief Rudder pedals steer the native nose wheel, so the ground track can be corrected at low speed. */
+void NoseWheelSteering()
+{
+    // Same convention as the airborne rudder probe: a negative command yaws the nose right.
+    double const noseRight=TaxiHeadingChange(-0.5);
+    double const straight=TaxiHeadingChange(0.0);
+    double const noseLeft=TaxiHeadingChange(0.5);
+    std::cout<<"[STEERING_PROBE] nose_right="<<noseRight/DegreesToRadians<<" straight="<<straight/DegreesToRadians
+        <<" nose_left="<<noseLeft/DegreesToRadians<<" deg\n";
+    // The rudder alone turns the T-6 by less than one degree here; the nose wheel turns it much more.
+    constexpr double MinimumTurnRadians=3.0*DegreesToRadians;
+    Check(noseRight>straight+MinimumTurnRadians && noseLeft<straight-MinimumTurnRadians,
+        "rudder pedals steer the nose wheel in the direction of the aerodynamic yaw at taxi speed");
+}
+
+/** @brief Every shaping channel of a real 0.1 s action telescopes, including a partial timeout. */
+void CheckActionPotentials(StepResult const& step,std::array<double,RewardCount> const& before,
+    std::array<double,RewardCount> const& after,double gamma,char const* message)
+{
+    for(std::size_t i=0;i<RewardCount;++i)
+        if(IsPotentialChannel(static_cast<Reward>(i)))
+            Check(Near(step.rewards[i],gamma*after[i]-before[i],1e-7),message);
+}
+void ActionLevelPotential()
+{
+    auto c=T6Config();
+    for(std::uint32_t seed : {92U,93U,94U})
+    {
+        FlightEnvironment env(c,DefaultDataRoot(),seed);env.Reset(seed);
+        auto const before=ShapingPotentials(env.Settings(),env.Mission(),env.Aircraft());
+        auto const step=env.Step(Neutral(c));
+        Check(!step.terminated && !step.truncated,"the potential probe remains airborne");
+        auto const after=ShapingPotentials(env.Settings(),env.Mission(),env.Aircraft());
+        CheckActionPotentials(step,before,after,c.training.gamma,"a PPO action telescopes the discounted substep potentials");
+        double sum=0;for(double reward:step.rewards) sum+=reward;
+        Check(Near(sum,step.reward,1e-10),"an action preserves the reward channel sum");
+    }
+    // Timeout after 0.13 s: the second PPO action executes only 3 substeps.
+    c.mission.maxSeconds=0.13;
+    FlightEnvironment partial(c,DefaultDataRoot(),95U);partial.Reset(95U);
+    Check(!partial.Step(Neutral(c)).truncated,"the first 0.1 s action precedes the partial timeout");
+    auto const pre=ShapingPotentials(partial.Settings(),partial.Mission(),partial.Aircraft());
+    auto const last=partial.Step(Neutral(c));
+    auto const post=ShapingPotentials(partial.Settings(),partial.Mission(),partial.Aircraft());
+    Check(last.truncated && !last.terminated && partial.Mission().outcome==Outcome::Timeout,
+        "the second action is the three-substep timeout");
+    CheckActionPotentials(last,pre,post,c.training.gamma,"a partial timeout keeps gamma-correct potentials");
+    Rejects([&] { partial.Step(Neutral(c)); },"a step after the episode boundary is rejected");
+}
+/** @brief Native reset preserves sampled attitude, speed and course, and leaves no state behind. */
+void IndependentResetAttitude()
+{
+    auto c=T6Config();
+    std::mt19937 rng(183U);
+    JsbsimAircraft fdm(c,DefaultDataRoot());
+    for(double heading : {0.,90.,181.,359.})
+    {
+        auto runway=SampleRunway(c,rng);runway.headingDegrees=heading;
+        fdm.SetRunway(runway);
+        for(double roll : {0.,5.}) for(double pitch : {-3.,3.}) for(double slope : {0.,1.5})
+        {
+            c.initial.rollDegrees=roll;c.initial.pitchDegrees={pitch,pitch};c.initial.slopeToleranceDegrees=slope;
+            auto const requested=SampleApproachStart(c,runway,ApproachSide::Left,1.0,rng);
+            auto const actual=fdm.Reset(requested);
+            // JSBSim keeps the requested climb rate and course in the aircraft's
+            // own tangent frame; the world frame is tangent at the runway
+            // reference, so Earth curvature tilts them slightly at 7-14 km.
+            constexpr double CurvatureVerticalSpeedToleranceMps=0.15;
+            constexpr double CurvatureCourseToleranceRadians=0.003;
+            double const requestedCourse=std::atan2(requested.velocity.east,requested.velocity.north);
+            double const actualCourse=std::atan2(actual.velocity.east,actual.velocity.north);
+            Check(Near(actual.roll,requested.roll,1e-8) && Near(actual.pitch,requested.pitch,1e-8)
+                && Near(WrapAngle(actual.heading-requested.heading),0,1e-8)
+                && Near(actual.airspeed,requested.airspeed,1e-5)
+                && Near(actual.velocity.up,requested.velocity.up,CurvatureVerticalSpeedToleranceMps)
+                && Near(WrapAngle(actualCourse-requestedCourse),0,CurvatureCourseToleranceRadians),
+                "the native reset preserves attitude, calibrated speed, climb rate and course");
+            Check(Near(actual.position.north,requested.position.north,0.02) && Near(actual.position.up,requested.position.up,0.02),
+                "the JSBSim geodetic conversion preserves the local position");
+            Controls manoeuvre=Neutral(c);manoeuvre.elevator=0.2;manoeuvre.aileron=-0.2;manoeuvre.rudder=0.1;
+            for(int step=0;step<20;++step) fdm.Advance(manoeuvre);
+            auto const repeated=fdm.Reset(requested);
+            Check(Near(repeated.roll,actual.roll,1e-8) && Near(repeated.pitch,actual.pitch,1e-8)
+                && Near(repeated.velocity.north,actual.velocity.north,1e-7) && Near(repeated.velocity.up,actual.velocity.up,1e-7),
+                "a previous manoeuvre cannot contaminate the next reset");
+        }
+    }
+    auto invalid=SampleApproachStart(c,SampleRunway(c,rng),ApproachSide::Left,1.0,rng);
+    invalid.velocity.up=1000;
+    Rejects([&] {fdm.Reset(invalid);},"an impossible initial climb fails explicitly");
+}
+} // namespace
 
 int main()
 {
     try
     {
-        auto c=LoadConfig(PPO_FLIGHT_CONFIG);
-        PhaseControlMapping(c);
-        c.initial.distanceMeters={10000,10000}; c.initial.bearingDegrees={8,8}; c.initial.heightMeters={600,600};
-        c.initial.headingOffsetDegrees={0,0}; c.initial.rollDegrees={0,0}; c.initial.pitchDegrees={2,2};
-        c.initial.slopeDegrees={0,0}; c.initial.speedMps={65,65};
-        c.initial.approach=true;c.initial.runwayAlignedProbability=1;
-        auto& d=c.runwayRandomization;
-        d.northMeters={0,0}; d.eastMeters={0,0}; d.headingOffsetDegrees={0,0}; d.deckHeightMeters={15,15};
-        d.speedMps={0,0}; d.heaveAmplitudeMeters={0,0}; d.pitchAmplitudeDegrees={0,0}; d.rollAmplitudeDegrees={0,0};
-        FlightEnvironment env(c);
-        auto const obs=env.Reset(); auto const initial=env.Aircraft();
-        Check(env.Mission().phase==Phase::Approach,"default real FDM reset prioritizes ILS without a compulsory patrol lap");
-        Check(IsFinite(initial) && !initial.weightOnWheels && Near(initial.gearPosition,0,0.01),"initial gear must really be up");
-        double const initialHeight=env.Settings().runway.thresholdHeightMeters
-            +10000*std::tan(c.mission.glideDegrees*DegreesToRadians);
-        auto const point=FromRunway(env.Settings().runway,-10000,0,initialHeight);
-        Check(Near(initial.position.up,point.up,0.02),"JSBSim altitude conversion");
-        Check(Near(initial.position.north,point.north,0.02) && Near(initial.position.east,point.east,0.02),"JSBSim geodetic conversion");
-        for(float value:obs) Check(std::isfinite(value) && std::abs(value)<=1,"JSBSim finite observation");
-        auto const action=Controls{0,0,0,c.initial.throttle,0,true};
-        for (int i=0; i<60; ++i)
-        {
-            auto const step=env.Step(action);
-            Check(!step.terminated && !step.truncated && IsFinite(env.Aircraft()),"six-second real FDM flight");
-        }
-        Check(env.Aircraft().gearPosition>=c.mission.gearDownMinimum,"five-second gear travel is physical");
-        Check(std::hypot(env.Aircraft().position.north-initial.position.north,env.Aircraft().position.east-initial.position.east)>100,"actual JSBSim dynamics advanced");
-        env.Reset();
-        Check(Near(env.Aircraft().position.up,initial.position.up) && Near(env.Aircraft().gearPosition,0),"reset clears physical gear and position");
-        auto const baseline=env.Step({0,0,0,c.initial.throttle,0,false});
-        auto const neutral=env.Aircraft();
-        env.Reset(); env.Step({0.5,0.6,0.2,c.initial.throttle,0,false});
-        Check(std::abs(env.Aircraft().rollRate-neutral.rollRate)>1e-4 && std::abs(env.Aircraft().pitchRate-neutral.pitchRate)>1e-4,"aileron/elevator affect actual FDM");
-        Check(std::isfinite(baseline.reward),"real transition reward");
-        InterceptActionReward(c);
-        // Curriculum starts must keep LEFT/RIGHT balanced and GLIDE above/below.
-        auto locConfig=c;locConfig.training.curriculumStage=CurriculumStage::Loc;
-        FlightEnvironment locEnv(locConfig,DefaultDataRoot(),761U);
-        bool seenLeft=false,seenRight=false;
-        for(int e=0;e<20;++e)
-        {
-            locEnv.Reset();
-            auto const g=locEnv.CurrentGuidance();
-            seenLeft|=g.cross<0;seenRight|=g.cross>0;
-            Check(locEnv.Settings().training.curriculumStage==CurriculumStage::Loc,"LOC gate active");
-        }
-        Check(seenLeft && seenRight,"LOC gate explores both sides of runway");
-        auto glideConfig=c;glideConfig.training.curriculumStage=CurriculumStage::Glide;
-        glideConfig.training.locReminderProbability=0;
-        FlightEnvironment glideEnv(glideConfig,DefaultDataRoot(),762U);
-        bool high=false,low=false;
-        for(int e=0;e<20;++e)
-        {
-            glideEnv.Reset();
-            auto const g=glideEnv.CurrentGuidance();
-            high|=g.glideError>0;low|=g.glideError<0;
-            Check(std::abs(g.cross)<0.1,"glide gate begins on LOC axis");
-        }
-        Check(high && low,"glide gate samples both sides of descending plane");
-        glideConfig.training.locReminderProbability=1;
-        FlightEnvironment reminderEnv(glideConfig,DefaultDataRoot(),763U);
-        reminderEnv.Reset();
-        Check(reminderEnv.Settings().training.curriculumStage==CurriculumStage::Loc,
-            "gate 2 can replay true LOC-only episodes");
-        c.mission.maxSeconds=0.2; c.mission.actionSubsteps=1;
-        FlightEnvironment shortEpisode(c); shortEpisode.Reset();
-        StepResult last{};
-        for (int i=0; i<25 && !last.truncated; ++i) last=shortEpisode.Step(action);
-        Check(last.truncated && !last.terminated,"actual FDM time limit");
-        Rejects([&] { shortEpisode.Step(action); },"step after reset boundary");
-        auto random=LoadConfig(PPO_FLIGHT_CONFIG);
-        random.initial.runwayAlignedProbability=1;
-        FlightEnvironment randomized(random);
-        for(int episode=0;episode<32;++episode)
-        {
-            randomized.Reset();
-            auto const local=DeckCoordinates(randomized.Settings().runway,randomized.Aircraft().position);
-            double const expectedHeight=randomized.Settings().runway.thresholdHeightMeters
-                -local.north*std::tan(random.mission.glideDegrees*DegreesToRadians);
-            Check(Near(local.up,expectedHeight,0.1),"real FDM reset preserves the configured glide height");
-            Check(local.north<0 && Near(local.east,0,0.02)
-                && Near(WrapAngle(randomized.Aircraft().heading-randomized.Settings().runway.headingDegrees*DegreesToRadians),0,1e-6),
-                "native JSBSim reset preserves runway centreline and inbound heading on moving tilted runways");
-            Check(randomized.Aircraft().airspeed>=random.initial.speedMps.minimum-0.1 && randomized.Aircraft().airspeed<=random.initial.speedMps.maximum+0.1,"real FDM randomized calibrated speed");
-        }
-        JsbsimAircraft fdm(random,DefaultDataRoot());
-        std::mt19937 generator(77);
-        SpawnPlacementSampler placements{};
-        auto const motion=SampleRunway(random,generator);
-        auto const deck=RunwayAt(motion,0);
-        fdm.SetRunwayMotion(motion);
-        auto const placement=placements.Next(random.initial.runwayAlignedProbability,generator);
-        fdm.Reset(SampleAircraft(random,deck,placement,generator));
-        auto const probe=fdm.ProbeGround(FromRunway(deck,500,0,10));
-        auto const expected=RunwayNormal(deck),velocity=DeckVelocity(deck,FromRunway(deck,500,0,0));
-        Check(Near(probe.height,10,1e-6) && Near(probe.normal.north,expected.north,1e-6)
-            && Near(probe.normal.up,expected.up,1e-6),"JSBSim uses the tilted moving contact plane");
-        Check(Near(probe.velocity.north,velocity.north,1e-6) && Near(probe.velocity.up,velocity.up,1e-6),"JSBSim receives moving surface velocity");
-        auto const offDeck=FromRunway(deck,500,random.runway.widthMeters+100,10);
-        Check(Near(fdm.ProbeGround(offDeck).height,offDeck.up-motion.seaHeight,1e-6),"finite deck falls back to sea outside runway");
-        random.initial.gearDown=true;random.initial.throttle=0;
-        JsbsimAircraft touchdownFdm(random,DefaultDataRoot());
-        touchdownFdm.SetRunwayMotion(motion);
-        AircraftState descending{};
-        descending.position=FromRunway(deck,500,0,2.5);descending.airspeed=3;
-        descending.heading=deck.headingDegrees*DegreesToRadians;
-        descending.pitch=deck.pitch;descending.roll=deck.roll;descending.velocity.up=-1;
-        auto contact=touchdownFdm.Reset(descending);
-        bool contacted=contact.weightOnWheels;
-        for(int i=0;i<300 && !contacted;++i)
-        {
-            contact=touchdownFdm.Advance({0,0,0,0,1,true});
-            Check(IsFinite(contact),"finite native moving-deck contact dynamics");
-            contacted=contact.weightOnWheels;
-        }
-        Check(contacted && contact.position.up>motion.seaHeight+5,"real wheels contact the moving elevated runway");
+        FilteredControls();
+        TrainingStartsAndRudderAuthority();
+        ControlProbes();
+        FiniteSurfaceContactAuthority();
+        PhaseControlMapping();
+        NativeTouchdownAndStop();
+        NeutralRolloutBrakesToStop();
+        NoseWheelSteering();
+        ActionLevelPotential();
+        IndependentResetAttitude();
     }
     catch(std::exception const& e) { std::cerr<<e.what()<<'\n'; return 1; }
     std::cout<<"Native JSBSim regressions passed\n";

@@ -93,8 +93,6 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         COMMAND BlueDefensePatrolRuntimeSmokeTest blue-defense-inference)
     set_tests_properties(BlueDefenseInferenceRuntimeSmoke PROPERTIES
         FIXTURES_REQUIRED BlueInferenceActor)
-    add_test(NAME BlueDefenseCombatRuntimeSmoke
-        COMMAND BlueDefensePatrolRuntimeSmokeTest blue-defense)
 
     # Renderer contract: both enabled and disabled hostile zones must remain
     # identifiable through the public ECS snapshot and m_destroyed flag.

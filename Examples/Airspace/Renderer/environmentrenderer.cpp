@@ -25,6 +25,7 @@
 #include <stdexcept>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <imgui.h>
@@ -2919,27 +2920,79 @@ EnvironmentRenderer::DrawTrainingControls(std::shared_ptr<AgentController> const
 */
 void
 EnvironmentRenderer::DrawRewardControls(std::shared_ptr<AgentController> const& agent,
-                                        ppo::model::sAgentStateSnaphot const& state)
+                                        ppo::model::sAgentStateSnaphot const& state,entt::registry const& snapshot)
 {
     if (agent == nullptr || p_environment == nullptr)
         return;
 
     agent->m_clamp = state.m_common.m_rewardClamp;
-    agent->m_scalings = state.m_scalings;
-
     if (m_flightControlView)
     {
+        bool editable=state.m_common.m_training;
+        agent->m_rewardDrafts.resize(state.m_scalings.size());
+        ImGui::TextWrapped("Changes are saved to the scenario and applied at the next PPO rollout boundary.");
+#ifdef PPO_WITH_FLIGHT_CONTROL
+        ppo::examples::flight::FlightSnapshot const* flightSnapshot=nullptr;
+        if(snapshot.ctx().contains<ppo::examples::flight::FlightSnapshot>())
+        {
+            auto const& flight=snapshot.ctx().get<ppo::examples::flight::FlightSnapshot>();
+            flightSnapshot=&flight;
+            editable=flight.training && !flight.failed;
+            if(flight.rewardTuningStatus[0]!='\0') ImGui::TextWrapped("%s",flight.rewardTuningStatus.data());
+        }
+#endif
+        ImGui::TextDisabled("Some weights are constrained by the lesson-completion bonus.");
+        ImGui::TextDisabled("Ctrl+click a slider to enter a precise value, e.g. 0.1.");
+        ImGui::TextDisabled("Episode sum / PPO mean per action. Bars relative to Crash or Stop.");
         for (std::size_t i = 0; i < state.m_scalings.size(); ++i)
         {
+            // The surrounding agent ID plus this index scopes every widget,
+            // even when two reward labels are identical.
+            ImGui::PushID(static_cast<int>(i));
+            std::uint64_t revision{};
+#ifdef PPO_WITH_FLIGHT_CONTROL
+            if(flightSnapshot)
+            {
+                if(i<flightSnapshot->rewardTuningRevisions.size())
+                    revision=flightSnapshot->rewardTuningRevisions[i];
+            }
+#endif
+            auto& draft=agent->m_rewardDrafts[i];
             char const* const name = i < state.m_rewardnames.size()
                 ? state.m_rewardnames[i].c_str() : "Reward";
-            ImGui::Text("%s: weight %+.3f", name, state.m_scalings[i]);
-            if (i < state.m_rewards.size())
-                ImGui::TextDisabled("  current %+.4f", state.m_rewards[i]);
+            if(draft.editing && ImGui::GetActiveID()!=ImGui::GetID(name)) draft.editing=false;
+            draft.Sync(state.m_scalings[i],revision);
+            bool const crash=std::string_view{name}=="Crash";
+            bool const terminal=std::string_view{name}=="Stop" || std::string_view{name}=="Touchdown"
+                || std::string_view{name}=="LessonComplete";
+            float const minimum=crash ? -500.F : 0.F;
+            float const maximum=crash ? 0.F : (terminal ? 500.F : 100.F);
+            ImGui::BeginDisabled(!editable);
+            if(ImGui::SliderFloat(name,&draft.value,minimum,maximum,"%.3f",
+                ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp))
+            {
+                ppo::model::sAgentRealTimeCommand command{};
+                command.m_id=agent->m_id;
+                command.m_rewardScaling=draft.value;
+                command.m_rewardScalingType=static_cast<unsigned char>(i);
+                command.m_type=ppo::model::sAgentRealTimeCommand::eTypeCommand::RewardScaling;
+                p_environment->AddAgentCommand(command);
+                draft.Submitted(revision);
+            }
+            draft.editing=ImGui::IsItemActive();
+            ImGui::EndDisabled();
+#ifdef PPO_WITH_FLIGHT_CONTROL
+            if(i<state.m_rewards.size() && snapshot.ctx().contains<ppo::examples::flight::FlightSnapshot>())
+            {
+                ppo::examples::flight::DrawFlightRewardBar(snapshot.ctx().get<ppo::examples::flight::FlightSnapshot>(),i);
+            }
+#endif
+            ImGui::PopID();
         }
         return;
     }
 
+    agent->m_scalings = state.m_scalings;
     if (ImGui::SliderFloat("Reward clamp", &agent->m_clamp, 0.5F, 100.F))
     {
         ppo::model::sAgentRealTimeCommand command{};
@@ -3129,8 +3182,7 @@ EnvironmentRenderer::DrawLearningProgress(std::shared_ptr<AgentController> const
 
     ImGui::SeparatorText("Model evaluation");
     ImGui::Text("LATEST  %.2f", common.m_latestEvaluationNotation);
-    if (!m_flightControlView)
-        ImGui::Text("BEST    %.2f", common.m_notation);
+    ImGui::Text("BEST    %.2f", common.m_notation);
     ImGui::Text("SUCCESS %.1f%%", 100.F * common.m_latestEvaluationSuccessRate);
     if (!m_flightControlView)
     {
@@ -3590,12 +3642,20 @@ EnvironmentRenderer::DrawTacticalWindow(entt::registry const& snapshot)
             return;
         }
         auto const& flight = snapshot.ctx().get<ppo::examples::flight::FlightSnapshot>();
-        ImGui::Text("Cessna 310 | FPS %d", GetFPS());
+        ImGui::Text("T-6 Texan II | FPS %d", GetFPS());
         ReleaseMultipleCameraTextures();
         ImVec2 const size = ImGui::GetContentRegionAvail();
-        EnsureTacticalTexture(static_cast<int>(size.x), static_cast<int>(size.y));
-        ppo::examples::flight::DrawFlightScene(flight, m_tacticalTexture);
-        rlImGuiImageRenderTextureFit(&m_tacticalTexture, true);
+        float const profileHeight=std::clamp(size.y*0.34F,160.F,260.F);
+        float const sceneHeight=std::max(80.F,size.y-profileHeight-ImGui::GetStyle().ItemSpacing.y);
+        if(ImGui::BeginChild("##flight-scene",ImVec2(0.F,sceneHeight)))
+        {
+            ImVec2 const sceneSize=ImGui::GetContentRegionAvail();
+            EnsureTacticalTexture(static_cast<int>(sceneSize.x), static_cast<int>(sceneSize.y));
+            ppo::examples::flight::DrawFlightScene(flight, m_tacticalTexture);
+            rlImGuiImageRenderTextureFit(&m_tacticalTexture, true);
+        }
+        ImGui::EndChild();
+        ppo::examples::flight::DrawFlightApproachProfile(flight);
         ImGui::End();
         return;
     }
@@ -4377,7 +4437,8 @@ EnvironmentRenderer::DrawAgentsWindow(entt::registry const& snapshot)
         if (agent == nullptr)
             continue;
 
-        ImGui::PushID(static_cast<int>(state.m_id));
+        auto const agentId=std::to_string(state.m_id);
+        ImGui::PushID(agentId.c_str());
         if (ImGui::CollapsingHeader(state.m_name.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
         {
             ImGui::TextDisabled("Model version %u  |  Step %lld / %lld",
@@ -4395,7 +4456,7 @@ EnvironmentRenderer::DrawAgentsWindow(entt::registry const& snapshot)
                 {
                     if (!m_flightControlView)
                         ImGui::TextWrapped("Changes apply to the active training agent.");
-                    DrawRewardControls(agent, state);
+                    DrawRewardControls(agent, state, snapshot);
                     ImGui::SeparatorText("Rollout");
                     DrawTrainingControls(agent, state);
                     ImGui::EndTabItem();

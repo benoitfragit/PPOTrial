@@ -7,6 +7,10 @@
 namespace ppo::examples::flight {
 namespace {
 using Json=nlohmann::json;
+// Version 1 used one continuous RNG stream; version 2 seeds each episode
+// independently; version 3 stratifies rolling and airborne starts up to the
+// curriculum difficulty recorded in the manifest.
+constexpr unsigned EvaluationProtocolVersion=3;
 std::string Checksum(std::filesystem::path const& path)
 {
     // FNV-1a is an integrity checksum, not a security/authentication mechanism.
@@ -32,7 +36,10 @@ std::optional<BestRecord> ReadBest(Config const& config,std::filesystem::path co
         throw std::runtime_error("FlightControl3D: incompatible BEST validation contract");
     BestRecord record{};
     auto& m=record.metrics;
-    m.update=json.at("update").get<std::uint64_t>();m.episodes=json.at("episodes").get<std::size_t>();
+    m.update=json.at("update").get<std::uint64_t>();
+    // Earlier protocols always evaluated the full airborne task.
+    m.difficulty=json.value("difficulty",1.0);
+    m.episodes=json.at("episodes").get<std::size_t>();
     m.touchdowns=json.at("touchdowns").get<std::size_t>();m.stops=json.at("stops").get<std::size_t>();
     m.crashes=json.at("crashes").get<std::size_t>();m.timeouts=json.at("timeouts").get<std::size_t>();
     m.touchdownSumMeters=json.at("touchdownSumMeters").get<double>();m.stopSumMeters=json.at("stopSumMeters").get<double>();
@@ -43,7 +50,8 @@ std::optional<BestRecord> ReadBest(Config const& config,std::filesystem::path co
     if(Checksum(record.checkpoint)!=json.at("fnv1a64").get<std::string>())
         throw std::runtime_error("FlightControl3D: BEST checkpoint/manifest mismatch");
     // Preserve the old generation; its score requires the exact current contract.
-    if(changedContract) return std::nullopt;
+    if(changedContract || json.value("evaluationProtocolVersion",1U)!=EvaluationProtocolVersion)
+        return std::nullopt;
     return record;
 }
 void CommitPointer(std::filesystem::path const& path,Json const& json)
@@ -70,7 +78,9 @@ void ValidationMetrics::Record(MissionState const& mission)
 }
 bool Validated(Config const& config,ValidationMetrics const& m) noexcept
 {
-    return m.episodes==config.evaluation.episodes && m.episodes>0 && m.touchdowns<=m.episodes && m.stops<=m.touchdowns
+    return m.episodes==config.evaluation.episodes && m.episodes>0
+        && std::isfinite(m.difficulty) && m.difficulty>=0 && m.difficulty<=1
+        && m.touchdowns<=m.episodes && m.stops<=m.touchdowns
         && m.stops<=m.episodes && m.crashes<=m.episodes && m.timeouts<=m.episodes
         && m.stops+m.crashes+m.timeouts==m.episodes && m.SuccessRate()>=config.evaluation.minimumSuccessRate
         && std::isfinite(m.stopSumMeters) && std::isfinite(m.touchdownSumMeters)
@@ -80,12 +90,20 @@ bool Validated(Config const& config,ValidationMetrics const& m) noexcept
 }
 bool Better(ValidationMetrics const& candidate,ValidationMetrics const& incumbent) noexcept
 {
+    // Campaigns follow the curriculum: a policy validated on a harder mix
+    // supersedes one validated on an easier mix, whatever their stop rates.
+    if(candidate.difficulty!=incumbent.difficulty) return candidate.difficulty>incumbent.difficulty;
     return candidate.SuccessRate()>incumbent.SuccessRate()
         || (candidate.SuccessRate()==incumbent.SuccessRate() && candidate.MeanStop()<incumbent.MeanStop());
 }
 FlightModelStore::FlightModelStore(Config const& config,std::filesystem::path directory)
     : config_(config),directory_(std::move(directory)) {}
-std::filesystem::path FlightModelStore::Latest() const { return directory_/"latest/flight_hybrid_v1.txt"; }
+void FlightModelStore::SetRewardContract(RewardSettings const& settings,std::string const& signature)
+{
+    config_.reward=settings;config_.checkpointSignature=signature;
+}
+std::filesystem::path FlightModelStore::Latest() const { return directory_/"latest/flight_policy.txt"; }
+std::filesystem::path FlightModelStore::CurriculumLevel() const { return directory_/"latest/curriculum_level.txt"; }
 std::optional<ValidationMetrics> FlightModelStore::BestMetrics(bool allowTrainingChanges) const
 {
     auto const record=ReadBest(config_,directory_,allowTrainingChanges);
@@ -118,8 +136,11 @@ bool FlightModelStore::Promote(FlightLearner const& learner,ValidationMetrics co
         std::filesystem::remove(pending);
     }
     else std::filesystem::rename(pending,destination);
-    Json manifest{{"formatVersion",1},{"signature",config_.checkpointSignature},{"seed",config_.evaluation.seed},
-        {"requiredEpisodes",config_.evaluation.episodes},{"update",metrics.update},{"episodes",metrics.episodes},
+    Json manifest{{"formatVersion",1},{"signature",config_.checkpointSignature},
+        {"evaluationProtocolVersion",EvaluationProtocolVersion},
+        {"seed",config_.evaluation.seed},
+        {"requiredEpisodes",config_.evaluation.episodes},{"update",metrics.update},
+        {"difficulty",metrics.difficulty},{"episodes",metrics.episodes},
         {"touchdowns",metrics.touchdowns},{"stops",metrics.stops},{"crashes",metrics.crashes},{"timeouts",metrics.timeouts},
         {"touchdownSumMeters",metrics.touchdownSumMeters},{"stopSumMeters",metrics.stopSumMeters},
         {"score",metrics.Score()},{"checkpoint",filename},{"fnv1a64",checksum}};

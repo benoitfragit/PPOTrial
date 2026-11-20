@@ -22,6 +22,7 @@
 #include "environment.hpp"
 #include "ppo/core/learning_monitor.hpp"
 #include "tactical_view_layout.hpp"
+#include "reward_slider_draft.hpp"
 
 namespace ppo::renderer {
 
@@ -157,6 +158,8 @@ public:
         * @brief Reward scaling values shown in the UI.
         */
         std::vector<float> m_scalings{};
+        /** @brief Flight reward edits retained until acknowledged by the simulation. */
+        std::vector<RewardSliderDraft> m_rewardDrafts{};
         /**
         * @brief Rollout length configured for the agent.
         */
@@ -428,7 +431,7 @@ private:
     * @param state Current agent snapshot.
     */
     void DrawRewardControls(std::shared_ptr<AgentController> const& agent,
-                            ppo::model::sAgentStateSnaphot const& state);
+                            ppo::model::sAgentStateSnaphot const& state,entt::registry const& snapshot);
     /**
     * @brief Draws the plot selection area for one agent.
     * @param agent UI controller for the selected agent.

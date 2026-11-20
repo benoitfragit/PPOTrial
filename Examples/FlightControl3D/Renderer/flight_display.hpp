@@ -1,34 +1,49 @@
 #pragma once
-#include "flight_mission.hpp"
+#include "runway_geometry.hpp"
+#include <algorithm>
 
 namespace ppo::examples::flight {
 
-/** Render-only ILS references, anchored to the instantaneous runway frame. */
-struct IlsDisplayGeometry final
+/**
+ * @brief Normalize a signed episode reward against Stop or the magnitude of Crash.
+ * @param episode Signed accumulated channel reward.
+ * @param stop Current Stop weight.
+ * @param crash Current Crash weight.
+ * @return A bounded bar fraction; if a reference is zero, use the other or one.
+ */
+inline float RewardProgressFraction(double episode,double stop,double crash) noexcept
 {
-    Vec3 localizerOrigin{}, localizerEnd{}, localizerLeft{}, localizerRight{};
-    Vec3 glideOrigin{}, glideEnd{}, glideLow{}, glideHigh{};
-};
+    double const reference=episode<0 ? std::abs(crash) : std::abs(stop);
+    double const alternate=episode<0 ? std::abs(stop) : std::abs(crash);
+    double const scale=reference>0 ? reference : (alternate>0 ? alternate : 1.0);
+    return static_cast<float>(std::clamp(std::abs(episode)/scale,0.0,1.0));
+}
 
-inline IlsDisplayGeometry MakeIlsDisplayGeometry(Runway const& runway, double range,
-    double glideDegrees, double localizerCaptureDegrees, double glideCaptureDegrees) noexcept
+/**
+ * @brief Positions the runway camera near the threshold, looking toward it.
+ * @param runway Current runway pose and positive physical length.
+ * @return Camera position in world coordinates, eight metres above the runway.
+ */
+inline Vec3 RunwayCameraPosition(Runway const& runway) noexcept
 {
-    IlsDisplayGeometry result{};
-    // Lift the ground reference slightly to avoid depth fighting with the deck.
-    constexpr double GroundLineHeight = 0.2;
-    double const halfWidth = range*std::tan(localizerCaptureDegrees*DegreesToRadians);
-    result.localizerOrigin = FromRunway(runway,0,0,GroundLineHeight);
-    result.localizerEnd = FromRunway(runway,-range,0,GroundLineHeight);
-    result.localizerLeft = FromRunway(runway,-range,-halfWidth,GroundLineHeight);
-    result.localizerRight = FromRunway(runway,-range,halfWidth,GroundLineHeight);
-    result.glideOrigin = FromRunway(runway,0,0,runway.thresholdHeightMeters);
-    result.glideEnd = FromRunway(runway,-range,0,
-        runway.thresholdHeightMeters+range*std::tan(glideDegrees*DegreesToRadians));
-    result.glideLow = FromRunway(runway,-range,0,
-        runway.thresholdHeightMeters+range*std::tan((glideDegrees-glideCaptureDegrees)*DegreesToRadians));
-    result.glideHigh = FromRunway(runway,-range,0,
-        runway.thresholdHeightMeters+range*std::tan((glideDegrees+glideCaptureDegrees)*DegreesToRadians));
-    return result;
+    constexpr double DistanceFromThresholdMeters=300.0;
+    constexpr double CameraHeightMeters=8.0;
+    return FromRunway(runway,std::min(DistanceFromThresholdMeters,runway.lengthMeters*0.5),
+        0,CameraHeightMeters);
+}
+
+/**
+ * @brief Zooms the fixed runway camera toward a distant aircraft.
+ * @param camera Camera position in world metres.
+ * @param aircraft Aircraft position in world metres.
+ * @return Bounded vertical field of view in degrees.
+ */
+inline double RunwayCameraFieldOfView(Vec3 camera,Vec3 aircraft) noexcept
+{
+    double const distance=std::hypot(std::hypot(aircraft.north-camera.north,
+        aircraft.east-camera.east),aircraft.up-camera.up);
+    if(!std::isfinite(distance) || distance<1.0) return 50.0;
+    return std::clamp(2.0*std::atan(50.0/distance)/DegreesToRadians,0.4,50.0);
 }
 
 /** Same deck-relative flight-path angle as the existing slope reward. */

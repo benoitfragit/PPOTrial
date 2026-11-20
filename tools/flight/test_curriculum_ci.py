@@ -1,4 +1,4 @@
-"""Deterministic regression tests: repeated failures, progression and recovery."""
+"""Deterministic regression tests for the bounded FlightControl3D training runner."""
 
 import json
 import os
@@ -9,37 +9,50 @@ import tempfile
 import unittest
 
 RUNNER = Path(__file__).with_name("curriculum_ci.py")
+ROOT = RUNNER.parents[2]
 FAKE_HEADLESS = '''#!/usr/bin/env python3
 import json, os
 from pathlib import Path
 import sys
 args = sys.argv
+dimensions = "33 5 5 128"
+if "--inspect-contract" in args:
+    print(json.dumps(dict(observations=33, actions=5, outputs=5, width=128,
+                          build=os.environ.get("NATIVE_BUILD", "Release"), signature={"contractVersion": 1})))
+    sys.exit(0)
+if "--check-checkpoint" in args:
+    lines = Path(args[args.index("--check-checkpoint") + 1]).read_text().splitlines()
+    if os.environ.get("REJECT_CHECKPOINT") == "1":
+        print("incompatible checkpoint signature", file=sys.stderr)
+        sys.exit(1)
+    print(f"[FLIGHT_CHECKPOINT] compatible=true updates={lines[0].split()[5]}")
+    sys.exit(0)
 output = Path(args[args.index("--output") + 1])
-stage = args[args.index("--stage") + 1]
 target = int(args[args.index("--updates") + 1])
-with (output / "calls.txt").open("a") as f: f.write(f"{stage} {target}\\n")
-checkpoint = output / "latest" / "flight_hybrid_v1.txt"
+with Path(os.environ["ALL_CALLS"]).open("a") as calls: calls.write(f"{target}\\n")
+checkpoint = output / "latest" / "flight_policy.txt"
 checkpoint.parent.mkdir(parents=True, exist_ok=True)
-checkpoint.write_text(f"PPO_FLIGHT_HYBRID_V1 56 5 128 {target}\\n")
+checkpoint.write_text(f"PPO_FLIGHT_POLICY_V3 {dimensions} {target}\\nsignature\\noptimizer and RNG\\n")
 (output / "training.csv").write_text("episode,updates\\n1,1\\n")
-threshold = json.loads(os.environ["PASS_AT"])[stage]
-passed = target >= threshold
+full_task = target >= int(os.environ["FULL_TASK_AT"])
+passed = full_task and target >= int(os.environ["PASS_AT"])
+easy_success = not full_task and os.environ.get("EASY_LEVEL_SUCCEEDS") == "1"
+successes = 19 if passed or easy_success else 0
 if os.environ.get("MALFORMED_GATE") == "1":
     print("[FLIGHT_GATE] incorrect result")
 else:
-    print(f"[FLIGHT_GATE] stage={stage} successes={19 if passed else 0} episodes=20 passed={str(passed).lower()}")
+    print(f"[FLIGHT_GATE] successes={successes} episodes=20 difficulty={1 if full_task else 0.4} "
+          f"passed={str(passed).lower()}")
 '''
 
 
-class CurriculumTests(unittest.TestCase):
+class TrainingRunnerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
         self.output = root / "output"
-        (self.output / "latest").mkdir(parents=True)
-        self.checkpoint = self.output / "latest" / "flight_hybrid_v1.txt"
-        self.checkpoint.write_text("PPO_FLIGHT_HYBRID_V1 56 5 128 0\n")
+        self.checkpoint = self.output / "latest" / "flight_policy.txt"
         self.config = root / "config.json"
         self.config.write_text(json.dumps({"evaluation": {"episodes": 20, "minimumSuccessRate": .92}}))
         self.fake = root / ("headless.py" if os.name == "nt" else "headless")
@@ -50,74 +63,92 @@ class CurriculumTests(unittest.TestCase):
             # Windows CreateProcess cannot execute a Python shebang directly.
             self.launcher = root / "headless.cmd"
             self.launcher.write_text(f'@echo off\r\n"{sys.executable}" "{self.fake}" %*\r\n')
+        self.all_calls = root / "all_calls.txt"
         self.summary = root / "summary.txt"
 
-    def execute(self, max_updates=100, stage="progressive", interval=10, malformed=False):
-        env = {**os.environ, "PASS_AT": json.dumps({"loc": 30, "glide": 50, "joint": 70}),
-               "GITHUB_STEP_SUMMARY": str(self.summary), "MALFORMED_GATE": str(int(malformed))}
-        return subprocess.run([sys.executable, str(RUNNER), "--executable", str(self.launcher),
-                               "--config", str(self.config), "--output", str(self.output),
-                               "--stage", stage, "--updates-per-evaluation", str(interval),
-                               "--max-additional-updates", str(max_updates),
-                               "--runtime-seconds", "30"], env=env, capture_output=True, text=True)
+    def execute(self, pass_at=30, max_updates=100, interval=10, malformed=False, require_release=False,
+                native_build="Release", reject_checkpoint=False, full_task_at=0, easy_level_succeeds=False):
+        env = {**os.environ, "PASS_AT": str(pass_at), "ALL_CALLS": str(self.all_calls),
+               "FULL_TASK_AT": str(full_task_at), "EASY_LEVEL_SUCCEEDS": str(int(easy_level_succeeds)),
+               "GITHUB_STEP_SUMMARY": str(self.summary), "MALFORMED_GATE": str(int(malformed)),
+               "NATIVE_BUILD": native_build, "REJECT_CHECKPOINT": str(int(reject_checkpoint))}
+        command = [sys.executable, str(RUNNER), "--executable", str(self.launcher),
+                   "--config", str(self.config), "--output", str(self.output),
+                   "--updates-per-evaluation", str(interval),
+                   "--max-additional-updates", str(max_updates), "--runtime-seconds", "30"]
+        if require_release:
+            command.append("--require-release")
+        return subprocess.run(command, env=env, capture_output=True, text=True)
 
-    def test_progressive_retries_each_gate_until_independently_validated(self):
-        result = self.execute()
+    def calls(self):
+        return self.all_calls.read_text().split() if self.all_calls.exists() else []
+
+    def test_fresh_policy_trains_blocks_until_independently_validated(self):
+        result = self.execute(pass_at=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual((self.output / "curriculum_stage.txt").read_text().strip(), "done")
-        self.assertEqual((self.output / "curriculum_status.txt").read_text().strip(), "completed")
-        self.assertEqual((self.output / "calls.txt").read_text().splitlines(),
-                         ["loc 10", "loc 20", "loc 30", "glide 40", "glide 50", "joint 60", "joint 70"])
-        self.assertEqual(len(list(self.output.glob("training_*.csv"))), 7)
+        self.assertEqual(self.calls(), ["10", "20", "30"])
+        self.assertEqual((self.output / "training_status.txt").read_text().strip(), "completed")
+        self.assertTrue((self.output / "training_30.csv").is_file())
 
-    def test_fresh_v2_curriculum_starts_without_a_checkpoint(self):
-        self.checkpoint.unlink()
-        self.checkpoint.parent.rmdir()
-        result = self.execute()
+    def test_easy_curriculum_level_success_does_not_pass_the_gate(self):
+        result = self.execute(pass_at=10, full_task_at=30, easy_level_succeeds=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual((self.output / "calls.txt").read_text().splitlines(),
-                         ["loc 10", "loc 20", "loc 30", "glide 40", "glide 50", "joint 60", "joint 70"])
-        self.assertEqual(self.checkpoint.read_text().split()[4], "70")
-        self.assertEqual((self.output / "curriculum_status.txt").read_text().strip(), "completed")
+        self.assertEqual(self.calls(), ["10", "20", "30"])
+        self.assertEqual((self.output / "training_status.txt").read_text().strip(), "completed")
 
-    def test_missing_resume_checkpoint_is_rejected_before_training(self):
-        self.checkpoint.unlink()
-        (self.output / "curriculum_stage.txt").write_text("glide\n")
-        result = self.execute()
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("Missing checkpoint for saved FlightControl3D curriculum stage", result.stderr)
-        self.assertFalse((self.output / "calls.txt").exists())
+    def test_exhausted_budget_is_not_a_false_success(self):
+        result = self.execute(pass_at=1000, max_updates=25)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), ["10", "20", "25"])
+        self.assertEqual((self.output / "training_status.txt").read_text().strip(), "incomplete")
 
-    def test_budget_limit_is_not_a_false_success_and_can_resume(self):
-        first = self.execute(max_updates=20)
-        self.assertEqual(first.returncode, 2, first.stdout + first.stderr)
-        self.assertEqual(self.checkpoint.read_text().split()[4], "20")
-        self.assertEqual((self.output / "curriculum_stage.txt").read_text().strip(), "loc")
-        self.assertEqual((self.output / "curriculum_status.txt").read_text().strip(), "incomplete")
-        second = self.execute(max_updates=60)
-        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
-        self.assertEqual((self.output / "curriculum_stage.txt").read_text().strip(), "done")
-        self.assertEqual(self.checkpoint.read_text().split()[4], "70")
-
-    def test_manual_stage_stops_after_validation_and_saves_next_stage(self):
-        result = self.execute(stage="loc")
+    def test_resume_continues_from_the_saved_update(self):
+        self.checkpoint.parent.mkdir(parents=True)
+        self.checkpoint.write_text("PPO_FLIGHT_POLICY_V3 33 5 5 128 70\nsignature\n")
+        result = self.execute(pass_at=80)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual((self.output / "curriculum_stage.txt").read_text().strip(), "glide")
-        self.assertEqual((self.output / "calls.txt").read_text().splitlines(),
-                         ["loc 10", "loc 20", "loc 30"])
+        self.assertEqual(self.calls(), ["80"])
 
-    def test_malformed_gate_result_is_not_promoted(self):
+    def test_previous_checkpoint_format_is_rejected_before_training(self):
+        self.checkpoint.parent.mkdir(parents=True)
+        self.checkpoint.write_text("PPO_FLIGHT_HYBRID_V2 39 5 6 128 70\n")
+        result = self.execute()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), [])
+
+    def test_natively_incompatible_checkpoint_is_rejected_before_training(self):
+        self.checkpoint.parent.mkdir(parents=True)
+        self.checkpoint.write_text("PPO_FLIGHT_POLICY_V3 33 5 5 128 70\nsignature\n")
+        result = self.execute(reject_checkpoint=True)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), [])
+
+    def test_malformed_validation_is_not_promoted(self):
         result = self.execute(malformed=True)
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("Missing or invalid independent gate evaluation", result.stderr)
-        self.assertEqual((self.output / "curriculum_stage.txt").read_text().strip(), "loc")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("invalid independent validation", result.stderr)
 
-    def test_invalid_checkpoint_is_rejected_before_training(self):
-        self.checkpoint.write_text("NOT_A_MODEL 56 5 128 0\n")
-        result = self.execute()
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("checkpoint header", result.stderr)
-        self.assertFalse((self.output / "calls.txt").exists())
+    def test_non_release_binary_fails_before_training(self):
+        result = self.execute(require_release=True, native_build="Debug")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), [])
+
+
+class RepositoryWiringTests(unittest.TestCase):
+    def test_workflow_trains_release_and_publishes_resumable_artifacts(self):
+        workflow = (ROOT / ".github" / "workflows" / "flight-control-training.yml").read_text()
+        self.assertIn("--require-release", workflow)
+        self.assertNotIn("--stage", workflow)
+        self.assertIn("build/flight-training/latest/flight_policy.txt", workflow)
+        self.assertIn("build/flight-training/best/**", workflow)
+        self.assertIn("build/flight-training/latest/curriculum_level.txt", workflow)
+
+    def test_desktop_launcher_auto_runs_without_forcing_max_speed(self):
+        launcher = (ROOT / "Lancer_FlightControl3D_Curriculum_Release.bat").read_text().lower()
+        self.assertIn("--auto-run", launcher)
+        self.assertNotIn("--max-speed", launcher)
+        self.assertNotIn("--curriculum", launcher)
+        self.assertIn("%*", launcher)
 
 
 if __name__ == "__main__":

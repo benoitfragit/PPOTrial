@@ -1,5 +1,5 @@
 #pragma once
-#include "hybrid_policy.hpp"
+#include "flight_policy.hpp"
 #include <memory>
 
 namespace ppo::examples::flight {
@@ -18,11 +18,18 @@ struct LearningStats final
 {
     std::uint64_t updates{};
     double policyLoss{}, valueLoss{}, entropy{}, meanReward{};
+    double maximumApproximateKl{};
+    /** @brief Largest sampled mean old-log-probability minus new-log-probability per minibatch. */
+    double maximumSampledKl{};
+    /** @brief Counts applied actor/critic steps and actor minibatches skipped by the KL guard. */
+    std::size_t actorSteps{},criticSteps{},actorKlSkips{};
     /** @brief Mean weighted reward contribution per actor action and channel. */
     std::array<double,RewardCount> meanRewards{};
+    /** @brief False before the first PPO update in this process, including after resume. */
+    bool hasRewardMeans{};
 };
 
-/** RLtools MLPs with Gaussian + Bernoulli PPO; no JSBSim/ECS dependency. */
+/** RLtools MLPs with a diagonal Gaussian PPO actor; no JSBSim/ECS dependency. */
 class FlightLearner final
 {
 public:
@@ -30,7 +37,8 @@ public:
     ~FlightLearner();
     FlightLearner(FlightLearner const&) = delete;
     FlightLearner& operator=(FlightLearner const&) = delete;
-    PolicyVector Evaluate(Observation const& observation);
+    PolicyDistribution Evaluate(Observation const& observation);
+    /** @brief Samples controls; the brake is active only during the ground roll. */
     PolicyAction Choose(Observation const& observation, bool deterministic = false);
     void Record(Observation const& observation, PolicyAction const& action,
         StepResult const& step, Observation const& nextObservation);
@@ -38,6 +46,8 @@ public:
     void Optimize();
     LearningStats const& Stats() const noexcept;
     std::size_t Collected() const noexcept;
+    /** @brief Update checkpoint metadata at an empty PPO rollout boundary. */
+    void SetRewardContract(RewardSettings const& settings,std::string const& signature);
     void Save(std::filesystem::path const& path) const;
     void Load(std::filesystem::path const& path);
     struct Impl;
