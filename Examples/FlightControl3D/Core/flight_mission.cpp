@@ -53,7 +53,7 @@ void RecordFirstContact(Config const& config, MissionState& mission, AircraftSta
     auto const local = DeckCoordinates(config.runway, contactPoint);
     mission.touchdownFromThreshold = local.north;
     mission.touchdownCrossMeters = local.east;
-    auto const velocityBefore = RunwayAxes(config.runway, before.velocity);
+    auto const velocityBefore = DeckRelativeVelocity(config.runway, before.velocity);
     mission.touchdownSinkMps = std::max(-velocityBefore.up, -guidance.relativeVelocity.up);
     mission.touchdownSpeedMps = std::hypot(guidance.relativeVelocity.north, guidance.relativeVelocity.east);
     mission.touchdownGearPosition = after.gearPosition;
@@ -95,7 +95,10 @@ void Rollout(Config const& config, MissionState& mission, AircraftState const& b
     AircraftState const& after, Guidance const& guidance, StepResult& result) noexcept
 {
     double const dt = config.mission.physicsDt;
-    auto const previous = DeckCoordinates(config.runway, before.position);
+    // The previous position is taken in the deck frame of the previous substep, so a moving
+    // deck carrying a stopped aircraft adds no ground roll.
+    auto const deckDisplacement = Scale(config.runway.velocity, dt);
+    auto const previous = DeckCoordinates(config.runway, Add(before.position, deckDisplacement));
     mission.groundRoll += std::hypot(guidance.along - previous.north, guidance.cross - previous.east);
     double const groundSpeed = std::hypot(guidance.relativeVelocity.north, guidance.relativeVelocity.east);
     // The stop timer accumulates only while every wheel is down below the
@@ -182,6 +185,15 @@ void AddShaping(Config const& config, MissionState const& mission, AircraftState
 StepResult AdvanceMission(Config const& config, MissionState& mission, AircraftState const& before,
     AircraftState const& after, CrashDiagnostic* crashDiagnostic) noexcept
 {
+    // On a static deck the state before the substep is evaluated with the same runway pose.
+    auto const previousPotentials = ShapingPotentials(config, mission, before);
+    return AdvanceMission(config, mission, before, after, previousPotentials, crashDiagnostic);
+}
+
+StepResult AdvanceMission(Config const& config, MissionState& mission, AircraftState const& before,
+    AircraftState const& after, std::array<double, RewardCount> const& previousPotentials,
+    CrashDiagnostic* crashDiagnostic) noexcept
+{
     StepResult result{};
     // After a boundary the mission is frozen: only the flags are reported.
     if (mission.outcome != Outcome::Flying)
@@ -190,7 +202,6 @@ StepResult AdvanceMission(Config const& config, MissionState& mission, AircraftS
         result.truncated = mission.outcome == Outcome::Timeout;
         return result;
     }
-    auto const previousPotentials = ShapingPotentials(config, mission, before);
     ++mission.steps;
     auto const guidance = Guide(config, mission, after);
     bool const contact = ContactDetected(config, after);

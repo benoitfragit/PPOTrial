@@ -138,6 +138,132 @@ void DrawLandingAreaSides(Runway const& runway, double seaHeight)
     }
 }
 
+// Sea-state display. The swell is drawn as moving crest bands around the deck and the deck
+// speed as a Kelvin wake behind it; both are visual only, JSBSim sees the level heaving deck.
+/** @brief Half extent of the drawn swell around the deck, in metres. */
+constexpr double SwellDrawHalfExtentMeters = 2000.0;
+/** @brief Width of a drawn swell crest band as a fraction of the wavelength. */
+constexpr double SwellCrestBandFraction = 0.1;
+/** @brief Height of the drawn sea-state marks above the sea, in metres (avoids z-fighting). */
+constexpr double SeaMarkHeightMeters = 1.0;
+/** @brief Half angle of a ship's Kelvin wake, in degrees. */
+constexpr double KelvinHalfAngleDegrees = 19.47;
+/** @brief Drawn wake length per metre per second of deck speed, in metres (one minute of travel). */
+constexpr double WakeSecondsOfTravel = 60.0;
+/** @brief Segments of the fading wake arms. */
+constexpr int WakeSegments = 6;
+constexpr Color SwellCrestColor{96, 150, 182, 255};
+constexpr Color WakeColor{214, 232, 240, 255};
+
+/** @brief Deep-water wavelength of a swell period, g T^2 / (2 pi), in metres. */
+double SwellWavelengthMeters(double periodSeconds) noexcept
+{
+    return StandardGravity * periodSeconds * periodSeconds / (2.0 * Pi);
+}
+
+/**
+ * @brief Draw the swell crests travelling along the runway axis around the deck.
+ *
+ * The sea height along the runway is amplitude * sin(swellAngle - k * along), so the
+ * crest that passes the threshold lifts the deck to the top of its heave.
+ * @param runway Current deck pose.
+ * @param deck Swell of the episode and its current angle.
+ * @param seaHeight Sea level in the local world frame, in metres.
+ */
+void DrawSwell(Runway const& runway, DeckState const& deck, double seaHeight)
+{
+    auto const& motion = deck.motion;
+    if (motion.swellAmplitudeMeters <= 0)
+    {
+        return;
+    }
+    double const wavelength = SwellWavelengthMeters(motion.swellPeriodSeconds);
+    double const waveNumber = 2.0 * Pi / wavelength;
+    double const centreAlong = runway.lengthMeters / 2;
+    double const firstAlong = centreAlong - SwellDrawHalfExtentMeters;
+    double const lastAlong = centreAlong + SwellDrawHalfExtentMeters;
+    double const bandHalfWidth = SwellCrestBandFraction * wavelength / 2;
+    double const crestHeight = seaHeight - runway.origin.up + SeaMarkHeightMeters;
+    // Crest n lies where swellAngle - k * along = pi / 2 + 2 pi n; the first is the one just
+    // ahead of firstAlong, and the count is bounded by the drawn extent.
+    double const crestZero = (deck.swellAngle - Pi / 2) / waveNumber;
+    double const firstCrest = crestZero + std::ceil((firstAlong - crestZero) / wavelength) * wavelength;
+    for (double along = firstCrest; along <= lastAlong; along += wavelength)
+    {
+        Quad(FromRunway(runway, along - bandHalfWidth, -SwellDrawHalfExtentMeters, crestHeight),
+            FromRunway(runway, along + bandHalfWidth, -SwellDrawHalfExtentMeters, crestHeight),
+            FromRunway(runway, along + bandHalfWidth, SwellDrawHalfExtentMeters, crestHeight),
+            FromRunway(runway, along - bandHalfWidth, SwellDrawHalfExtentMeters, crestHeight), SwellCrestColor);
+    }
+}
+
+/**
+ * @brief Draw the Kelvin wake that a deck under way leaves behind its stern.
+ * @param runway Current deck pose and dimensions.
+ * @param deck Deck speed of the episode.
+ * @param seaHeight Sea level in the local world frame, in metres.
+ */
+void DrawWake(Runway const& runway, DeckState const& deck, double seaHeight)
+{
+    double const speed = deck.motion.speedMps;
+    if (speed <= 0)
+    {
+        return;
+    }
+    double const stern = -runway.landingMarginMeters;
+    double const halfBeam = runway.widthMeters / 2 + runway.landingMarginMeters;
+    double const length = speed * WakeSecondsOfTravel;
+    double const spread = std::tan(KelvinHalfAngleDegrees * DegreesToRadians);
+    double const height = seaHeight - runway.origin.up + SeaMarkHeightMeters;
+    // Each arm and the turbulent centre fade in segments away from the stern.
+    for (int segment = 0; segment < WakeSegments; ++segment)
+    {
+        double const near = length * segment / WakeSegments;
+        double const far = length * (segment + 1) / WakeSegments;
+        auto const alpha = static_cast<unsigned char>(200 * (WakeSegments - segment) / WakeSegments);
+        Color const foam{WakeColor.r, WakeColor.g, WakeColor.b, alpha};
+        for (double const side : {-1.0, 1.0})
+        {
+            double const nearCross = side * (halfBeam + near * spread);
+            double const farCross = side * (halfBeam + far * spread);
+            double const armWidth = side * runway.widthMeters / 8;
+            Quad(FromRunway(runway, stern - near, nearCross, height),
+                FromRunway(runway, stern - far, farCross, height),
+                FromRunway(runway, stern - far, farCross - armWidth, height),
+                FromRunway(runway, stern - near, nearCross - armWidth, height), foam);
+        }
+        Color const centre{WakeColor.r, WakeColor.g, WakeColor.b, static_cast<unsigned char>(alpha / 2)};
+        double const nearHalf = halfBeam * (1.0 - 0.5 * near / length);
+        double const farHalf = halfBeam * (1.0 - 0.5 * far / length);
+        Quad(FromRunway(runway, stern - near, -nearHalf, height), FromRunway(runway, stern - far, -farHalf, height),
+            FromRunway(runway, stern - far, farHalf, height), FromRunway(runway, stern - near, nearHalf, height),
+            centre);
+    }
+}
+
+/**
+ * @brief Write the deck speed, the swell and the present heave in the 3D view's bottom-left corner.
+ * @param deck Deck motion of the episode.
+ * @param target Render target dimensions.
+ */
+void DrawDeckBanner(DeckState const& deck, RenderTexture2D const& target)
+{
+    if (!deck.motion.Moving())
+    {
+        return;
+    }
+    constexpr int FontSize = 16;
+    constexpr double MetresPerSecondToKnots = 3600.0 / 1852.0;
+    char text[160];
+    std::snprintf(text, sizeof(text), "DECK %.1f m/s (%.0f kt)   SWELL +/-%.1f m, %.0f s   HEAVE %+.2f m",
+        deck.motion.speedMps, deck.motion.speedMps * MetresPerSecondToKnots, deck.motion.swellAmplitudeMeters,
+        deck.motion.swellPeriodSeconds, deck.heaveMeters);
+    int const width = MeasureText(text, FontSize);
+    int const y = target.texture.height - FontSize - 12;
+    DrawRectangle(10, y - 4, width + 12, FontSize + 8, {14, 27, 44, 220});
+    DrawText(text, 16, y, FontSize, WakeColor);
+}
+
 /**
  * @brief Draw the physical runway and high-contrast markings at its exact dimensions.
  * @param runway Current physical runway pose and dimensions.
@@ -546,6 +672,8 @@ void DrawFlightScene(FlightSnapshot const& snapshot, RenderTexture2D const& targ
     // The sea is a visual backdrop; the actual finite moving surface is in JSBSim.
     DrawPlane(World({frame.aircraft.position.north, frame.aircraft.position.east, frame.seaHeightMeters}),
         {1000.F, 1000.F}, {18, 53, 75, 255});
+    DrawSwell(frame.runway, frame.deck, frame.seaHeightMeters);
+    DrawWake(frame.runway, frame.deck, frame.seaHeightMeters);
     DrawLandingAreaSides(frame.runway, frame.seaHeightMeters);
     DrawLandingArea(frame.runway);
     DrawRunway(frame.runway);
@@ -557,6 +685,7 @@ void DrawFlightScene(FlightSnapshot const& snapshot, RenderTexture2D const& targ
     }
     EndMode3D();
     DrawThresholdLabel(frame.runway, camera, target);
+    DrawDeckBanner(frame.deck, target);
     if (!showCrash)
     {
         DrawAircraftTag(frame, camera, target);
@@ -720,6 +849,32 @@ void DrawTargetsTable(FlightSnapshot const& state)
     ImGui::EndTable();
 }
 
+/** @brief Deck speed, swell and a heave gauge from the trough to the crest of the swell. */
+void DrawDeckMotionPanel(FlightSnapshot const& state)
+{
+    auto const& deck = state.deck;
+    if (!deck.motion.Moving())
+    {
+        ImGui::TextDisabled("Deck: static");
+        return;
+    }
+    ImGui::SeparatorText("Deck motion");
+    ImGui::Text("Deck speed: %.1f m/s along the runway | vertical %+.2f m/s", deck.motion.speedMps,
+        state.runway.velocity.up);
+    double const amplitude = deck.motion.swellAmplitudeMeters;
+    if (amplitude <= 0)
+    {
+        return;
+    }
+    ImGui::Text("Swell: +/-%.2f m, period %.1f s, wavelength %.0f m", amplitude,
+        deck.motion.swellPeriodSeconds, SwellWavelengthMeters(deck.motion.swellPeriodSeconds));
+    // The gauge is empty at the trough and full at the crest.
+    double const fraction = std::clamp(0.5 + 0.5 * deck.heaveMeters / amplitude, 0.0, 1.0);
+    char label[32];
+    std::snprintf(label, sizeof(label), "heave %+.2f m", deck.heaveMeters);
+    ImGui::ProgressBar(static_cast<float>(fraction), ImVec2(-1.F, 0.F), label);
+}
+
 /** @brief Runway dimensions and the aircraft position relative to it. */
 void DrawRunwayPanel(FlightSnapshot const& state)
 {
@@ -732,6 +887,7 @@ void DrawRunwayPanel(FlightSnapshot const& state)
     }
     ImGui::Text("Runway %.2f km | Height %.0f m", state.guidance.distance / 1000, state.guidance.height);
     ImGui::Text("Runway lateral: %+.0f m (%s)", state.guidance.cross, LateralSideName(state.guidance.cross));
+    DrawDeckMotionPanel(state);
 }
 
 /** @brief Network mean, sampled raw and applied value of each control. */

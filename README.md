@@ -31,7 +31,7 @@ Sans `--example`, l'application affiche le sélecteur graphique. Avec
 
 FlightControl3D utilise le scénario d'atterrissage T-6 configuré dans
 `resources/settings/Scenarios/FlightControl3D_T6_Joint.json`. L'entraînement
-reprend `latest` depuis `resources/model/FlightControl3D/t6texan2_joint_v4`,
+reprend `latest` depuis `resources/model/FlightControl3D/t6texan2_joint_v5`,
 avec les poids, les états Adam et le générateur aléatoire du checkpoint. Le
 modèle est distinct du BEST d'atterrissage qualifié requis par le mode inférence.
 
@@ -57,7 +57,11 @@ une variation de ±60 m. Un curriculum adaptatif commence par des finales courte
 alignées et élargit les départs à mesure que les arrêts réussissent ; les
 validations jouent le même mélange (roulages, finales courtes à très déportées)
 jusqu'au niveau courant, et seule la tâche complète peut valider la CI. Le train reste verrouillé
-sorti et la piste est fixe pendant un épisode.
+sorti une fois commandé. La piste est fixe pendant un épisode, sauf dans les deux
+dernières étapes : `swell` fait pilonner le pont dans une houle (±0,6 m, période 9 s)
+et `moving-deck` le fait en plus avancer à 6 m/s ; ces constantes se règlent dans
+l'objet `deckMotion` de chaque étape du scénario. L'IHM dessine alors les crêtes de
+houle et le sillage du pont, et le panneau Runway affiche sa vitesse et son pilonnement.
 
 La caméra `Runway`, placée à 300 m du seuil ou à mi-piste si elle est courte,
 suit l'avion avec un zoom adapté. Un crash déclenche une animation visuelle de

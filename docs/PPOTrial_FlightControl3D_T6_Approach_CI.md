@@ -188,10 +188,10 @@ La section `training.curriculum` règle une difficulté de départ adaptative :
 |---|---|---|
 | `firstDistanceMeters` | 1 500–3 000 m | départs du niveau 0 : finale courte, sur l'axe et le plan, cap aligné |
 | `levels` | 6 | niveaux d'approche ; le dernier est l'enveloppe complète (`initial`) |
-| `promotionSuccessRate` | 0,6 | taux d'arrêts sur la fenêtre qui fait passer au niveau suivant |
+| `promotionSuccessRate` | 0,85 | taux d'arrêts sur la fenêtre qui fait passer au niveau suivant ; proche de l'exigence de la validation (92 %) pour qu'aucune étape ne soit franchie avec une approche imprécise |
 | `windowEpisodes` | 30 | épisodes en vol par décision |
 | `rolloutStartShare` | 0,15 | part des départs déjà posés, pour apprendre le freinage |
-| `stages` | 4 étapes | niveaux suivants, un par étape ; la dernière est la tâche complète |
+| `stages` | 6 étapes | niveaux suivants, un par étape (offset, high-far, downwind, holding, swell, moving-deck) ; la dernière est la tâche complète |
 
 Les étapes (`stages`) prolongent l'échelle après les niveaux d'approche :
 

@@ -376,6 +376,8 @@ void RouteGuidance()
     auto mission=Flying();
     mission.route=PatternRoute(1,300);
     auto aircraft=Approach(c,0,2500);aircraft.position=FromRunway(c.runway,0,2500,250);
+    // Flying downwind toward the gate, so the command is not limited by the turn lead.
+    aircraft.velocity=Scale(Scale(RunwayForward(c.runway),-1),c.mission.approachSpeed);
     auto const guidance=Guide(c,mission,aircraft);
     auto const direction=RunwayAxes(c.runway,guidance.targetDirection);
     Check(direction.north<0 && Near(direction.east,0,1e-9) && direction.up>0
@@ -412,6 +414,196 @@ void RouteMission()
     Check(step.terminated && landing.outcome==Outcome::Crash && !landing.touchedDown
         && diagnostic.conditions[static_cast<std::size_t>(CrashReason::RouteIncomplete)].failed,
         "landing with gates remaining is a shortcut and a crash");
+}
+
+/**
+ * @brief Largest heading error of a 30-degree bank follower in the route turns, in degrees.
+ *
+ * Measured: the command leads the track by at most MaximumGateLeadDegrees in every turn of
+ * the patterns and of the holding lap.
+ */
+constexpr double MaximumRouteTurnErrorDegrees = 40.0;
+
+/**
+ * @brief Flies the command at approach speed with a turn rate bounded by a 30-degree bank,
+ *        passing gates as AdvanceMission does.
+ * @param maximumErrorDegrees Largest heading error between the track and the command once the
+ *     first gate is passed.
+ * @return True when the aircraft crosses the threshold aligned after the last gate.
+ */
+bool FlyRouteAtBank(Config const& c,MissionState mission,AircraftState aircraft,double& maximumErrorDegrees)
+{
+    constexpr double Speed=56;
+    constexpr double Dt=0.1;
+    double const turnRate=StandardGravity*std::tan(30*DegreesToRadians)/Speed;
+    auto const horizontal=RunwayAxes(c.runway,aircraft.velocity);
+    double track=std::atan2(horizontal.east,horizontal.north);
+    maximumErrorDegrees=0;
+    for(int step=0;step<30000;++step)
+    {
+        auto const local=DeckCoordinates(c.runway,aircraft.position);
+        while(mission.nextGate<mission.route.count && GatePassed(mission.route,mission.nextGate,local.north,local.east))
+            ++mission.nextGate;
+        auto const guidance=Guide(c,mission,aircraft);
+        double const command=CommandTrackDegrees(c,guidance)*DegreesToRadians;
+        double const error=WrapAngle(command-track);
+        if(mission.nextGate>0 && mission.nextGate<mission.route.count)
+            maximumErrorDegrees=std::max(maximumErrorDegrees,std::abs(error)/DegreesToRadians);
+        if(local.north>=0 && mission.nextGate==mission.route.count && std::abs(local.east)<200)
+            return std::abs(local.east)<10 && std::abs(command/DegreesToRadians)<2;
+        track+=std::clamp(error,-turnRate*Dt,turnRate*Dt);
+        double const climb=Speed*std::sin(guidance.targetSlope);
+        double const level=Speed*std::cos(guidance.targetSlope);
+        aircraft.velocity=Add(Add(Scale(RunwayForward(c.runway),level*std::cos(track)),
+            Scale(RunwayRight(c.runway),level*std::sin(track))),Scale(RunwayNormal(c.runway),climb));
+        aircraft.position=Add(aircraft.position,Scale(aircraft.velocity,Dt));
+    }
+    return false;
+}
+
+/** @brief Holding laps and patterns flown at a 30-degree bank keep a small heading error in the turns. */
+void RouteTurnsAtBank()
+{
+    auto c=T6Config();
+    c.runway.origin={0,0,15};c.runway.headingDegrees=0;
+    std::mt19937 rng(91U);
+    for(auto const& stage : c.training.curriculum.stages)
+    {
+        if(stage.kind==StageKind::Approach) continue;
+        for(auto const side : {ApproachSide::Left,ApproachSide::Right})
+        {
+            auto const start=SampleStageStart(c,c.runway,stage,side,rng);
+            auto mission=Flying();
+            mission.route=start.route;
+            double maximumError=0;
+            Check(FlyRouteAtBank(c,mission,start.aircraft,maximumError),
+                "a route flown at a 30-degree bank reaches the threshold aligned");
+            std::cout<<"[ROUTE_BANK] "<<stage.name<<" max_error_deg="<<maximumError<<"\n";
+            Check(maximumError<=MaximumRouteTurnErrorDegrees,
+                "a 30-degree bank follows the route turns with a small heading error");
+        }
+    }
+}
+
+/** @brief A moving deck translates along its heading and heaves sinusoidally, with a matching velocity. */
+void MovingDeckPose()
+{
+    auto c=T6Config();
+    c.runway.origin={100,-50,15};c.runway.headingDegrees=30;
+    auto const still=MovedDeck(c.runway,DeckMotionSettings{},1.0,12.0);
+    Check(still.origin.north==c.runway.origin.north && still.origin.east==c.runway.origin.east
+        && still.origin.up==c.runway.origin.up && Length(still.velocity)==0,"a static deck never moves");
+    DeckMotionSettings const motion{6.0,0.6,9.0};
+    double const phase=0.7;
+    for(double const seconds : {0.0,1.3,4.5,20.0})
+    {
+        auto const deck=MovedDeck(c.runway,motion,phase,seconds);
+        auto const offset=DeckCoordinates(c.runway,deck.origin);
+        double const angle=2*Pi*seconds/9.0+phase;
+        Check(Near(offset.north,6.0*seconds,1e-9) && Near(offset.east,0,1e-9)
+            && Near(offset.up,0.6*std::sin(angle),1e-9),"the deck advances along its heading and heaves");
+        auto const velocity=RunwayAxes(c.runway,deck.velocity);
+        Check(Near(velocity.north,6.0,1e-9) && Near(velocity.east,0,1e-9)
+            && Near(velocity.up,0.6*2*Pi/9.0*std::cos(angle),1e-9),"the deck velocity is the pose derivative");
+        // A finite difference of the pose agrees with the reported velocity.
+        constexpr double Step=1e-4;
+        auto const next=MovedDeck(c.runway,motion,phase,seconds+Step);
+        auto const numeric=Scale(Subtract(next.origin,deck.origin),1/Step);
+        Check(Length(Subtract(numeric,deck.velocity))<1e-3,"the pose and the velocity are consistent");
+    }
+}
+
+/** @brief On a moving deck speeds, touchdown sink, ground roll and stop are measured relative to the deck. */
+void MovingDeckMission()
+{
+    auto c=T6Config();
+    c.runway.landingMarginMeters=0;
+    c.runway.origin={0,0,15};c.runway.headingDegrees=0;
+    c.runway.velocity={6,0,0.4};
+    auto aircraft=Approach(c,-1000);
+    auto const guidance=Guide(c,Flying(),aircraft);
+    auto const world=RunwayAxes(c.runway,aircraft.velocity);
+    Check(Near(guidance.relativeVelocity.north,world.north-6,1e-9) && Near(guidance.relativeVelocity.up,world.up-0.4,1e-9),
+        "guidance velocities are deck-relative");
+    // A rising deck meets a descending aircraft harder: the sink adds the heave rate.
+    auto before=Approach(c,300);before.position=FromRunway(c.runway,300,0,1.8);before.velocity.up=-1;
+    auto after=before;after.weightOnWheels=true;after.velocity.up=0;
+    auto landing=Flying();
+    AdvanceMission(c,landing,before,after);
+    Check(landing.touchedDown && Near(landing.touchdownSinkMps,1.4,1e-9),"the touchdown sink is relative to the heaving deck");
+    // An aircraft carried by the deck rolls nowhere and stops, although it moves at 6 m/s.
+    c.runway.velocity={6,0,0};
+    auto mission=Flying(Phase::Rollout);mission.touchedDown=true;mission.contactAttempted=true;
+    auto carried=Approach(c,600);carried.weightOnWheels=true;carried.velocity=c.runway.velocity;
+    auto const origin=c.runway.origin;
+    std::size_t const holdSteps=static_cast<std::size_t>(c.mission.stoppedHoldSeconds/c.mission.physicsDt)+2;
+    for(std::size_t step=1;step<=holdSteps && mission.outcome==Outcome::Flying;++step)
+    {
+        auto previous=carried;previous.position=FromRunway(c.runway,600,0,1.8);
+        c.runway.origin=Add(origin,Scale(c.runway.velocity,c.mission.physicsDt*static_cast<double>(step)));
+        carried.position=FromRunway(c.runway,600,0,1.8);
+        AdvanceMission(c,mission,previous,carried);
+    }
+    Check(mission.outcome==Outcome::Stopped && Near(mission.stopFromThreshold,600,1e-6) && mission.groundRoll<1e-6,
+        "an aircraft at rest on the moving deck adds no ground roll and stops");
+}
+
+/** @brief The explicit previous potentials replace Phi(s) in the shaping, and match it on a static deck. */
+void PreviousPotentials()
+{
+    auto const c=T6Config();
+    auto const before=Approach(c,-3000);
+    auto after=before;after.position=Add(before.position,Scale(before.velocity,c.mission.physicsDt));
+    auto first=Flying();auto second=Flying();auto third=Flying();
+    auto const implicit=AdvanceMission(c,first,before,after);
+    auto const explicitStep=AdvanceMission(c,second,before,after,ShapingPotentials(c,second,before));
+    std::array<double,RewardCount> const zero{};
+    auto const fromZero=AdvanceMission(c,third,before,after,zero);
+    for(std::size_t channel=0;channel<RewardCount;++channel)
+        Check(implicit.rewards[channel]==explicitStep.rewards[channel],"explicit potentials of s give the same rewards");
+    auto const phi=ShapingPotentials(c,Flying(),before);
+    double const path=fromZero.rewards[static_cast<std::size_t>(Reward::Path)]-implicit.rewards[static_cast<std::size_t>(Reward::Path)];
+    Check(Near(path,phi[static_cast<std::size_t>(Reward::Path)],1e-12),"the shaping subtracts the given Phi(s)");
+}
+
+/** @brief Stages may move the deck; the motion is validated and stays outside the checkpoint contract. */
+void DeckMotionStages()
+{
+    auto const c=T6Config();
+    auto const& stages=c.training.curriculum.stages;
+    Check(stages.size()>=6 && stages[stages.size()-2].name=="swell" && stages.back().name=="moving-deck",
+        "the curriculum ends with the swell and moving-deck stages");
+    Check(!stages[stages.size()-2].deckMotion.speedMps && stages[stages.size()-2].deckMotion.swellAmplitudeMeters>0
+        && stages.back().deckMotion.speedMps>0 && stages.back().deckMotion.swellAmplitudeMeters>0,
+        "the swell stage heaves a stationary deck, the last stage also moves it forward");
+    for(std::size_t stage=0;stage+2<stages.size();++stage)
+        Check(!stages[stage].deckMotion.Moving(),"the earlier stages keep a static deck");
+    std::ifstream source(PPO_FLIGHT_CONFIG);nlohmann::json json;source>>json;
+    // The deck motion lives in the training curriculum, outside the checkpoint signature.
+    auto withoutMotion=json;
+    for(auto& stage : withoutMotion["training"]["curriculum"]["stages"]) stage.erase("deckMotion");
+    TemporaryDirectory directory("flight-deck-");
+    auto const path=directory.path/"scenario.json";
+    {std::ofstream output(path);output<<withoutMotion;}
+    auto const staticDeck=LoadConfig(path);
+    Check(staticDeck.checkpointSignature==c.checkpointSignature && !staticDeck.training.curriculum.stages.back().deckMotion.Moving(),
+        "a stage without deckMotion is static and the motion does not change the checkpoint contract");
+    auto const reject=[&](char const* key,double value,char const* message)
+    {
+        auto invalid=json;
+        invalid["training"]["curriculum"]["stages"].back()["deckMotion"][key]=value;
+        {std::ofstream output(path);output<<invalid;}
+        Rejects([&] { LoadConfig(path); },message);
+    };
+    reject("speedMps",-1.0,"a negative deck speed is rejected");
+    reject("speedMps",40.0,"an implausible deck speed is rejected");
+    reject("swellAmplitudeMeters",-0.1,"a negative swell is rejected");
+    reject("swellAmplitudeMeters",14.5,"a swell that sinks the deck below the sea is rejected");
+    reject("swellPeriodSeconds",0.5,"a swell period below the physical range is rejected");
+    auto unknown=json;
+    unknown["training"]["curriculum"]["stages"].back()["deckMotion"]["pitchDegrees"]=1.0;
+    {std::ofstream output(path);output<<unknown;}
+    Rejects([&] { LoadConfig(path); },"unknown deck motion fields are rejected");
 }
 
 /** @brief Following the commanded direction from short final flares onto the runway past the aim point. */
@@ -960,6 +1152,11 @@ int main()
         GatePassage();
         RouteGuidance();
         RouteMission();
+        RouteTurnsAtBank();
+        MovingDeckPose();
+        MovingDeckMission();
+        PreviousPotentials();
+        DeckMotionStages();
         FlareTrajectory();
         LandingQuality();
         CrashDiagnostics();

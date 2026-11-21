@@ -50,6 +50,27 @@ Vec3 DeckCoordinates(Runway const& runway, Vec3 point) noexcept;
 /** @brief Express a world direction or velocity in runway axes (no translation). */
 Vec3 RunwayAxes(Runway const& runway, Vec3 vector) noexcept;
 /**
+ * @brief Velocity relative to the deck, in runway axes.
+ * @param runway Runway pose and deck velocity.
+ * @param velocity World velocity, in metres per second.
+ * @return Deck-relative velocity (along, right, up); equal to RunwayAxes on a static deck.
+ */
+Vec3 DeckRelativeVelocity(Runway const& runway, Vec3 velocity) noexcept;
+/**
+ * @brief Pose of a moving deck some time after the episode start.
+ *
+ * The threshold advances along the runway heading at the deck speed and heaves vertically:
+ * origin(t) = start + forward * speed * t + up * amplitude * sin(2 pi t / period + phase),
+ * velocity(t) = forward * speed + up * amplitude * (2 pi / period) * cos(2 pi t / period + phase).
+ * @param start Mean deck pose at the episode start (its velocity is ignored).
+ * @param motion Deck speed and swell of the stage.
+ * @param swellPhase Swell phase of the episode, in radians.
+ * @param seconds Time since the episode start, in seconds.
+ * @return Deck pose and velocity at that time; the start pose with zero velocity for a static deck.
+ */
+Runway MovedDeck(Runway const& start, DeckMotionSettings const& motion, double swellPhase,
+    double seconds) noexcept;
+/**
  * @brief Convert runway-frame coordinates to a world position.
  * @param runway Runway pose.
  * @param along Distance past the threshold, in metres.

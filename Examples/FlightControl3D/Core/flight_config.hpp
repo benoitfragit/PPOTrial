@@ -53,6 +53,13 @@ struct Runway final
     double landingMarginMeters{};
     /** @brief Threshold centre on the deck in the world frame, in metres (set per episode). */
     Vec3 origin{};
+    /**
+     * @brief World velocity of the deck, in metres per second.
+     *
+     * Zero for a static deck; a moving-deck stage updates it with the origin at every
+     * physics substep, see MovedDeck.
+     */
+    Vec3 velocity{};
 };
 
 /** @brief Closed interval [minimum, maximum], read from a two-element JSON array. */
@@ -206,6 +213,28 @@ inline constexpr double PatternBaseOffsetFraction = 0.6;
 inline constexpr double PatternFinalAlongMeters = -7000.0;
 
 /**
+ * @brief Deck motion during the episodes of a stage (optional "deckMotion" object of a stage).
+ *
+ * The deck moves forward along the runway heading at a constant speed, like a ship under
+ * way, and heaves vertically in a sinusoidal swell; it stays level. All zero is a static deck.
+ */
+struct DeckMotionSettings final
+{
+    /** @brief Forward speed of the deck along the runway heading, in metres per second. */
+    double speedMps{};
+    /** @brief Amplitude of the vertical swell heave, in metres. */
+    double swellAmplitudeMeters{};
+    /** @brief Period of the swell heave, in seconds; unused without a swell amplitude. */
+    double swellPeriodSeconds{};
+
+    /** @brief True when the deck translates or heaves. */
+    bool Moving() const noexcept
+    {
+        return speedMps > 0 || swellAmplitudeMeters > 0;
+    }
+};
+
+/**
  * @brief One curriculum stage beyond the approach levels ("curriculum.stages" JSON array).
  *
  * Fields that a kind does not use are left at zero and absent from its JSON object.
@@ -235,6 +264,8 @@ struct StageSettings final
     double holdingWidthMeters{};
     /** @brief Share of the stage starts with the gear retracted, in [0, 1]. */
     double gearUpShare{};
+    /** @brief Deck motion of the stage episodes; a static deck when the stage omits "deckMotion". */
+    DeckMotionSettings deckMotion{};
 };
 
 /**

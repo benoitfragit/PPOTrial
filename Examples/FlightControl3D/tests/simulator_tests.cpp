@@ -34,14 +34,32 @@ Controls Neutral(Config const& c,double brake=0)
 }
 std::size_t ControlObservation(std::size_t axis) { return ObservationSize-ContinuousActions+axis; }
 
+/** @brief Index of the scenario curriculum stage with the given name. */
+std::size_t StageIndex(Config const& c,char const* name)
+{
+    auto const& stages=c.training.curriculum.stages;
+    for(std::size_t stage=0;stage<stages.size();++stage)
+        if(stages[stage].name==name) return stage;
+    throw std::runtime_error("missing curriculum stage");
+}
+
+/** @brief A difficulty inside the scale interval of a stage, see ResolveCurriculum. */
+double StageDifficulty(Config const& c,std::size_t stage)
+{
+    auto const& curriculum=c.training.curriculum;
+    double const level=static_cast<double>(curriculum.levels+stage)-0.5;
+    return level/static_cast<double>(CurriculumLevels(curriculum)-1);
+}
+
 /** @brief Check first-order command filtering and its observable reset state. */
 void FilteredControls()
 {
     auto const c=T6Config();
     FlightEnvironment env(c,DefaultDataRoot(),778U);
-    auto observation=env.Reset(778U);
-    // An airborne start begins on JSBSim's trim of its own speed and flight path, close to
-    // the action reference trimmed on the nominal 3-degree approach.
+    // A gear-down approach level: its trim stays close to the action reference trimmed on
+    // the nominal 3-degree approach (a gear-up stage start needs much less throttle).
+    auto observation=env.Reset(778U,EpisodeStart{false,0.5});
+    // An airborne start begins on JSBSim's trim of its own speed and flight path.
     double const trim=env.Mission().filteredControls.elevator;
     double const throttle=env.Mission().filteredControls.throttle;
     Check(Near(trim,c.initial.elevatorTrim,0.05) && Near(throttle,c.initial.throttle,0.15)
@@ -71,7 +89,7 @@ void FilteredControls()
     auto const before=env.Mission().filteredControls;
     Rejects([&] { env.Step(invalid); },"a non-finite command is rejected");
     Check(Near(before.aileron,env.Mission().filteredControls.aileron),"a rejected command cannot advance the filter");
-    observation=env.Reset(778U);
+    observation=env.Reset(778U,EpisodeStart{false,0.5});
     Check(Near(observation[ControlObservation(0)],trim,1e-6) && Near(observation[ControlObservation(1)],0)
         && Near(observation[ControlObservation(3)],throttle,1e-6),
         "a new episode does not inherit the prior filter state");
@@ -522,16 +540,18 @@ void StageEpisodes()
 {
     auto const c=T6Config();
     FlightEnvironment env(c,DefaultDataRoot(),41U);
-    auto const& last=c.training.curriculum.stages.back();
+    auto const& stages=c.training.curriculum.stages;
+    std::size_t const holding=StageIndex(c,"holding");
+    auto const& last=stages[holding];
     int gearUp=0;
     constexpr int Episodes=12;
     for(std::uint32_t seed=600U;seed<600U+Episodes;++seed)
     {
-        EpisodeStart start{};start.difficulty=1.0;
+        EpisodeStart start{};start.difficulty=StageDifficulty(c,holding);
         env.Reset(seed,start);
         auto const& mission=env.Mission();
         Check(last.kind==StageKind::Holding && mission.route.count==5 && mission.nextGate==0,
-            "the full task flies the holding lap of the last stage");
+            "the holding stage flies its holding lap");
         Check(mission.gearDownCommanded==(env.Aircraft().gearPosition>0.5),"the gear position matches its latch");
         gearUp+=mission.gearDownCommanded ? 0 : 1;
         // Level flight needs more power than the 3-degree descent of the action reference.
@@ -544,6 +564,79 @@ void StageEpisodes()
     EpisodeStart first{};first.difficulty=0;
     env.Reset(700U,first);
     Check(env.Mission().route.count==0 && env.Mission().gearDownCommanded,"the first level is a direct approach, gear down");
+}
+
+/** @brief JSBSim sees the deck velocity on the deck only, so braked wheels are dragged along with it. */
+void MovingDeckGround()
+{
+    auto c=T6Config();
+    c.runway.origin={0,0,15};c.runway.headingDegrees=40;
+    JsbsimAircraft fdm(c,DefaultDataRoot());
+    auto deck=c.runway;deck.velocity=Add(Scale(RunwayForward(deck),6.0),Scale(RunwayNormal(deck),0.3));
+    fdm.SetRunway(deck);
+    auto const onDeck=fdm.ProbeGround(FromRunway(deck,500,0,10));
+    auto const onSea=fdm.ProbeGround(FromRunway(deck,500,deck.widthMeters+100,10));
+    Check(Length(Subtract(onDeck.velocity,deck.velocity))<1e-9 && Length(onSea.velocity)<1e-12,
+        "the ground reports the deck velocity on the deck and a still sea elsewhere");
+    // A braked aircraft rolling at 6 m/s stops on a static deck, but on a deck moving at
+    // 6 m/s it is at rest relative to the deck and the tyres keep carrying it.
+    constexpr double RollSpeed=6.0;
+    std::array<double,2> finalSpeeds{};
+    std::array<double,2> const deckSpeeds{0.0,RollSpeed};
+    for(std::size_t index=0;index<deckSpeeds.size();++index)
+    {
+        auto moving=deck;moving.velocity=Scale(RunwayForward(deck),deckSpeeds[index]);
+        fdm.SetRunway(moving);
+        AircraftState initial{};
+        initial.position=FromRunway(moving,600,0,2.5);
+        initial.heading=moving.headingDegrees*DegreesToRadians;initial.gearPosition=1;
+        initial.airspeed=RollSpeed;initial.velocity=Scale(RunwayForward(moving),RollSpeed);
+        // Lower the wheels onto the deck, as the rolling-start reset does.
+        auto const measured=fdm.Reset(initial,Phase::Rollout);
+        double highest=DeckCoordinates(moving,measured.wheels.front().point).up;
+        for(auto const& wheel : measured.wheels) highest=std::max(highest,DeckCoordinates(moving,wheel.point).up);
+        initial.position=Add(initial.position,Scale(RunwayNormal(moving),-highest-0.001));
+        fdm.Reset(initial,Phase::Rollout);
+        auto controls=Neutral(c,1.0);controls.throttle=0;controls.flap=c.initial.rolloutFlap;
+        AircraftState state{};
+        for(int step=0;step<500;++step) state=fdm.Advance(controls);
+        Check(state.weightOnWheels,"the braked aircraft stays on its wheels");
+        finalSpeeds[index]=Dot(state.velocity,RunwayForward(moving));
+    }
+    Check(std::abs(finalSpeeds[0])<1.0,"on a static deck the brakes stop the aircraft");
+    Check(std::abs(finalSpeeds[1]-RollSpeed)<0.5,"on a moving deck the braked aircraft is carried at the deck speed");
+}
+
+/** @brief A moving-deck episode advances and heaves the deck in the environment, the JSBSim ground and the snapshot. */
+void MovingDeckEpisode()
+{
+    auto const c=T6Config();
+    FlightEnvironment env(c,DefaultDataRoot(),44U);
+    std::size_t const moving=StageIndex(c,"moving-deck");
+    auto const& motion=c.training.curriculum.stages[moving].deckMotion;
+    env.Reset(808U,EpisodeStart{false,StageDifficulty(c,moving)});
+    auto const start=env.Settings().runway;
+    double const startHeave=env.CurrentDeck().heaveMeters;
+    Check(std::abs(startHeave)<=motion.swellAmplitudeMeters+1e-9 && env.CurrentDeck().motion.speedMps==motion.speedMps,
+        "the episode starts on the swell of its stage");
+    auto controls=Neutral(c);controls.gear=1;
+    constexpr int Actions=30;
+    for(int action=0;action<Actions && env.Mission().outcome==Outcome::Flying;++action) env.Step(controls);
+    double const seconds=static_cast<double>(env.Mission().steps)*c.mission.physicsDt;
+    auto const& runway=env.Settings().runway;
+    auto const displacement=RunwayAxes(start,Subtract(runway.origin,start.origin));
+    auto const deck=env.CurrentDeck();
+    Check(Near(displacement.north,motion.speedMps*seconds,1e-6) && Near(displacement.east,0,1e-6)
+        && Near(displacement.up,deck.heaveMeters-startHeave,1e-9),"the deck advances at its speed and heaves");
+    Check(std::abs(deck.heaveMeters)<=motion.swellAmplitudeMeters+1e-9
+        && Near(deck.heaveMeters,motion.swellAmplitudeMeters*std::sin(deck.swellAngle),1e-9)
+        && Near(RunwayAxes(runway,runway.velocity).north,motion.speedMps,1e-9),"the snapshot heave follows the swell angle");
+    // A static stage keeps its deck in place.
+    env.Reset(809U,EpisodeStart{false,StageDifficulty(c,StageIndex(c,"holding"))});
+    auto const still=env.Settings().runway;
+    for(int action=0;action<5;++action) env.Step(controls);
+    Check(env.Settings().runway.origin.north==still.origin.north && env.Settings().runway.origin.up==still.origin.up
+        && !env.CurrentDeck().motion.Moving() && Length(env.Settings().runway.velocity)==0,"a static stage never moves its deck");
 }
 
 /** @brief Heading change of an airborne aircraft after a few seconds of constant rudder, in radians. */
@@ -643,6 +736,8 @@ int main()
         GearExtensionLatch();
         GearUpTouchdownCrashes();
         StageEpisodes();
+        MovingDeckGround();
+        MovingDeckEpisode();
         Pc7Aircraft();
     }
     catch(std::exception const& e) { std::cerr<<e.what()<<'\n'; return 1; }

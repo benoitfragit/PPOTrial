@@ -3,7 +3,8 @@
  * @brief Construction of the approach reference: aim point, lookahead, gradient, flare and speed.
  *
  * Summary of the guidance law (all quantities in runway axes):
- * - while route gates remain: straight at the next gate, climbing or descending toward its
+ * - while route gates remain: toward the next gate, leading the deck-relative track by at most
+ *   10 degrees when the gate is farther round (a turn), climbing or descending toward its
  *   height with a gradient bounded to +/- tan(6 degrees); the rules below then apply;
  * - horizontal direction: toward the extended centreline a look-ahead L ahead,
  *   L = clamp(aim along - along, 300 m, 2 km), at most 30 degrees off the runway axis.
@@ -105,10 +106,51 @@ double AirborneGradient(Config const& config, double height, double horizontalDi
 
 /** @brief Horizontal distance below which the gate direction is not resolved, in metres. */
 constexpr double MinimumGateDistanceMeters = 1.0;
+/** @brief Deck-relative ground speed below which the track is undefined and the gate is pointed at directly. */
+constexpr double MinimumTrackSpeedMps = 1.0;
+
+/** @brief Horizontal unit direction in runway axes. */
+struct HorizontalDirection final
+{
+    double forward{};
+    double right{};
+};
 
 /**
- * @brief Command toward a route gate: straight at its horizontal position, climbing or
- *        descending toward its height at no more than the steepest path angle.
+ * @brief Horizontal command toward a gate, leading the current track by at most
+ *        MaximumGateLeadDegrees.
+ * @param runway Runway pose and deck velocity.
+ * @param aircraft Current aircraft state.
+ * @param gateForward Along-runway component of the unit direction to the gate.
+ * @param gateRight Right component of the unit direction to the gate.
+ * @return The gate direction when it lies within the lead of the track, otherwise the track
+ *     rotated by the lead toward the gate.
+ */
+HorizontalDirection LeadTrack(Runway const& runway, AircraftState const& aircraft, double gateForward,
+    double gateRight) noexcept
+{
+    HorizontalDirection const towardGate{gateForward, gateRight};
+    auto const velocity = DeckRelativeVelocity(runway, aircraft.velocity);
+    if (std::hypot(velocity.north, velocity.east) < MinimumTrackSpeedMps)
+    {
+        return towardGate;
+    }
+    double const track = std::atan2(velocity.east, velocity.north);
+    double const offset = WrapAngle(std::atan2(gateRight, gateForward) - track);
+    double const lead = MaximumGateLeadDegrees * DegreesToRadians;
+    if (std::abs(offset) <= lead)
+    {
+        return towardGate;
+    }
+    // A gate behind or abeam is reached by a turn: lead the track on the side of the gate.
+    double const heading = track + std::copysign(lead, offset);
+    return {std::cos(heading), std::sin(heading)};
+}
+
+/**
+ * @brief Command toward a route gate: at its horizontal position, or leading the track toward
+ *        it during a turn (LeadTrack), climbing or descending toward its height at no more
+ *        than the steepest path angle.
  * @param config Episode configuration and runway pose.
  * @param gate Next gate of the route.
  * @param aircraft Current aircraft state.
@@ -123,8 +165,9 @@ ApproachReference GateReference(Config const& config, Gate const& gate, Aircraft
     double const horizontalDistance = std::max(std::hypot(forward, right), MinimumGateDistanceMeters);
     double const limit = MaximumPathGradient();
     double const gradient = std::clamp((gate.heightMeters - local.up) / horizontalDistance, -limit, limit);
-    auto const horizontalForward = Scale(RunwayForward(runway), forward / horizontalDistance);
-    auto const horizontalRight = Scale(RunwayRight(runway), right / horizontalDistance);
+    auto const track = LeadTrack(runway, aircraft, forward / horizontalDistance, right / horizontalDistance);
+    auto const horizontalForward = Scale(RunwayForward(runway), track.forward);
+    auto const horizontalRight = Scale(RunwayRight(runway), track.right);
     ApproachReference reference{};
     reference.target = FromRunway(runway, gate.alongMeters, gate.crossMeters, gate.heightMeters);
     reference.direction = UnitDirection(Add(Add(horizontalForward, horizontalRight),
@@ -209,7 +252,7 @@ ApproachReference ResolveApproachReference(Config const& config, MissionState co
         // measured to the aim point, or to the point sliding 300 m ahead near it.
         double const glideTargetAlong = std::max(aimAlong, local.north + CentrelineLookaheadMeters);
         double const glideDistance = std::hypot(glideTargetAlong - local.north, local.east);
-        auto const velocity = RunwayAxes(runway, aircraft.velocity);
+        auto const velocity = DeckRelativeVelocity(runway, aircraft.velocity);
         gradient = AirborneGradient(config, local.up, glideDistance, std::hypot(velocity.north,
             velocity.east));
     }
@@ -242,8 +285,8 @@ Guidance Guide(Config const& config, MissionState const& mission, AircraftState 
     guidance.cross = local.east;
     guidance.height = local.up;
     guidance.distance = std::hypot(guidance.along, guidance.cross);
-    guidance.relativeVelocity = RunwayAxes(runway, aircraft.velocity);
-    guidance.velocityDirection = UnitDirection(aircraft.velocity);
+    guidance.relativeVelocity = DeckRelativeVelocity(runway, aircraft.velocity);
+    guidance.velocityDirection = UnitDirection(Subtract(aircraft.velocity, runway.velocity));
     guidance.targetSpeed = TargetSpeed(config, mission, aircraft, guidance.along);
     // The mode is informative only: Flare means low over the landable surface.
     bool const lowOverRunway = guidance.height >= 0 && guidance.height <= config.mission.flareHeightMeters

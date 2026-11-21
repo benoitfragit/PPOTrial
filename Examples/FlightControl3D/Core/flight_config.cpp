@@ -84,6 +84,13 @@ constexpr double MaximumStageHeightMeters = 1500.0;
 constexpr double MaximumStageCrossMeters = 4000.0;
 /** @brief Smallest distance between route gates, in metres (more than three gate radii). */
 constexpr double MinimumGateSpacingMeters = 1000.0;
+/** @brief Fastest deck, in metres per second (about 30 knots, a carrier at full speed). */
+constexpr double MaximumDeckSpeedMps = 15.0;
+/** @brief Largest swell heave amplitude, in metres (a rough sea for a large deck). */
+constexpr double MaximumSwellAmplitudeMeters = 3.0;
+/** @brief Accepted swell periods, in seconds (wind sea to long ocean swell). */
+constexpr double MinimumSwellPeriodSeconds = 4.0;
+constexpr double MaximumSwellPeriodSeconds = 30.0;
 /** @brief Shortest first curriculum start distance, in metres. */
 constexpr double MinimumFirstCurriculumDistanceMeters = 1000.0;
 /** @brief Accepted saturation threshold range of the diagnostics. */
@@ -269,7 +276,22 @@ StageKind ReadStageKind(Json const& stage)
     return StageKind::Holding;
 }
 
-/** @brief Reads one curriculum stage; each kind has its own exact set of fields. */
+/** @brief Reads the "deckMotion" object of a stage: forward speed and swell heave. */
+DeckMotionSettings ReadDeckMotion(Json const& section)
+{
+    Keys(section, {"speedMps", "swellAmplitudeMeters", "swellPeriodSeconds"});
+    DeckMotionSettings motion{};
+    motion.speedMps = Number(section, "speedMps");
+    motion.swellAmplitudeMeters = Number(section, "swellAmplitudeMeters");
+    motion.swellPeriodSeconds = Number(section, "swellPeriodSeconds");
+    return motion;
+}
+
+/**
+ * @brief Reads one curriculum stage; each kind has its own exact set of fields.
+ *
+ * Every kind also accepts an optional "deckMotion" object; without it the deck is static.
+ */
 StageSettings ReadStage(Json const& section)
 {
     Require(section.is_object() && section.contains("kind") && section.contains("name")
@@ -277,9 +299,16 @@ StageSettings ReadStage(Json const& section)
     StageSettings stage{};
     stage.name = section.at("name").get<std::string>();
     stage.kind = ReadStageKind(section);
+    // The kind fields are checked without the optional deck motion object.
+    Json fields = section;
+    if (fields.contains("deckMotion"))
+    {
+        stage.deckMotion = ReadDeckMotion(fields.at("deckMotion"));
+        fields.erase("deckMotion");
+    }
     if (stage.kind == StageKind::Approach)
     {
-        Keys(section, {"name", "kind", "distanceMeters", "bearingDegrees", "headingOffsetDegrees",
+        Keys(fields, {"name", "kind", "distanceMeters", "bearingDegrees", "headingOffsetDegrees",
             "heightAboveGlideMeters", "gearUpShare"});
         stage.distanceMeters = Bounds(section, "distanceMeters");
         stage.bearingDegrees = Bounds(section, "bearingDegrees");
@@ -287,7 +316,7 @@ StageSettings ReadStage(Json const& section)
     }
     else if (stage.kind == StageKind::Pattern)
     {
-        Keys(section, {"name", "kind", "startAlongMeters", "downwindOffsetMeters", "headingOffsetDegrees",
+        Keys(fields, {"name", "kind", "startAlongMeters", "downwindOffsetMeters", "headingOffsetDegrees",
             "heightMeters", "gearUpShare"});
         stage.startAlongMeters = Bounds(section, "startAlongMeters");
         stage.lateralMeters = Bounds(section, "downwindOffsetMeters");
@@ -295,7 +324,7 @@ StageSettings ReadStage(Json const& section)
     }
     else
     {
-        Keys(section, {"name", "kind", "startAlongMeters", "startCrossMeters", "headingOffsetDegrees",
+        Keys(fields, {"name", "kind", "startAlongMeters", "startCrossMeters", "headingOffsetDegrees",
             "heightMeters", "fixAlongMeters", "outboundMeters", "widthMeters", "gearUpShare"});
         stage.startAlongMeters = Bounds(section, "startAlongMeters");
         stage.lateralMeters = Bounds(section, "startCrossMeters");
@@ -562,6 +591,21 @@ double GlideHeightAt(Config const& config, double distanceMeters) noexcept
 }
 
 /**
+ * @brief Checks a stage deck motion: a bounded forward speed, and a swell whose troughs keep
+ *        the lowest deck above the sea, with a physical period.
+ */
+void ValidateDeckMotion(Config const& config, DeckMotionSettings const& motion)
+{
+    auto const& randomization = config.runwayRandomization;
+    double const lowestTrough = randomization.deckHeightMeters.minimum - motion.swellAmplitudeMeters;
+    Require(motion.speedMps >= 0 && motion.speedMps <= MaximumDeckSpeedMps
+        && motion.swellAmplitudeMeters >= 0 && motion.swellAmplitudeMeters <= MaximumSwellAmplitudeMeters
+        && lowestTrough > randomization.seaHeightMeters, "stage deck speed or swell amplitude");
+    Require(motion.swellAmplitudeMeters == 0 || (motion.swellPeriodSeconds >= MinimumSwellPeriodSeconds
+        && motion.swellPeriodSeconds <= MaximumSwellPeriodSeconds), "stage swell period");
+}
+
+/**
  * @brief Checks one curriculum stage: starts inside the envelope and the observation ranges,
  *        above the flare height, and route gates far enough apart to be passed one by one.
  */
@@ -571,6 +615,7 @@ void ValidateStage(Config const& config, StageSettings const& stage)
     Require(!stage.name.empty() && stage.gearUpShare >= 0 && stage.gearUpShare <= 1
         && MaximumMagnitude(stage.headingOffsetDegrees) <= HalfTurnDegrees,
         "curriculum stage name, gear or heading");
+    ValidateDeckMotion(config, stage.deckMotion);
     if (stage.kind == StageKind::Approach)
     {
         double const largestBearing = MaximumMagnitude(stage.bearingDegrees);

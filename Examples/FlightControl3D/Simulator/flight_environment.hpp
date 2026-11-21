@@ -38,6 +38,17 @@ namespace ppo::examples::flight {
  */
 Controls ApplyPhaseControls(Controls controls, Phase phase, InitialSettings const& initial) noexcept;
 
+/** @brief Deck motion of an episode as shown by the renderer. */
+struct DeckState final
+{
+    /** @brief Forward speed and swell of the episode; all zero for a static deck. */
+    DeckMotionSettings motion{};
+    /** @brief Current deck height above its mean height, in metres. */
+    double heaveMeters{};
+    /** @brief Current swell angle 2 pi t / period + phase, in radians; the heave is amplitude * sin. */
+    double swellAngle{};
+};
+
 /** @brief Same transition loop for desktop, headless training and deterministic tests. */
 class FlightEnvironment final
 {
@@ -95,6 +106,8 @@ public:
     {
         return crashDiagnostic_;
     }
+    /** @brief Deck motion of the current episode and its present heave, for the renderer snapshot. */
+    DeckState CurrentDeck() const noexcept;
     /** @brief Guidance of the current state, for the renderer snapshot. */
     Guidance CurrentGuidance() const noexcept
     {
@@ -142,6 +155,11 @@ private:
     std::size_t RunSubsteps(Controls const& controls, StepResult& total);
     /** @brief Adds (gamma - gamma_sub^executed) * Phi(s) when a timeout cut the action short. */
     void CorrectPartialTimeout(std::size_t executed, StepResult& total) const noexcept;
+    /**
+     * @brief Places a moving deck at its pose after a number of physics substeps, in the episode
+     *        configuration and in the JSBSim ground; does nothing for a static deck.
+     */
+    void MoveDeck(std::size_t steps);
 
     /** @brief Base configuration (reward weights may be replaced at a rollout boundary). */
     Config config_;
@@ -154,6 +172,12 @@ private:
     double difficulty_{1.0};
     bool startedAirborne_{true};
     ApproachSide trainingSide_{ApproachSide::Left};
+    /** @brief Mean deck pose at the episode start, origin of the deck motion. */
+    Runway deckStart_{};
+    /** @brief Deck motion of the current episode; static outside the moving-deck stages. */
+    DeckMotionSettings deckMotion_{};
+    /** @brief Swell phase of the current episode, in radians. */
+    double swellPhase_{};
     AircraftState aircraft_{};
     MissionState mission_{};
     CrashDiagnostic crashDiagnostic_{};

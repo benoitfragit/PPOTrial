@@ -108,6 +108,16 @@ int main()
             && text.instruments.find("Actor")==std::string::npos,"training data is not duplicated in flight instruments");
         Check(text.instruments.find("No crash recorded")!=std::string::npos,
             "the crash panel has an explicit empty state");
+        Check(text.instruments.find("Deck: static")!=std::string::npos && text.instruments.find("Swell")==std::string::npos,
+            "a static deck is shown without motion details");
+        auto moving=state;
+        moving.deck.motion={6.0,0.6,9.0};moving.deck.heaveMeters=0.3;
+        moving.runway.velocity={6.0,0.0,0.25};
+        auto const deckText=Frame(moving).instruments;
+        Check(deckText.find("Deck speed: 6.0 m/s")!=std::string::npos && deckText.find("vertical +0.25 m/s")!=std::string::npos
+            && deckText.find("Swell: +/-0.60 m, period 9.0 s, wavelength 126 m")!=std::string::npos
+            && deckText.find("heave +0.30 m")!=std::string::npos,
+            "a moving deck shows its speed, its swell and the present heave");
         state.guidance.targetDirection={0,0,-0.05};
         state.guidance.relativeVelocity.up=-4;
         text=Frame(state);
