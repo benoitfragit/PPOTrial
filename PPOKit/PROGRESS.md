@@ -180,10 +180,13 @@ ce qui est précisément le rôle du code généré (étape 6).
    (observation v10), les layouts générés égalent les constantes actuelles,
    vérifié par `static_assert`. Aucun changement de comportement.
 
-## Dernier état de la CI (PR #105, commit `e6161e4`)
+## Dernier état de la CI (PR #105, commit `18494cb`, étape 3a)
 
 Tout est au vert : Core C++17 tests ; FlightControl3D JSBSim (Ubuntu GCC 15 et
-Windows, Debug et Release) ; Desktop VS2022 (Debug et Release, CTest compris).
+Windows, Debug et Release) ; Desktop VS2022 Debug et Release, 65/65 tests,
+dont `BlueDefenseGeneralizedLearnerTests` et `BlueDefenseGeneralizedActorTests`
+(vérifié dans les logs des jobs). La golden trace Flight y est *skipped*,
+comme attendu hors GCC 13.
 
 ## Pièges connus
 
