@@ -378,7 +378,16 @@ resources/model/BluePatrol/latest/*.txt.bak
 # Windows shell links are generated for this checkout by the FlightControl3D build.
 /FlightControl3D_Debug.lnk
 /FlightControl3D_Release.lnk
+/FlightControl3D_Curriculum_Release.lnk
+/FlightControl3D_T6_Release.lnk
 /resources/model/FlightControl3D/*
-!/resources/model/FlightControl3D/latest/
-/resources/model/FlightControl3D/latest/*
-!/resources/model/FlightControl3D/latest/flight_hybrid_v1.txt
+!/resources/model/FlightControl3D/t6texan2_joint_v3/
+/resources/model/FlightControl3D/t6texan2_joint_v3/*
+!/resources/model/FlightControl3D/t6texan2_joint_v3/latest/
+/resources/model/FlightControl3D/t6texan2_joint_v3/latest/*
+!/resources/model/FlightControl3D/t6texan2_joint_v3/latest/flight_policy.txt
+!/resources/model/FlightControl3D/t6texan2_joint_v3/latest/curriculum_level.txt
+!/resources/model/FlightControl3D/t6texan2_joint_v3/best/
+/resources/model/FlightControl3D/t6texan2_joint_v3/best/*
+!/resources/model/FlightControl3D/t6texan2_joint_v3/best/current.json
+!/resources/model/FlightControl3D/t6texan2_joint_v3/best/flight_710_b8db07606953e196.txt

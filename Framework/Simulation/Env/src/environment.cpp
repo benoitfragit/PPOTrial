@@ -11,6 +11,7 @@
 #include "entityruntime.hpp"
 #include "utils.hpp"
 #include "serializer.hpp"
+#include "step_pacing.hpp"
 
 #include <map>
 #include <thread>
@@ -71,12 +72,20 @@ struct Environment::Impl
 
     void                    ProcessCommand(sRealTimeCommand const& command);
 
+    template<typename Command>
+    void QueueCommand(Command const& command)
+    {
+        std::lock_guard<std::mutex> lock{m_dispatcherMutex};
+        m_dispatcher.enqueue<Command>(command);
+    }
+
                             Impl(void);
 
                             ~Impl(void);
 
     entt::registry                   m_world{};
     entt::dispatcher                 m_dispatcher{};
+    std::mutex                       m_dispatcherMutex{};
     Entities                         m_entities{};
     Agents                           m_agents{};
     std::array<entt::registry, 2>    m_buffers{};
@@ -216,11 +225,15 @@ Environment::Impl::Stop(void)
     sRealTimeCommand cmd{};
     cmd.m_type = sRealTimeCommand::eTypeCommand::ChangeState;
     cmd.m_state = eEnvironmentState::STOPPED;
-    m_dispatcher.enqueue<sRealTimeCommand>(cmd);
+    QueueCommand(cmd);
 
     m_running.store(false, std::memory_order_release);
     if (m_thread.joinable())
         m_thread.join();
+
+    // Also deliver edits queued while the worker was already stopped.
+    std::lock_guard<std::mutex> lock{m_dispatcherMutex};
+    m_dispatcher.update();
 }
 
 /**
@@ -245,7 +258,10 @@ Environment::Impl::Run(void)
     while (m_running.load(std::memory_order_acquire))
     {
         // Apply every queued command before stepping the simulation.
-        m_dispatcher.update();
+        {
+            std::lock_guard<std::mutex> lock{m_dispatcherMutex};
+            m_dispatcher.update();
+        }
 
         if (m_state == eEnvironmentState::RUNNING)
         {
@@ -292,14 +308,21 @@ Environment::Impl::Run(void)
         if (m_worldRules != nullptr)
             m_worldRules->AfterStep();
 
-        // Snapshot publication and the desktop throttle are expensive in
-        // long-running training. Keep the desktop path exactly unchanged.
+        // Reduce snapshot publication in unthrottled training.
         if (!m_headless || ++headlessStepCount % 256U == 0U)
             CreateSnapshot();
-        if (!m_headless)
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        // Preserve the desktop throttle without slowing maximum-speed runs.
+        auto const delay = detail::StepDelay(m_headless);
+        if (delay > std::chrono::steady_clock::duration::zero())
+            std::this_thread::sleep_for(delay);
     }
 
+    // Commands accepted immediately before Stop must be delivered before join;
+    // in particular, a pending reward edit must reach its JSON save path.
+    {
+        std::lock_guard<std::mutex> lock{m_dispatcherMutex};
+        m_dispatcher.update();
+    }
     m_prevState = eEnvironmentState::STOPPED;
 }
 
@@ -410,7 +433,7 @@ Environment::SetTimeStep(float timestep)
     sRealTimeCommand cmd{};
     cmd.m_type = sRealTimeCommand::eTypeCommand::TimeStep;
     cmd.m_timeStep = timestep;
-    p_impl->m_dispatcher.enqueue<sRealTimeCommand>(cmd);
+    p_impl->QueueCommand(cmd);
 }
 
 /**
@@ -426,7 +449,7 @@ Environment::SetMaxRange(float north, float east)
     cmd.m_type = sRealTimeCommand::eTypeCommand::MaxRange;
     cmd.m_maxRanges[0] = north;
     cmd.m_maxRanges[1] = east;
-    p_impl->m_dispatcher.enqueue<sRealTimeCommand>(cmd);
+    p_impl->QueueCommand(cmd);
 }
 
 /**
@@ -478,7 +501,7 @@ Environment::Play(void)
     sRealTimeCommand cmd{};
     cmd.m_type = sRealTimeCommand::eTypeCommand::ChangeState;
     cmd.m_state = eEnvironmentState::RUNNING;
-    p_impl->m_dispatcher.enqueue<sRealTimeCommand>(cmd);
+    p_impl->QueueCommand(cmd);
 }
 
 /**
@@ -504,7 +527,7 @@ Environment::Pause(void)
     sRealTimeCommand cmd{};
     cmd.m_type = sRealTimeCommand::eTypeCommand::ChangeState;
     cmd.m_state = eEnvironmentState::PAUSED;
-    p_impl->m_dispatcher.enqueue<sRealTimeCommand>(cmd);
+    p_impl->QueueCommand(cmd);
 }
 
 /**
@@ -528,7 +551,7 @@ Environment::AddAgentCommand(sAgentRealTimeCommand const& command)
     if (p_impl == nullptr)
         return;
 
-    p_impl->m_dispatcher.enqueue<sAgentRealTimeCommand>(command);
+    p_impl->QueueCommand(command);
 }
 
 }

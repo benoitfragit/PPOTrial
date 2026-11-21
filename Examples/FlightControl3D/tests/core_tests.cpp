@@ -1,555 +1,731 @@
+/**
+ * @file core_tests.cpp
+ * @brief Deterministic regressions of Core/: configuration, geometry, guidance, landing,
+ *        observation, spawns, curriculum starts, evaluation plans and display references.
+ *
+ * Protects: the strict JSON schema and its validation rules, the checkpoint signature
+ * compatibility rules, the frame conversions, the aim point and the flare reference, the
+ * touchdown limits and crash diagnostics, the observation bounds and resolutions, the start
+ * samplers and the stratified evaluation plan. Uses the production scenario
+ * (PPO_FLIGHT_CONFIG); no JSBSim and no network.
+ *
+ * Read next: reward_tests.cpp, simulator_tests.cpp.
+ */
 #include "test_support.hpp"
+#include "flight_landing.hpp"
+#include "flight_mission.hpp"
+#include "flight_observation.hpp"
+#include "flight_reward.hpp"
+#include "flight_t6_performance.hpp"
 #include "../Renderer/flight_display.hpp"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <limits>
+#include <utility>
 using namespace ppo::examples::flight;
 
 namespace {
+Config T6Config()
+{
+    return LoadConfig(std::filesystem::path(PPO_FLIGHT_CONFIG));
+}
+
+/** @brief Aircraft on the 3-degree plane through the threshold crossing height, flying down the runway axis. */
 AircraftState Approach(Config const& c, double along=-1000, double cross=0)
 {
+    double const gradient=std::tan(c.mission.glideDegrees*DegreesToRadians);
     AircraftState a{};
-    a.position=FromRunway(c.runway,along,cross,c.runway.thresholdHeightMeters-along*std::tan(c.mission.glideDegrees*DegreesToRadians));
+    a.position=FromRunway(c.runway,along,cross,c.runway.thresholdHeightMeters-along*gradient);
     a.airspeed=c.mission.approachSpeed;
     a.heading=c.runway.headingDegrees*DegreesToRadians;
-    a.velocity=FromRunway(c.runway,a.airspeed,0,-a.airspeed*std::tan(c.mission.glideDegrees*DegreesToRadians));
+    a.velocity=Add(Scale(RunwayForward(c.runway),a.airspeed),Scale(RunwayNormal(c.runway),-a.airspeed*gradient));
     a.gearPosition=1;
     return a;
 }
-void Geometry(Config const& c)
-{
-    auto const plan=MakeFlightPlan(c);
-    Check(plan.count==2*(c.mission.straightSamples+c.mission.turnSamples),"plan point count");
-    double previousAlong{};
-    for(std::size_t point=0;point<c.mission.straightSamples;++point)
-    {
-        auto const local=ToRunway(c.runway,plan.points[point]);
-        Check(Near(local[1],0),"inbound racetrack straight lies on the localizer");
-        if(point>0) Check(local[0]>previousAlong,"localizer-aligned racetrack straight points toward the threshold");
-        previousAlong=local[0];
-    }
-    AircraftState ilsPresentation{};
-    ilsPresentation.position=plan.points[0];
-    ilsPresentation.heading=c.runway.headingDegrees*DegreesToRadians;
-    auto const presentation=Guide(c,plan,MissionState{},ilsPresentation);
-    Check(presentation.ilsValid
-        && std::abs(presentation.localizer)<=c.mission.localizerCaptureDegrees*DegreesToRadians
-        && std::abs(presentation.glideError)<=c.mission.glideCaptureDegrees*DegreesToRadians,
-        "inbound racetrack straight crosses both LOC and glide capture windows");
-    for (double h : {0.,90.,181.,359.})
-    {
-        auto runway=c.runway; runway.headingDegrees=h;
-        auto const xy=ToRunway(runway,FromRunway(runway,-1234,57,99));
-        Check(Near(xy[0],-1234) && Near(xy[1],57),"runway rotation/inverse");
-    }
-    MissionState s{};
-    s.completedLaps=c.mission.requiredLaps;
-    auto a=Approach(c);
-    std::size_t const captureSteps=static_cast<std::size_t>(
-        std::ceil(c.mission.captureHoldSeconds/c.mission.physicsDt))+1;
-    auto const first=AdvanceMission(c,plan,s,a,a);
-    Check(s.phase==Phase::Patrol && !first.terminated,"LOC hold precedes the approach switch");
-    auto const g=Guide(c,plan,s,a);
-    Check(g.ilsValid && Near(g.localizer,0) && Near(g.glideError,0),"on LOC/glide");
-    Check(!s.capturedLocalizer && !s.capturedGlide,"captures require a stable hold");
-    double captures=first.rewards[5]+first.rewards[6];
-    for(std::size_t i=0;i<2*captureSteps+2;++i)
-    { auto const stable=AdvanceMission(c,plan,s,a,a);captures+=stable.rewards[5]+stable.rewards[6]; }
-    Check(s.capturedLocalizer && s.capturedGlide && Near(captures,c.reward.weights[5]+c.reward.weights[6]),"confirmed one-shot capture events");
-    auto const again=AdvanceMission(c,plan,s,a,a);
-    Check(again.rewards[5]==0 && again.rewards[6]==0,"captures must be one-shot");
-    auto far=Approach(c,-c.mission.ilsRangeMeters-1);
-    AdvanceMission(c,plan,s,a,far);
-    Check(s.phase==Phase::Approach && s.capturedLocalizer && s.capturedGlide,
-        "a transient ILS loss cannot cancel the approach");
-    for(std::size_t step=1;step<captureSteps && !s.approachRecoveryPending;++step)
-        AdvanceMission(c,plan,s,far,far);
-    Check(s.phase==Phase::Approach && s.approachRecoveryPending
-        && !s.capturedLocalizer && !s.capturedGlide && !Guide(c,plan,s,far).targetValid,
-        "confirmed ILS loss first keeps a point-free approach recovery grace period");
-    for(std::size_t step=0;step<captureSteps;++step) AdvanceMission(c,plan,s,far,far);
-    Check(s.phase==Phase::Patrol && !s.capturedLocalizer && !s.capturedGlide,
-        "an unrecovered ILS loss eventually returns guidance to the racetrack");
-    MissionState back{}; back.phase=Phase::Approach;
-    auto behind=Approach(c,1000);
-    behind.position.up=100;
-    auto const outside=AdvanceMission(c,plan,back,behind,behind);
-    Check(!Guide(c,plan,back,behind).ilsValid && !back.capturedGlide && outside.rewards[1]==0,"ILS backside suppression");
-    auto invalid=Approach(c,-1000,2000);
-    Check(!Guide(c,plan,back,invalid).ilsValid,"ILS sector");
-    auto obs=Observe(c,plan,s,a);
-    Check(obs.size()==ObservationNames.size(),"observation schema");
-    for (float value : obs) Check(std::isfinite(value) && std::abs(value)<=1,"normalized finite observation");
-    a.velocity.up=std::numeric_limits<double>::quiet_NaN();
-    for (float value : Observe(c,plan,s,a)) Check(value==0,"invalid terminal observation");
-    auto failure=AdvanceMission(c,plan,s,far,a);
-    Check(failure.terminated && !failure.truncated && failure.reward==c.reward.weights[9],"NaN FDM crash");
 
-    MissionState escaped{};escaped.phase=Phase::Approach;
-    auto const insideBoundary=Approach(c,-c.mission.maxDistanceMeters+1);
-    auto const outsideBoundary=Approach(c,-c.mission.maxDistanceMeters-1);
-    auto const rangeFailure=AdvanceMission(c,plan,escaped,insideBoundary,outsideBoundary);
-    Check(rangeFailure.terminated && !rangeFailure.truncated && escaped.outcome==Outcome::Crash
-        && rangeFailure.reward==c.reward.weights[static_cast<std::size_t>(Reward::Crash)],
-        "leaving the recoverable distance is a penalized terminal failure");
-}
-void Landing(Config c)
+MissionState Flying(Phase phase=Phase::Approach)
 {
-    auto const plan=MakeFlightPlan(c);
-    auto before=Approach(c,300); before.position.up=1.8; before.velocity.up=-1;
-    auto after=before; after.weightOnWheels=true; after.velocity.up=0;
-    MissionState s{}; s.phase=Phase::Approach;
-    auto landed=AdvanceMission(c,plan,s,before,after);
-    Check(s.touchedDown && s.phase==Phase::Rollout && !landed.terminated,"safe touchdown continues to stop");
-    Check(Near(s.touchdownFromThreshold,300) && landed.rewards[7]==c.reward.weights[7],"touchdown distance and bonus");
-    auto rolling=after;
-    rolling.position=FromRunway(c.runway,600,0,1.8); rolling.velocity={};
-    auto roll=AdvanceMission(c,plan,s,after,rolling);
-    Check(!roll.terminated && roll.rewards[7]==0 && s.groundRoll>=299,"no repeated touchdown; roll distance");
-    for (std::size_t i=0; i<static_cast<std::size_t>(c.mission.stoppedHoldSeconds/c.mission.physicsDt)+2; ++i)
-    {
-        if (s.outcome!=Outcome::Flying) break;
-        roll=AdvanceMission(c,plan,s,rolling,rolling);
-    }
-    Check(roll.terminated && s.outcome==Outcome::Stopped && Near(s.stopFromThreshold,600),"confirmed stop location");
-    Check(roll.rewards[8]==c.reward.weights[8],"stop reward");
-    MissionState wheelTest{};wheelTest.phase=Phase::Approach;
-    auto precise=after;precise.wheelDataValid=true;
-    for(auto& wheel:precise.wheels) wheel={FromRunway(c.runway,302,0,0),true};
-    AdvanceMission(c,plan,wheelTest,before,precise);
-    Check(Near(wheelTest.touchdownFromThreshold,302),"touchdown is measured at the first physical wheel contact");
-    wheelTest={};wheelTest.phase=Phase::Approach;
-    precise.wheels[0].point=FromRunway(c.runway,302,c.runway.widthMeters,0);
-    Check(AdvanceMission(c,plan,wheelTest,before,precise).terminated && !wheelTest.touchedDown,"all physical wheels must remain inside runway");
-    for (int test=0; test<7; ++test)
-    {
-        auto b=before, a=after;
-        if (test==0) a.gearPosition=0;
-        if (test==1) a.gearPosition=c.mission.gearDownMinimum-0.01;
-        if (test==2) b.velocity.up=-c.mission.maxTouchdownSink-1; // Impact solver may already have removed sink after contact.
-        if (test==3) a.position=FromRunway(c.runway,300,c.runway.widthMeters,1.8);
-        if (test==4) a.structuralContact=true;
-        if (test==5) a.roll=(c.mission.maxTouchdownRollDegrees+1)*DegreesToRadians;
-        if (test==6) a.heading+=Pi;
-        MissionState crash{}; crash.phase=Phase::Approach;
-        auto const result=AdvanceMission(c,plan,crash,b,a);
-        Check(result.terminated && crash.outcome==Outcome::Crash && !crash.touchedDown && result.rewards[7]==0,"unsafe landing rejected");
-    }
-    MissionState overrun{}; overrun.phase=Phase::Rollout; overrun.touchedDown=true;
-    auto off=rolling; off.position=FromRunway(c.runway,c.runway.lengthMeters+1,0,2);
-    Check(AdvanceMission(c,plan,overrun,rolling,off).terminated && overrun.outcome==Outcome::Crash,"runway overrun");
-    MissionState timeout{}; timeout.phase=Phase::Approach;
-    timeout.steps=static_cast<std::uint64_t>(std::ceil(c.mission.maxSeconds/c.mission.physicsDt));
-    auto const timed=AdvanceMission(c,plan,timeout,before,before);
-    Check(timed.truncated && !timed.terminated,"time limit bootstraps");
-    auto const noRepeat=AdvanceMission(c,plan,timeout,before,before);
-    Check(noRepeat.reward==0 && noRepeat.truncated,"terminal reward not repeated");
+    MissionState mission{};
+    mission.phase=phase;
+    return mission;
 }
+
+double Channel(StepResult const& step,Reward reward) { return step.rewards[static_cast<std::size_t>(reward)]; }
+
+/** @brief The scenario exposes only the retained direct landing task. */
 void Configuration()
 {
-    std::ifstream source(PPO_FLIGHT_CONFIG); nlohmann::json valid; source>>valid;
-    TemporaryDirectory temporary("flight-config-"); auto const path=temporary.path/"config.json";
-    for (int test=0; test<32; ++test)
+    auto const c=T6Config();
+    std::ifstream source(PPO_FLIGHT_CONFIG);nlohmann::json json;source>>json;
+    Check(json.at("reward").at("weights").size()==RewardCount,"the scenario exposes exactly the reward channels");
+    for(auto const* key : {"patrolEnabled","racetrackRadius","gearLockedDown","gearDamageSpeedMps","approachHeadingToleranceDegrees"})
+        Check(!json.at("mission").contains(key),"removed mission settings are absent");
+    Check(!json.at("training").contains("curriculumAircraft") && !json.at("training").at("curriculum").contains("stage")
+        && !json.at("training").at("curriculum").contains("pilot"),"removed pilot-lesson settings are absent");
+    for(auto const* key : {"speedMps","heaveAmplitudeMeters","pitchAmplitudeDegrees","rollAmplitudeDegrees"})
+        Check(!json.at("runwayRandomization").contains(key),"the runway no longer moves");
+    Check(Near(c.mission.flareSpeed,52.0),"T6 flare keeps a model-derived airborne speed reserve");
+    Check(T6StallCalibratedSpeed(0.33)>38 && T6StallCalibratedSpeed(0.33)<39,
+        "the pinned mass, wing area and flap lift imply a 38-39 m/s stall CAS");
+
+    auto invalid=json;invalid["mission"]["patrolEnabled"]=false;
+    TemporaryDirectory directory("flight-config-");
+    auto const path=directory.path/"scenario.json";
+    {std::ofstream output(path);output<<invalid;}
+    Rejects([&] { LoadConfig(path); },"unknown legacy settings are rejected");
+    invalid=json;invalid["formatVersion"]=1;
+    {std::ofstream output(path);output<<invalid;}
+    Rejects([&] { LoadConfig(path); },"the previous configuration format is rejected");
+}
+
+/** @brief The scenario weights keep the landing objective dominant and visible from a far start. */
+void RewardBalance()
+{
+    auto const c=T6Config();
+    auto const weight=[&c](Reward channel) { return Weight(c.reward,channel); };
+    Check(weight(Reward::Stop)>weight(Reward::Touchdown) && weight(Reward::Touchdown)>0 && weight(Reward::Crash)<0,
+        "stopping is the main objective and a crash is penalized");
+    double const shaping=weight(Reward::Path)+weight(Reward::VerticalSpeed)+weight(Reward::Speed);
+    Check(shaping<weight(Reward::Stop)+weight(Reward::Touchdown),
+        "the full shaping amplitude stays below the landing rewards");
+    // A far start lasts about 250 s of flight; the discounted Stop must stay visible.
+    double const farStartSteps=c.initial.distanceMeters.maximum/c.mission.approachSpeed/c.StepSeconds();
+    Check(std::pow(c.training.gamma,farStartSteps)>0.05,"the discount horizon reaches the landing from a far start");
+    Check(c.mission.maxSeconds*c.mission.approachSpeed>1.5*c.initial.distanceMeters.maximum,
+        "the time limit leaves room for the longest approach and the rollout");
+}
+
+/** @brief Warm starts accept reward and spawn changes, never physics or guidance changes. */
+void SignatureCompatibility()
+{
+    auto const c=T6Config();
+    auto signature=nlohmann::json::parse(c.checkpointSignature);
+    Check(!signature.contains("training") && !signature.contains("evaluation") && signature.contains("contractVersion"),
+        "the checkpoint contract excludes optimizer and evaluation settings");
+    auto changed=signature;changed["reward"]["weights"]["Path"]=1.0;changed["initial"]["distanceMeters"]={1000,2000};
+    Check(changed.dump()!=c.checkpointSignature && CompatibleTrainingSignature(changed.dump(),c.checkpointSignature),
+        "reward and spawn changes keep a compatible warm start");
+    for(auto const* field : {"throttle","elevatorTrim","approachFlap","rolloutFlap","propeller","mixture"})
     {
-        auto json=valid;
-        if (test==0) json["normalization"]["speed"]=0;
-        if (test==1) json["mission"]["turnSamples"]=128;
-        if (test==2) json["training"]["minibatch"]=3;
-        if (test==3) json["mission"]["actionSubsteps"]=-1;
-        if (test==4) json["initial"]["gearDown"]=1;
-        if (test==5) json["mission"]["hiddenConstant"]=3;
-        if (test==6) json["training"]["checkpointDirectory"]="../BluePatrol/prod";
-        if (test==7) json["mission"].erase("physicsDt");
-        if (test==8) json["initial"]["runwayAlignedProbability"]=-0.01;
-        if (test==9) json["initial"]["runwayAlignedProbability"]=1.01;
-        if (test==10) json["initial"]["runwayAlignedProbability"]=true;
-        if (test==11) json["initial"].erase("runwayAlignedProbability");
-        if (test==12) json["initial"]["bearingDegrees"]={-20,20};
-        if (test==13) json["mission"]["patrolLookaheadSeconds"]=0;
-        if (test==14) json["initial"]["distanceMeters"]={5000,
-            json["mission"]["ilsRangeMeters"].get<double>()+1};
-        if (test==15) json["mission"]["racetrackCenterCross"]=0;
-        if (test==16) json["training"]["ilsCaptureScale"]=0.99;
-        if (test==17) json["training"]["ilsCaptureScale"]=100.0;
-        if (test==18) json["training"].erase("ilsCaptureScale");
-        if (test==19) json["mission"]["patrolHeadingToleranceDegrees"]=0;
-        if (test==20) json["reward"].erase("glideToleranceDegrees");
-        if (test==21) json["reward"].erase("slopeToleranceDegrees");
-        if (test==22) json["reward"].erase("localizerCourseBlend");
-        if (test==23) json["reward"].erase("localizerInterceptGain");
-        if (test==24) json["reward"].erase("localizerInterceptLimitDegrees");
-        if (test==25) json["normalization"]["localizerDegrees"]=35.0;
-        if (test==26) json["training"]["curriculum"]["stage"]="invalid";
-        if (test==27) json["training"]["curriculum"]["locReminderProbability"]=-0.1;
-        if (test==28) json["training"]["curriculum"]["glideOffsetMeters"]=1e7;
-        if (test==29) json["training"]["curriculum"]["gateHeadingDegrees"]=0;
-        if (test==30) json["training"]["curriculum"]["gateRouteDegrees"]=50;
-        if (test==31) json["training"]["curriculum"]["gateSlopeDegrees"]=10;
-        { std::ofstream stream(path); stream<<json; }
-        Rejects([&] { LoadConfig(path); },"invalid JSON accepted");
+        changed=signature;changed["initial"][field]=changed["initial"][field].get<double>()-0.05;
+        Check(!CompatibleTrainingSignature(changed.dump(),c.checkpointSignature),
+            "fixed controls and aircraft configuration are part of the contract");
     }
-    auto c=LoadConfig(PPO_FLIGHT_CONFIG);
-    Check(Near(c.initial.runwayAlignedProbability,1.0/3.0),"balanced LOC/glide-start probability");
-    Check(Near(c.training.ilsCaptureScale,2.0),"training-only ILS capture scale");
-    Check(Near(c.mission.maxDistanceMeters,18000),"bounded recovery margin beyond ILS range");
-    for(double probability : {std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity()})
+    changed=signature;changed["initial"]["unknownControl"]=1.0;
+    Check(!CompatibleTrainingSignature(changed.dump(),c.checkpointSignature),
+        "an unlisted initial field is incompatible by default");
+    changed=signature;changed["initial"]["rolloutStart"]["speedMps"]={10,20};changed["initial"]["rollDegrees"]=3.0;
+    Check(CompatibleTrainingSignature(changed.dump(),c.checkpointSignature),
+        "rollout and attitude spawn ranges keep a compatible warm start");
+    for(auto const* field : {"glideDegrees","flareSpeed","maxTouchdownSink"})
     {
-        c.initial.runwayAlignedProbability=probability;
-        Rejects([&] { Validate(c); },"non-finite spawn probability accepted");
+        changed=signature;changed["mission"][field]=changed["mission"][field].get<double>()+1.0;
+        Check(!CompatibleTrainingSignature(changed.dump(),c.checkpointSignature),"mission changes are incompatible");
+    }
+    changed=signature;changed["contractVersion"]=0;
+    Check(!CompatibleTrainingSignature(changed.dump(),c.checkpointSignature),"another contract version is incompatible");
+    Check(!CompatibleTrainingSignature("broken",c.checkpointSignature),"malformed signatures are incompatible");
+}
+
+/** @brief Runway frames are exact inverses and the body axes are orthonormal. */
+void Geometry()
+{
+    auto c=T6Config();
+    c.runway.origin={150,-200,15};
+    for(double heading : {0.,90.,181.,359.})
+    {
+        c.runway.headingDegrees=heading;
+        auto const local=DeckCoordinates(c.runway,FromRunway(c.runway,-1234,57,99));
+        Check(Near(local.north,-1234) && Near(local.east,57) && Near(local.up,99),"runway rotation/inverse");
+    }
+    for(double roll : {-0.5,0.0,0.7}) for(double pitch : {-0.2,0.1}) for(double heading : {0.0,2.0})
+    {
+        auto const axes=AircraftAxes(roll,pitch,heading);
+        Check(Near(Length(axes.forward),1) && Near(Length(axes.right),1) && Near(Length(axes.up),1)
+            && Near(Dot(axes.forward,axes.right),0) && Near(Dot(axes.forward,axes.up),0)
+            && Near(Dot(axes.right,axes.up),0),"body axes are orthonormal");
+    }
+    auto const level=AircraftAxes(0,0,0);
+    Check(Near(level.forward.north,1) && Near(level.right.east,1) && Near(level.up.up,1),
+        "a level aircraft heading north has north, east and up body axes");
+}
+
+/** @brief Target speed decelerates before the flare and keeps the stall reserve. */
+void TargetSpeed()
+{
+    auto const c=T6Config();
+    auto approach=Flying();
+    for(auto const sample : {std::pair<double,double>{-2700,56},{-2350,54},{-2000,52},{0,52}})
+    {
+        auto aircraft=Approach(c,sample.first);aircraft.flapPosition=c.initial.approachFlap;
+        Check(Near(Guide(c,approach,aircraft).targetSpeed,sample.second),"T6 approach speed follows the distance ramp");
+    }
+    auto aircraft=Approach(c,c.runway.lengthMeters/2);aircraft.flapPosition=c.initial.approachFlap;
+    auto rollout=Flying(Phase::Rollout);rollout.touchedDown=true;
+    Check(Guide(c,rollout,aircraft).targetSpeed>0,"an airborne bounce cannot request zero speed");
+    aircraft.weightOnWheels=true;
+    Check(Near(Guide(c,rollout,aircraft).targetSpeed,0),"the rollout target is zero only on the wheels");
+    aircraft.weightOnWheels=false;
+    for(double flap : {0.0,0.33,1.0}) for(double along : {-1000.0,-300.0,0.0,4000.0})
+    {
+        aircraft.position=FromRunway(c.runway,along,0,5);aircraft.flapPosition=flap;
+        Check(Guide(c,approach,aircraft).targetSpeed>=1.3*T6StallCalibratedSpeed(flap),
+            "every airborne target reserves 30 percent above the current-flap stall CAS");
     }
 }
-void OrderedNavigation(Config const& config)
+
+/** @brief The glide plane crosses the threshold at its crossing height and meets the runway at the aim point. */
+void AimPointOnRunway()
 {
-    auto c=config;
-    auto const plan=MakeFlightPlan(c);
-    MissionState notArmed{};
-    auto const near=Approach(c,-1000);
-    AdvanceMission(c,plan,notArmed,near,near);
-    Check(notArmed.phase==Phase::Patrol,"distance alone cannot skip prescribed racetrack laps");
-    MissionState flight{};
-    AircraftState a{};a.position=plan.points[0];a.airspeed=c.mission.patrolSpeed;
-    for(std::size_t step=0;step<10000 && flight.completedLaps==0;++step)
-    {
-        auto const target=plan.points[flight.waypoint];auto const difference=Subtract(target,a.position);
-        double const length=std::sqrt(Dot(difference,difference));
-        auto next=a;
-        next.position=Add(a.position,Scale(difference,std::min(10.0,length)/length));
-        // Keep this path-validation fixture outside the approach capture gate;
-        // the real aligned inbound branch intentionally gives LOC priority.
-        next.heading=std::atan2(difference.east,difference.north)+Pi/2;
-        AdvanceMission(c,plan,flight,a,next);a=next;
-    }
-    Check(flight.completedLaps==1,"one complete ordered physical circuit qualifies landing return");
-    MissionState shortcut{};shortcut.pathQualified=true;shortcut.waypointsPassed=3;
-    auto before=a,after=a;before.position=plan.points[0];after.position=plan.points[3];
-    AdvanceMission(c,plan,shortcut,before,after);
-    Check(!shortcut.pathQualified && shortcut.waypointsPassed==0 && shortcut.completedLaps==0,"teleport/shortcut invalidates lap progress");
-    MissionState stopped{};a.position=plan.points[0];
-    auto const inboundSegment=Subtract(plan.points[0],plan.points[plan.count-1]);
-    a.heading=std::atan2(inboundSegment.east,inboundSegment.north);
-    auto const stationary=AdvanceMission(c,plan,stopped,a,a);
-    Check(stationary.rewards[0]<=0 && !stopped.pathQualified
-        && stopped.waypointsPassed==0 && stopped.completedLaps==0,
-        "stationary aircraft earns no path progression");
+    auto c=T6Config();
+    c.runway.origin={150,-200,25};c.runway.headingDegrees=123;
+    double const aimAlong=AimPointAlongMeters(c);
+    auto const aim=DeckCoordinates(c.runway,AimPoint(c));
+    Check(aimAlong>0 && aimAlong<c.runway.lengthMeters/2 && Near(aim.north,aimAlong) && Near(aim.east,0) && Near(aim.up,0)
+        && OnLandingSurface(c.runway,aim.north,aim.east) && LandingRewardFactor(c.runway,aim.north,aim.east)==1,
+        "the aim point lies on the runway centreline, inside the real runway");
+    Check(Near(ApproachPathHeight(c,0),c.runway.thresholdHeightMeters) && Near(ApproachPathHeight(c,aimAlong),0)
+        && Near(ApproachPathHeight(c,aimAlong+500),0),"the glide plane crosses the threshold at its crossing height");
+    Check(Near(ApproachPathHeight(c,-5000),c.runway.thresholdHeightMeters+5000*std::tan(c.mission.glideDegrees*DegreesToRadians)),
+        "spawns and guidance share the same glide plane");
 }
-void AlignedStarts(Config c)
+
+/** @brief Short final points at the aim point; near it the track converges onto the centreline. */
+void ApproachDirection()
 {
-    std::array<double,4> const headings{0,90,181,359};
-    for(double probability : {0.0,1.0,1.0/3.0})
+    auto c=T6Config();
+    c.runway.origin={150,-200,25};c.runway.headingDegrees=123;
+    double const aimAlong=AimPointAlongMeters(c);
+    for(double cross : {-300.0,0.0,250.0}) for(double along : {-9000.0,-3000.0,-1000.0})
     {
-        c.initial.runwayAlignedProbability=probability;
-        std::mt19937 rng(279),same(279);
-        SpawnPlacementSampler placements{},samePlacements{};
-        std::size_t alignedCount=0,left=0,right=0;
-        std::array<bool,3> familyBlock{};
-        double firstDistance=0,firstSpeed=0,firstRoll=0;
-        bool variedDistance=false,variedSpeed=false,variedRoll=false;
-        for(std::size_t sample=0;sample<1000;++sample)
+        auto const aircraft=Approach(c,along,cross);
+        auto const guidance=Guide(c,Flying(),aircraft);
+        if(aimAlong-along<=InterceptLookaheadMeters)
         {
-            auto motion=SampleRunway(c,rng),copy=SampleRunway(c,same);
-            motion.base.headingDegrees=headings[sample%headings.size()];copy.base.headingDegrees=motion.base.headingDegrees;
-            auto const runway=RunwayAt(motion,0),replicaRunway=RunwayAt(copy,0);
-            auto const placement=placements.Next(probability,rng);
-            auto const replicaPlacement=samePlacements.Next(probability,same);
-            auto const aircraft=SampleAircraft(c,runway,placement,rng);
-            auto const replica=SampleAircraft(c,replicaRunway,replicaPlacement,same);
+            auto const toAim=UnitDirection(Subtract(AimPoint(c),aircraft.position));
+            Check(guidance.targetValid && Near(Dot(guidance.targetDirection,toAim),1,1e-9)
+                && Near(Length(Subtract(guidance.target,AimPoint(c))),0,1e-6),
+                "on short final the commanded direction points straight at the aim point");
+        }
+        auto const observation=Observe(c,Flying(),aircraft);
+        auto const body=InBodyAxes(AircraftAxes(aircraft.roll,aircraft.pitch,aircraft.heading),guidance.targetDirection);
+        Check(Near(observation[Slot(ObservationIndex::TargetDirectionForward)],body.north,1e-6)
+            && Near(observation[Slot(ObservationIndex::TargetDirectionRight)],body.east,1e-6)
+            && Near(observation[Slot(ObservationIndex::TargetDirectionUp)],body.up,1e-6),
+            "the policy observes the same commanded direction in body axes");
+        auto truncated=Flying();truncated.outcome=Outcome::Timeout;
+        Check(Observe(c,truncated,aircraft)==observation,"a truncated episode preserves its target for bootstrapping");
+    }
+    // Around the switch from the aim point to the sliding centreline target the direction stays continuous.
+    double const switchAlong=aimAlong-CentrelineLookaheadMeters;
+    auto before=Approach(c,switchAlong-0.01,20),after=Approach(c,switchAlong+0.01,20);
+    Check(Near(Dot(Guide(c,Flying(),before).targetDirection,Guide(c,Flying(),after).targetDirection),1,1e-6),
+        "the direction is continuous where the target starts sliding along the centreline");
+    for(double along : {aimAlong-100,aimAlong,aimAlong+400,c.runway.lengthMeters*0.75})
+    {
+        auto aircraft=Approach(c,along,20);aircraft.position=FromRunway(c.runway,along,20,30);
+        auto const direction=RunwayAxes(c.runway,Guide(c,Flying(),aircraft).targetDirection);
+        Check(direction.north>0 && direction.east<0 && direction.up<0,
+            "over the runway the direction keeps flying forward, converges to the centreline and descends");
+    }
+    auto rolling=Approach(c,800,10);rolling.position=FromRunway(c.runway,800,10,1.5);rolling.weightOnWheels=true;
+    auto const rollout=Guide(c,Flying(Phase::Rollout),rolling);
+    auto const rollDirection=RunwayAxes(c.runway,rollout.targetDirection);
+    Check(rollout.targetValid && rollout.mode==GuidanceMode::Rollout && rollDirection.north>0 && rollDirection.east<0
+        && Near(rollDirection.up,0),"while rolling the direction is level, forward and back to the centreline");
+    for(auto const outcome : {Outcome::Crash,Outcome::Stopped})
+    {
+        auto terminal=Flying();terminal.outcome=outcome;
+        Check(!Guide(c,terminal,Approach(c)).targetValid,"a terminal mission has no active target");
+    }
+}
+
+/** @brief Angle between the commanded horizontal track and the runway axis, positive to the right, in degrees. */
+double CommandTrackDegrees(Config const& c,Guidance const& guidance)
+{
+    auto const direction=RunwayAxes(c.runway,guidance.targetDirection);
+    return std::atan2(direction.east,direction.north)/DegreesToRadians;
+}
+
+/** @brief Far out the command intercepts the extended centreline at a bounded angle and keeps the glide plane. */
+void CentrelineIntercept()
+{
+    auto c=T6Config();
+    c.runway.origin={150,-200,25};c.runway.headingDegrees=123;
+    double const aimAlong=AimPointAlongMeters(c);
+    double const along=-9000;
+    auto const onAxis=Guide(c,Flying(),Approach(c,along));
+    Check(Near(CommandTrackDegrees(c,onAxis),0,1e-9)
+        && Near(Length(Subtract(onAxis.target,FromRunway(c.runway,along+InterceptLookaheadMeters,0,0))),0,1e-6),
+        "on the extended centreline the command follows the runway axis toward a point 2 km ahead");
+    for(double cross : {-2900.0,-250.0,-5.0,5.0,250.0,2900.0})
+    {
+        auto const aircraft=Approach(c,along,cross);
+        auto const guidance=Guide(c,Flying(),aircraft);
+        double const expected=std::max(-MaximumInterceptAngleDegrees,std::min(MaximumInterceptAngleDegrees,
+            std::atan2(-cross,InterceptLookaheadMeters)/DegreesToRadians));
+        Check(Near(CommandTrackDegrees(c,guidance),expected,1e-9) && CommandTrackDegrees(c,guidance)*cross<0,
+            "off the centreline the command turns toward it, at most at the intercept angle");
+        Check(Near(CommandTrackDegrees(c,Guide(c,Flying(),Approach(c,along,-cross))),-expected,1e-9),
+            "left and right offsets are intercepted symmetrically");
+        double const height=DeckCoordinates(c.runway,aircraft.position).up;
+        Check(Near(guidance.targetSlope,-std::atan(height/std::hypot(aimAlong-along,cross)),1e-9),
+            "the commanded slope still descends toward the aim point on the glide plane");
+    }
+    // The look-ahead switches from 2 km to the aim point without a jump in the command.
+    double const switchAlong=aimAlong-InterceptLookaheadMeters;
+    auto const before=Guide(c,Flying(),Approach(c,switchAlong-0.01,300));
+    auto const after=Guide(c,Flying(),Approach(c,switchAlong+0.01,300));
+    Check(Near(Dot(before.targetDirection,after.targetDirection),1,1e-9),
+        "the direction is continuous where the look-ahead starts shrinking toward the aim point");
+}
+
+/** @brief Following the command from the widest curriculum start reaches the threshold aligned with the runway. */
+void CentrelineInterceptTrajectory()
+{
+    auto c=T6Config();
+    c.runway.origin={0,0,15};c.runway.headingDegrees=0;
+    constexpr double Speed=56;
+    constexpr double Dt=0.1;
+    double const distance=c.initial.distanceMeters.maximum;
+    double const bearing=c.initial.bearingDegrees.maximum*DegreesToRadians;
+    for(double const side : {-1.0,1.0})
+    {
+        double const startCross=side*distance*std::sin(bearing);
+        auto aircraft=Approach(c,-distance*std::cos(bearing),startCross);
+        double previousCross=std::abs(startCross);
+        bool reachedThreshold=false;
+        for(int step=0;step<10000;++step)
+        {
+            auto const guidance=Guide(c,Flying(),aircraft);
+            auto const local=DeckCoordinates(c.runway,aircraft.position);
+            Check(std::abs(local.east)<=previousCross+1e-9 && local.east*startCross>=0,
+                "the lateral offset decreases toward the centreline without overshooting it");
+            previousCross=std::abs(local.east);
+            if(local.north>=0)
+            {
+                Check(std::abs(local.east)<5 && std::abs(CommandTrackDegrees(c,guidance))<1,
+                    "the aircraft crosses the threshold on the centreline, aligned with the runway");
+                reachedThreshold=true;break;
+            }
+            aircraft.velocity=Scale(guidance.targetDirection,Speed);
+            aircraft.position=Add(aircraft.position,Scale(aircraft.velocity,Dt));
+        }
+        Check(reachedThreshold,"the intercept reaches the threshold in finite time");
+    }
+}
+
+/** @brief Following the commanded direction from short final flares onto the runway past the aim point. */
+void FlareTrajectory()
+{
+    auto c=T6Config();
+    c.runway.origin={0,0,15};c.runway.headingDegrees=0;
+    auto aircraft=Approach(c,-2000,15);
+    auto const mission=Flying();
+    bool reachedWheels=false;
+    for(int step=0;step<20000;++step)
+    {
+        auto const guidance=Guide(c,mission,aircraft);
+        aircraft.velocity=Scale(guidance.targetDirection,c.mission.flareSpeed);
+        auto const local=DeckCoordinates(c.runway,aircraft.position);
+        double const sink=-aircraft.velocity.up;
+        Check(sink>0 && aircraft.velocity.north>0,"the reference neither climbs, hovers nor turns back");
+        if(local.up<=0.5)
+        {
+            Check(sink<c.mission.maxTouchdownSink/4 && local.north>=0 && local.north<=c.runway.lengthMeters/2
+                && std::abs(local.east)<1,"the flare reaches the wheels gently, on the runway centreline");
+            reachedWheels=true;break;
+        }
+        aircraft.position=Add(aircraft.position,Scale(aircraft.velocity,c.mission.physicsDt));
+    }
+    Check(reachedWheels,"the reference trajectory reaches wheel contact in finite time");
+}
+/** @brief The landing-area factor decreases from the real runway edge to zero at the margin. */
+void LandingQuality()
+{
+    auto const c=T6Config();
+    Check(c.runway.landingMarginMeters==50,"the T6 physical safety margin is 50 metres");
+    for(int edge=0;edge<4;++edge)
+    {
+        double previous=1;
+        for(double distance : {0.0,5.0,25.0,50.0})
+        {
+            double const along=edge==2 ? -distance : edge==3 ? c.runway.lengthMeters+distance : c.runway.lengthMeters/2;
+            double const cross=edge==0 ? -c.runway.widthMeters/2-distance : edge==1 ? c.runway.widthMeters/2+distance : 0;
+            double const quality=LandingRewardFactor(c.runway,along,cross);
+            Check(Near(quality,1-distance/c.runway.landingMarginMeters) && quality<=previous,
+                "quality decreases monotonically from the real edge to zero at the margin");
+            previous=quality;
+            auto before=Approach(c);before.position=FromRunway(c.runway,along,cross,2.1);
+            before.velocity=Scale(RunwayForward(c.runway),50);before.velocity.up=-1;before.airspeed=50;
+            auto after=before;after.weightOnWheels=true;after.velocity={};after.airspeed=0;
+            auto mission=Flying();
+            auto result=AdvanceMission(c,mission,before,after);
+            Check(mission.touchedDown && Near(mission.landingAreaFactor,quality)
+                && Near(mission.touchdownQuality,TouchdownQuality(c,mission))
+                && Near(Channel(result,Reward::Touchdown),Weight(c.reward,Reward::Touchdown)*mission.touchdownQuality),
+                "Touchdown pays its quality, which includes the real-runway distance factor");
+            for(int step=0;step<300 && mission.outcome==Outcome::Flying;++step) result=AdvanceMission(c,mission,after,after);
+            Check(mission.outcome==Outcome::Stopped && Near(Channel(result,Reward::Stop),Weight(c.reward,Reward::Stop)*quality),
+                "Stop uses the landing-area factor");
+        }
+        double const along=edge==2 ? -60 : edge==3 ? c.runway.lengthMeters+60 : c.runway.lengthMeters/2;
+        double const cross=edge==0 ? -c.runway.widthMeters/2-60 : edge==1 ? c.runway.widthMeters/2+60 : 0;
+        Check(!OnLandingSurface(c.runway,along,cross) && Near(LandingRewardFactor(c.runway,along,cross),0.0),
+            "outside the safety margin the ground is not landable");
+    }
+}
+
+/** @brief Crash diagnostics preserve simultaneous failures and pre-impact measurements. */
+void CrashDiagnostics()
+{
+    auto c=T6Config();
+    c.runway.landingMarginMeters=0;
+    auto before=Approach(c,300);before.position=FromRunway(c.runway,300,0,1.8);
+    before.velocity=Add(Scale(RunwayForward(c.runway),c.mission.maxTouchdownSpeed+5),
+        Scale(RunwayNormal(c.runway),-c.mission.maxTouchdownSink-2));
+    auto after=before;after.weightOnWheels=true;
+    after.velocity=Scale(RunwayForward(c.runway),10);
+    after.roll=(c.mission.maxTouchdownRollDegrees+2)*DegreesToRadians;
+    auto mission=Flying();
+    CrashDiagnostic diagnostic{};
+    auto const result=AdvanceMission(c,mission,before,after,&diagnostic);
+    auto const& speed=diagnostic.conditions[static_cast<std::size_t>(CrashReason::Speed)];
+    auto const& sink=diagnostic.conditions[static_cast<std::size_t>(CrashReason::Sink)];
+    auto const& roll=diagnostic.conditions[static_cast<std::size_t>(CrashReason::Roll)];
+    Check(result.terminated && mission.outcome==Outcome::Crash && speed.failed && sink.failed && roll.failed,
+        "simultaneous impact speed, sink and roll failures are reported");
+    Check(Near(speed.value,c.mission.maxTouchdownSpeed+5) && Near(speed.limit,c.mission.maxTouchdownSpeed)
+        && Near(sink.value,c.mission.maxTouchdownSink+2) && Near(roll.value,c.mission.maxTouchdownRollDegrees+2),
+        "impact diagnostics show the worst pre/post values and actual limits");
+    Check(!diagnostic.conditions[static_cast<std::size_t>(CrashReason::Gear)].failed,
+        "satisfied landing conditions are not reported");
+
+    mission=Flying();diagnostic={};
+    auto invalid=before;invalid.finite=false;
+    AdvanceMission(c,mission,before,invalid,&diagnostic);
+    Check(mission.outcome==Outcome::Crash && diagnostic.conditions[static_cast<std::size_t>(CrashReason::InvalidState)].failed,
+        "an invalid aircraft state has a crash reason");
+
+    mission=Flying();diagnostic={};
+    auto safe=Approach(c,300);safe.position=FromRunway(c.runway,300,0,1.8);
+    safe.velocity=Scale(RunwayForward(c.runway),10);safe.weightOnWheels=true;
+    Check(!AdvanceMission(c,mission,safe,safe,&diagnostic).terminated && mission.outcome==Outcome::Flying,
+        "requesting diagnostics does not change a safe touchdown");
+
+    mission=Flying();diagnostic={};
+    auto badAttitude=safe;badAttitude.pitch=(c.mission.minTouchdownPitchDegrees-2)*DegreesToRadians;
+    badAttitude.heading+=(c.mission.maxTouchdownHeadingDegrees+3)*DegreesToRadians;badAttitude.gearPosition=0;
+    AdvanceMission(c,mission,safe,badAttitude,&diagnostic);
+    auto const& pitch=diagnostic.conditions[static_cast<std::size_t>(CrashReason::PitchLow)];
+    auto const& heading=diagnostic.conditions[static_cast<std::size_t>(CrashReason::Heading)];
+    auto const& gear=diagnostic.conditions[static_cast<std::size_t>(CrashReason::Gear)];
+    Check(mission.outcome==Outcome::Crash && pitch.failed && heading.failed && gear.failed
+        && Near(pitch.value,c.mission.minTouchdownPitchDegrees-2) && Near(heading.value,c.mission.maxTouchdownHeadingDegrees+3)
+        && Near(gear.limit,c.mission.gearDownMinimum),"pitch, heading and gear report their failed limit");
+
+    mission=Flying(Phase::Rollout);diagnostic={};
+    auto outside=safe;outside.position=FromRunway(c.runway,c.runway.lengthMeters+1,0,2);outside.weightOnWheels=false;
+    AdvanceMission(c,mission,safe,outside,&diagnostic);
+    Check(mission.outcome==Outcome::Crash && diagnostic.conditions[static_cast<std::size_t>(CrashReason::LandingArea)].failed,
+        "leaving the landing area during rollout is reported even without contact");
+}
+
+/** @brief A safe touchdown rolls to a confirmed stop; unsafe contacts end in a crash. */
+void Landing()
+{
+    auto c=T6Config();
+    c.runway.landingMarginMeters=0;
+    auto before=Approach(c,300);before.position=FromRunway(c.runway,300,0,1.8);before.velocity.up=-1;
+    auto after=before;after.weightOnWheels=true;after.velocity.up=0;
+    auto mission=Flying();
+    auto const landed=AdvanceMission(c,mission,before,after);
+    Check(mission.touchedDown && mission.phase==Phase::Rollout && !landed.terminated,"a safe touchdown continues to the stop");
+    Check(Near(mission.touchdownFromThreshold,300) && Near(Channel(landed,Reward::Touchdown),Weight(c.reward,Reward::Touchdown)*mission.touchdownQuality),
+        "touchdown distance and bonus");
+    auto rolling=after;rolling.position=FromRunway(c.runway,600,0,1.8);rolling.velocity={};
+    auto roll=AdvanceMission(c,mission,after,rolling);
+    Check(!roll.terminated && Channel(roll,Reward::Touchdown)==0 && mission.groundRoll>=299,"no repeated touchdown; roll distance");
+    for(std::size_t i=0;i<static_cast<std::size_t>(c.mission.stoppedHoldSeconds/c.mission.physicsDt)+2;++i)
+    {
+        if(mission.outcome!=Outcome::Flying) break;
+        roll=AdvanceMission(c,mission,rolling,rolling);
+    }
+    Check(roll.terminated && mission.outcome==Outcome::Stopped && Near(mission.stopFromThreshold,600),"confirmed stop location");
+    Check(Near(Channel(roll,Reward::Stop),Weight(c.reward,Reward::Stop)),"stop reward");
+
+    auto wheelTest=Flying();
+    auto precise=after;precise.wheelDataValid=true;
+    for(auto& wheel:precise.wheels) wheel={FromRunway(c.runway,302,0,0),true};
+    AdvanceMission(c,wheelTest,before,precise);
+    Check(Near(wheelTest.touchdownFromThreshold,302),"touchdown is measured at the first physical wheel contact");
+    wheelTest=Flying();
+    precise.wheels[0].point=FromRunway(c.runway,302,c.runway.widthMeters,0);
+    Check(AdvanceMission(c,wheelTest,before,precise).terminated && !wheelTest.touchedDown,"all wheels must remain inside the runway");
+    for(int test=0;test<7;++test)
+    {
+        auto b=before,a=after;
+        if(test==0) a.gearPosition=0;
+        if(test==1) a.gearPosition=c.mission.gearDownMinimum-0.01;
+        if(test==2) b.velocity.up=-c.mission.maxTouchdownSink-1; // The impact solver may already have removed sink.
+        if(test==3) a.position=FromRunway(c.runway,300,c.runway.widthMeters,1.8);
+        if(test==4) a.structuralContact=true;
+        if(test==5) a.roll=(c.mission.maxTouchdownRollDegrees+1)*DegreesToRadians;
+        if(test==6) a.heading+=Pi;
+        auto crash=Flying();
+        auto const result=AdvanceMission(c,crash,b,a);
+        Check(result.terminated && crash.outcome==Outcome::Crash && !crash.touchedDown
+            && Channel(result,Reward::Touchdown)==0,"an unsafe landing is rejected");
+    }
+    auto overrun=Flying(Phase::Rollout);overrun.touchedDown=true;
+    auto off=rolling;off.position=FromRunway(c.runway,c.runway.lengthMeters+1,0,2);
+    Check(AdvanceMission(c,overrun,rolling,off).terminated && overrun.outcome==Outcome::Crash,"runway overrun");
+    auto timeout=Flying();
+    timeout.steps=static_cast<std::uint64_t>(std::ceil(c.mission.maxSeconds/c.mission.physicsDt));
+    auto const timed=AdvanceMission(c,timeout,before,before);
+    Check(timed.truncated && !timed.terminated,"the time limit bootstraps");
+    auto const noRepeat=AdvanceMission(c,timeout,before,before);
+    Check(noRepeat.reward==0 && noRepeat.truncated,"no reward after the episode boundary");
+    auto escaped=Flying();
+    auto const outside=AdvanceMission(c,escaped,Approach(c,-c.mission.maxDistanceMeters+1),Approach(c,-c.mission.maxDistanceMeters-1));
+    Check(outside.truncated && escaped.outcome==Outcome::Timeout,"leaving the recoverable distance truncates the episode");
+}
+
+/** @brief The elevated deck plane cannot invent contact above the sea; native contacts are authoritative. */
+void FiniteSurfaceContacts()
+{
+    auto c=T6Config();
+    c.runway.origin={100,-200,15};
+    for(double const heading:{0.0,90.0,181.0,359.0})
+    {
+        c.runway.headingDegrees=heading;
+        for(auto const position:std::array<std::array<double,2>,4>{{
+            {{-60,0}},{{c.runway.lengthMeters+60,0}},{{500,-c.runway.widthMeters}},{{500,c.runway.widthMeters}}}})
+        {
+            for(bool const native:{false,true})
+            {
+                auto aircraft=Approach(c,position[0],position[1]);
+                aircraft.position=FromRunway(c.runway,position[0],position[1],0.1);
+                aircraft.wheelDataValid=native;
+                auto mission=Flying();
+                auto const step=AdvanceMission(c,mission,aircraft,aircraft);
+                Check(!step.terminated && !mission.contactAttempted && mission.outcome==Outcome::Flying,
+                    "the elevated runway plane cannot cause an off-deck impact above the sea");
+                aircraft.position.up=c.runwayRandomization.seaHeightMeters+0.1;
+                aircraft.structuralContact=native;
+                mission=Flying();
+                auto const impact=AdvanceMission(c,mission,aircraft,aircraft);
+                Check(impact.terminated && mission.outcome==Outcome::Crash
+                    && Near(Channel(impact,Reward::Crash),Weight(c.reward,Reward::Crash)),
+                    "a real sea impact stays a penalized terminal failure");
+            }
+        }
+        auto above=Approach(c,500);above.position=FromRunway(c.runway,500,0,0.1);above.wheelDataValid=true;
+        auto mission=Flying();
+        Check(!AdvanceMission(c,mission,above,above).terminated && !mission.contactAttempted,
+            "native wheel and structure contacts are authoritative above the deck");
+        above.structuralContact=true;
+        Check(AdvanceMission(c,mission,above,above).terminated && mission.outcome==Outcome::Crash,
+            "native structural contact cannot be masked by the geometric fallback");
+    }
+}
+
+/** @brief The signed logarithm is odd, monotonic, fine near zero and saturates at its maximum. */
+void SignedLogCompression()
+{
+    Check(SignedLog(0,5,2000)==0 && Near(SignedLog(2000,5,2000),1) && SignedLog(1e6,5,2000)==1
+        && Near(SignedLog(-37,5,2000),-SignedLog(37,5,2000)),"the compression is odd and saturates");
+    float previous=-2;
+    for(double value : {-1000.0,-50.0,-1.0,0.0,1.0,2.0,10.0,100.0,1000.0})
+    {
+        float const current=SignedLog(value,5,2000);
+        Check(current>previous,"the compression is strictly monotonic");
+        previous=current;
+    }
+    Check(SignedLog(3,5,2000)-SignedLog(1,5,2000)>0.04F,"two metres near the deck remain distinguishable");
+    Check(std::isfinite(SignedLog(std::numeric_limits<double>::quiet_NaN(),5,2000)),"a non-finite value maps to zero");
+}
+
+/** @brief Observations live in runway axes: identical local situations observe identically on any runway. */
+void ObservationConditioning()
+{
+    auto const config=T6Config();
+    auto const mission=Flying();
+    auto reference=config;reference.runway.origin={0,0,15};reference.runway.headingDegrees=0;
+    auto const referenceObservation=Observe(reference,mission,Approach(reference,-6000,300));
+    for(double heading : {37.0,90.0,181.0,359.0})
+    {
+        auto c=config;c.runway.origin={-800,1200,14};c.runway.headingDegrees=heading;
+        auto const observation=Observe(c,mission,Approach(c,-6000,300));
+        for(std::size_t i=0;i<ObservationSize;++i)
+            Check(Near(observation[i],referenceObservation[i],1e-5),"observations do not depend on the runway pose");
+    }
+    auto const c=reference;
+    auto aircraft=Approach(c,-6000,300);
+    aircraft.velocity.up=-3;aircraft.rollRate=0.1;aircraft.pitchRate=-0.1;aircraft.yawRate=0.05;
+    auto const observation=Observe(c,mission,aircraft);
+    Check(observation[Slot(ObservationIndex::Cross)]>0
+        && Near(observation[Slot(ObservationIndex::Cross)],-Observe(c,mission,Approach(c,-6000,-300))[Slot(ObservationIndex::Cross)],1e-6),
+        "the cross-track position is signed and symmetric");
+    Check(Near(observation[Slot(ObservationIndex::VelocityUp)],-0.3,1e-6)
+        && Near(observation[Slot(ObservationIndex::RollRate)],0.2,1e-6)
+        && Near(observation[Slot(ObservationIndex::PitchRate)],-0.2,1e-6),
+        "vertical speed and body rates keep their physical signs and scales");
+    Check(Near(observation[Slot(ObservationIndex::GlidePathError)],0,1e-6)
+        && Near(observation[Slot(ObservationIndex::AirspeedError)],0,1e-6),
+        "an aircraft on the glide plane at the target speed observes zero errors");
+    auto high=Approach(c,-6000,300);high.position=FromRunway(c.runway,-6000,300,ApproachPathHeight(c,-6000)+80);
+    Check(Observe(c,mission,high)[Slot(ObservationIndex::GlidePathError)]>0.3F,"an aircraft above the plane sees a positive error");
+    auto low=Approach(c,600,0);low.position=FromRunway(c.runway,600,0,1);
+    auto lower=low;lower.position=FromRunway(c.runway,600,0,3);
+    Check(Observe(c,mission,lower)[Slot(ObservationIndex::Height)]-Observe(c,mission,low)[Slot(ObservationIndex::Height)]>0.04F,
+        "heights near the deck keep a fine resolution");
+    aircraft.velocity.up=-100;aircraft.rollRate=5;aircraft.position=FromRunway(c.runway,-50000,9000,9000);
+    auto const bounded=Observe(c,mission,aircraft);
+    Check(bounded[Slot(ObservationIndex::VelocityUp)]==-1 && bounded[Slot(ObservationIndex::RollRate)]==1
+        && bounded[Slot(ObservationIndex::Along)]==-1,"large finite values clip safely");
+    for(float value : bounded) Check(std::isfinite(value) && std::abs(value)<=ObservationBound,"inputs are bounded");
+    auto invalid=Approach(c);invalid.velocity.up=std::numeric_limits<double>::quiet_NaN();
+    for(float value : Observe(c,mission,invalid)) Check(value==0,"an invalid state observes zeros");
+    auto rolling=Approach(c,800,0);rolling.weightOnWheels=true;
+    auto const ground=Observe(c,Flying(Phase::Rollout),rolling);
+    Check(ground[RolloutObservation]==1 && ground[Slot(ObservationIndex::WeightOnWheels)]==1,"rollout and wheel contact are flagged");
+}
+/** @brief Full-difficulty spawns respect the configured envelopes on both sides of the centreline. */
+void Spawns()
+{
+    auto const c=T6Config();
+    std::mt19937 rng(17U);
+    for(int sample=0;sample<200;++sample)
+    {
+        auto const runway=SampleRunway(c,rng);
+        Check(runway.headingDegrees>=0 && runway.headingDegrees<360 && runway.origin.up>=14 && runway.origin.up<=16,
+            "the runway pose stays inside its randomization ranges");
+        for(auto const side : {ApproachSide::Left,ApproachSide::Right})
+        {
+            auto const aircraft=SampleApproachStart(c,runway,side,1.0,rng);
             auto const local=DeckCoordinates(runway,aircraft.position);
-            double const offset=WrapAngle(aircraft.heading-runway.headingDegrees*DegreesToRadians);
-            bool const aligned=Near(local.east,0,1e-7) && Near(offset,0,1e-10);
-            if(aligned)
-            {
-                ++alignedCount;
-                double const expectedHeight=runway.thresholdHeightMeters-local.north*std::tan(c.mission.glideDegrees*DegreesToRadians);
-                double const slope=std::atan2(aircraft.velocity.up,std::hypot(aircraft.velocity.north,aircraft.velocity.east));
-                Check(local.north<0 && Near(local.up,expectedHeight,1e-7)
-                    && Near(slope,-c.mission.glideDegrees*DegreesToRadians,1e-10)
-                    && Dot(aircraft.velocity,RunwayForward(runway))>0,
-                    "aligned starts are inbound on the exact LOC/glide geometry");
-            }
-            else
-            {
-                if(local.east<0) ++left;
-                if(local.east>0) ++right;
-                Check(local.east*offset<0 && std::cos(offset)>0,
-                    "left/right starts point inward and never away from the runway");
-                Check(local.up>=c.initial.heightMeters.minimum-1e-7 && local.up<=c.initial.heightMeters.maximum+1e-7,
-                    "side starts keep the configured height envelope");
-            }
             double const distance=std::hypot(local.north,local.east);
-            Check(distance>=c.initial.distanceMeters.minimum-1e-7 && distance<=c.initial.distanceMeters.maximum+1e-7,
-                "all spawn families keep the configured distance envelope");
-            Check(placement==replicaPlacement && aircraft.position.north==replica.position.north
-                && aircraft.heading==replica.heading && rng==same,
-                "spawn mixture is reproducible for the same seed");
-            if(probability==1.0/3.0)
-            {
-                familyBlock[static_cast<std::size_t>(placement)]=true;
-                if(sample%familyBlock.size()==familyBlock.size()-1)
-                {
-                    Check(familyBlock[0] && familyBlock[1] && familyBlock[2],
-                        "each balanced block contains left, LOC/glide and right exactly once");
-                    familyBlock={};
-                }
-            }
-            if(sample==0) { firstDistance=distance;firstSpeed=aircraft.airspeed;firstRoll=aircraft.roll; }
-            else
-            {
-                variedDistance=variedDistance || !Near(distance,firstDistance);
-                variedSpeed=variedSpeed || !Near(aircraft.airspeed,firstSpeed);
-                variedRoll=variedRoll || !Near(aircraft.roll,firstRoll);
-            }
+            double const plane=runway.thresholdHeightMeters-local.north*std::tan(c.mission.glideDegrees*DegreesToRadians);
+            Check(distance>=c.initial.distanceMeters.minimum-0.01 && distance<=c.initial.distanceMeters.maximum+0.01
+                && (side==ApproachSide::Left ? local.east<0 : local.east>0)
+                && std::abs(local.up-plane)<=c.initial.heightOffsetMeters+0.01
+                && std::abs(aircraft.airspeed-c.mission.approachSpeed)<=c.initial.speedToleranceMps+1e-9,
+                "approach starts respect distance, side, height and speed envelopes");
         }
-        Check(variedDistance && variedSpeed && variedRoll,"aligned starts must retain the other random parameters");
-        if(probability==0) Check(alignedCount==0,"zero probability retains broad random starts");
-        if(probability==1) Check(alignedCount==1000,"unit probability aligns every start on all runway headings");
-        if(probability==1.0/3.0) Check(alignedCount>=333 && alignedCount<=334,
-            "balanced scheduler preserves the configured LOC/glide share");
-        if(probability<1) Check(std::max(left,right)-std::min(left,right)<=1,
-            "side starts remain prefix-balanced across the runway");
+        auto const rolling=SampleRolloutStart(c,runway,rng);
+        auto const local=DeckCoordinates(runway,rolling.position);
+        Check(local.north>=c.initial.rolloutStart.alongMeters.minimum && local.north<=c.initial.rolloutStart.alongMeters.maximum
+            && rolling.airspeed>=c.initial.rolloutStart.speedMps.minimum,"rolling starts are on the runway");
     }
 }
 
-void CapturePriority(Config const& c)
+/** @brief Difficulty zero is a short aligned final; intermediate difficulties widen the envelope gradually. */
+void CurriculumSpawns()
 {
-    auto const plan=MakeFlightPlan(c);
-    auto onBeam=Approach(c,-6000);
-    MissionState crossing{};
-    auto perpendicular=onBeam;perpendicular.heading+=Pi/2;
-    std::size_t const holdSteps=static_cast<std::size_t>(std::ceil(c.mission.captureHoldSeconds/c.mission.physicsDt))+1;
-    for(std::size_t step=0;step<holdSteps;++step) AdvanceMission(c,plan,crossing,perpendicular,perpendicular);
-    Check(crossing.phase==Phase::Patrol && !crossing.capturedLocalizer,
-        "crossing the localizer with an incompatible heading cannot capture it");
-
-    MissionState completedPatrol{};
-    completedPatrol.completedLaps=c.mission.requiredLaps;
-    auto const outsideCapture=Approach(c,-6000,1000);
-    AdvanceMission(c,plan,completedPatrol,outsideCapture,outsideCapture);
-    Check(completedPatrol.phase==Phase::Patrol && !completedPatrol.capturedLocalizer
-        && Guide(c,plan,completedPatrol,outsideCapture).mode==GuidanceMode::Patrol,
-        "a completed racetrack cannot switch guidance before confirmed LOC capture");
-
-    MissionState inbound{};
-    double localizerReward{},glideReward{};
-    for(std::size_t step=0;step<holdSteps;++step)
+    auto const c=T6Config();
+    auto const& first=c.training.curriculum.firstDistanceMeters;
+    std::mt19937 rng(23U);
+    double previousMaximum=0;
+    for(double difficulty : {0.0,0.5,1.0})
     {
-        auto const result=AdvanceMission(c,plan,inbound,onBeam,onBeam);
-        localizerReward+=result.rewards[static_cast<std::size_t>(Reward::EnterLocalizer)];
-        glideReward+=result.rewards[static_cast<std::size_t>(Reward::EnterGlide)];
-    }
-    Check(inbound.phase==Phase::Approach && inbound.capturedLocalizer && !inbound.capturedGlide
-        && Guide(c,plan,inbound,onBeam).mode==GuidanceMode::Localizer
-        && !Guide(c,plan,inbound,onBeam).targetValid
-        && Near(localizerReward,c.reward.weights[static_cast<std::size_t>(Reward::EnterLocalizer)]) && glideReward==0,
-        "confirmed LOC capture removes all point guidance before a completed lap");
-    for(std::size_t step=0;step<holdSteps;++step)
-    {
-        auto const result=AdvanceMission(c,plan,inbound,onBeam,onBeam);
-        glideReward+=result.rewards[static_cast<std::size_t>(Reward::EnterGlide)];
-    }
-    Check(inbound.capturedGlide && Guide(c,plan,inbound,onBeam).mode==GuidanceMode::Glide
-        && !Guide(c,plan,inbound,onBeam).targetValid
-        && Near(glideReward,c.reward.weights[static_cast<std::size_t>(Reward::EnterGlide)]),
-        "glide capture follows LOC capture and removes the competing threshold point");
-
-    auto committedApproach=inbound;
-    auto const pastThreshold=Approach(c,100);
-    for(std::size_t step=0;step<holdSteps;++step)
-        AdvanceMission(c,plan,committedApproach,pastThreshold,pastThreshold);
-    Check(committedApproach.phase==Phase::Approach && committedApproach.capturedLocalizer
-        && committedApproach.capturedGlide && !Guide(c,plan,committedApproach,pastThreshold).targetValid,
-        "an approach committed across the threshold keeps both captures until touchdown");
-
-    auto glideLoss=inbound;
-    auto aboveGlide=onBeam;
-    aboveGlide.position.up+=1000;
-    AdvanceMission(c,plan,glideLoss,onBeam,aboveGlide);
-    Check(glideLoss.phase==Phase::Approach && glideLoss.capturedLocalizer && glideLoss.capturedGlide,
-        "a transient glide deviation cannot cancel the approach");
-    for(std::size_t step=1;step<holdSteps && !glideLoss.approachRecoveryPending;++step)
-        AdvanceMission(c,plan,glideLoss,aboveGlide,aboveGlide);
-    Check(glideLoss.phase==Phase::Approach && glideLoss.approachRecoveryPending
-        && glideLoss.approachRecoveryRequiresGlide && glideLoss.capturedLocalizer
-        && !glideLoss.capturedGlide
-        && !Guide(c,plan,glideLoss,aboveGlide).targetValid,
-        "confirmed glide loss keeps a short point-free approach recovery window");
-    auto recoveredBeforeHipp=glideLoss;
-    for(std::size_t step=0;step<holdSteps;++step)
-        AdvanceMission(c,plan,recoveredBeforeHipp,onBeam,onBeam);
-    Check(recoveredBeforeHipp.phase==Phase::Approach && recoveredBeforeHipp.capturedLocalizer
-        && recoveredBeforeHipp.capturedGlide
-        && !recoveredBeforeHipp.approachRecoveryPending
-        && !Guide(c,plan,recoveredBeforeHipp,onBeam).targetValid,
-        "fresh glide capture during the grace period prevents a HIPP reactivation");
-    for(std::size_t step=0;step<holdSteps;++step)
-        AdvanceMission(c,plan,glideLoss,aboveGlide,aboveGlide);
-    Check(glideLoss.phase==Phase::Patrol && !glideLoss.approachRecoveryPending,
-        "unrecovered glide loss eventually returns to the racetrack");
-
-    auto const outsideBeam=Approach(c,-6000,5000);
-    inbound.pathQualified=true;
-    inbound.waypointsPassed=5;
-    AdvanceMission(c,plan,inbound,onBeam,outsideBeam);
-    Check(inbound.capturedLocalizer && inbound.capturedGlide,
-        "a transient ILS dropout does not release either capture");
-    for(std::size_t step=1;step<holdSteps && !inbound.approachRecoveryPending;++step)
-        AdvanceMission(c,plan,inbound,outsideBeam,outsideBeam);
-    Check(inbound.phase==Phase::Approach && inbound.approachRecoveryPending
-        && !inbound.capturedLocalizer && !inbound.capturedGlide
-        && !Guide(c,plan,inbound,outsideBeam).targetValid,
-        "sustained LOC loss does not immediately reactivate racetrack guidance");
-    for(std::size_t step=0;step<holdSteps;++step)
-        AdvanceMission(c,plan,inbound,outsideBeam,outsideBeam);
-    Check(inbound.phase==Phase::Patrol && !inbound.capturedLocalizer && !inbound.capturedGlide
-        && !inbound.pathQualified && inbound.waypointsPassed==0
-        && Guide(c,plan,inbound,outsideBeam).mode==GuidanceMode::Patrol,
-        "unrecovered LOC loss returns to racetrack reacquisition and clears partial lap credit");
-
-    double repeatedCaptureReward{};
-    for(std::size_t step=0;step<holdSteps;++step)
-    {
-        auto const result=AdvanceMission(c,plan,inbound,onBeam,onBeam);
-        repeatedCaptureReward+=result.rewards[static_cast<std::size_t>(Reward::EnterLocalizer)]
-            +result.rewards[static_cast<std::size_t>(Reward::EnterGlide)];
-    }
-    Check(inbound.capturedLocalizer && !inbound.capturedGlide
-        && !Guide(c,plan,inbound,onBeam).targetValid,
-        "LOC reacquisition cannot reactivate a runway or racetrack point");
-    for(std::size_t step=0;step<holdSteps;++step)
-    {
-        auto const result=AdvanceMission(c,plan,inbound,onBeam,onBeam);
-        repeatedCaptureReward+=result.rewards[static_cast<std::size_t>(Reward::EnterLocalizer)]
-            +result.rewards[static_cast<std::size_t>(Reward::EnterGlide)];
-    }
-    auto const glideGuidance=Guide(c,plan,inbound,onBeam);
-    auto const observation=Observe(c,plan,inbound,onBeam);
-    Check(inbound.capturedLocalizer && inbound.capturedGlide && !glideGuidance.targetValid
-        && observation[0]==0 && observation[1]==0 && observation[2]==0
-        && repeatedCaptureReward==0,
-        "LOC/glide recapture suppresses the threshold point without repeating entry bonuses");
-
-    auto const flareAircraft=Approach(c,-50);
-    auto const flareGuidance=Guide(c,plan,inbound,flareAircraft);
-    auto rollout=inbound;rollout.phase=Phase::Rollout;
-    auto const rolloutGuidance=Guide(c,plan,rollout,flareAircraft);
-    Check(flareGuidance.mode==GuidanceMode::Flare && !flareGuidance.targetValid
-        && flareGuidance.target.north==flareAircraft.position.north
-        && flareGuidance.target.east==flareAircraft.position.east
-        && rolloutGuidance.mode==GuidanceMode::Rollout && !rolloutGuidance.targetValid
-        && rolloutGuidance.target.north==flareAircraft.position.north
-        && rolloutGuidance.target.east==flareAircraft.position.east,
-        "flare and rollout cannot reactivate a threshold guidance line");
-}
-void RandomizationAndMotion(Config const& c)
-{
-    std::mt19937 rng(91),same(91);
-    SpawnPlacementSampler placements{},samePlacements{};
-    bool differentPositions=false,differentAttitudes=false;
-    AircraftState first{};
-    for (std::size_t sample=0;sample<1000;++sample)
-    {
-        auto const motion=SampleRunway(c,rng),repeated=SampleRunway(c,same);
-        auto const runway=RunwayAt(motion,0),copy=RunwayAt(repeated,0);
-        auto const placement=placements.Next(c.initial.runwayAlignedProbability,rng);
-        auto const replicaPlacement=samePlacements.Next(c.initial.runwayAlignedProbability,same);
-        auto const aircraft=SampleAircraft(c,runway,placement,rng);
-        auto const replica=SampleAircraft(c,copy,replicaPlacement,same);
-        auto const local=DeckCoordinates(runway,aircraft.position);
-        double const distance=std::hypot(local.north,local.east);
-        Check(distance>=c.initial.distanceMeters.minimum-1e-7 && distance<=c.initial.distanceMeters.maximum+1e-7,"random spawn distance bounds");
-        auto episode=c; episode.runway=runway;
-        auto const plan=MakeFlightPlan(episode);
-        double nearest=std::numeric_limits<double>::max();
-        for(std::size_t i=0;i<plan.count;++i)
+        double maximumDistance=0,maximumCross=0,maximumHeading=0;
+        for(int sample=0;sample<200;++sample)
         {
-            auto const delta=Subtract(aircraft.position,plan.points[i]);
-            nearest=std::min(nearest,std::sqrt(Dot(delta,delta)));
+            auto const runway=SampleRunway(c,rng);
+            auto const aircraft=SampleApproachStart(c,runway,sample%2 ? ApproachSide::Right : ApproachSide::Left,difficulty,rng);
+            auto const local=DeckCoordinates(runway,aircraft.position);
+            double const distance=std::hypot(local.north,local.east);
+            maximumDistance=std::max(maximumDistance,distance);
+            maximumCross=std::max(maximumCross,std::abs(local.east));
+            maximumHeading=std::max(maximumHeading,std::abs(WrapAngle(aircraft.heading-runway.headingDegrees*DegreesToRadians)));
+            if(difficulty==0)
+                Check(distance>=first.minimum-0.01 && distance<=first.maximum+0.01 && Near(local.east,0,1e-6)
+                    && Near(local.up,ApproachPathHeight(c,local.north),1e-6)
+                    && Near(WrapAngle(aircraft.heading-runway.headingDegrees*DegreesToRadians),0,1e-9),
+                    "difficulty zero starts on the centreline and the glide plane, aligned with the runway");
         }
-        Check(local.north<0 && nearest<3*c.normalization.path,
-            "default starts stay on the approach side within bounded racetrack rally range");
-        if(std::abs(local.east)<1e-7)
-            Check(Near(local.up,c.runway.thresholdHeightMeters-local.north*std::tan(c.mission.glideDegrees*DegreesToRadians),1e-7),
-                "centreline spawn is exactly on glide");
-        else Check(local.up>=c.initial.heightMeters.minimum-1e-7 && local.up<=c.initial.heightMeters.maximum+1e-7,
-            "left/right spawn height bounds");
-        Check(aircraft.airspeed>=c.initial.speedMps.minimum && aircraft.airspeed<=c.initial.speedMps.maximum,"random spawn speed bounds");
-        Check(aircraft.roll>=c.initial.rollDegrees.minimum*DegreesToRadians && aircraft.roll<=c.initial.rollDegrees.maximum*DegreesToRadians,"random roll bounds");
-        Check(aircraft.pitch>=c.initial.pitchDegrees.minimum*DegreesToRadians && aircraft.pitch<=c.initial.pitchDegrees.maximum*DegreesToRadians,"random pitch bounds");
-        Check(placement==replicaPlacement && aircraft.position.north==replica.position.north
-            && aircraft.heading==replica.heading && aircraft.airspeed==replica.airspeed,
-            "seeded reproducible randomization");
-        if (sample==0) first=aircraft;
-        else { differentPositions=differentPositions || aircraft.position.north!=first.position.north;
-            differentAttitudes=differentAttitudes || aircraft.heading!=first.heading || aircraft.roll!=first.roll; }
-        double const t=1.3,epsilon=1e-4;
-        auto const deck=RunwayAt(motion,t);
-        auto const point=FromRunway(deck,600,8,0);
-        auto const plus=FromRunway(RunwayAt(motion,t+epsilon),600,8,0);
-        auto const minus=FromRunway(RunwayAt(motion,t-epsilon),600,8,0);
-        auto const numerical=Scale(Subtract(plus,minus),1/(2*epsilon));
-        auto const velocity=DeckVelocity(deck,point);
-        Check(Near(velocity.north,numerical.north,1e-5) && Near(velocity.east,numerical.east,1e-5)
-            && Near(velocity.up,numerical.up,1e-5),"heave/pitch/roll contact velocity matches surface derivative");
-        auto const transformed=DeckCoordinates(deck,FromRunway(deck,-2100,27,500));
-        Check(Near(transformed.north,-2100) && Near(transformed.east,27) && Near(transformed.up,500),"moving tilted runway inverse");
+        Check(maximumDistance>previousMaximum,"a higher difficulty reaches farther starts");
+        if(difficulty==1.0)
+            Check(maximumDistance>c.initial.distanceMeters.maximum-500 && maximumCross>500
+                && maximumHeading>10*DegreesToRadians,"the full difficulty covers the configured envelope");
+        previousMaximum=maximumDistance;
     }
-    Check(differentPositions && differentAttitudes,"episodes must not share a fixed initial aircraft state");
-    auto moving=c;
-    moving.runway.velocity={8,0,1};
-    MissionState s{};s.phase=Phase::Approach;
-    auto a=Approach(moving,300);a.position.up=2;a.velocity={8,0,1};a.weightOnWheels=true;
-    auto const plan=MakeFlightPlan(moving);
-    AdvanceMission(moving,plan,s,a,a);
-    Check(s.touchedDown,"touchdown limits use deck-relative sink");
-    s.stoppedSeconds=moving.mission.stoppedHoldSeconds;
-    auto const result=AdvanceMission(moving,plan,s,a,a);
-    Check(result.terminated && s.outcome==Outcome::Stopped,"stop is relative to moving runway");
 }
-void DisplayReferences(Config const& config)
+
+/** @brief Evaluation campaigns mix rolling starts with stratified approaches up to the curriculum frontier. */
+void EvaluationStratification()
 {
-    for(double heading : {0.0,90.0,181.0,359.0})
+    constexpr std::size_t Episodes=20;
+    constexpr double Share=0.15,Frontier=0.4;
+    std::size_t rolling=0;
+    double previous=0;
+    for(std::size_t episode=0;episode<Episodes;++episode)
     {
-        auto c=config;
-        c.runway.origin={1200,-700,18}; c.runway.headingDegrees=heading;
-        c.runway.pitch=0.2*DegreesToRadians; c.runway.roll=-0.4*DegreesToRadians;
-        c.runway.velocity={2,1,0.3}; c.runway.angularVelocity={0.0001,0.0002,0};
-        auto const display=MakeIlsDisplayGeometry(c.runway,c.mission.ilsRangeMeters,
-            c.mission.glideDegrees,c.mission.localizerCaptureDegrees,c.mission.glideCaptureDegrees);
-        auto const locOrigin=DeckCoordinates(c.runway,display.localizerOrigin);
-        auto const gsOrigin=DeckCoordinates(c.runway,display.glideOrigin);
-        Check(Near(locOrigin.north,0) && Near(locOrigin.east,0) && locOrigin.up>0 && locOrigin.up<1,
-            "LOC starts above threshold without deck depth fighting");
-        Check(Near(gsOrigin.north,0) && Near(gsOrigin.east,0) && Near(gsOrigin.up,c.runway.thresholdHeightMeters),
-            "GLIDE starts at configured threshold crossing height");
-        auto const left=DeckCoordinates(c.runway,display.localizerLeft);
-        auto const right=DeckCoordinates(c.runway,display.localizerRight);
-        Check(Near(left.north,-c.mission.ilsRangeMeters) && Near(right.north,left.north)
-            && Near(left.east,-right.east) && left.east<0,"LOC envelope is runway-aligned and symmetric");
-        Check(Near(std::atan2(right.east,-right.north)/DegreesToRadians,c.mission.localizerCaptureDegrees),
-            "LOC envelope follows configured capture angle");
-        MissionState approach{}; approach.phase=Phase::Approach;
-        AircraftState onGlide{}; onGlide.position=display.glideEnd; onGlide.pitch=8*DegreesToRadians;
-        onGlide.velocity=Add(DeckVelocity(c.runway,onGlide.position),
-            Add(Scale(RunwayForward(c.runway),100*std::cos(3*DegreesToRadians)),
-                Scale(RunwayNormal(c.runway),-100*std::sin(3*DegreesToRadians))));
-        auto const guidance=Guide(c,MakeFlightPlan(c),approach,onGlide);
-        Check(Near(guidance.localizer,0) && Near(guidance.glideError,0),"displayed centreline agrees with real ILS guidance");
-        Check(Near(DisplaySlopeDegrees(guidance),-3),"actual slope is deck-relative velocity, independent of aircraft pitch");
-        for(auto const& edge : {display.glideLow,display.glideHigh})
-        {
-            auto const point=DeckCoordinates(c.runway,edge);
-            double const angle=std::atan2(point.up-c.runway.thresholdHeightMeters,-point.north)/DegreesToRadians;
-            Check(Near(std::abs(angle-c.mission.glideDegrees),c.mission.glideCaptureDegrees),"glide envelope follows configured capture angle");
-        }
+        auto const start=EvaluationStart(episode,Episodes,Share,Frontier);
+        if(start.rolling) { ++rolling;continue; }
+        Check(start.difficulty>previous && start.difficulty<=Frontier+1e-12,
+            "airborne evaluation difficulties grow from short finals up to the frontier");
+        previous=start.difficulty;
     }
-    Guidance stopped{};
-    Check(Near(DisplaySlopeDegrees(stopped),0),"stationary slope stays finite");
-    stopped.relativeVelocity={0,100,100};
-    Check(Near(DisplaySlopeDegrees(stopped),45),"climb uses full horizontal speed and positive slope");
+    Check(rolling==3 && EvaluationStart(0,Episodes,Share,Frontier).rolling
+        && Near(EvaluationStart(Episodes-1,Episodes,Share,Frontier).difficulty,Frontier),
+        "the campaign starts with the rolling share and ends at the curriculum frontier");
+    Check(Near(EvaluationStart(3,Episodes,Share,Frontier).difficulty,Frontier/17),
+        "the easiest airborne episode is a short final");
+    // Curriculum level zero: every approach is the short aligned final.
+    for(std::size_t episode=3;episode<Episodes;++episode)
+        Check(EvaluationStart(episode,Episodes,Share,0.0).difficulty==0,"level zero evaluates short finals only");
+    // Edge cases: no rolling share, a single episode and an almost all-rolling share.
+    Check(!EvaluationStart(0,Episodes,0.0,1.0).rolling && Near(EvaluationStart(0,Episodes,0.0,1.0).difficulty,0.05),
+        "without a rolling share every episode is airborne");
+    Check(!EvaluationStart(0,1,Share,1.0).rolling && EvaluationStart(0,1,Share,1.0).difficulty==1.0,
+        "a single-episode campaign flies the frontier");
+    Check(!EvaluationStart(Episodes-1,Episodes,0.99,1.0).rolling
+        && EvaluationStart(Episodes-2,Episodes,0.99,1.0).rolling,"at least one approach is always evaluated");
+    Check(!EvaluationStart(0,0,Share,1.0).rolling,"an empty campaign yields the default airborne start");
 }
+
+/** @brief Display helpers keep the camera on the runway and zoom on distant aircraft. */
+void DisplayReferences()
+{
+    auto c=T6Config();
+    c.runway.origin={};c.runway.headingDegrees=0;
+    auto const camera=DeckCoordinates(c.runway,RunwayCameraPosition(c.runway));
+    Check(Near(camera.north,300) && Near(camera.up,8),"the runway camera sits 300 m past the threshold, 8 m high");
+    auto shortRunway=c.runway;shortRunway.lengthMeters=200;
+    Check(Near(DeckCoordinates(shortRunway,RunwayCameraPosition(shortRunway)).north,100),"a short runway uses its midpoint");
+    auto const position=RunwayCameraPosition(c.runway);
+    Check(RunwayCameraFieldOfView(position,FromRunway(c.runway,-200,0,100))
+        >RunwayCameraFieldOfView(position,FromRunway(c.runway,-6000,0,400)),"distant aircraft get a narrower field of view");
 }
+} // namespace
+
 int main()
 {
-    try { auto const c=LoadConfig(PPO_FLIGHT_CONFIG); Geometry(c); Landing(c); Configuration(); OrderedNavigation(c); AlignedStarts(c); CapturePriority(c); RandomizationAndMotion(c); DisplayReferences(c); }
-    catch(std::exception const& e) { std::cerr<<e.what()<<'\n'; return 1; }
-    std::cout<<"Flight mission/configuration regressions passed\n";
+    try
+    {
+        Configuration();
+        RewardBalance();
+        SignatureCompatibility();
+        Geometry();
+        TargetSpeed();
+        AimPointOnRunway();
+        ApproachDirection();
+        CentrelineIntercept();
+        CentrelineInterceptTrajectory();
+        FlareTrajectory();
+        LandingQuality();
+        CrashDiagnostics();
+        Landing();
+        FiniteSurfaceContacts();
+        SignedLogCompression();
+        ObservationConditioning();
+        Spawns();
+        CurriculumSpawns();
+        EvaluationStratification();
+        DisplayReferences();
+    }
+    catch(std::exception const& error) { std::cerr<<error.what()<<'\n'; return 1; }
+    std::cout<<"Flight core regressions passed\n";
 }
