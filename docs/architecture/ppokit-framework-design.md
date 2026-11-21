@@ -46,8 +46,8 @@
    rl_tools. rl_tools n'est jamais exposé au client.
 5. Un cycle outillé **design → codegen → entraînement → évaluation →
    inférence**, avec identité vérifiable des artefacts.
-6. Des points d'extension DLL simples, via une ABI C et un SDK C++, pour des
-   tâches, blocs, politiques, normaliseurs et métriques externes.
+6. Des composants DLL boîte noire, déclarés par leurs ports et capacités et
+   câblés librement dans le graphe, via une ABI C et un SDK C++.
 7. Un studio ImGui + imnodes + ImPlot, construit **en dernier**, sur des
    formats déjà stabilisés.
 
@@ -61,7 +61,7 @@
 ```
 graph.json ─┐
 task.json  ─┼─► ppokit-codegen ─► <model>_generated.hpp/.cpp ─┐
-plugins/*.manifest.json ─┘                                     │
+components/*.manifest.json ─┘                                     │
                                                                ▼
 client C++ (Task / HostedAgent, hooks) ──► ppokit runtime ◄── backend rl_tools (privé)
                                              │
@@ -92,7 +92,7 @@ ni ImGui.
 | `ppokit/runtime` | Trainer owned/hosted, MAPPO, curriculum, évaluation périodique et promotion, budgets, télémétrie et commandes | tous les précédents |
 | `ppokit/eval` | Suites, grilles, gates, rapports, rejeu | runtime |
 | `ppokit/artifacts` | Formats de checkpoint, en-têtes d'identité, écriture atomique, migrations | core |
-| `ppokit/plugin` | Chargement DLL, ABI C, SDK C++ | core |
+| `ppokit/component` | Chargement des DLL, ABI C des composants boîte noire, SDK C++ | core |
 | `ppokit-codegen` | Exécutable JSON → C++ | schema |
 | `ppokit-studio` | Éditeur imnodes, suivi des runs, rapports | runtime, eval, imgui, imnodes, implot |
 
@@ -277,12 +277,14 @@ Points clés :
 
 - Types de nœuds de la v1 : `input`, `dense`, `dense_stack`, `activation`,
   `concat`, `split`, `entity_encoder`, `masked_attention`, `masked_pool`,
-  `heads`, `value`, `plugin:<nom>@<version>`.
+  `heads`, `value`, `component:<nom>@<version>` (§12).
 - `input.from` peut viser un groupe (`"observation.tracks"`) pour router les
   ensembles vers un encodeur par entité.
+- Les arêtes relient des nœuds ou des ports nommés (`"filter.out:features"`).
 - Le codegen vérifie : formes, acyclicité, présence et unicité de
-  `heads`/`value`, cohérence avec `task.json` et les manifestes de plugins,
-  et masques propagés jusqu'aux blocs qui les consomment.
+  `heads`/`value`, cohérence avec `task.json` et les manifestes des
+  composants, masques propagés jusqu'aux blocs qui les consomment, et règles
+  de câblage de §12.4.
 
 ### 5.3 `train.json`
 
@@ -354,7 +356,7 @@ Le défaut de la v1 est la log-prob sur le latent, pour aligner les deux modes.
 
 ## 7. Génération de code
 
-- **Entrées** : `graph.json`, `task.json`, manifestes des plugins.
+- **Entrées** : `graph.json`, `task.json`, manifestes des composants.
 - **Sorties** :
   - `<model>_generated.hpp` : types de §4.2 et `Spec` ;
   - `<model>_generated.cpp` : instanciation rl_tools, forward, backward,
@@ -366,8 +368,9 @@ Le défaut de la v1 est la log-prob sur le latent, pour aligner les deux modes.
   ajoute une commande personnalisée et une bibliothèque statique. Tout
   changement de JSON déclenche une régénération. Les répertoires
   `build/debug` et `build/release` restent les seuls utilisés (AGENTS.md).
-- **Plugins** : un nœud `plugin:` génère un appel à la table d'appels du
-  plugin. Les formes viennent du manifeste ; le plugin n'est pas inliné.
+- **Composants** : un nœud `component:` génère un appel à la table d'appels
+  de la DLL, avec les formes résolues au câblage. Le composant n'est pas
+  inliné.
 - **Test d'acceptation n°1** : régénérer les réseaux actuels (MLP Flight,
   acteur à attention et critique Blue) depuis JSON, avec une sortie forward
   identique et des gradients identiques sur des entrées fixées.
@@ -383,7 +386,7 @@ Le défaut de la v1 est la log-prob sur le latent, pour aligner les deux modes.
 **En-tête commun :**
 - magic et version du format ;
 - `taskHash`, `graphHash`, `generatorVersion`, `scalar` ;
-- hash du plugin pour chaque nœud plugin ;
+- hash du binaire, du manifeste et de la configuration de chaque composant ;
 - horodatage et seed d'entraînement.
 
 **Règles :**
@@ -456,85 +459,211 @@ la fin de la migration.
 - Test de parité : la sortie d'inférence est égale à l'action déterministe
   calculée par le learner sur les mêmes entrées.
 
-## 12. Plugins DLL
+## 12. Composants externes (DLL boîte noire)
 
-### 12.1 ABI C
+### 12.1 Principe
+
+L'utilisateur fournit une DLL qui déclare un ou plusieurs **composants**. Le
+framework ignore ce qu'ils calculent. Il connaît seulement ce qu'il faut
+pour les **câbler** :
+- des ports d'entrée et de sortie typés ;
+- des capacités déclarées (différentiable, entraînable, avec état…).
+
+Le **rôle** d'un composant n'est pas déclaré par le plugin. Il découle de son
+câblage dans `graph.json` :
+
+| Câblage | Rôle effectif | Exemples |
+|---|---|---|
+| `observation.*` → composant → réseau | Prétraitement, extracteur de features | Modèle capteur, filtre de pistes, encodeur pré-entraîné figé |
+| réseau → composant → réseau | Bloc interne | Attention masquée, couche custom |
+| tête → composant → `action.*` | Post-traitement de l'action, côté environnement | Allocateur de commandes, limiteur, autopilote bas niveau |
+| `observation.*` → composant → `action.*` | Politique externe complète | Modèle C/C++ existant, entraînable ou figé |
+| composant → `critic.*` | Entrée privilégiée du critique | Estimateur d'état global |
+
+La même DLL peut exposer plusieurs composants. Le studio les affiche dans la
+palette d'imnodes avec leurs ports, et le codegen vérifie le câblage.
+
+### 12.2 Descripteur de ports
+
+Chaque port déclare :
+
+| Champ | Valeurs | Rôle |
+|---|---|---|
+| `name` | identifiant | Référence dans les arêtes (`"comp.out:features"`) |
+| `direction` | `in` / `out` | |
+| `dtype` | `f32`, `f64`, `i32`, `bool` | `bool` pour les masques, `i32` pour les indices catégoriels |
+| `shape` | `[n]`, `[capacité, n]` ou dimension symbolique (`"N"`) | Les dimensions symboliques sont résolues au câblage puis figées par le codegen |
+| `mask` | nom d'un port `bool` associé | Propagation des masques d'ensembles |
+| `unit` | texte libre, optionnel | Documentation et vérification facultative |
+| `optional` | booléen | Le port peut rester non connecté |
+
+### 12.3 Capacités
+
+| Capacité | Conséquence vérifiée par le codegen et le runtime |
+|---|---|
+| `differentiable` | Fournit `backward` vers ses entrées. Obligatoire si un nœud entraînable se trouve **en amont**. |
+| `trainable` | Expose paramètres et gradients ; l'optimiseur reste celui du framework. Implique `differentiable` vers ses paramètres. |
+| `stateful` | Fournit `reset`, `stateSize`, `saveState` et `loadState`. Voir §12.5. |
+| `deterministic` | Faux : le framework fournit un seed par instance et par épisode, que le composant doit utiliser. |
+| `threadSafe` | Faux : une instance par worker. |
+| `batch` | Accepte un lot de B échantillons par appel, sinon le framework boucle. |
+
+### 12.4 Règles de câblage
+
+1. **Gradient** : un composant non différentiable ne peut pas se trouver
+   entre deux nœuds entraînables. En pratique il doit être :
+   - soit avant tout nœud entraînable (prétraitement, gelé ou non) ;
+   - soit après l'échantillonnage de l'action.
+
+   Tout autre câblage est une erreur du codegen.
+2. **Post-traitement d'action** : un composant placé après une tête transforme
+   l'action **échantillonnée**. Pour PPO, il fait partie de l'environnement :
+   la log-prob est calculée sur la sortie de la tête, pas sur celle du
+   composant. On garde ainsi un ratio PPO correct quel que soit le contenu de
+   la boîte noire. Le studio affiche cette frontière.
+3. **Formes** : chaque arête relie des ports de même `dtype` et de même forme,
+   après résolution des dimensions symboliques. Les masques suivent leur port.
+4. **Cycles** : interdits dans le graphe d'un pas. La récurrence passe par
+   l'état d'un composant `stateful`.
+
+### 12.5 Composants avec état
+
+- `reset` est appelé à chaque début d'épisode, par agent.
+- Pour l'apprentissage, le framework **stocke dans le rollout la sortie** des
+  composants avec état placés avant les nœuds entraînables. La mise à jour
+  PPO rejoue alors le réseau sur ces sorties, sans réexécuter le composant.
+  C'est une condition de validité du ratio PPO.
+- Un composant avec état **entraînable** (récurrent) n'est pas supporté en v1,
+  faute de rétropropagation dans le temps. Le codegen le refuse.
+- L'état fait partie du checkpoint `training`, et l'état initial fait partie
+  de l'artefact `policy`.
+
+### 12.6 ABI C
 
 ```c
-#define PPOKIT_PLUGIN_ABI 1u
+#define PPOKIT_COMPONENT_ABI 1u
 
-typedef enum { PPOKIT_TASK = 1, PPOKIT_BLOCK, PPOKIT_POLICY,
-               PPOKIT_NORMALIZER, PPOKIT_METRIC } PpokitPluginKind;
+typedef struct PpokitBuffer
+{
+    void* data;
+    uint32_t dtype;
+    uint32_t rank;
+    const uint32_t* shape;
+} PpokitBuffer;
 
-typedef struct PpokitPluginApi
+typedef struct PpokitComponentApi
 {
     uint32_t abi;
-    uint32_t kind;
-    const char* manifestJson;
-    void* (*create)(const char* configJson, uint64_t seed, char* error, size_t errorSize);
+    const char* name;
+    uint32_t version;
+    const char* manifestJson;                 /* ports, capacités, paramètres */
+    void* (*create)(const char* configJson, const char* resolvedShapesJson,
+                    char* error, size_t errorSize);
     void  (*destroy)(void* instance);
-    int   (*forward)(void* instance, const float* input, size_t inputSize,
-                     float* output, size_t outputSize, float* cache);
-    int   (*backward)(void* instance, const float* outputGradient, const float* cache,
-                      float* inputGradient, float* parameterGradient);   /* NULL : gelé */
+    int   (*forward)(void* instance, uint32_t batch,
+                     const PpokitBuffer* inputs, PpokitBuffer* outputs, void* cache);
+    /* NULL sauf si differentiable */
+    int   (*backward)(void* instance, uint32_t batch, const PpokitBuffer* outputGradients,
+                      const void* cache, PpokitBuffer* inputGradients, float* parameterGradients);
+    /* NULL sauf si trainable */
     int   (*parameters)(void* instance, float** data, size_t* count);
+    /* NULL sauf si stateful */
+    int   (*reset)(void* instance, uint32_t agentSlot, uint64_t seed);
+    int   (*saveState)(void* instance, void* buffer, size_t size);
+    int   (*loadState)(void* instance, const void* buffer, size_t size);
+    size_t (*stateSize)(void* instance);
+    size_t (*cacheSize)(void* instance, uint32_t batch);
     int   (*lastError)(void* instance, char* error, size_t errorSize);
-} PpokitPluginApi;
+} PpokitComponentApi;
 
-PPOKIT_EXPORT const PpokitPluginApi* ppokit_plugin_get_api(uint32_t requestedAbi);
+/* Point d'entrée unique de la DLL : liste de ses composants. */
+PPOKIT_EXPORT int ppokit_components(uint32_t requestedAbi,
+                                    const PpokitComponentApi* const** components,
+                                    size_t* count);
 ```
 
-Les plugins TASK, NORMALIZER et METRIC ont leurs propres tables, sur le même
-modèle (`reset`, `step`, `metrics`…), avec des buffers plats décrits par le
-`task.json` du manifeste.
+Règles de frontière :
+- Pas de STL, d'exception ni d'allocation partagée à la frontière.
+- Le framework possède tous les buffers (entrées, sorties, cache, gradients),
+  ce qui garantit l'absence d'allocation dans la boucle chaude.
+- Erreurs par code de retour et `lastError`. Le SDK intercepte toute exception
+  C++ avant la frontière.
+- Négociation : refus explicite si la version majeure de l'ABI diffère.
+- Le hash du binaire, du manifeste et de la configuration est enregistré dans
+  les artefacts (§8). Changer de DLL invalide donc un checkpoint, sauf
+  déclaration de compatibilité.
 
-### 12.2 Manifeste
+### 12.7 Manifeste
 
 ```json
-{ "schema": "ppokit.plugin/1.0", "name": "myattention", "version": 1, "kind": "block",
-  "inputs":  [ { "name": "tracks", "shape": [10, 13], "masked": true } ],
-  "outputs": [ { "name": "context", "shape": [64] } ],
-  "parameters": 12345, "cacheFloats": 4096,
-  "deterministic": true, "threadSafe": false, "trainable": true }
+{
+  "schema": "ppokit.component/1.0",
+  "name": "trackfilter", "version": 1,
+  "ports": [
+    { "name": "tracks",   "direction": "in",  "dtype": "f32", "shape": ["N", 13], "mask": "trackMask" },
+    { "name": "trackMask","direction": "in",  "dtype": "bool","shape": ["N"] },
+    { "name": "features", "direction": "out", "dtype": "f32", "shape": [64] }
+  ],
+  "capabilities": { "differentiable": false, "trainable": false, "stateful": true,
+                    "deterministic": true, "threadSafe": false, "batch": true },
+  "config": { "alpha": { "type": "float", "range": [0, 1], "default": 0.3 } }
+}
 ```
 
-### 12.3 Règles
+La section `config` est validée par le framework et éditable dans le studio.
+La DLL reçoit la configuration déjà validée.
 
-- Pas de STL, d'exception, d'allocation partagée ni de type C++ à la frontière.
-- Le framework possède tous les buffers : entrée, sortie, cache, gradients.
-- Le framework garde l'optimiseur : le plugin expose ses paramètres et
-  gradients, et Adam reste unique.
-- Erreurs par code de retour et `lastError`. Une exception C++ qui
-  traverserait la frontière est interceptée par le SDK.
-- `threadSafe: false` impose une instance par worker.
-- Le seed est fourni par le framework, ce qui rend le plugin reproductible.
-- Négociation ABI : refus si la version majeure diffère, avec un message
-  explicite.
-- Le hash du binaire et du manifeste est enregistré dans les artefacts (§8).
+### 12.8 Câblage dans `graph.json`
 
-### 12.4 SDK C++
+```json
+{ "id": "filter", "type": "component:trackfilter@1", "config": { "alpha": 0.2 } },
+{ "id": "mlp", "type": "dense_stack", "widths": [128, 128], "activation": "tanh" }
+```
+```json
+"edges": [
+  ["observation.red", "filter.in:tracks"],
+  ["observation.red.mask", "filter.in:trackMask"],
+  ["filter.out:features", "concat.in:1"],
+  ["concat.out", "mlp"]
+]
+```
+
+La dimension symbolique `N` est résolue à 10 par le câblage sur
+`observation.red`, puis figée dans le code généré.
+
+### 12.9 SDK C++
 
 ```cpp
-class MyAttention final : public ppokit::sdk::Block
+class TrackFilter final : public ppokit::sdk::Component
 {
 public:
-    explicit MyAttention(ppokit::sdk::Config const& config);
-    void Forward(ppokit::sdk::Inputs in, ppokit::sdk::Outputs out, ppokit::sdk::Cache cache) override;
-    void Backward(ppokit::sdk::Gradients g, ppokit::sdk::Cache cache) override;
-    ppokit::sdk::Parameters Parameters() noexcept override;
+    static ppokit::sdk::Manifest Describe();              // ports, capacités, configuration
+    explicit TrackFilter(ppokit::sdk::Config const& config, ppokit::sdk::Shapes const& shapes);
+    void Forward(ppokit::sdk::Batch batch, ppokit::sdk::Inputs in, ppokit::sdk::Outputs out) override;
+    void Reset(std::uint32_t agentSlot, std::uint64_t seed) override;
+    // Backward / Parameters / SaveState… seulement si déclarés dans Describe().
 };
-PPOKIT_EXPORT_BLOCK(MyAttention, "myattention", 1);
+PPOKIT_COMPONENTS(TrackFilter /*, AutreComposant */);
 ```
 
-Le SDK est header-only et ne dépend pas de rl_tools : un modèle C/C++
-externe s'intègre sans connaître le backend.
+Le SDK est header-only et ne dépend pas de rl_tools. Il génère le manifeste à
+partir de `Describe()`, ce qui garantit que le manifeste et le code restent
+cohérents. Il vérifie aussi, en Debug, que les capacités déclarées
+correspondent aux méthodes surchargées.
+
+Le même mécanisme sert aux tâches externes : une DLL peut fournir un
+simulateur conforme à l'interface `Task` (table `reset`, `step`, `metrics`
+sur des buffers plats décrits par son `task.json`). Normaliseurs et métriques
+custom sont simplement des composants câblés sur `observation.*` ou sur
+`metrics.*`.
 
 ## 13. Studio
 
 Il est développé **en dernier** (§16, étape 8).
 
 - **Éditeur de graphe** (imnodes) :
-  - palette des blocs intégrés et des plugins découverts ;
+  - palette des blocs intégrés et des composants découverts dans les DLL,
+    avec leurs ports ;
   - vérification des formes en direct, avec la même bibliothèque que le
     codegen ;
   - export vers `graph.json`.
@@ -564,7 +693,7 @@ la télémétrie et des commandes.
 | Entrée critique centralisée par participant (470) | `generalized_critic_observation.hpp`, `generalized_critic_network.hpp` | `critic.source: custom`, `perAgent` | Remplissage |
 | Rôles leader/équipiers, succession | `blue_team_roles.hpp`, `generalized_leader_succession.hpp` | Champ de rôle du schéma, slots stables | Affectation et succession |
 | Capacités P 1..9, N 0..10, masques, permutations | `team_capacity.hpp` | `agents.capacity`, masques, test d'invariance | — |
-| Acteur à attention masquée, backward manuel | `generalized_attention_actor.hpp`, `attention_actor.hpp` | Bloc `masked_attention` (ou plugin pendant la transition) | — |
+| Acteur à attention masquée, backward manuel | `generalized_attention_actor.hpp`, `attention_actor.hpp` | Bloc `masked_attention` (ou composant interne pendant la transition) | — |
 | Tête gaussienne (action 2) | `generalized_patrol_learner.hpp` | `heads.gaussian` | — |
 | 15 canaux de récompense, normalisation P/N | `generalized_cooperative_reward.hpp` | `reward` (canaux, poids, agrégation) | Termes et normalisation P/N, transcrits à l'identique |
 | Façonnage dense (patrouille, formation, proximité, frontière, basse vitesse) | `generalized_reward_shaping.hpp` | — | Entièrement client |
@@ -653,7 +782,7 @@ Chaque étape fait l'objet d'une PR séparée.
 | 5 | `schema` + `obs` + `reward` + codegen des types (§4.2), sans réseaux | Layouts générés égaux aux offsets actuels (`static_assert`) ; hash stable |
 | 6 | Codegen des réseaux, y compris l'attention Blue | Test d'acceptation n°1 (§7) |
 | 7 | `runtime` Owned (Flight) puis Hosted (Blue), évaluation périodique, `eval`, `inference` | Golden trace ; parité d'inférence ; campagne Blue identique sur les mêmes seeds |
-| 8 | `plugin` (ABI, SDK) puis `ppokit-studio` | Plugin d'exemple chargé en Debug et Release ; graphe Flight édité, régénéré et entraîné depuis le studio |
+| 8 | `component` (ABI, SDK) puis `ppokit-studio` | Composant d'exemple (prétraitement avec état, et bloc différentiable) chargé en Debug et Release ; graphe Flight édité, régénéré et entraîné depuis le studio |
 
 L'évaluation multi-seed des politiques entraînées est relancée après les
 étapes 3, 6 et 7. Aucune conclusion de convergence n'est tirée des tests
@@ -666,7 +795,8 @@ unitaires.
    scalaire et reproduire l'ordre exact des opérations ; une différence non
    nulle est un échec.
 2. **Attention Blue** : backward manuel de 731 lignes. Il faut extraire le
-   bloc tel quel, d'abord comme plugin interne, avant toute réécriture.
+   bloc tel quel, d'abord comme composant interne différentiable, avant toute
+   réécriture.
 3. **Sur-abstraction** : seulement deux clients (mono-agent et multi-agent).
    Ne rien ajouter à l'API sans cas d'usage dans l'un des deux.
 4. **Temps de compilation** du codegen rl_tools, avec un modèle par cible.
