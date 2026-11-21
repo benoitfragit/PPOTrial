@@ -159,6 +159,34 @@ auto const action = learner.Mean(observation);  // politique déterministe
 Exemple complet : `PPOKit/tests/backend_learner_tests.cpp` (couloir jouet
 résolu en 30 updates, de façon reproductible à partir du seed).
 
+### Évaluer une politique sur des seeds indépendants
+
+Une suite d'évaluation est un fichier :
+
+```json
+{
+  "schema": "ppokit.eval/1",
+  "suite": "corridor_smoke",
+  "seeds": [1001, 1002, 1003],
+  "episodes": 2,
+  "policy": "deterministic",
+  "gates": { "success_rate": ">= 1.0", "mean_length": "<= 8" }
+}
+```
+
+```cpp
+#include "ppokit/eval/evaluator.hpp"
+auto const suite = ppokit::eval::LoadEvaluationSuite("eval/smoke.json");
+ppokit::eval::RequireDisjointSeeds(suite, trainingSeeds);   // refuse un seed d'entraînement
+auto const report = ppokit::eval::Evaluate(suite, MakeTask, learner, maximumSteps);
+std::cout << report.ToJson();                               // métriques, gates, épisodes
+```
+
+Métriques intégrées : `mean_return`, `success_rate` (épisodes terminés),
+`truncation_rate`, `mean_length`. La politique n'est jamais échantillonnée
+pendant l'évaluation, ce qui laisse intact le générateur aléatoire de
+l'entraînement. CMake : `PPOKit::Evaluation`.
+
 ## Organisation
 
 ```

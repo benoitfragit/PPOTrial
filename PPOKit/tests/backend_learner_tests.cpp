@@ -13,6 +13,7 @@
 
 #include "corridor_networks.hpp"
 #include "ppokit/backend/rltools/gaussian_mlp_learner.hpp"
+#include "ppokit/eval/evaluator.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -86,6 +87,12 @@ private:
     int steps_ = 0;
 };
 
+/** @brief The corridor has no randomness: every seed gives the same task. */
+CorridorTask MakeCorridor(std::uint32_t)
+{
+    return {};
+}
+
 /** @brief Steps needed by the deterministic policy to reach the goal, or -1 if it never does. */
 int DeterministicStepsToGoal(Learner& learner)
 {
@@ -144,6 +151,16 @@ void LearnsTheCorridor()
               << "the goal in " << steps << " steps (optimum 6)\n";
     Check(lastReturn > firstReturn + 0.3, "training raises the mean episode return");
     Check(steps > 0 && steps <= 8, "the deterministic policy walks to the goal");
+
+    // Independent-seed evaluation of the frozen policy, gated by the suite file.
+    auto const suite = ppokit::eval::LoadEvaluationSuite(PPOKIT_CORRIDOR_SMOKE_SUITE);
+    ppokit::eval::RequireDisjointSeeds(suite, {CorridorSettings().seed});
+    auto const report = ppokit::eval::Evaluate(suite, MakeCorridor, learner, CorridorTask::StepLimit);
+    Check(report.Passed(), "the trained policy passes the corridor_smoke gates");
+    if (!report.Passed())
+    {
+        std::cerr << report.ToJson() << '\n';
+    }
 }
 
 void SameSeedSameTraining()

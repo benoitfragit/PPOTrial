@@ -74,7 +74,8 @@ void ReadHidden(Json const& network, MlpSpec& mlp, std::string const& path, Erro
     {
         errors.Fail(hiddenPath, "missing, e.g. { \"layers\": 2, \"width\": 64 }");
     }
-    Json const& hidden = RequireObject(network.at("hidden"), hiddenPath, errors);
+    Json const& hidden = network.at("hidden");
+    RequireObject(hidden, hiddenPath, errors);
     RequireKnownKeys(hidden, {"layers", "width"}, hiddenPath, errors);
     if (!hidden.contains("layers") || !hidden.contains("width"))
     {

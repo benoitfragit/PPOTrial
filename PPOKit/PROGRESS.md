@@ -94,7 +94,7 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
 | 6c. Attention Blue comme composant interne | à faire | |
 | 7a. Rollout, collecte Owned, learner PPO rl_tools générique | fait | Voir ci-dessous |
 | 7b. Mode Hosted (MAPPO, pilotage par l'hôte) | à faire | |
-| 7c. Suites d'évaluation (`eval/*.json`), inférence | à faire | **Prochaine action** |
+| 7c. Suites d'évaluation `ppokit.eval/1` | fait | Voir ci-dessous ; grilles de scénarios et métriques propres à la tâche viendront avec le schéma des scénarios |
 | 4 à 11 | à faire | |
 
 ### Détail de l'étape 1a
@@ -270,17 +270,36 @@ aucun code d'exécution des exemples n'est modifié.
   qui ne dépend pas de l'action (coût par pas seul) ne donne aucun signal
   avant le premier succès, rare en exploration aléatoire.
 
+### Détail de l'étape 7c
+
+- `ppokit/eval/evaluation.hpp` et `src/eval/evaluation.cpp` : lecture
+  stricte de `ppokit.eval/1` (`suite`, `seeds` uniques, `episodes`,
+  `policy: deterministic`, `gates` de la forme `">= x"` ou `"<= x"` sur
+  `mean_return`, `success_rate`, `truncation_rate`, `mean_length`),
+  `RequireDisjointSeeds` (refuse un seed d'entraînement), `EvaluationReport`
+  (métriques, verdict par gate avec sa valeur mesurée, rapport JSON).
+- `ppokit/eval/evaluator.hpp` : `Evaluate(suite, fabrique de tâche par
+  seed, politique, borne de pas)`. La politique doit seulement fournir
+  `Mean` ; un épisode qui ne se termine jamais est signalé au lieu de boucler.
+- `RequireObject` ne renvoie plus de référence : cela supprime une famille de
+  faux positifs `-Wdangling-reference` de GCC 13.
+- Tests : `PPOKitEvaluationTests`. Le test du learner enchaîne désormais
+  entraînement puis évaluation de la suite
+  `tests/fixtures/corridor/eval/smoke.json`, qui passe ses gates.
+
 ## Prochaine action
 
-Étape 7c : évaluation, dans PPOKit.
-1. `ppokit.eval/1` (§5.4 et §10 de la conception) : seeds, épisodes, grilles,
-   cas nommés, gates.
-2. Un évaluateur générique en mode déterministe (moyennes), avec rapport JSON
-   par cellule.
-3. Le tester sur le couloir jouet.
-
-Puis l'étape 7b (mode Hosted pour MAPPO) et, après le rebase de
-l'utilisateur, l'étape 6b (migration des learners des exemples).
+Tout ce qui reste demande soit de toucher aux exemples, soit des choix de
+conception plus lourds :
+1. Étape 7b, mode Hosted (MAPPO) : une interface pilotée par l'hôte
+   (`Act` / `Observe`), avec fins d'épisode par agent. À concevoir sur le
+   learner Blue, donc mieux après le rebase.
+2. Étape 6b, après le rebase de l'utilisateur : faire utiliser les réseaux
+   générés et le runtime commun par Flight, puis par Blue.
+3. Schéma des scénarios et curriculum dans `task.json` et `train.json` (§5.1
+   et §5.3 de la conception), qui débloque les grilles d'évaluation.
+4. Artefacts versionnés (étape 1b : en-tête d'identité avec `ShapeHash`) et
+   `ppokit-import`.
 
 ## Dernier état de la CI (PR #105, commit `7278d63`, étape 6a)
 

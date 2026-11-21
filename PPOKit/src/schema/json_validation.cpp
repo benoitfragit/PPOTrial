@@ -86,13 +86,12 @@ void RequireKnownKeys(Json const& object, std::set<std::string> const& allowed, 
     }
 }
 
-Json const& RequireObject(Json const& value, std::string const& path, ErrorReporter const& errors)
+void RequireObject(Json const& value, std::string const& path, ErrorReporter const& errors)
 {
     if (!value.is_object())
     {
         errors.Fail(path, "expected an object { ... }");
     }
-    return value;
 }
 
 std::string RequireIdentifier(Json const& value, std::string const& path, ErrorReporter const& errors)

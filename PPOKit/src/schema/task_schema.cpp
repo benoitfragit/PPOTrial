@@ -117,7 +117,8 @@ ObservationGroup ReadGroup(std::string const& name, Json const& value, std::stri
     {
         RequireKnownKeys(value, {"set"}, path, errors);
         std::string const setPath = path + ".set";
-        Json const& set = RequireObject(value.at("set"), setPath, errors);
+        Json const& set = value.at("set");
+        RequireObject(set, setPath, errors);
         RequireKnownKeys(set, {"capacity", "features", "fields", "mask"}, setPath, errors);
         if (!set.contains("capacity"))
         {

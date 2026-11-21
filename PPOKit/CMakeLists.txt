@@ -11,7 +11,7 @@ add_library(PPOKit::Core ALIAS ppokit_core)
 target_include_directories(ppokit_core INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_compile_features(ppokit_core INTERFACE cxx_std_17)
 
-# --- ppokit::schema : task.json and generated layout headers ----------------
+# --- ppokit::schema and ppokit::eval : task, graph and evaluation files ------
 include(FetchContent)
 if (NOT TARGET nlohmann_json::nlohmann_json)
     # Same declaration as dependencies.cmake and FlightControl3D: the first one wins.
@@ -20,8 +20,10 @@ if (NOT TARGET nlohmann_json::nlohmann_json)
 endif()
 
 add_library(ppokit_schema STATIC src/schema/json_validation.cpp src/schema/task_schema.cpp
-    src/schema/task_codegen.cpp src/schema/network_schema.cpp)
+    src/schema/task_codegen.cpp src/schema/network_schema.cpp src/eval/evaluation.cpp)
 add_library(PPOKit::Schema ALIAS ppokit_schema)
+# Evaluation suites share the JSON validation of the schema files.
+add_library(PPOKit::Evaluation ALIAS ppokit_schema)
 target_include_directories(ppokit_schema PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_compile_features(ppokit_schema PUBLIC cxx_std_17)
 target_link_libraries(ppokit_schema PRIVATE nlohmann_json::nlohmann_json)
@@ -82,8 +84,14 @@ if (PPO_BUILD_CORE_TESTS)
         TASK tests/fixtures/sample_task.json HEADER sample_task_layout.hpp)
     add_test(NAME PPOKitTaskSchemaTests COMMAND PPOKitTaskSchemaTests)
 
+    add_executable(PPOKitEvaluationTests tests/evaluation_tests.cpp)
+    target_link_libraries(PPOKitEvaluationTests PRIVATE PPOKit::Evaluation PPOKit::Core)
+    add_test(NAME PPOKitEvaluationTests COMMAND PPOKitEvaluationTests)
+
     add_executable(PPOKitBackendLearnerTests tests/backend_learner_tests.cpp)
-    target_link_libraries(PPOKitBackendLearnerTests PRIVATE PPOKit::BackendRltools)
+    target_link_libraries(PPOKitBackendLearnerTests PRIVATE PPOKit::BackendRltools PPOKit::Evaluation)
+    target_compile_definitions(PPOKitBackendLearnerTests PRIVATE
+        PPOKIT_CORRIDOR_SMOKE_SUITE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/corridor/eval/smoke.json")
     ppokit_generate_networks(TARGET PPOKitBackendLearnerTests TASK tests/fixtures/corridor/task.json
         GRAPH tests/fixtures/corridor/graph.json HEADER corridor_networks.hpp)
     add_test(NAME PPOKitBackendLearnerTests COMMAND PPOKitBackendLearnerTests)

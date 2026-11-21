@@ -55,8 +55,8 @@ std::string ChildPath(std::string const& path, std::string const& key);
 void RequireKnownKeys(Json const& object, std::set<std::string> const& allowed, std::string const& path,
     ErrorReporter const& errors);
 
-/** @brief Returns `value` when it is an object, otherwise fails. */
-Json const& RequireObject(Json const& value, std::string const& path, ErrorReporter const& errors);
+/** @brief Fails unless `value` is an object. */
+void RequireObject(Json const& value, std::string const& path, ErrorReporter const& errors);
 
 /** @brief Returns `value` when it is a string holding an identifier, otherwise fails. */
 std::string RequireIdentifier(Json const& value, std::string const& path, ErrorReporter const& errors);
