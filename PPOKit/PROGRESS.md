@@ -301,13 +301,13 @@ conception plus lourds :
 4. Artefacts versionnés (étape 1b : en-tête d'identité avec `ShapeHash`) et
    `ppokit-import`.
 
-## Dernier état de la CI (PR #105, commit `7278d63`, étape 6a)
+## Dernier état de la CI (PR #105, commit `b3ed698`, étape 7c)
 
-Tout est au vert : Core C++17 tests ; FlightControl3D JSBSim (Ubuntu GCC 15
-et Windows, Debug et Release, 25/25) ; Desktop VS2022 Debug et Release
-(69/69). `FlightControl_network_parity_tests` (parité **bit à bit** de
-l'acteur généré) et `BlueDefenseNetworkTypeTests` passent sur toutes ces
-plateformes (vérifié dans les logs des jobs).
+Tout est au vert : Core C++17 tests ; FlightControl3D JSBSim (Ubuntu GCC 15 et
+Windows MSVC, Debug et Release, 28/28, dont `PPOKitBackendLearnerTests` et
+`PPOKitEvaluationTests`) ; Desktop VS2022 Debug et Release (72/72). Le
+couloir s'entraîne et passe ses gates aussi avec la `std::normal_distribution`
+de MSVC (vérifié dans les logs des jobs).
 
 ## Pièges connus
 
