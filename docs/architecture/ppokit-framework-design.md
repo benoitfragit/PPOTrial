@@ -1,4 +1,4 @@
-# PPOKit — framework commun PPO/MAPPO, codegen de réseaux et studio
+# PPOKit — framework commun PPO/MAPPO, backends rl_tools et libtorch, codegen et studio
 
 > Statut : **document de conception**, aucune modification de code.
 > Nom de travail : `PPOKit` (bibliothèque `ppokit`, namespace `ppokit`).
@@ -6,15 +6,24 @@
 
 ## 0. Portée et garde-fous
 
-**Dans la portée :**
-- BlueDefense, c'est-à-dire le MAPPO Blue généralisé (`Examples/BlueDefense/Agents/BluePatrol`).
-- FlightControl3D (`Examples/FlightControl3D`).
+**Dans la portée : les trois exemples.**
+- BlueDefense, c'est-à-dire le MAPPO Blue généralisé
+  (`Examples/BlueDefense/Agents/BluePatrol`), sur le backend rl_tools.
+- FlightControl3D (`Examples/FlightControl3D`), sur le backend rl_tools.
+- Airspace (`Examples/Airspace` : agents Interception/SNA et Mission/RLMission),
+  sur le backend **libtorch**, caché derrière le même frontal (§3.1). La chaîne
+  `Framework/RL/PPO` et `Framework/RL/Bindings` devient un détail
+  d'implémentation de ce backend, puis disparaît.
 
-**Hors de la portée :**
-- Airspace et la chaîne libtorch existante (`Framework/RL/PPO`, `Framework/RL/Bindings`).
-  Ils restent inchangés. Leur raccordement éventuel, via un backend libtorch
-  derrière les mêmes interfaces, est une question ouverte (§17).
-- Le contrôleur rouge `RLMission` n'est pas modifié (AGENTS.md).
+**Contrainte sur RLMission :** BlueDefense utilise la politique de production
+RLMission pour ses Rouges, et l'AGENTS.md interdit de la modifier pendant
+l'évolution du MAPPO. Sa migration est donc une **étape séparée et la
+dernière** (§16, étape 11). Elle exige l'approbation explicite de
+l'utilisateur et une parité d'inférence sur le modèle `model.pt` existant.
+Jusque-là, BlueDefense continue de charger RLMission par la chaîne actuelle.
+
+**Exemples de référence :** à la fin de la migration, les trois exemples ont
+la même structure et servent de modèles pour un nouvel utilisateur (§13.1).
 
 **Invariants à respecter pendant toute la migration :**
 - Aucun canal de récompense Blue n'est ajouté, renommé, repondéré ou renormalisé.
@@ -42,8 +51,9 @@
    le client.
 3. Des têtes de sortie composables : catégorielle, Bernoulli, gaussienne
    (bornée par clip ou tanh), et composite.
-4. Un graphe de réseau décrit en JSON, **compilé par génération de code** vers
-   rl_tools. rl_tools n'est jamais exposé au client.
+4. Un graphe de réseau décrit en JSON, exécuté par l'un des deux backends :
+   **compilé par génération de code** vers rl_tools, ou construit à
+   l'exécution avec libtorch. Aucun des deux n'est exposé au client.
 5. Un cycle outillé **design → codegen → entraînement → évaluation →
    inférence**, avec identité vérifiable des artefacts.
 6. Des composants DLL boîte noire, déclarés par leurs ports et capacités et
@@ -63,7 +73,7 @@ graph.json ─┐
 task.json  ─┼─► ppokit-codegen ─► <model>_generated.hpp/.cpp ─┐
 components/*.manifest.json ─┘                                     │
                                                                ▼
-client C++ (Task / HostedAgent, hooks) ──► ppokit runtime ◄── backend rl_tools (privé)
+client C++ (Task / HostedAgent, hooks) ──► ppokit runtime ◄── backend rl_tools | libtorch (privé)
                                              │
               ┌──────────────────────────────┼──────────────────────────┐
               ▼                              ▼                          ▼
@@ -88,13 +98,46 @@ ni ImGui.
 | `ppokit/reward` | Canaux nommés, poids, agrégation par agent et par équipe, snapshots par canal | schema |
 | `ppokit/heads` | Têtes catégorielle, Bernoulli, gaussienne, composite : échantillonnage, log-prob, entropie, gradient, action déterministe | core |
 | `ppokit/blocks` | Dense, activations, Concat/Split, encodeur par entité, attention masquée, pooling masqué | backend |
-| `ppokit/backend` | **Privé.** Instanciation rl_tools, Adam, buffers, une seule cible CMake (supprime `RL_TOOLS_NAMESPACE_WRAPPER`) | rl_tools |
+| `ppokit/backend/rltools` | **Privé.** Instanciation rl_tools, Adam, buffers, une seule cible CMake (supprime `RL_TOOLS_NAMESPACE_WRAPPER`) | rl_tools |
+| `ppokit/backend/torch` | **Privé.** Construction du graphe en `torch::nn`, autograd, Adam libtorch, absorbe `Framework/RL/PPO` et `Framework/RL/Bindings` | libtorch |
 | `ppokit/runtime` | Trainer owned/hosted, MAPPO, curriculum, évaluation périodique et promotion, budgets, télémétrie et commandes | tous les précédents |
 | `ppokit/eval` | Suites, grilles, gates, rapports, rejeu | runtime |
 | `ppokit/artifacts` | Formats de checkpoint, en-têtes d'identité, écriture atomique, migrations | core |
 | `ppokit/component` | Chargement des DLL, ABI C des composants boîte noire, SDK C++ | core |
 | `ppokit-codegen` | Exécutable JSON → C++ | schema |
 | `ppokit-studio` | Éditeur imnodes, suivi des runs, rapports | runtime, eval, imgui, imnodes, implot |
+
+### 3.1 Deux backends, un seul frontal
+
+| | `backend/rltools` | `backend/torch` |
+|---|---|---|
+| Réseaux | Code généré depuis `graph.json` (§7), dimensions figées | Graphe construit **à l'exécution** depuis le même `graph.json` (modules `torch::nn`), sans recompilation |
+| Types client (`Obs`, `Action`, `Rewards`…) | Générés | Générés, identiques |
+| Gradient | Forward et backward explicites | Autograd |
+| Composants DLL (§12) | Appel à la table C | Enveloppés dans une `torch::autograd::Function` qui appelle `forward` et `backward` de la table C |
+| Exemples | BlueDefense, FlightControl3D | Airspace |
+| Option CMake | toujours présent | `PPOKIT_WITH_TORCH` (par défaut ON, car le desktop actuel lie libtorch) |
+
+**Règles :**
+- Le backend est choisi dans `graph.json` (`"backend": "rltools"` ou
+  `"torch"`). Le client ne change pas une ligne de code pour passer de l'un à
+  l'autre.
+- Aucun en-tête rl_tools ni libtorch n'apparaît dans l'API publique. Le
+  frontal manipule des buffers plats et les types générés.
+- Les deux backends **coexistent dans le même processus**. C'est nécessaire
+  pour BlueDefense : MAPPO Blue sur rl_tools et Rouges RLMission sur libtorch.
+- Les têtes, le GAE, le surrogate PPO, les schémas, les artefacts,
+  l'évaluation et le runtime sont communs. Seuls l'acteur, le critique et
+  l'optimiseur sont propres au backend.
+- **Parité :** à l'intérieur d'un backend, l'exigence de traces identiques au
+  bit près demeure. Entre backends, il n'y a pas de bit-exactitude. Il y a un
+  test de parité du forward à tolérance fixée, sur des poids convertis, pour
+  les graphes sans composant, et une comparaison statistique par évaluation
+  multi-seed pour l'entraînement.
+- Les artefacts portent leur backend (§8). Un convertisseur de poids
+  rl_tools ↔ torch est fourni pour les blocs intégrés.
+- La compatibilité ABI Windows Debug/Release de libtorch, déjà traitée dans
+  `generic-rl-core.md`, reste à la charge du backend torch.
 
 ## 4. Contrat client
 
@@ -254,6 +297,7 @@ Points clés :
 {
   "schema": "ppokit.graph/1.0",
   "task": "flight",
+  "backend": "rltools",
   "scalar": "float",
   "actor": {
     "nodes": [
@@ -385,6 +429,7 @@ Le défaut de la v1 est la log-prob sur le latent, pour aligner les deux modes.
 
 **En-tête commun :**
 - magic et version du format ;
+- `backend` (`rltools` ou `torch`) ;
 - `taskHash`, `graphHash`, `generatorVersion`, `scalar` ;
 - hash du binaire, du manifeste et de la configuration de chaque composant ;
 - horodatage et seed d'entraînement.
@@ -680,6 +725,42 @@ Il est développé **en dernier** (§16, étape 8).
 Le studio n'entre jamais dans la boucle d'entraînement : c'est un client de
 la télémétrie et des commandes.
 
+### 13.1 Exemples de référence, faciles à prendre en main
+
+Chaque exemple migré a la même structure, qui sert de gabarit :
+
+```
+Examples/<Nom>/
+  README.md          ce que fait l'exemple, comment le lancer, quoi modifier en premier
+  task.json          observations, actions, récompenses, scénarios, métriques
+  graph.json         réseaux (éditable dans le studio)
+  train.json         hyperparamètres, curriculum, évaluation périodique
+  eval/              suites smoke, regression, heldout
+  src/<nom>_task.cpp Reset / Step / métriques (+ hooks éventuels)
+  src/physics/…      simulateur propre à l'exemple
+  render/…           rendu optionnel, branché sur la télémétrie
+  CMakeLists.txt     ppokit_add_example(<nom> TASK task.json GRAPH graph.json)
+```
+
+Ce qui rend les exemples faciles à prendre en main :
+- **Une ligne pour enregistrer un exemple** : `PPOKIT_REGISTER_TASK` alimente
+  aussi le catalogue du desktop (`ExampleDefinition`), qui n'a plus à être
+  rempli à la main.
+- **Un seul lanceur** : `ppokit-train <exemple>`, `ppokit-eval <exemple>
+  <suite>`, `ppokit-play <exemple> <artefact>`, et les mêmes actions dans le
+  studio.
+- **Un gabarit** : `ppokit-new <nom>` crée un exemple minimal qui compile et
+  s'entraîne : une tâche jouet, un graphe MLP, une suite smoke.
+- **Des messages d'erreur orientés utilisateur** : chaque erreur de schéma,
+  de câblage ou de checkpoint indique le fichier, le champ et la correction
+  attendue.
+- **Les README des exemples** suivent le même plan : ce que l'agent apprend,
+  lancer, observer, modifier la récompense, modifier le réseau, évaluer.
+- **Les fichiers complexes restent dans l'exemple, pas dans le chemin
+  d'apprentissage** : la physique, le rendu et la géométrie métier sont
+  rangés à part de `task.json` et de `*_task.cpp`, qui sont les deux fichiers
+  qu'un nouvel utilisateur lit en premier.
+
 ## 14. Matrice de couverture
 
 ### 14.1 BlueDefense (MAPPO Blue généralisé)
@@ -731,7 +812,24 @@ la télémétrie et des commandes.
 | Rendu et instruments | `Renderer/*` | — | Client (lit la télémétrie) |
 | Golden trace | `tests/golden_trace_tests.cpp` | Inchangé : critère d'acceptation de chaque étape | — |
 
-**Conclusion :** aucun service des deux exemples ne reste sans emplacement.
+### 14.3 Airspace (backend libtorch)
+
+| Service actuel | Fichier(s) | PPOKit | Reste client |
+|---|---|---|---|
+| Agent Interception (SNA) : entraînement et production | `Interception.*` (`SNATrainingAgent`, `SNAProdAgent`) | `runtime` Hosted + `inference` | Adaptateur ECS mince |
+| Réseau acteur-critique MLP, log-std en sortie du réseau | `actorcriticnet.*` | `graph.json` backend `torch`, `heads.gaussian` avec `logStd: "network"` | — |
+| Agent Mission (RLMission), attention sur les pistes, 3 actions | `actorcriticmission.*`, `missionlayout.hpp` | Bloc `masked_attention` (torch), `heads.gaussian` ; **étape 11** | — |
+| Filtre de pistes de mission | `missiontrackfilter.hpp` | Composant de prétraitement non entraînable (§12) ou fournisseur de références | Logique de filtrage |
+| Sélection de cible | `targetselector.*` | — | Client (pas de contrôleur d'affectation externe ajouté) |
+| PPO libtorch, learner, bindings | `Framework/RL/PPO`, `Framework/RL/Bindings` | `backend/torch` + `core` (GAE et surrogate communs) | — |
+| Canaux de récompense (destruction de cible, de l'ownship…) | `Interception.hpp` | `reward` | Termes |
+| Initialisation aléatoire ou depuis checkpoint | `randominitializersystem.*`, `checkpointinitializersystem.*` | `scenario` + curriculum | Placement dans l'ECS |
+| Méta-registre, règles de monde | `airspacemeta.*`, `airspaceworldrules.*` | — | Client (ECS) |
+| Évaluateur | `evaluator.*` | `eval` | Métriques métier |
+| Rendu tactique | `Renderer/*` | — | Client (lit la télémétrie) |
+| Checkpoints `model.pt` | `TorchLearner`, `TorchProductionPolicy` | `artifacts` (backend `torch`) + lecteur de l'ancien format | — |
+
+**Conclusion :** aucun service des trois exemples ne reste sans emplacement.
 Ce qui reste chez le client est soit de la physique, soit de la sémantique
 métier (termes de récompense, guidage, placement, rôles), conformément aux
 garde-fous de §0.
@@ -778,14 +876,17 @@ Chaque étape fait l'objet d'une PR séparée.
 | 1 | `ppokit/artifacts` : écriture atomique, en-tête, RNG portable. Remplacement des 4 implémentations | Golden trace Flight inchangée ; tests Blue de checkpoint au vert ; Debug et Release, CTest |
 | 2 | `ppokit/core` : GAE `<T>` et surrogate PPO ; Flight et Blue les appellent | Golden trace Flight identique ; tests `generalized_learner_tests` identiques au bit près |
 | 3 | `ppokit/heads` : têtes, puis composite pour Flight et gaussienne pour Blue | Parité de log-prob, d'entropie et de gradient avec `hybrid_policy.hpp` et le learner Blue ; golden trace |
-| 4 | `ppokit/backend` unique : suppression de `RL_TOOLS_NAMESPACE_WRAPPER` | Les deux exemples liés dans le même exécutable ; pas de régression |
+| 4 | `ppokit/backend/rltools` unique : suppression de `RL_TOOLS_NAMESPACE_WRAPPER` | BlueDefense et Flight liés dans le même exécutable ; pas de régression |
 | 5 | `schema` + `obs` + `reward` + codegen des types (§4.2), sans réseaux | Layouts générés égaux aux offsets actuels (`static_assert`) ; hash stable |
 | 6 | Codegen des réseaux, y compris l'attention Blue | Test d'acceptation n°1 (§7) |
 | 7 | `runtime` Owned (Flight) puis Hosted (Blue), évaluation périodique, `eval`, `inference` | Golden trace ; parité d'inférence ; campagne Blue identique sur les mêmes seeds |
-| 8 | `component` (ABI, SDK) puis `ppokit-studio` | Composant d'exemple (prétraitement avec état, et bloc différentiable) chargé en Debug et Release ; graphe Flight édité, régénéré et entraîné depuis le studio |
+| 8 | `component` (ABI, SDK) | Composant d'exemple (prétraitement avec état, et bloc différentiable) chargé en Debug et Release |
+| 9 | `backend/torch` derrière le même frontal ; Airspace Interception (SNA) migré | Parité d'inférence sur le `model.pt` existant ; entraînement comparable en évaluation multi-seed ; coexistence des deux backends dans `PPO.exe` |
+| 10 | Exemples de référence (§13.1) : structure commune, lanceur, `ppokit-new`, README ; puis `ppokit-studio` | Un exemple créé par `ppokit-new` compile et s'entraîne ; graphe Flight édité, régénéré et entraîné depuis le studio |
+| 11 | Airspace RLMission migré, puis utilisé par les Rouges de BlueDefense — **sur approbation explicite** | Actions de production identiques (tolérance fixée) sur les mêmes états ; campagne BlueDefense inchangée sur les mêmes seeds |
 
 L'évaluation multi-seed des politiques entraînées est relancée après les
-étapes 3, 6 et 7. Aucune conclusion de convergence n'est tirée des tests
+étapes 3, 6, 7, 9 et 11. Aucune conclusion de convergence n'est tirée des tests
 unitaires.
 
 ## 17. Risques et questions ouvertes
@@ -797,16 +898,19 @@ unitaires.
 2. **Attention Blue** : backward manuel de 731 lignes. Il faut extraire le
    bloc tel quel, d'abord comme composant interne différentiable, avant toute
    réécriture.
-3. **Sur-abstraction** : seulement deux clients (mono-agent et multi-agent).
-   Ne rien ajouter à l'API sans cas d'usage dans l'un des deux.
+3. **Sur-abstraction** : trois clients (mono-agent, MAPPO, et deux agents
+   libtorch). Ne rien ajouter à l'API sans cas d'usage dans l'un d'eux.
 4. **Temps de compilation** du codegen rl_tools, avec un modèle par cible.
    À mesurer dès l'étape 6.
-5. **Airspace / libtorch** : faut-il un backend libtorch derrière les mêmes
-   interfaces, ou laisser Airspace sur `Framework/RL` ? Décision à prendre
-   par l'utilisateur.
+5. **Airspace / libtorch** : *décidé*. Backend libtorch derrière le même
+   frontal (§3.1). Restent ouverts : la tolérance de parité entre backends, et
+   le coût d'enveloppement des composants DLL dans l'autograd.
 6. **`map: tanh`** : log-prob sur le latent ou corrigée du jacobien (§6).
 7. **Relation avec `Framework/RL/Core`** : `ppo::core::IEnvironment`,
-   `IPolicy` et `ILearner` existent déjà côté libtorch. Il faut choisir entre
-   faire converger ces interfaces vers PPOKit ou les garder séparées
-   jusqu'à la décision n°5.
-8. **Nom définitif** de la bibliothèque.
+   `IPolicy` et `ILearner` deviennent des adaptateurs vers PPOKit pendant les
+   étapes 9 à 11, puis sont supprimés une fois les trois exemples migrés.
+8. **Facilité de prise en main** : à mesurer concrètement, par exemple en
+   comptant le nombre de lignes de C++ client et de fichiers à lire pour
+   l'exemple généré par `ppokit-new`. Cible : un seul fichier C++ et quatre
+   fichiers JSON.
+9. **Nom définitif** de la bibliothèque.
