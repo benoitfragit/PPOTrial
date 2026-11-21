@@ -347,8 +347,10 @@ int main()
         std::cout << "[FLIGHT_GOLDEN] fingerprint=" << Hex(fingerprint) << '\n';
 #if defined(__linux__) && defined(__x86_64__) && defined(__GLIBCXX__) && defined(__GNUC__) \
     && !defined(__clang__) && __GNUC__ == 13
-        // Frozen before the readability refactoring; identical in Debug and Release.
-        constexpr std::uint64_t Reference = 0x848d71c6725f735cULL;
+        // Frozen on master after #87 (T-6 approach), before the PPOKit migration;
+        // identical in Debug and Release. The former value predated the intended
+        // behaviour changes of #87 and was never re-checked, as CI runs GCC 15.
+        constexpr std::uint64_t Reference = 0x471aaf859adb0883ULL;
         Check(fingerprint == Reference, "golden trace changed: the refactoring altered model behaviour");
         std::cout << "Flight golden trace matches the pre-refactoring reference\n";
         return 0;
