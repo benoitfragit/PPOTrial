@@ -1,0 +1,22 @@
+{
+  "schema": "ppokit.task/1",
+  "name": "sample",
+  "namespace": "ppokit::tests::sample",
+  "agents": { "min": 1, "max": 4 },
+  "observation": {
+    "own": { "fields": ["speed", "heading_error"] },
+    "lidar": { "size": 5 },
+    "red_tracks": { "set": { "capacity": 3, "fields": ["range", "bearing", "present"], "mask": "present" } }
+  },
+  "critic": {
+    "state": { "fields": ["speed", "time_left"] }
+  },
+  "actions": {
+    "steer": { "head": "gaussian", "names": ["turn", "acceleration"], "bounds": [-1, 1], "map": "clip" },
+    "brake": { "head": "gaussian", "size": 1, "bounds": [0, 1], "map": "none" }
+  },
+  "rewards": {
+    "Progress": { "label": "Patrol progress", "weight": 0.5 },
+    "Crash": {}
+  }
+}

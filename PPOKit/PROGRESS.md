@@ -88,7 +88,8 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
 | 3a. Tête gaussienne et surrogate PPO communs | fait | Décision B de l'utilisateur ; voir ci-dessous |
 | 3b. Têtes Bernoulli, catégorielle, composite | reporté à l'étape 5/6 | Aucun exemple ne les utilise aujourd'hui ; l'AGENTS.md interdit les interfaces sans appelant. Elles arriveront avec le schéma et le codegen |
 | 4. Backend rl_tools unique | fusionné dans l'étape 6 | Voir ci-dessous |
-| 5. Schémas (`task.json`) et types générés | à faire | **Prochaine action** |
+| 5. Schéma `task.json`, `ppokit-codegen`, layouts générés | fait (partie forme) | Voir ci-dessous ; scénarios et métriques viendront avec le runtime (étape 7) |
+| 6. Codegen des réseaux (inclut l'ancienne étape 4) | à faire | **Prochaine action** |
 | 4 à 11 | à faire | |
 
 ### Détail de l'étape 1a
@@ -168,17 +169,51 @@ lui-même, ce wrapper est la bonne solution. Le backend unique n'apporte
 quelque chose que lorsqu'une seule bibliothèque possède tout le code rl_tools,
 ce qui est précisément le rôle du code généré (étape 6).
 
+### Détail de l'étape 5
+
+Contrainte de l'utilisateur : d'autres développements sont en cours sur les
+modèles, et il rebasera sa branche plus tard. L'étape est donc **additive** :
+aucun code d'exécution des exemples n'est modifié.
+
+- `PPOKit::Schema` (`ppokit/schema/task_schema.hpp`) : lecture stricte de
+  `task.json` (`ppokit.task/1`), avec l'ordre d'écriture conservé
+  (`nlohmann::ordered_json`), et des erreurs de la forme
+  `fichier: chemin.de.la.clé: attendu …`. Contenu : observation et critique
+  (groupes `fields`, `size` ou `set` avec `capacity`, `features`/`fields` et
+  `mask`), actions (tête `gaussian`, `names` ou `size`, `bounds`, `map`),
+  récompenses (`label`, `weight`), `agents` (min, max), `namespace`.
+- `ShapeHash` : FNV-1a des formes et des noms. Les labels et les poids par
+  défaut n'en font pas partie.
+- `ppokit-codegen` et la fonction CMake `ppokit_generate_task_layout`
+  (`PPOKit/cmake/PPOKitTask.cmake`) produisent un en-tête de constantes : une
+  struct par groupe (`Offset`, `Size`, `Capacity`, `Features`, `MaskFeature`,
+  enum `Feature`), un enum `Slot` et `SlotNames` quand tout est nommé,
+  `Action::Component` et `ComponentNames`, `Reward::Channel`, `Names`,
+  `Labels` et `DefaultWeights`.
+- `task.json` ajoutés : `Examples/FlightControl3D/task.json` (33 observations
+  en 6 groupes, 5 actions, 7 canaux) et
+  `Examples/BlueDefense/Agents/BluePatrol/task.json` (observation v10 de 295
+  valeurs, critique de 470, 2 actions, 15 canaux).
+- Tests de correspondance : `FlightControl_task_layout_tests` et
+  `BlueDefenseTaskLayoutTests` vérifient par `static_assert` et à
+  l'exécution que le `task.json` et le code décrivent exactement les mêmes
+  layouts et noms. Ils échouent dès que l'un change sans l'autre.
+- Les poids de récompense effectifs restent dans les configurations des
+  exemples (pas de seconde source de vérité). `DefaultWeights` vaut 1 tant
+  que la migration du runtime (étape 7) n'a pas eu lieu.
+
 ## Prochaine action
 
-Étape 5 : schéma `task.json` et types générés, sans réseau.
-1. `ppokit/schema` : lecture et validation de `task.json` (groupes
-   d'observation, ensembles masqués, rôles, actions, canaux de récompense,
-   scénarios, métriques), avec des messages d'erreur qui pointent le champ.
-2. `ppokit-codegen` (première version) : génération des structs typés et des
-   offsets.
-3. Critère : pour Flight (33 observations, 5 actions, 7 canaux) puis Blue
-   (observation v10), les layouts générés égalent les constantes actuelles,
-   vérifié par `static_assert`. Aucun changement de comportement.
+Étape 6 : génération des réseaux (`graph.json`) vers rl_tools, avec un backend
+unique (l'ancienne étape 4).
+1. Définir `ppokit.graph/1` : `dense_stack`, activations, entrée depuis
+   `task.json`, tête gaussienne, critique `value`.
+2. Générer le MLP de Flight (`mlp_unconditional_stddev`, voir
+   `flight_learner.cpp`) et vérifier une sortie forward **identique** à
+   l'implémentation actuelle sur des poids et des entrées fixés.
+3. L'attention Blue passera d'abord comme composant interne différentiable.
+4. Comme pour l'étape 5, rester additif tant que l'utilisateur n'a pas rebasé
+   ses travaux sur les modèles.
 
 ## Dernier état de la CI (PR #105, commit `18494cb`, étape 3a)
 

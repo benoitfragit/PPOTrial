@@ -1065,7 +1065,7 @@ Chaque étape fait l'objet d'une PR séparée. L'avancement réel est suivi dans
 | 2 | `ppokit/core` : GAE `<T>` ; Flight et Blue l'appellent. Le surrogate PPO passe à l'étape 3, car les deux implémentations diffèrent (bornes du log-ratio, règle d'activation du gradient) | Golden trace Flight identique ; trace de `generalized_learner_tests` identique au bit près |
 | 3 | `ppokit/heads` (gaussienne) et surrogate PPO communs ; une **formule unique** (décision de l'utilisateur) remplace celles de Flight et de Blue. Bernoulli, catégorielle et composite arrivent avec le codegen | Écart d'au plus 1 ulp sur la log-densité ; épisodes de la golden trace inchangés ; nouvelles références enregistrées ; évaluation multi-seed avant fusion |
 | 4 | `ppokit/backend/rltools` unique : suppression de `RL_TOOLS_NAMESPACE_WRAPPER` | BlueDefense et Flight liés dans le même exécutable ; pas de régression |
-| 5 | `schema` + `obs` + `reward` + codegen des types (§4.2), sans réseaux | Layouts générés égaux aux offsets actuels (`static_assert`) ; hash stable |
+| 5 | `schema` + codegen des layouts (§4.2), sans réseaux. Fait de façon additive : `task.json` de Flight et de Blue, tests de correspondance. Les normaliseurs (`obs`) et le moteur de récompense (`reward`) arrivent avec le runtime (étape 7) | Layouts générés égaux aux offsets actuels (`static_assert`) ; hash stable |
 | 6 | Codegen des réseaux, y compris l'attention Blue | Test d'acceptation n°1 (§7) |
 | 7 | `runtime` Owned (Flight) puis Hosted (Blue), évaluation périodique, `eval`, `inference` | Golden trace ; parité d'inférence ; campagne Blue identique sur les mêmes seeds |
 | 8 | `component` (ABI, SDK) | Composant d'exemple (prétraitement avec état, et bloc différentiable) chargé en Debug et Release |

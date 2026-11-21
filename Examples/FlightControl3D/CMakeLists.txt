@@ -74,6 +74,11 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     endforeach()
     # The golden trace is only frozen on its reference platform; elsewhere it reports a skip.
     set_tests_properties(FlightControl_golden_trace_tests PROPERTIES SKIP_RETURN_CODE 77)
+    # task.json (PPOKit) must describe the same observation, actions and rewards as the code.
+    add_executable(FlightControl_task_layout_tests tests/task_layout_tests.cpp)
+    target_link_libraries(FlightControl_task_layout_tests PRIVATE FlightControlRuntime)
+    ppokit_generate_task_layout(TARGET FlightControl_task_layout_tests TASK task.json HEADER flight_task_layout.hpp)
+    add_test(NAME FlightControl_task_layout_tests COMMAND FlightControl_task_layout_tests)
     target_sources(FlightControl_learner_tests PRIVATE tests/other_rltools_backend.cpp)
     target_link_libraries(FlightControl_learner_tests PRIVATE RLtools::Core)
 endif()

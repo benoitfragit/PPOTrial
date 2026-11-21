@@ -57,6 +57,47 @@ CMake : `target_link_libraries(<cible> PUBLIC PPOKit::Core)`.
 
 FlightControl3D et BlueDefense utilisent exactement ces fonctions.
 
+### `PPOKit::Schema` et `ppokit-codegen` — décrire une tâche dans `task.json`
+
+Un fichier `task.json` décrit la forme de ce que l'agent observe et fait :
+groupes d'observation (champs nommés, vecteurs, ensembles d'entités masqués),
+entrée du critique, groupes d'actions, canaux de récompense. Exemples complets :
+[`Examples/FlightControl3D/task.json`](../Examples/FlightControl3D/task.json),
+[`Examples/BlueDefense/Agents/BluePatrol/task.json`](../Examples/BlueDefense/Agents/BluePatrol/task.json).
+
+```json
+{
+  "schema": "ppokit.task/1",
+  "name": "my_task",
+  "observation": {
+    "own":    { "fields": ["speed", "heading_error"] },
+    "lidar":  { "size": 61 },
+    "tracks": { "set": { "capacity": 10, "features": 13, "mask": "last" } }
+  },
+  "actions": { "motion": { "head": "gaussian", "names": ["turn", "acceleration"], "bounds": [-1, 1], "map": "clip" } },
+  "rewards": { "Progress": {}, "Crash": { "label": "Crash penalty", "weight": 10 } }
+}
+```
+
+CMake génère un en-tête de layout à chaque modification du fichier :
+
+```cmake
+ppokit_generate_task_layout(TARGET my_target TASK task.json HEADER my_task_layout.hpp)
+```
+
+```cpp
+#include "my_task_layout.hpp"
+using Layout = ppokit::tasks::my_task::TaskLayout;
+float const lidarFirst = observation[Layout::Observation::Lidar::Offset];
+static_assert(Layout::Action::Size == 2);
+```
+
+Une faute dans le fichier est signalée avec son chemin exact :
+
+```
+ppokit-codegen: task.json: observation.tracks.set.capacty: unknown key (accepted: capacity, features, fields, mask)
+```
+
 ## Organisation
 
 ```

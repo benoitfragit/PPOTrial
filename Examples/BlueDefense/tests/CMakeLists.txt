@@ -26,3 +26,12 @@ foreach(test IN ITEMS RewardEvaluation RewardShaping RuntimeState Advantage Patr
     add_test(NAME BlueDefenseGeneralized${test}Tests
         COMMAND BlueDefenseGeneralized${test}Tests)
 endforeach()
+
+# BluePatrol/task.json (PPOKit) must describe the same layouts and channels as the code.
+add_executable(BlueDefenseTaskLayoutTests task_layout_tests.cpp)
+target_compile_features(BlueDefenseTaskLayoutTests PRIVATE cxx_std_17)
+target_include_directories(BlueDefenseTaskLayoutTests PRIVATE
+    ../Agents/BluePatrol/Core ../Agents/BluePatrol/Training)
+ppokit_generate_task_layout(TARGET BlueDefenseTaskLayoutTests
+    TASK ../Agents/BluePatrol/task.json HEADER blue_patrol_task_layout.hpp)
+add_test(NAME BlueDefenseTaskLayoutTests COMMAND BlueDefenseTaskLayoutTests)
