@@ -247,13 +247,13 @@ entièrement dans PPOKit :
   sur une tâche jouette de PPOKit (`tests/`), sans toucher aux exemples.
 - Puis les suites d'évaluation (`eval/*.json`, §10 de la conception).
 
-## Dernier état de la CI (PR #105, commit `e149d36`, étape 5)
+## Dernier état de la CI (PR #105, commit `7278d63`, étape 6a)
 
-Tout est au vert : Core C++17 tests (configuration sans Flight, où PPOKit
-récupère lui-même nlohmann_json) ; FlightControl3D JSBSim (Ubuntu GCC 15 et
-Windows, Debug et Release) ; Desktop VS2022 Debug et Release, y compris
-`ppokit-codegen` et `FlightControl_task_layout_tests` sous MSVC (vérifié dans
-les logs des jobs).
+Tout est au vert : Core C++17 tests ; FlightControl3D JSBSim (Ubuntu GCC 15
+et Windows, Debug et Release, 25/25) ; Desktop VS2022 Debug et Release
+(69/69). `FlightControl_network_parity_tests` (parité **bit à bit** de
+l'acteur généré) et `BlueDefenseNetworkTypeTests` passent sur toutes ces
+plateformes (vérifié dans les logs des jobs).
 
 ## Pièges connus
 
