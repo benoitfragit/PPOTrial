@@ -9,6 +9,7 @@
 // optional headless utility. Version 7 removes external target assignments
 // and deliberately rejects policies trained under the previous semantics.
 #include "patrol_rltools.hpp"
+#include "ppokit/artifacts/atomic_file.hpp"
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -18,7 +19,6 @@
 #include <ostream>
 #include <stdexcept>
 #include <string>
-#include <system_error>
 #include <utility>
 
 namespace ppo::examples::bluedefense::defenders {
@@ -149,56 +149,17 @@ template<typename ACTOR> void WritePatrolPolicy(std::ostream& os,ACTOR const& ac
 
 /**
  * @brief Atomically replaces a checkpoint while retaining rollback on rename.
+ * @details Thin wrapper over the PPOKit transaction: `.tmp` then commit, with a
+ * `.bak` rollback copy deleted after success.
  * @tparam Writer Callable that serializes to the supplied output stream.
  * @param path Final checkpoint path.
  * @param writer Serialization callback.
  */
 template<typename Writer>
-/**
- * @brief Sérialise ou écrit les données associées à SavePatrolAtomically selon les garanties implémentées.
- * @details Utilise des fichiers ou chemins. Peut signaler un état invalide par exception.
- */
 void SavePatrolAtomically(std::filesystem::path const& path, Writer&& writer)
 {
-    if (path.has_parent_path())
-        std::filesystem::create_directories(path.parent_path());
-    auto const temp = std::filesystem::path{path.string() + ".tmp"};
-    auto const backup = std::filesystem::path{path.string() + ".bak"};
-    try
-    {
-        std::ofstream file{temp, std::ios::trunc};
-        if (!file)
-            throw std::runtime_error("Cannot create patrol checkpoint");
-        std::forward<Writer>(writer)(file);
-        file.flush();
-        if (!file)
-            throw std::runtime_error("Cannot flush patrol checkpoint");
-    }
-    catch (...)
-    {
-        std::error_code ignored;
-        std::filesystem::remove(temp, ignored);
-        throw;
-    }
-
-    std::error_code ignored;
-    std::filesystem::remove(backup, ignored);
-    bool const existed = std::filesystem::exists(path);
-    if (existed)
-        std::filesystem::rename(path, backup);
-    try
-    {
-        std::filesystem::rename(temp, path);
-    }
-    catch (...)
-    {
-        if (existed)
-            std::filesystem::rename(backup, path);
-        std::filesystem::remove(temp, ignored);
-        throw;
-    }
-    if (existed)
-        std::filesystem::remove(backup, ignored);
+    ppokit::artifacts::WriteFileAtomically(path, std::forward<Writer>(writer),
+        ppokit::artifacts::AtomicWriteOptions{}, "Blue patrol checkpoint");
 }
 
 template<typename ACTOR>

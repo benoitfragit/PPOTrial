@@ -48,7 +48,7 @@ target_compile_definitions(FlightControlSimulator PRIVATE PPO_JSBSIM_DATA_ROOT="
 target_link_libraries(FlightControlSimulator PUBLIC FlightControlCore PRIVATE libJSBSim)
 
 add_library(FlightControlLearner STATIC Training/flight_learner.cpp Training/flight_model_store.cpp)
-target_link_libraries(FlightControlLearner PUBLIC FlightControlCore PRIVATE RLtools::Core)
+target_link_libraries(FlightControlLearner PUBLIC FlightControlCore PRIVATE RLtools::Core PPOKit::Artifacts)
 
 add_library(FlightControlRuntime STATIC Runtime/flight_session.cpp)
 target_include_directories(FlightControlRuntime PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Runtime")
@@ -72,7 +72,7 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     target_compile_definitions(FlightControl_session_tests PRIVATE
         PPO_FLIGHT_COMMITTED_CHECKPOINT="${CMAKE_SOURCE_DIR}/resources/model/FlightControl3D/latest/flight_hybrid_v1.txt")
     target_sources(FlightControl_learner_tests PRIVATE tests/other_rltools_backend.cpp)
-    target_link_libraries(FlightControl_learner_tests PRIVATE RLtools::Core)
+    target_link_libraries(FlightControl_learner_tests PRIVATE RLtools::Core PPOKit::Artifacts)
 endif()
 
 if (PPO_BUILD_DESKTOP)

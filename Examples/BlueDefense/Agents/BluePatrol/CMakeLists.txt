@@ -5,7 +5,7 @@ target_include_directories(BlueDefenseDefenderBackend INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../Evaluation"
     "${CMAKE_CURRENT_SOURCE_DIR}/Runtime"
     "${CMAKE_CURRENT_SOURCE_DIR}/Training")
-target_link_libraries(BlueDefenseDefenderBackend INTERFACE RLtools::Core GenericRLCore)
+target_link_libraries(BlueDefenseDefenderBackend INTERFACE RLtools::Core GenericRLCore PPOKit::Artifacts)
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_executable(BlueDefenseTeamDomainTests ../../tests/team_domain_tests.cpp)

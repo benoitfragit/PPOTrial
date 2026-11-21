@@ -1,4 +1,5 @@
 #include "flight_model_store.hpp"
+#include "ppokit/artifacts/atomic_file.hpp"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <iomanip>
@@ -46,17 +47,18 @@ std::optional<BestRecord> ReadBest(Config const& config,std::filesystem::path co
     if(changedContract) return std::nullopt;
     return record;
 }
+/** @brief Writes the BEST manifest as indented JSON followed by a newline. */
+struct ManifestWriter final
+{
+    Json const& manifest;
+    void operator()(std::ostream& stream) const { stream<<manifest.dump(2)<<'\n'; }
+};
 void CommitPointer(std::filesystem::path const& path,Json const& json)
 {
-    auto temporary=path;temporary+=".tmp";
-    { std::ofstream stream(temporary,std::ios::trunc);stream<<json.dump(2)<<'\n';stream.flush();
-        if(!stream) throw std::runtime_error("FlightControl3D: BEST manifest write failed"); }
-    auto backup=path;backup+=".previous";
-    if(std::filesystem::exists(backup)) std::filesystem::remove(backup);
-    bool const hadPrevious=std::filesystem::exists(path);
-    if(hadPrevious) std::filesystem::rename(path,backup);
-    try { std::filesystem::rename(temporary,path); }
-    catch(...) { if(hadPrevious) std::filesystem::rename(backup,path);throw; }
+    // The manifest directory is created with the BEST checkpoint; a missing one is an error.
+    auto options=ppokit::artifacts::AtomicWriteOptions::KeepingPrevious(".previous");
+    options.createParentDirectories=false;
+    ppokit::artifacts::WriteFileAtomically(path,ManifestWriter{json},options,"FlightControl3D BEST manifest");
 }
 }
 void ValidationMetrics::Record(MissionState const& mission)

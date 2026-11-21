@@ -1,4 +1,5 @@
 #include "flight_learner.hpp"
+#include "ppokit/artifacts/atomic_file.hpp"
 // Upstream CPU headers define non-inline symbols. Use its supported namespace
 // wrapper so this backend can coexist with BlueDefense in the same executable.
 #define RL_TOOLS_NAMESPACE_WRAPPER ppo_flight_backend
@@ -363,19 +364,21 @@ void FlightLearner::Record(Observation const& observation, PolicyAction const& a
     ++impl_->collected;
 }
 
+namespace {
+/** @brief Serializes the complete learner state into an artifact stream. */
+struct LearnerWriter final
+{
+    FlightLearner::Impl const& learner;
+    void operator()(std::ostream& stream) const { learner.Write(stream); }
+};
+} // namespace
+
 void FlightLearner::Save(std::filesystem::path const& path) const
 {
     if (impl_->collected!=0) throw std::logic_error("FlightControl3D: save at an update boundary");
-    if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
-    auto temporary=path; temporary += ".tmp";
-    { std::ofstream stream(temporary,std::ios::trunc); impl_->Write(stream); stream.flush();
-      if (!stream) throw std::runtime_error("FlightControl3D: checkpoint write failed"); }
-    auto backup=path; backup += ".previous";
-    if (std::filesystem::exists(backup)) std::filesystem::remove(backup);
-    bool const previous=std::filesystem::exists(path);
-    if (previous) std::filesystem::rename(path,backup);
-    try { std::filesystem::rename(temporary,path); }
-    catch (...) { if (previous) std::filesystem::rename(backup,path); throw; }
+    // The CI archives the `.previous` generation, so it is kept after the commit.
+    auto const options=ppokit::artifacts::AtomicWriteOptions::KeepingPrevious(".previous");
+    ppokit::artifacts::WriteFileAtomically(path,LearnerWriter{*impl_},options,"FlightControl3D checkpoint");
 }
 void FlightLearner::Load(std::filesystem::path const& path)
 {

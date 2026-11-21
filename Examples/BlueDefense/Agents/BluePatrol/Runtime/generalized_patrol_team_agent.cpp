@@ -12,6 +12,7 @@
 #include "generalized_cooperative_reward.hpp"
 #include "generalized_patrol_learner.hpp"
 #include "generalized_reward_shaping.hpp"
+#include "ppokit/artifacts/atomic_file.hpp"
 #include "initializer.hpp"
 #include "components.hpp"
 #include "sharedworldcomponents.hpp"
@@ -28,6 +29,19 @@
 
 namespace ppo::examples::bluedefense::defenders {
 namespace {
+
+/** @brief Serializes the promoted evaluation score in its V1 text format. */
+struct PromotedScoreWriter final
+{
+    std::size_t blueMobiles;
+    std::size_t redMobiles;
+    float bestScore;
+    void operator()(std::ostream& stream) const
+    {
+        stream << "BLUE_PATROL_GENERALIZED_EVALUATION_V1 " << blueMobiles << ' ' << redMobiles << ' '
+               << std::setprecision(9) << bestScore << '\n';
+    }
+};
 
 /**
  * @brief Réalise l'opération GeneralizedMobileFromEcs; voir les préconditions et effets dans son corps C++.
@@ -1398,41 +1412,9 @@ void GeneralizedPatrolMappoAgent::SavePromotedScore()
 {
     auto scorePath = productionCheckpoint_;
     scorePath += ".score";
-    if (scorePath.has_parent_path())
-        std::filesystem::create_directories(scorePath.parent_path());
-    auto temporary = scorePath;
-    temporary += ".tmp";
-    auto backup = scorePath;
-    backup += ".bak";
-    {
-        std::ofstream stream{temporary, std::ios::trunc};
-        if (!stream)
-            throw std::runtime_error(
-                "Cannot create generalized blue evaluation score");
-        stream << "BLUE_PATROL_GENERALIZED_EVALUATION_V1 "
-               << counts_.blueMobiles << ' ' << counts_.redMobiles << ' '
-               << std::setprecision(9) << evaluation_.BestScore() << '\n';
-        if (!stream)
-            throw std::runtime_error(
-                "Cannot write generalized blue evaluation score");
-    }
-    std::error_code ignored;
-    std::filesystem::remove(backup, ignored);
-    bool const existed = std::filesystem::exists(scorePath);
-    if (existed)
-        std::filesystem::rename(scorePath, backup);
-    try
-    {
-        std::filesystem::rename(temporary, scorePath);
-    }
-    catch (...)
-    {
-        if (existed)
-            std::filesystem::rename(backup, scorePath);
-        throw;
-    }
-    if (existed)
-        std::filesystem::remove(backup, ignored);
+    ppokit::artifacts::WriteFileAtomically(scorePath,
+        PromotedScoreWriter{counts_.blueMobiles, counts_.redMobiles, evaluation_.BestScore()},
+        ppokit::artifacts::AtomicWriteOptions{}, "Blue generalized evaluation score");
 }
 
 /**

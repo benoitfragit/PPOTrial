@@ -1054,11 +1054,14 @@ sont reprises de `flight_types.hpp` et `hybrid_policy.hpp` lors de l'étape 3.
 
 ## 16. Plan de migration
 
-Chaque étape fait l'objet d'une PR séparée.
+Chaque étape fait l'objet d'une PR séparée. L'avancement réel est suivi dans
+[`PPOKit/PROGRESS.md`](../../PPOKit/PROGRESS.md).
 
 | # | Étape | Critère d'acceptation |
 |---|---|---|
-| 1 | `ppokit/artifacts` : écriture atomique, en-tête, RNG portable. Remplacement des 4 implémentations | Golden trace Flight inchangée ; tests Blue de checkpoint au vert ; Debug et Release, CTest |
+| 0 | Golden trace Flight (absente de master) : 3 updates PPO depuis un seed fixe, checkpoint complet hashé | Empreinte identique en Debug et Release, enregistrée sur master avant toute refonte |
+| 1a | `ppokit/artifacts` : écriture atomique. Remplacement des 4 implémentations | Golden trace Flight inchangée ; tests Blue de checkpoint au vert ; Debug et Release, CTest |
+| 1b | En-tête d'identité et RNG portable des artefacts (reporté avec l'étape 5, pour ne changer les formats sur disque qu'une fois) | Lecture des anciens formats conservée (§8.1) |
 | 2 | `ppokit/core` : GAE `<T>` et surrogate PPO ; Flight et Blue les appellent | Golden trace Flight identique ; tests `generalized_learner_tests` identiques au bit près |
 | 3 | `ppokit/heads` : têtes, puis composite pour Flight et gaussienne pour Blue | Parité de log-prob, d'entropie et de gradient avec `hybrid_policy.hpp` et le learner Blue ; golden trace |
 | 4 | `ppokit/backend/rltools` unique : suppression de `RL_TOOLS_NAMESPACE_WRAPPER` | BlueDefense et Flight liés dans le même exécutable ; pas de régression |
