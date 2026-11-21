@@ -5,7 +5,8 @@
  * Flow of one action (0.1 s = 10 substeps of 0.01 s in the scenario):
  * 1. reject a call after a boundary and non-finite controls;
  * 2. resolve the flap and brake for the phase, clamp, scale the airborne rudder;
- * 3. for each substep: filter the controls (first order, alpha = 1 - exp(-dt / tau)),
+ * 3. for each substep: evaluate Phi(s), move a moving deck to its pose at the end of the
+ *    substep, filter the controls (first order, alpha = 1 - exp(-dt / tau)),
  *    advance JSBSim, AdvanceMission, accumulate rewards (potential channels multiplied by
  *    gamma_sub^k, k = substep index), stop at a boundary;
  * 4. if a timeout cut the action short, correct the end potential so PPO's gamma bootstrap
@@ -198,6 +199,9 @@ void FlightEnvironment::PrepareEpisode(bool rolling)
     episodeConfig_ = config_;
     episodeConfig_.runway = SampleRunway(config_, rng_);
     fdm_.SetRunway(episodeConfig_.runway);
+    deckStart_ = episodeConfig_.runway;
+    deckMotion_ = {};
+    swellPhase_ = 0.0;
     mission_ = {};
     // The command filter starts from the controls the native reset applies:
     // idle on the ground, the trimmed approach in flight.
@@ -236,6 +240,14 @@ Observation FlightEnvironment::StartAirborne(ApproachSide side, double difficult
         start = SampleStageStart(config_, episodeConfig_.runway, stage, side, rng_);
         // Drawn only for stages, so the approach levels keep their draw sequence.
         gearUp = std::bernoulli_distribution(stage.gearUpShare)(rng_) || gearUp;
+        // The swell phase is drawn last and only with a swell, so the static stages keep theirs.
+        deckMotion_ = stage.deckMotion;
+        if (deckMotion_.swellAmplitudeMeters > 0)
+        {
+            swellPhase_ = std::uniform_real_distribution<double>(0.0, 2.0 * Pi)(rng_);
+        }
+        // The start is sampled around the mean deck; the deck then takes its pose at t = 0.
+        MoveDeck(0);
     }
     else
     {
@@ -287,9 +299,13 @@ std::size_t FlightEnvironment::RunSubsteps(Controls const& controls, StepResult&
     for (std::size_t substep = 0; substep < mission.actionSubsteps; ++substep)
     {
         auto const previous = aircraft_;
+        // Phi(s) is evaluated with the deck pose of s, before a moving deck advances.
+        auto const previousPotentials = ShapingPotentials(episodeConfig_, mission_, previous);
+        MoveDeck(mission_.steps + 1);
         mission_.filteredControls = FilterControls(mission_.filteredControls, controls, filterAlpha);
         aircraft_ = fdm_.Advance(mission_.filteredControls);
-        auto const step = AdvanceMission(episodeConfig_, mission_, previous, aircraft_, &crashDiagnostic_);
+        auto const step = AdvanceMission(episodeConfig_, mission_, previous, aircraft_, previousPotentials,
+            &crashDiagnostic_);
         // Potential terms are discounted inside the action so that they
         // telescope to gamma * Phi(s_next) - Phi(s_now) for PPO.
         for (std::size_t channel = 0; channel < RewardCount; ++channel)
@@ -314,6 +330,30 @@ std::size_t FlightEnvironment::RunSubsteps(Controls const& controls, StepResult&
         discount *= gammaSub;
     }
     return executed;
+}
+
+void FlightEnvironment::MoveDeck(std::size_t steps)
+{
+    if (!deckMotion_.Moving())
+    {
+        return;
+    }
+    double const seconds = static_cast<double>(steps) * config_.mission.physicsDt;
+    episodeConfig_.runway = MovedDeck(deckStart_, deckMotion_, swellPhase_, seconds);
+    fdm_.SetRunway(episodeConfig_.runway);
+}
+
+DeckState FlightEnvironment::CurrentDeck() const noexcept
+{
+    DeckState deck{};
+    deck.motion = deckMotion_;
+    deck.heaveMeters = episodeConfig_.runway.origin.up - deckStart_.origin.up;
+    if (deckMotion_.swellAmplitudeMeters > 0)
+    {
+        double const seconds = static_cast<double>(mission_.steps) * config_.mission.physicsDt;
+        deck.swellAngle = 2.0 * Pi * seconds / deckMotion_.swellPeriodSeconds + swellPhase_;
+    }
+    return deck;
 }
 
 void FlightEnvironment::CorrectPartialTimeout(std::size_t executed, StepResult& total) const noexcept

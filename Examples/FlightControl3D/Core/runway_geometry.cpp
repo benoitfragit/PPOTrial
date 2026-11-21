@@ -86,6 +86,38 @@ Vec3 DeckCoordinates(Runway const& runway, Vec3 point) noexcept
     return RunwayAxes(runway, Subtract(point, runway.origin));
 }
 
+Vec3 DeckRelativeVelocity(Runway const& runway, Vec3 velocity) noexcept
+{
+    return RunwayAxes(runway, Subtract(velocity, runway.velocity));
+}
+
+Runway MovedDeck(Runway const& start, DeckMotionSettings const& motion, double swellPhase,
+    double seconds) noexcept
+{
+    Runway deck = start;
+    deck.velocity = {};
+    if (!motion.Moving())
+    {
+        return deck;
+    }
+    // Forward translation of a ship under way: constant speed along the runway heading.
+    auto const forwardVelocity = Scale(RunwayForward(start), motion.speedMps);
+    auto position = Add(start.origin, Scale(forwardVelocity, seconds));
+    auto velocity = forwardVelocity;
+    // Swell: a level vertical heave, sinusoidal in time.
+    if (motion.swellAmplitudeMeters > 0)
+    {
+        constexpr double FullTurnRadians = 2.0 * Pi;
+        double const angularFrequency = FullTurnRadians / motion.swellPeriodSeconds;
+        double const angle = angularFrequency * seconds + swellPhase;
+        position.up += motion.swellAmplitudeMeters * std::sin(angle);
+        velocity.up += motion.swellAmplitudeMeters * angularFrequency * std::cos(angle);
+    }
+    deck.origin = position;
+    deck.velocity = velocity;
+    return deck;
+}
+
 Vec3 FromRunway(Runway const& runway, double along, double cross, double up) noexcept
 {
     auto const offset = Add(Scale(RunwayForward(runway), along),

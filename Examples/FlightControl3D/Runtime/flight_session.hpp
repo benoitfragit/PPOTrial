@@ -127,6 +127,8 @@ struct FlightSnapshot final
     FlightDiagnostics lastDiagnostics{};
     /** @brief Sea level in the local world frame, in metres. */
     double seaHeightMeters{};
+    /** @brief Deck speed, swell and present heave of the current episode. */
+    DeckState deck{};
     /** @brief Latest crash event and its physical pose, retained across episode resets. */
     std::uint64_t crashEvent{};
     AircraftState crashAircraft{};

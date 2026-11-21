@@ -173,6 +173,24 @@ Le plan d'évaluation est stratifié : les `round(rolloutStartShare × N)` premi
   la fenêtre repart vide dans tous les cas.
 - Le niveau est sauvegardé dans `latest/curriculum_level.txt` à côté du checkpoint.
 - Seule une validation à difficulté 1 peut passer la porte `[FLIGHT_GATE]`.
+- `curriculum.stages` prolonge l'échelle après les niveaux d'approche (un niveau par
+  étape) : `offset`, `high-far`, `downwind`, `holding`, puis `swell` et `moving-deck`.
+  Ajouter des étapes en fin de liste garde la signification d'un `curriculum_level.txt`
+  existant ; `training` n'entre pas dans la signature, un checkpoint reste donc reprenable.
+- Chaque étape peut porter un objet optionnel `deckMotion` : `speedMps` (avance du pont
+  le long de son cap, ≤ 15 m/s), `swellAmplitudeMeters` et `swellPeriodSeconds`
+  (pilonnement sinusoïdal, creux toujours au-dessus de la mer, période de 4 à 30 s). Le
+  pont reste horizontal ; sa pose et sa vitesse (`MovedDeck`) sont mises à jour à chaque
+  sous-pas dans la configuration d'épisode et dans le sol JSBSim, qui calcule
+  compression et frottement des roues relativement au pont. La phase de houle est tirée
+  en dernier, seulement pour une étape avec houle. Guidage, observation, toucher, arrêt et
+  distance de roulage utilisent la vitesse relative au pont ; Φ(s) est évalué avec la
+  pose du pont de s (surcharge `AdvanceMission` avec potentiels précédents).
+- Vers une gate de route, la consigne horizontale mène la trajectoire relative au pont
+  d'au plus `MaximumGateLeadDegrees` (10°) pendant un virage, au lieu d'un saut de 90 à
+  180°. Le coût `Direction` d'un virage reste ainsi sous `w (1 − cos 10°) / 2` par
+  seconde : s'écraser n'est plus moins coûteux que tourner, ce qui l'était avec la
+  consigne en saut (le T-6 piquait dans la mer au demi-tour du circuit d'attente).
 
 ## Glossaire
 

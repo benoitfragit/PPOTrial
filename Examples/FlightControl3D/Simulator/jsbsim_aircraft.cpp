@@ -92,7 +92,10 @@ public:
     {
     }
 
-    /** @brief Height above the deck or the sea, in feet, with the contact point and a static normal. */
+    /**
+     * @brief Height above the deck or the sea, in feet, with the contact point, a level normal
+     *        and the surface velocity in ECEF feet per second.
+     */
     double GetAGLevel(double, JSBSim::FGLocation const& location, JSBSim::FGLocation& contact,
         JSBSim::FGColumnVector3& normal, JSBSim::FGColumnVector3& velocity,
         JSBSim::FGColumnVector3& angular) const override
@@ -101,16 +104,19 @@ public:
         auto const local = DeckCoordinates(deck, point);
         bool const onDeck = OnLandingSurface(deck, local.north, local.east);
         double surfaceHeight = seaHeight;
+        Vec3 surfaceVelocity{};
         if (onDeck)
         {
             surfaceHeight = deck.origin.up;
+            surfaceVelocity = deck.velocity;
         }
         Vec3 const surface{point.north, point.east, surfaceHeight};
         contact = reference.LocalToLocation(ToNed(surface));
         SetWgs84Ellipse(contact);
-        // Both the deck and the sea are level and static in the local tangent frame.
+        // Both the deck and the sea are level. The sea is static; a moving deck reports its
+        // velocity, so JSBSim computes the strut compression and tyre slip relative to it.
         normal = reference.GetTl2ec() * JSBSim::FGColumnVector3(0, 0, -1);
-        velocity = JSBSim::FGColumnVector3(0, 0, 0);
+        velocity = reference.GetTl2ec() * ToNed(surfaceVelocity);
         angular = JSBSim::FGColumnVector3(0, 0, 0);
         return (point.up - surfaceHeight) / FeetToMeters;
     }
@@ -500,6 +506,6 @@ GroundSample JsbsimAircraft::ProbeGround(Vec3 point) const
         angular);
     auto const localNormal = impl.reference.GetTec2l() * normal;
     return {heightFeet * FeetToMeters, FromNed(impl.reference.LocationToLocal(contact)),
-        {localNormal(1), localNormal(2), -localNormal(3)}};
+        {localNormal(1), localNormal(2), -localNormal(3)}, FromNed(impl.reference.GetTec2l() * velocity)};
 }
 } // namespace ppo::examples::flight

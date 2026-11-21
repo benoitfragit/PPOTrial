@@ -572,6 +572,7 @@ FlightSnapshot FlightSession::Snapshot() const noexcept
     state.diagnostics = diagnostics_;
     state.lastDiagnostics = lastDiagnostics_;
     state.seaHeightMeters = active.Settings().runwayRandomization.seaHeightMeters;
+    state.deck = active.CurrentDeck();
     state.crashEvent = crashEvent_;
     state.crashAircraft = crashAircraft_;
     state.crashRunway = crashRunway_;

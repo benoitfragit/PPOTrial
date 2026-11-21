@@ -56,8 +56,8 @@ struct TouchdownMeasurements final
 TouchdownMeasurements Measure(Runway const& runway, AircraftState const& before,
     AircraftState const& after) noexcept
 {
-    auto const velocityBefore = RunwayAxes(runway, before.velocity);
-    auto const velocityAfter = RunwayAxes(runway, after.velocity);
+    auto const velocityBefore = DeckRelativeVelocity(runway, before.velocity);
+    auto const velocityAfter = DeckRelativeVelocity(runway, after.velocity);
     auto const attitudeBefore = RelativeAttitude(runway, before);
     auto const attitudeAfter = RelativeAttitude(runway, after);
     TouchdownMeasurements result{};

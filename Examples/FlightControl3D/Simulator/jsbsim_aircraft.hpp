@@ -33,6 +33,8 @@ struct GroundSample final
     Vec3 contact{};
     /** @brief Unit surface normal, in world axes. */
     Vec3 normal{};
+    /** @brief Surface velocity, in world metres per second: the deck velocity, zero on the sea. */
+    Vec3 velocity{};
 };
 
 /** @brief Steady, wings-level flight condition solved by JsbsimAircraft::Trim. */

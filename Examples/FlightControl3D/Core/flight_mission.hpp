@@ -36,4 +36,22 @@ namespace ppo::examples::flight {
 StepResult AdvanceMission(Config const& config, MissionState& mission, AircraftState const& before,
     AircraftState const& after, CrashDiagnostic* crashDiagnostic = nullptr) noexcept;
 
+/**
+ * @brief Advance the mission by one physics substep with the potentials of the state before it.
+ *
+ * Used when the deck moves during the substep: config holds the deck pose after the substep,
+ * while previousPotentials were evaluated with the pose before it, so the shaping
+ * gamma_sub * Phi(s') - Phi(s) still telescopes over the episode.
+ * @param config Current episode settings and runway pose after the substep.
+ * @param mission Mission state to update.
+ * @param before Aircraft state before the physics substep.
+ * @param after Aircraft state after the physics substep.
+ * @param previousPotentials ShapingPotentials of the mission and aircraft before the substep.
+ * @param crashDiagnostic Optional terminal crash details; written only on crash.
+ * @return Weighted rewards and episode boundary flags; after a boundary, only the flags.
+ */
+StepResult AdvanceMission(Config const& config, MissionState& mission, AircraftState const& before,
+    AircraftState const& after, std::array<double, RewardCount> const& previousPotentials,
+    CrashDiagnostic* crashDiagnostic = nullptr) noexcept;
+
 } // namespace ppo::examples::flight
