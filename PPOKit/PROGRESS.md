@@ -90,7 +90,7 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
 | 4. Backend rl_tools unique | fusionné dans l'étape 6 | Voir ci-dessous |
 | 5. Schéma `task.json`, `ppokit-codegen`, layouts générés | fait (partie forme) | Voir ci-dessous ; scénarios et métriques viendront avec le runtime (étape 7) |
 | 6a. `graph.json` et types rl_tools générés (MLP, modèles externes) | fait | Voir ci-dessous |
-| 6b. Brancher les learners sur les types générés, backend rl_tools unique | à faire, **après le rebase de l'utilisateur** | Modifie le code d'exécution des exemples |
+| 6b. Brancher les learners sur les types générés | Flight : fait (golden inchangée au bit près) ; Blue : à faire | Voir ci-dessous |
 | 6c. Attention Blue comme composant interne | à faire | |
 | 7a. Rollout, collecte Owned, learner PPO rl_tools générique | fait | Voir ci-dessous |
 | 7b. Mode Hosted (MAPPO, pilotage par l'hôte) | à faire | |
@@ -329,6 +329,21 @@ de MSVC (vérifié dans les logs des jobs).
 - Le build desktop (BlueDefense, Airspace) n'est pas compilable ici, faute de
   libtorch : passer par les vérifications manuelles ci-dessus et par la CI
   Windows.
+
+### Détail de l'étape 6b (Flight)
+
+- `FlightControlLearner` génère `flight_networks.hpp` depuis `task.json` et
+  `graph.json`, et `flight_learner.cpp` n'écrit plus ses
+  `StructureSpecification` à la main : `Actor<Width>` et `Critic<Width>` sont
+  les types générés, toujours instanciés pour 32, 64 et 128 et choisis à
+  l'exécution. Des `static_assert` relient le graphe au contrat de Flight.
+- Golden trace inchangée au bit près : ce sont exactement les mêmes types.
+- Blue reste à faire : `BlueDefenseDefenderBackend` est une bibliothèque
+  `INTERFACE`, et y rattacher une génération de code demande CMake 3.19
+  (sources ou dépendances sur une cible INTERFACE), alors que le projet exige
+  3.18. Options : relever le minimum à 3.19, ou générer dans une petite
+  bibliothèque dédiée. Le type du critique Blue est déjà prouvé identique
+  (`BlueDefenseNetworkTypeTests`).
 
 ### Fusion de master #106
 
