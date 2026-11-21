@@ -94,6 +94,7 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
 | 6c. Attention Blue comme composant interne | à faire | |
 | 7a. Rollout, collecte Owned, learner PPO rl_tools générique | fait | Voir ci-dessous |
 | 7b. Mode Hosted (MAPPO, pilotage par l'hôte) | à faire | |
+| 8a. Scénarios (`task.json`) et curriculum (`train.json`), moteur de curriculum | fait | Voir ci-dessous |
 | 7c. Suites d'évaluation `ppokit.eval/1` | fait | Voir ci-dessous ; grilles de scénarios et métriques propres à la tâche viendront avec le schéma des scénarios |
 | 4 à 11 | à faire | |
 
@@ -287,19 +288,35 @@ aucun code d'exécution des exemples n'est modifié.
   entraînement puis évaluation de la suite
   `tests/fixtures/corridor/eval/smoke.json`, qui passe ses gates.
 
+### Détail de l'étape 8a (scénarios et curriculum)
+
+- `task.json` accepte `"scenario"` : des paramètres `float` et `int`
+  (avec `range`), `bool` et `enum` (avec `values`), et une valeur par défaut
+  optionnelle, vérifiée. Les scénarios ne font pas partie du `ShapeHash`.
+- `ppokit.train/1` (`ppokit/schema/train_schema.hpp`) : `curriculum` avec
+  `window`, `promote_at`, `rehearse` et des `stages` nommées. Par paramètre :
+  une valeur fixe, `uniform`, `normal` (bornée au domaine et arrondie pour un
+  entier) ou `choice` pondéré. Un paramètre absent prend sa valeur par
+  défaut, sinon c'est une erreur. Les erreurs pointent la clé fautive.
+- `PPOKit::Training` (`ppokit/runtime/curriculum.hpp`) : `Curriculum`
+  (`Sample`, `Record`, `Restore`), avec la même règle de promotion que
+  `FlightCurriculum` (fenêtre complète, puis nouvelle fenêtre vide), la
+  répétition jamais comptée, et `Save`/`LoadCurriculumStage` par **nom**
+  d'étape, en écriture atomique.
+- L'en-tête généré contient une struct `Scenario` typée (énumérations,
+  champs, `From(values)`).
+- Tests : `PPOKitCurriculumTests`.
+- Correspondance avec Flight : `FlightCurriculum` (niveaux de difficulté,
+  `curriculum_level.txt`) n'est pas encore migré. C'est la prochaine étape
+  logique de 6b pour Flight, et elle touche au code d'exécution.
+
 ## Prochaine action
 
-Tout ce qui reste demande soit de toucher aux exemples, soit des choix de
-conception plus lourds :
-1. Étape 7b, mode Hosted (MAPPO) : une interface pilotée par l'hôte
-   (`Act` / `Observe`), avec fins d'épisode par agent. À concevoir sur le
-   learner Blue, donc mieux après le rebase.
-2. Étape 6b, après le rebase de l'utilisateur : faire utiliser les réseaux
-   générés et le runtime commun par Flight, puis par Blue.
-3. Schéma des scénarios et curriculum dans `task.json` et `train.json` (§5.1
-   et §5.3 de la conception), qui débloque les grilles d'évaluation.
-4. Artefacts versionnés (étape 1b : en-tête d'identité avec `ShapeHash`) et
-   `ppokit-import`.
+1. Mode Hosted (MAPPO) puis migration de Blue (6b), sous réserve de la
+   décision sur CMake 3.19 (voir l'étape 6b).
+2. Flight : décrire son curriculum et ses scénarios en `train.json` et
+   `task.json`, puis remplacer `FlightCurriculum` par `ppokit::runtime::Curriculum`.
+3. Artefacts versionnés (en-tête avec `ShapeHash`) et `ppokit-import`.
 
 ## Dernier état de la CI (PR #105, commit `b3ed698`, étape 7c)
 

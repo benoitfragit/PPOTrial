@@ -8,6 +8,7 @@
 
 #include "json_validation.hpp"
 
+#include <cmath>
 #include <set>
 #include <utility>
 
@@ -310,6 +311,142 @@ void ReadRewards(Json const& value, TaskSchema& schema, ErrorReporter const& err
     }
 }
 
+/** @brief Reads [minimum, maximum]; for an int parameter both ends must be integral. */
+void ReadRange(Json const& parameter, ScenarioParameter& result, std::string const& path, ErrorReporter const& errors)
+{
+    if (!parameter.contains("range") || !parameter.at("range").is_array() || parameter.at("range").size() != 2)
+    {
+        errors.Fail(path + ".range", "expected [minimum, maximum]");
+    }
+    Json const& range = parameter.at("range");
+    result.minimum = RequireFiniteNumber(range[0], path + ".range[0]", errors);
+    result.maximum = RequireFiniteNumber(range[1], path + ".range[1]", errors);
+    if (result.maximum < result.minimum)
+    {
+        errors.Fail(path + ".range", "the maximum must not be smaller than the minimum");
+    }
+    bool const integral = std::floor(result.minimum) == result.minimum && std::floor(result.maximum) == result.maximum;
+    if (result.type == ParameterType::Int && !integral)
+    {
+        errors.Fail(path + ".range", "an int parameter needs integral bounds");
+    }
+}
+
+/** @brief Reads the optional default and checks it against the type, range or names. */
+void ReadDefault(Json const& parameter, ScenarioParameter& result, std::string const& path,
+    ErrorReporter const& errors)
+{
+    if (!parameter.contains("default"))
+    {
+        return;
+    }
+    std::string const defaultPath = path + ".default";
+    Json const& value = parameter.at("default");
+    switch (result.type)
+    {
+    case ParameterType::Bool:
+        if (!value.is_boolean())
+        {
+            errors.Fail(defaultPath, "expected true or false");
+        }
+        result.defaultValue = value.get<bool>() ? 1.0 : 0.0;
+        return;
+    case ParameterType::Enum:
+    {
+        auto const index = value.is_string() ? result.EnumIndex(value.get<std::string>()) : std::nullopt;
+        if (!index)
+        {
+            errors.Fail(defaultPath, "expected one of the \"values\"");
+        }
+        result.defaultValue = static_cast<double>(*index);
+        return;
+    }
+    case ParameterType::Float:
+    case ParameterType::Int:
+        break;
+    }
+    double const number = RequireFiniteNumber(value, defaultPath, errors);
+    if (number < result.minimum || number > result.maximum
+        || (result.type == ParameterType::Int && std::floor(number) != number))
+    {
+        errors.Fail(defaultPath, "outside the range of the parameter");
+    }
+    result.defaultValue = number;
+}
+
+ScenarioParameter ReadScenarioParameter(std::string const& name, Json const& parameter, std::string const& path,
+    ErrorReporter const& errors)
+{
+    RequireObject(parameter, path, errors);
+    RequireKnownKeys(parameter, {"type", "range", "values", "default"}, path, errors);
+    ScenarioParameter result;
+    result.name = name;
+    Json const type = parameter.contains("type") ? parameter.at("type") : Json();
+    if (type == "float")
+    {
+        result.type = ParameterType::Float;
+    }
+    else if (type == "int")
+    {
+        result.type = ParameterType::Int;
+    }
+    else if (type == "bool")
+    {
+        result.type = ParameterType::Bool;
+    }
+    else if (type == "enum")
+    {
+        result.type = ParameterType::Enum;
+    }
+    else
+    {
+        errors.Fail(path + ".type", "expected \"float\", \"int\", \"bool\" or \"enum\"");
+    }
+    bool const ranged = result.type == ParameterType::Float || result.type == ParameterType::Int;
+    if (ranged)
+    {
+        ReadRange(parameter, result, path, errors);
+    }
+    else if (parameter.contains("range"))
+    {
+        errors.Fail(path + ".range", "only float and int parameters have a range");
+    }
+    if (result.type == ParameterType::Enum)
+    {
+        if (!parameter.contains("values"))
+        {
+            errors.Fail(path + ".values", "missing: list the possible names");
+        }
+        result.values = RequireNameList(parameter.at("values"), path + ".values", errors);
+        result.minimum = 0;
+        result.maximum = static_cast<double>(result.values.size() - 1);
+    }
+    else if (parameter.contains("values"))
+    {
+        errors.Fail(path + ".values", "only enum parameters have values");
+    }
+    if (result.type == ParameterType::Bool)
+    {
+        result.maximum = 1;
+    }
+    ReadDefault(parameter, result, path, errors);
+    return result;
+}
+
+void ReadScenario(Json const& value, TaskSchema& schema, ErrorReporter const& errors)
+{
+    RequireObject(value, "scenario", errors);
+    for (auto const& item : value.items())
+    {
+        std::string const path = "scenario." + item.key();
+        if (!IsIdentifier(item.key()))
+        {
+            errors.Fail(path, "parameter names must be identifiers");
+        }
+        schema.scenario.push_back(ReadScenarioParameter(item.key(), item.value(), path, errors));
+    }
+}
+
 void ReadAgents(Json const& value, TaskSchema& schema, ErrorReporter const& errors)
 {
     RequireObject(value, "agents", errors);
@@ -357,7 +494,8 @@ TaskSchema ParseTaskSchema(std::string_view text, std::string_view sourceName)
 {
     ErrorReporter const errors(sourceName);
     Json const root = detail::ParseRootObject(text, errors);
-    RequireKnownKeys(root, {"schema", "name", "namespace", "agents", "observation", "critic", "actions", "rewards"},
+    RequireKnownKeys(root,
+        {"schema", "name", "namespace", "agents", "observation", "critic", "actions", "rewards", "scenario"},
         "", errors);
     if (!root.contains("schema") || root.at("schema") != TaskSchemaVersion)
     {
@@ -394,6 +532,10 @@ TaskSchema ParseTaskSchema(std::string_view text, std::string_view sourceName)
     }
     ReadActions(root.at("actions"), schema, errors);
     ReadRewards(root.at("rewards"), schema, errors);
+    if (root.contains("scenario"))
+    {
+        ReadScenario(root.at("scenario"), schema, errors);
+    }
     schema.shapeHash = ShapeHash(schema);
     return schema;
 }
@@ -401,6 +543,18 @@ TaskSchema ParseTaskSchema(std::string_view text, std::string_view sourceName)
 TaskSchema LoadTaskSchema(std::filesystem::path const& path)
 {
     return ParseTaskSchema(detail::ReadTextFile(path), path.filename().string());
+}
+
+std::optional<std::size_t> ScenarioParameter::EnumIndex(std::string const& valueName) const
+{
+    for (std::size_t index = 0; index < values.size(); ++index)
+    {
+        if (values[index] == valueName)
+        {
+            return index;
+        }
+    }
+    return std::nullopt;
 }
 
 std::uint64_t ShapeHash(TaskSchema const& schema)

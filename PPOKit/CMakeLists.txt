@@ -20,7 +20,8 @@ if (NOT TARGET nlohmann_json::nlohmann_json)
 endif()
 
 add_library(ppokit_schema STATIC src/schema/json_validation.cpp src/schema/task_schema.cpp
-    src/schema/task_codegen.cpp src/schema/network_schema.cpp src/eval/evaluation.cpp)
+    src/schema/task_codegen.cpp src/schema/network_schema.cpp src/schema/train_schema.cpp
+    src/eval/evaluation.cpp)
 add_library(PPOKit::Schema ALIAS ppokit_schema)
 # Evaluation suites share the JSON validation of the schema files.
 add_library(PPOKit::Evaluation ALIAS ppokit_schema)
@@ -33,6 +34,11 @@ target_link_libraries(ppokit-codegen PRIVATE PPOKit::Schema PPOKit::Artifacts)
 
 # ppokit_generate_task_layout(TARGET ... TASK ... HEADER ...)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/PPOKitTask.cmake")
+
+# --- ppokit::runtime : curriculum (stages, promotion, persistence) -----------
+add_library(ppokit_training STATIC src/runtime/curriculum.cpp)
+add_library(PPOKit::Training ALIAS ppokit_training)
+target_link_libraries(ppokit_training PUBLIC PPOKit::Schema PPOKit::Core PRIVATE PPOKit::Artifacts)
 
 # --- ppokit::backend::rltools : learner on generated networks ---------------
 # PPOKit owns the rl_tools dependency; the examples and dependencies.cmake reuse it.
@@ -95,6 +101,15 @@ if (PPO_BUILD_CORE_TESTS)
     ppokit_generate_networks(TARGET PPOKitBackendLearnerTests TASK tests/fixtures/corridor/task.json
         GRAPH tests/fixtures/corridor/graph.json HEADER corridor_networks.hpp)
     add_test(NAME PPOKitBackendLearnerTests COMMAND PPOKitBackendLearnerTests)
+
+    add_executable(PPOKitCurriculumTests tests/curriculum_tests.cpp)
+    target_link_libraries(PPOKitCurriculumTests PRIVATE PPOKit::Training)
+    target_compile_definitions(PPOKitCurriculumTests PRIVATE
+        PPOKIT_SAMPLE_TASK="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/sample_task.json"
+        PPOKIT_SAMPLE_TRAIN="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/sample_train.json")
+    ppokit_generate_task_layout(TARGET PPOKitCurriculumTests
+        TASK tests/fixtures/sample_task.json HEADER sample_task_layout.hpp)
+    add_test(NAME PPOKitCurriculumTests COMMAND PPOKitCurriculumTests)
 
     add_executable(PPOKitNetworkSchemaTests tests/network_schema_tests.cpp)
     target_link_libraries(PPOKitNetworkSchemaTests PRIVATE PPOKit::Schema)

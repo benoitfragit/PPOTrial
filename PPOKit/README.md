@@ -187,6 +187,51 @@ Métriques intégrées : `mean_return`, `success_rate` (épisodes terminés),
 pendant l'évaluation, ce qui laisse intact le générateur aléatoire de
 l'entraînement. CMake : `PPOKit::Evaluation`.
 
+### Scénarios et curriculum
+
+`task.json` déclare ce qui varie d'un épisode à l'autre :
+
+```json
+"scenario": {
+  "wind_kt":   { "type": "float", "range": [0, 25], "default": 0 },
+  "start":     { "type": "enum", "values": ["rolling", "airborne"], "default": "airborne" },
+  "gusts":     { "type": "bool", "default": false },
+  "opponents": { "type": "int", "range": [0, 10] }
+}
+```
+
+`train.json` décrit le curriculum, du plus facile au plus difficile. Un
+paramètre non mentionné par une étape prend sa valeur par défaut :
+
+```json
+{
+  "schema": "ppokit.train/1",
+  "curriculum": {
+    "window": 200, "promote_at": 0.8, "rehearse": 0.1,
+    "stages": [
+      { "name": "calm",  "sample": { "opponents": 0, "start": "rolling" } },
+      { "name": "windy", "sample": { "opponents": { "uniform": [1, 3] }, "wind_kt": { "uniform": [5, 15] },
+                                     "start": { "choice": { "rolling": 1, "airborne": 3 } } } },
+      { "name": "full",  "window": 400, "sample": { "opponents": { "normal": { "mean": 8, "std": 4 } } } }
+    ]
+  }
+}
+```
+
+Une étape est promue quand le taux de succès sur une fenêtre d'épisodes de
+cette étape atteint `promote_at`. La fenêtre repart à zéro après chaque
+décision. Une part `rehearse` des épisodes rejoue une étape précédente sans
+compter pour la promotion.
+
+```cpp
+ppokit::runtime::Curriculum curriculum(*ppokit::schema::LoadTrainingPlan("train.json", task).curriculum);
+ppokit::runtime::LoadCurriculumStage("latest/stage.txt", curriculum);   // reprise
+auto const draw = curriculum.Sample(rng, values);
+auto const scenario = Layout::Scenario::From(values);                  // champs typés générés
+// ... épisode ...
+if (curriculum.Record(draw, success)) { ppokit::runtime::SaveCurriculumStage("latest/stage.txt", curriculum); }
+```
+
 ## Organisation
 
 ```

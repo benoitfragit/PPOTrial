@@ -20,7 +20,13 @@
  *   "actions": {
  *     "controls": { "head": "gaussian", "names": ["elevator", "aileron"], "bounds": [-1, 1], "map": "clip" }
  *   },
- *   "rewards": { "Path": {}, "Crash": { "label": "Crash penalty" } }
+ *   "rewards": { "Path": {}, "Crash": { "label": "Crash penalty" } },
+ *   "scenario": {
+ *     "wind_kt": { "type": "float", "range": [0, 25], "default": 0 },
+ *     "start":   { "type": "enum", "values": ["rolling", "airborne"], "default": "airborne" },
+ *     "gusts":   { "type": "bool", "default": false },
+ *     "opponents": { "type": "int", "range": [0, 10] }
+ *   }
  * }
  * @endcode
  *
@@ -126,6 +132,37 @@ struct RewardChannel final
     double weight = 1.0;
 };
 
+/** @brief Kind of value of a scenario parameter. */
+enum class ParameterType : std::uint8_t
+{
+    Float,
+    Int,
+    Bool,
+    /** @brief One of a fixed list of names, stored as its index. */
+    Enum,
+};
+
+/**
+ * @brief One parameter of the episode scenarios (wind, start placement, number of opponents...).
+ * @details Curriculum stages sample these parameters (train.json). Values are carried as
+ * doubles: an enum as its index, a bool as 0 or 1, an int as an integral value.
+ */
+struct ScenarioParameter final
+{
+    std::string name;
+    ParameterType type = ParameterType::Float;
+    /** @brief Inclusive range of a float or int parameter. */
+    double minimum = 0;
+    double maximum = 0;
+    /** @brief Names of an enum parameter, in index order. */
+    std::vector<std::string> values;
+    /** @brief Value used by stages that do not sample the parameter. */
+    std::optional<double> defaultValue;
+
+    /** @brief Index of an enum name. @return Nothing for an unknown name. */
+    std::optional<std::size_t> EnumIndex(std::string const& valueName) const;
+};
+
 /** @brief Complete, validated description of a task. */
 struct TaskSchema final
 {
@@ -140,6 +177,8 @@ struct TaskSchema final
     std::vector<ActionGroup> actions;
     std::size_t actionSize = 0;
     std::vector<RewardChannel> rewards;
+    /** @brief Scenario parameters, in written order; empty when the task has no variation. */
+    std::vector<ScenarioParameter> scenario;
     /** @brief Hash of everything that fixes tensor shapes and orders (see ShapeHash). */
     std::uint64_t shapeHash = 0;
 };

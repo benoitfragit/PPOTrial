@@ -1,0 +1,15 @@
+{
+  "schema": "ppokit.train/1",
+  "curriculum": {
+    "window": 4,
+    "promote_at": 0.75,
+    "rehearse": 0.2,
+    "stages": [
+      { "name": "calm", "sample": { "opponents": 0, "start": "rolling" } },
+      { "name": "windy", "sample": { "opponents": { "uniform": [1, 3] }, "wind_kt": { "uniform": [5, 15] },
+                                     "start": { "choice": { "rolling": 1, "airborne": 3 } } } },
+      { "name": "full", "window": 10, "sample": { "opponents": { "normal": { "mean": 8, "std": 4 } },
+                                                  "gusts": { "choice": { "true": 1, "false": 1 } } } }
+    ]
+  }
+}

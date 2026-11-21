@@ -61,6 +61,17 @@ void WriteEnum(CodeWriter& code, std::string const& type, std::vector<std::strin
     code.Close(";");
 }
 
+/** @brief Writes `enum class <type> : std::size_t { A, B };` without a Count enumerator. */
+void WriteEnumWithoutCount(CodeWriter& code, std::string const& type, std::vector<std::string> const& enumerators)
+{
+    code.Open("enum class " + type + " : std::size_t");
+    for (auto const& enumerator : enumerators)
+    {
+        code.Line(enumerator + ",");
+    }
+    code.Close(";");
+}
+
 /** @brief Writes `static constexpr std::array<char const*, N> <name>{"a", "b"};`. */
 void WriteNameArray(CodeWriter& code, std::string const& name, std::string const& count,
     std::vector<std::string> const& values)
@@ -194,6 +205,97 @@ void WriteActions(CodeWriter& code, TaskSchema const& schema)
     code.Close(";");
 }
 
+/** @brief "wind_kt" -> "windKt": field names of the generated Scenario struct. */
+std::string ToCamelCase(std::string const& identifier)
+{
+    std::string camel = ToPascalCase(identifier);
+    if (!camel.empty())
+    {
+        camel.front() = static_cast<char>(std::tolower(static_cast<unsigned char>(camel.front())));
+    }
+    return camel;
+}
+
+/** @brief C++ type and conversion from a curriculum value (a double) for one parameter. */
+std::string FieldType(ScenarioParameter const& parameter)
+{
+    switch (parameter.type)
+    {
+    case ParameterType::Int:
+        return "int";
+    case ParameterType::Bool:
+        return "bool";
+    case ParameterType::Enum:
+        return ToPascalCase(parameter.name);
+    case ParameterType::Float:
+        break;
+    }
+    return "double";
+}
+
+std::string FieldConversion(ScenarioParameter const& parameter, std::string const& value)
+{
+    switch (parameter.type)
+    {
+    case ParameterType::Int:
+        return "static_cast<int>(" + value + ")";
+    case ParameterType::Bool:
+        return value + " != 0.0";
+    case ParameterType::Enum:
+        return "static_cast<" + ToPascalCase(parameter.name) + ">(static_cast<std::size_t>(" + value + "))";
+    case ParameterType::Float:
+        break;
+    }
+    return value;
+}
+
+/** @brief Typed scenario struct, filled from the values drawn by ppokit::runtime::Curriculum. */
+void WriteScenario(CodeWriter& code, TaskSchema const& schema)
+{
+    std::vector<std::string> names;
+    std::set<std::string> reserved{"Count", "Names", "From"};
+    for (auto const& parameter : schema.scenario)
+    {
+        names.push_back(parameter.name);
+        if (parameter.type == ParameterType::Enum && reserved.count(ToPascalCase(parameter.name)) != 0)
+        {
+            throw SchemaError("scenario." + parameter.name + ": the name is reserved, rename the parameter");
+        }
+    }
+    UniquePascalNames(names, "scenario");
+    code.Line("/** @brief Scenario of one episode (task.json \"scenario\"), typed. */");
+    code.Open("struct Scenario final");
+    code.Line("static constexpr std::size_t Count = " + std::to_string(names.size()) + ";");
+    WriteNameArray(code, "Names", "Count", names);
+    for (auto const& parameter : schema.scenario)
+    {
+        if (parameter.type == ParameterType::Enum)
+        {
+            WriteEnumWithoutCount(code, ToPascalCase(parameter.name), UniquePascalNames(parameter.values,
+                "scenario." + parameter.name));
+        }
+    }
+    code.Line();
+    for (auto const& parameter : schema.scenario)
+    {
+        code.Line(FieldType(parameter) + " " + ToCamelCase(parameter.name) + "{};");
+    }
+    code.Line();
+    code.Line("/** @brief Converts curriculum values, in task.json order, into typed fields. */");
+    code.Line("template<typename Values>");
+    code.Open("static Scenario From(Values const& values)");
+    code.Line("Scenario scenario;");
+    for (std::size_t index = 0; index < schema.scenario.size(); ++index)
+    {
+        auto const& parameter = schema.scenario[index];
+        code.Line("scenario." + ToCamelCase(parameter.name) + " = "
+            + FieldConversion(parameter, "values[" + std::to_string(index) + "]") + ";");
+    }
+    code.Line("return scenario;");
+    code.Close();
+    code.Close(";");
+}
+
 void WriteRewards(CodeWriter& code, TaskSchema const& schema)
 {
     std::vector<std::string> names;
@@ -272,6 +374,11 @@ std::string GenerateTaskLayoutHeader(TaskSchema const& schema, std::string_view 
     WriteActions(code, schema);
     code.Line();
     WriteRewards(code, schema);
+    if (!schema.scenario.empty())
+    {
+        code.Line();
+        WriteScenario(code, schema);
+    }
     code.Close(";");
     code.Line();
     code.Line("} // namespace " + schema.cppNamespace);

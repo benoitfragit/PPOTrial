@@ -18,5 +18,11 @@
   "rewards": {
     "Progress": { "label": "Patrol progress", "weight": 0.5 },
     "Crash": {}
+  },
+  "scenario": {
+    "wind_kt": { "type": "float", "range": [0, 25], "default": 0 },
+    "start": { "type": "enum", "values": ["rolling", "airborne"], "default": "airborne" },
+    "gusts": { "type": "bool", "default": false },
+    "opponents": { "type": "int", "range": [0, 10] }
   }
 }
