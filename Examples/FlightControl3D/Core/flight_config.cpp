@@ -16,6 +16,7 @@
 #include "flight_t6_performance.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <array>
 #include <fstream>
 #include <limits>
 #include <stdexcept>
@@ -28,6 +29,16 @@ using Json = nlohmann::json;
 constexpr int ContractVersion = 5;
 /** @brief Accepted value of the scenario "formatVersion" field. */
 constexpr int ConfigurationFormatVersion = 2;
+/**
+ * @brief Spawn-distribution fields of "initial" that a warm start may change.
+ *
+ * Every other initial field (trimmed controls, flaps, propeller, mixture and any
+ * field added later) sets the aircraft dynamics or the meaning of an actor output,
+ * so a checkpoint is only compatible when it matches exactly.
+ */
+constexpr std::array<char const*, 9> WarmStartSpawnFields{"distanceMeters", "bearingDegrees",
+    "headingOffsetDegrees", "heightOffsetMeters", "speedToleranceMps", "rollDegrees", "pitchDegrees",
+    "slopeToleranceDegrees", "rolloutStart"};
 
 // Upper bounds of the integer fields. They only reject absurd values; the
 // physical and numerical rules live in the Validate* functions below.
@@ -568,9 +579,9 @@ bool CompatibleTrainingSignature(std::string const& stored, std::string const& c
     {
         return false;
     }
-    // Reward weights and start ranges change what is learned next, not the
-    // network contract: such a checkpoint can warm-start training. The trimmed
-    // controls define what an actor output means, so they must still match.
+    // Reward weights and spawn distributions change what is learned next, not the
+    // network contract: such a checkpoint can warm-start training. All other
+    // fields, including the rest of "initial", must match exactly.
     for (auto* signature : {&previous, &next})
     {
         auto const initial = signature->find("initial");
@@ -578,11 +589,11 @@ bool CompatibleTrainingSignature(std::string const& stored, std::string const& c
         {
             return false;
         }
-        Json const actionReference{{"throttle", initial->value("throttle", Json())},
-            {"elevatorTrim", initial->value("elevatorTrim", Json())}};
+        for (char const* spawnField : WarmStartSpawnFields)
+        {
+            initial->erase(spawnField);
+        }
         signature->erase("reward");
-        signature->erase("initial");
-        (*signature)["actionReference"] = actionReference;
     }
     return previous == next;
 }
