@@ -87,7 +87,8 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
 | 2b. Surrogate PPO commun | reporté à l'étape 3 | Les deux implémentations **diffèrent** : décision à prendre, voir ci-dessous |
 | 3a. Tête gaussienne et surrogate PPO communs | fait | Décision B de l'utilisateur ; voir ci-dessous |
 | 3b. Têtes Bernoulli, catégorielle, composite | reporté à l'étape 5/6 | Aucun exemple ne les utilise aujourd'hui ; l'AGENTS.md interdit les interfaces sans appelant. Elles arriveront avec le schéma et le codegen |
-| 4. Backend rl_tools unique | à faire | **Prochaine action** |
+| 4. Backend rl_tools unique | fusionné dans l'étape 6 | Voir ci-dessous |
+| 5. Schémas (`task.json`) et types générés | à faire | **Prochaine action** |
 | 4 à 11 | à faire | |
 
 ### Détail de l'étape 1a
@@ -155,15 +156,29 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
   `mappo-blue-defense-windows.yml` lancés sur la branche. Les tests unitaires
   ne prouvent pas la convergence.
 
+### Pourquoi l'étape 4 rejoint l'étape 6
+
+rl_tools définit dans un en-tête une fonction **non inline**
+(`rl_tools::devices::cpu::sanitize_file_name`, `devices/cpu.h`). Deux unités de
+traduction qui incluent rl_tools dans le même namespace provoquent donc une
+définition multiple au lien. C'est pour cela que Flight l'inclut sous
+`RL_TOOLS_NAMESPACE_WRAPPER ppo_flight_backend` (test de lien :
+`tests/other_rltools_backend.cpp`). Tant que chaque exemple inclut rl_tools
+lui-même, ce wrapper est la bonne solution. Le backend unique n'apporte
+quelque chose que lorsqu'une seule bibliothèque possède tout le code rl_tools,
+ce qui est précisément le rôle du code généré (étape 6).
+
 ## Prochaine action
 
-Étape 4 : un seul backend rl_tools partagé.
-- Aujourd'hui Flight inclut rl_tools sous `RL_TOOLS_NAMESPACE_WRAPPER ppo_flight_backend`
-  pour coexister avec BlueDefense dans le même exécutable.
-- Objectif : une cible `ppokit_backend_rltools` (privée) qui instancie les
-  opérations rl_tools une seule fois, utilisée par les deux exemples.
-- Validation : CI Windows desktop (Flight et Blue liés dans `PPO.exe`),
-  golden trace et trace Blue inchangées au bit près.
+Étape 5 : schéma `task.json` et types générés, sans réseau.
+1. `ppokit/schema` : lecture et validation de `task.json` (groupes
+   d'observation, ensembles masqués, rôles, actions, canaux de récompense,
+   scénarios, métriques), avec des messages d'erreur qui pointent le champ.
+2. `ppokit-codegen` (première version) : génération des structs typés et des
+   offsets.
+3. Critère : pour Flight (33 observations, 5 actions, 7 canaux) puis Blue
+   (observation v10), les layouts générés égalent les constantes actuelles,
+   vérifié par `static_assert`. Aucun changement de comportement.
 
 ## Dernier état de la CI (PR #105, commit `e6161e4`)
 
