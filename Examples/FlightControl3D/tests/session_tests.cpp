@@ -287,7 +287,7 @@ void CurriculumPersistence()
     FlightModelStore store(c,directory.path);
     {
         FlightSession session(c,true,directory.path,std::nullopt,TrainingBudget::AdditionalUpdates);
-        Check(session.Snapshot().curriculumLevel==0 && session.Snapshot().curriculumLevels==c.training.curriculum.levels,
+        Check(session.Snapshot().curriculumLevel==0 && session.Snapshot().curriculumLevels==CurriculumLevels(c.training.curriculum),
             "a new policy starts at the first curriculum level");
         for(int i=0;i<1000 && !session.Finished();++i) session.Tick();
         Check(LoadCurriculumLevel(store.CurriculumLevel()).has_value(),"the level is saved together with latest");

@@ -139,6 +139,9 @@ Observation Observe(Config const& config, MissionState const& mission, AircraftS
     Set(observation, ObservationIndex::StopProgress,
         Unit(mission.stoppedSeconds / config.mission.stoppedHoldSeconds));
     Set(observation, ObservationIndex::Elapsed, Unit(elapsedFraction));
+    // Gear extension and its latched command; the command flag also masks the gear action.
+    Set(observation, ObservationIndex::GearPosition, Unit(aircraft.gearPosition));
+    Set(observation, ObservationIndex::GearCommanded, Flag(mission.gearDownCommanded));
     // Filtered controls actually applied by the simulator.
     Set(observation, ObservationIndex::Elevator, Unit(controls.elevator));
     Set(observation, ObservationIndex::Aileron, Unit(controls.aileron));

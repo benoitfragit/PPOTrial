@@ -26,7 +26,8 @@ namespace ppo::examples::flight {
  * @brief Detects the first physical contact with the deck or the sea.
  * @param config Episode configuration and runway pose.
  * @param aircraft Aircraft state after a physics substep.
- * @return True for native wheel or structure contact, or a geometric fallback without wheel data.
+ * @return True for native wheel or structure contact, a belly contact with the gear not locked
+ *     down, or a geometric fallback without wheel data.
  */
 bool ContactDetected(Config const& config, AircraftState const& aircraft) noexcept;
 
@@ -48,13 +49,13 @@ bool LandingSafe(Config const& config, AircraftState const& before, AircraftStat
 /**
  * @brief Capture every failed crash condition using the same snapshots as the mission.
  * @param config Episode configuration and runway pose.
- * @param phase Phase used by the crash checks.
+ * @param mission Mission state used by the crash checks: phase and route progress.
  * @param before Aircraft state before the substep.
  * @param after Aircraft state after the substep.
  * @param contact Whether the contact detector fired.
  * @return Fixed-capacity terminal diagnostic; angles are reported in degrees.
  */
-CrashDiagnostic DiagnoseCrash(Config const& config, Phase phase, AircraftState const& before,
+CrashDiagnostic DiagnoseCrash(Config const& config, MissionState const& mission, AircraftState const& before,
     AircraftState const& after, bool contact) noexcept;
 
 } // namespace ppo::examples::flight

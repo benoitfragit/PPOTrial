@@ -14,7 +14,9 @@
  * most MaximumInterceptAngleDegrees off its axis; on short final it points at the aim
  * point; within CentrelineLookaheadMeters of it the target slides along the centreline.
  * The vertical command follows the glide plane. Below the flare height the descent blends
- * into a gentle contact sink. All lengths are in metres, speeds in m/s and angles in radians.
+ * into a gentle contact sink. An episode may first fly a route of gates (a downwind, a
+ * holding lap): the command then points at the next gate and climbs or descends toward its
+ * height, and the approach above starts once the last gate is passed. All lengths are in metres, speeds in m/s and angles in radians.
  *
  * Not here: no controller. Guidance never commands a surface; it only defines the
  * reference the policy learns to follow.
@@ -47,6 +49,28 @@ inline constexpr double InterceptLookaheadMeters = 2000.0;
 
 /** @brief Largest angle between the commanded horizontal track and the runway axis, in degrees. */
 inline constexpr double MaximumInterceptAngleDegrees = 30.0;
+
+/** @brief Horizontal radius within which a gate counts as passed, in metres. */
+inline constexpr double GateRadiusMeters = 300.0;
+
+/**
+ * @brief Half-width of the corridor in which crossing a gate's plane also passes it, in metres.
+ *
+ * An aircraft that overshoots a gate a little still passes it once beyond the plane
+ * normal to its inbound leg; farther off, the command turns it back toward the gate.
+ */
+inline constexpr double GateCorridorMeters = 2.0 * GateRadiusMeters;
+
+/**
+ * @brief Whether the aircraft has passed a route gate.
+ * @param route Episode route.
+ * @param index Gate index, below route.count.
+ * @param along Aircraft distance past the threshold, in metres.
+ * @param cross Aircraft offset right of the centreline, in metres.
+ * @return True within GateRadiusMeters of the gate, or beyond the plane normal to its inbound
+ *     leg and within GateCorridorMeters of the gate laterally.
+ */
+bool GatePassed(Route const& route, std::size_t index, double along, double cross) noexcept;
 
 /** @brief World position of the runway threshold centre on the deck. */
 Vec3 ThresholdPoint(Runway const& runway) noexcept;
@@ -85,9 +109,10 @@ struct ApproachReference final
  * @param config Episode configuration and runway pose.
  * @param mission Current phase.
  * @param aircraft Current aircraft state.
- * @return Toward the extended centreline far out, toward the aim point on short final, along
- *     the centreline near and past it, descending on the glide plane, with a gentle flare
- *     sink below the flare height and a level direction while rolling.
+ * @return While route gates remain, toward the next gate and its height; then toward the
+ *     extended centreline far out, toward the aim point on short final, along the centreline
+ *     near and past it, descending on the glide plane, with a gentle flare sink below the
+ *     flare height and a level direction while rolling.
  */
 ApproachReference ResolveApproachReference(Config const& config, MissionState const& mission,
     AircraftState const& aircraft) noexcept;

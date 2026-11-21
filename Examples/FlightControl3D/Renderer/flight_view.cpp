@@ -595,7 +595,7 @@ void DrawCrashDetails(FlightSnapshot const& state)
         "Invalid aircraft state", "Distance", "Altitude",
         "Outside landing area", "Wheel outside landing area", "Gear extension", "Structural contact",
         "Sink rate (deck-relative)", "Speed (deck-relative)", "Roll", "Pitch", "Pitch", "Heading",
-            "No wheel contact"};
+            "No wheel contact", "Route not completed"};
     for (std::size_t index = 0; index < CrashReasonCount; ++index)
     {
         auto const& condition = state.crashDiagnostic.conditions[index];

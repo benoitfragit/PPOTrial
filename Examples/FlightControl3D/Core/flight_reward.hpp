@@ -40,12 +40,25 @@ inline constexpr double TouchdownZoneLengthMeters = 900.0;
 bool IsPotentialChannel(Reward channel) noexcept;
 
 /**
- * @brief Distance from the approach reference used by the Path potential.
+ * @brief Distance from a point to the approach reference.
  * @param config Episode configuration and runway pose.
- * @param aircraft Aircraft state.
+ * @param point Point in runway axes (along, cross, height above the deck).
  * @return Distance to the aim point before it; lateral offset and height once past it, in metres.
  */
-double PathDistance(Config const& config, AircraftState const& aircraft) noexcept;
+double ApproachDistance(Config const& config, Gate const& point) noexcept;
+
+/**
+ * @brief Remaining flight distance used by the Path potential.
+ *
+ * Without remaining route gates it is ApproachDistance of the aircraft, unchanged for a
+ * direct approach. With gates ahead it is the distance to the next gate, plus the legs
+ * between the remaining gates, plus ApproachDistance of the last gate.
+ * @param config Episode configuration and runway pose.
+ * @param mission Route and progress.
+ * @param aircraft Aircraft state.
+ * @return Remaining distance, in metres.
+ */
+double PathDistance(Config const& config, MissionState const& mission, AircraftState const& aircraft) noexcept;
 
 /**
  * @brief Weighted shaping potentials of every channel, zero for non-potential channels.

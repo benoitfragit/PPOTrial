@@ -29,8 +29,10 @@ namespace ppo::examples::flight {
  * @brief Adaptive start-difficulty curriculum for training episodes.
  *
  * The level grows from a short aligned final (level 0) to the full start
- * envelope (last level). Each level is promoted once the stop rate over a
- * window of airborne training episodes reaches the configured threshold. The
+ * envelope (last approach level), then through the configured stages; the last
+ * stage is the full task (see ResolveCurriculum). Each level is promoted once the
+ * stop rate over a window of airborne training episodes reaches the configured
+ * threshold. The
  * validation campaigns evaluate the same rolling and airborne mix up to the
  * current difficulty, see EvaluationStart.
  */
@@ -43,10 +45,10 @@ public:
     {
         return level_;
     }
-    /** @brief Number of configured levels. */
+    /** @brief Number of levels: the approach levels, then one level per stage. */
     std::size_t Levels() const noexcept
     {
-        return settings_.levels;
+        return CurriculumLevels(settings_);
     }
     /** @brief Maximum start difficulty in [0, 1] for the current level. */
     double Difficulty() const noexcept;

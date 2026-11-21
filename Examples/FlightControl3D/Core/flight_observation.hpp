@@ -1,6 +1,6 @@
 /**
  * @file flight_observation.hpp
- * @brief Layout and normalization of the 33-slot policy observation.
+ * @brief Layout and normalization of the 35-slot policy observation.
  *
  * Role in the chain: mission + guidance -> **observation** -> PPO actor and critic.
  * The slot order, count, scales and bounds are part of the checkpoint contract: a trained
@@ -57,6 +57,8 @@ enum class ObservationIndex : std::size_t
     Rollout,
     StopProgress,
     Elapsed,
+    GearPosition,
+    GearCommanded,
     Elevator,
     Aileron,
     Rudder,
@@ -68,6 +70,8 @@ static_assert(static_cast<std::size_t>(ObservationIndex::Count) == ObservationSi
     "ObservationSize must match the named observation slots");
 static_assert(static_cast<std::size_t>(ObservationIndex::Rollout) == RolloutObservation,
     "RolloutObservation must name the rollout flag");
+static_assert(static_cast<std::size_t>(ObservationIndex::GearCommanded) == GearCommandObservation,
+    "GearCommandObservation must name the gear command flag");
 
 /** @brief Index of a named observation slot. */
 inline constexpr std::size_t Slot(ObservationIndex index) noexcept
@@ -83,7 +87,7 @@ inline constexpr std::array<char const*, ObservationSize> ObservationNames{
     "roll_rate", "pitch_rate", "yaw_rate",
     "target_direction_body_forward", "target_direction_body_right", "target_direction_body_up",
     "velocity_direction_body_forward", "velocity_direction_body_right", "velocity_direction_body_up",
-    "weight_on_wheels", "rollout", "stop_progress", "elapsed",
+    "weight_on_wheels", "rollout", "stop_progress", "elapsed", "gear_position", "gear_commanded",
     "filtered_elevator", "filtered_aileron", "filtered_rudder", "filtered_throttle", "filtered_brake"};
 
 /**

@@ -425,6 +425,79 @@ void AnalyticKl()
     changed=previous;changed.output[BrakeAction]=100;changed.logStandardDeviations[BrakeAction]=100;
     Check(PolicyKl(previous,changed,active)==0,"an inactive control cannot consume the KL budget");
 }
+/** @brief The Bernoulli gear head: likelihood, entropy, KL, PPO gradient, sampling and controls. */
+void GearPolicy(Config const& c)
+{
+    auto settings=c.training;
+    settings.entropy=0.01;
+    PolicyDistribution policy{};
+    policy.logStandardDeviations.fill(-0.5);
+    for(double const logit : {-1.3,0.0,2.1})
+    {
+        policy.output[GearOutput]=logit;
+        double const p=1/(1+std::exp(-logit));
+        Check(Near(GearEntropy(logit),-p*std::log(p)-(1-p)*std::log(1-p),1e-12),"Bernoulli gear entropy");
+        for(double const other : {-0.4,0.7})
+        {
+            double const q=1/(1+std::exp(-other));
+            Check(Near(GearKl(logit,other),p*std::log(p/q)+(1-p)*std::log((1-p)/(1-q)),1e-12),
+                "Bernoulli gear KL in the old-to-new direction");
+        }
+        for(bool const down : {false,true})
+        {
+            PolicyAction action{};action.gearDown=down;action.brakeActive=false;
+            double const gaussian=LogProbability(policy,action);
+            action.gearActive=true;
+            double const expected=down ? std::log(p) : std::log(1-p);
+            Check(Near(LogProbability(policy,action)-gaussian,expected,1e-12),
+                "an active gear draw adds its Bernoulli log-probability");
+            for(double const advantage : {-1.1,0.9})
+            {
+                for(double const ratio : {0.7,1.0,1.4})
+                {
+                    action.logProbability=LogProbability(policy,action)-std::log(ratio);
+                    auto const loss=ClippedLoss(policy,action,advantage,settings);
+                    auto plus=policy,minus=policy;
+                    plus.output[GearOutput]+=1e-6;minus.output[GearOutput]-=1e-6;
+                    double const numerical=(ClippedLoss(plus,action,advantage,settings).loss
+                        -ClippedLoss(minus,action,advantage,settings).loss)/2e-6;
+                    Check(Near(numerical,loss.outputDerivative[GearOutput],1e-6),
+                        "gear-logit finite-difference PPO gradient, entropy included");
+                }
+            }
+            action.gearActive=false;
+            Check(LogProbability(policy,action)==gaussian && Entropy(policy,false,false)==Entropy(policy,false)
+                && ClippedLoss(policy,action,1.0,settings).outputDerivative[GearOutput]==0,
+                "a latched gear contributes nothing to PPO");
+        }
+    }
+    // Deterministic and stochastic draws.
+    std::mt19937 rng(9);
+    policy.output[GearOutput]=0.2;
+    Check(Sample(policy,rng,true,false,true).gearDown,"a deterministic gear extends for a non-negative logit");
+    policy.output[GearOutput]=-0.2;
+    Check(!Sample(policy,rng,true,false,true).gearDown,"a deterministic gear stays up for a negative logit");
+    std::mt19937 withoutGear(5),inactiveGear(5);
+    Sample(policy,withoutGear,false,false);
+    auto const inactive=Sample(policy,inactiveGear,false,false,false);
+    Check(withoutGear==inactiveGear && !inactive.gearActive && !inactive.gearDown,
+        "an inactive gear draws no random number");
+    policy.output[GearOutput]=std::log(0.7/0.3);
+    int extensions=0;
+    constexpr int Draws=20000;
+    for(int draw=0;draw<Draws;++draw)
+    {
+        extensions+=Sample(policy,rng,false,false,true).gearDown ? 1 : 0;
+    }
+    Check(Near(static_cast<double>(extensions)/Draws,0.7,0.02),"the stochastic gear follows sigmoid(logit)");
+    // Physical mapping: only an active extension request moves the lever.
+    PolicyAction action{};action.gearActive=true;action.gearDown=true;
+    Check(ToControls(action,c.initial).gear==1,"an active extension request commands the gear down");
+    action.gearDown=false;
+    Check(ToControls(action,c.initial).gear==0,"an active refusal leaves the lever up");
+    action.gearActive=false;action.gearDown=true;
+    Check(ToControls(action,c.initial).gear==0,"an inactive gear never requests anything");
+}
 } // namespace
 /**
  * @brief A zero actor output holds the 3-degree approach from short curriculum finals.
@@ -469,7 +542,7 @@ int main()
         auto const c=LoadConfig(PPO_FLIGHT_CONFIG);
         PortableRngCheckpoint();
         GaussianPolicy(c); Exploration(c); ActiveControls(c); ObservationBounds(c); Training(c); AnalyticKl();
-        KlProtection(c); KlRejectedActorState(c); TrimmedNeutralApproach(c);
+        KlProtection(c); KlRejectedActorState(c); TrimmedNeutralApproach(c); GearPolicy(c);
     }
     catch(std::exception const& e) { std::cerr<<e.what()<<'\n'; return 1; }
     std::cout<<"Gaussian PPO/RLtools regressions passed\n";

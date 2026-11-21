@@ -35,6 +35,43 @@ struct GroundSample final
     Vec3 normal{};
 };
 
+/** @brief Steady, wings-level flight condition solved by JsbsimAircraft::Trim. */
+struct TrimCondition final
+{
+    /** @brief Calibrated airspeed, in metres per second. */
+    double calibratedSpeed{};
+    /** @brief Flight-path angle, in radians (negative when descending). */
+    double flightPathRadians{};
+    /** @brief Flap command, in [0, 1]. */
+    double flap{};
+    /** @brief Gear command, in [0, 1] (1 = down). */
+    double gear{1.0};
+    /** @brief Height above the local frame origin, in metres. */
+    double heightMeters{};
+};
+
+/** @brief Controls and attitude of a steady flight condition. */
+struct TrimResult final
+{
+    /** @brief True when JSBSim's longitudinal trim converged. */
+    bool converged{};
+    /** @brief Elevator command equivalent to the trimmed pitch-trim command, in [-1, 1]. */
+    double elevator{};
+    /** @brief Throttle lever, in [0, 1]. */
+    double throttle{};
+    /** @brief Trimmed pitch attitude, in radians. */
+    double pitch{};
+};
+
+/** @brief Elevator and throttle commands applied at a reset. */
+struct InitialCommands final
+{
+    /** @brief Elevator command, in [-1, 1]. */
+    double elevator{};
+    /** @brief Throttle lever, in [0, 1]. */
+    double throttle{};
+};
+
 /** @brief Owns the real FDM. No neural policy, mission outcome or reward lives here. */
 class JsbsimAircraft final
 {
@@ -51,18 +88,37 @@ public:
     JsbsimAircraft& operator=(JsbsimAircraft const&) = delete;
     /**
      * @brief Re-initializes the native simulator at a requested state.
-     * @param initial Finite initial position, velocity and attitude; the gear is always extended.
+     * @param initial Finite initial position, velocity, attitude and gear position (1 down, 0 up).
      * @param phase Phase selecting the flap detent and the initial elevator and throttle.
      * @return State measured by JSBSim after initialization.
      * @throws std::invalid_argument for a non-finite state or a climb faster than the true airspeed.
      */
     AircraftState Reset(AircraftState const& initial, Phase phase = Phase::Approach);
     /**
+     * @brief Re-initializes the native simulator with explicit initial elevator and throttle.
+     * @param initial Finite initial position, velocity, attitude and gear position (1 down, 0 up).
+     * @param phase Phase selecting the flap detent.
+     * @param commands Initial elevator and throttle, for example the trim of the start condition.
+     * @return State measured by JSBSim after initialization.
+     * @throws std::invalid_argument for a non-finite state or a climb faster than the true airspeed.
+     */
+    AircraftState Reset(AircraftState const& initial, Phase phase, InitialCommands commands);
+    /**
      * @brief Applies the controls and integrates one JSBSim time step (MissionSettings::physicsDt).
      * @param controls Finite physical controls; they are clamped to their ranges.
      * @return Measured state; finite is false when JSBSim failed to advance.
      */
     AircraftState Advance(Controls const& controls);
+    /**
+     * @brief Solves JSBSim's longitudinal trim (throttle, alpha, pitch trim) at a steady condition.
+     *
+     * The aircraft model sums the elevator and pitch-trim commands, so the trimmed pitch-trim
+     * command is the elevator command that holds the condition. The simulator state is left
+     * at the trimmed condition: call Reset before the next episode.
+     * @param condition Steady wings-level condition to hold.
+     * @return Trimmed controls and pitch; converged is false when the trim failed.
+     */
+    TrimResult Trim(TrimCondition const& condition);
     /** @brief Places the finite contact deck used by the native wheel and structure solver. */
     void SetRunway(Runway const& runway);
     /**

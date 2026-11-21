@@ -16,7 +16,7 @@
 #include "flight_mission.hpp"
 #include "flight_observation.hpp"
 #include "flight_reward.hpp"
-#include "flight_t6_performance.hpp"
+#include "flight_aircraft_performance.hpp"
 #include "../Renderer/flight_display.hpp"
 #include <nlohmann/json.hpp>
 #include <fstream>
@@ -52,6 +52,14 @@ MissionState Flying(Phase phase=Phase::Approach)
 
 double Channel(StepResult const& step,Reward reward) { return step.rewards[static_cast<std::size_t>(reward)]; }
 
+/** @brief Former piecewise T-6 flap lift: 0.02 per degree to 10, 0.01 to 20, then 0.005 (reference copy). */
+double FormerT6FlapLift(double degrees)
+{
+    if(degrees<=10) return 0.02*degrees;
+    if(degrees<=20) return 0.2+0.01*(degrees-10);
+    return 0.3+0.005*(degrees-20);
+}
+
 /** @brief The scenario exposes only the retained direct landing task. */
 void Configuration()
 {
@@ -65,8 +73,19 @@ void Configuration()
     for(auto const* key : {"speedMps","heaveAmplitudeMeters","pitchAmplitudeDegrees","rollAmplitudeDegrees"})
         Check(!json.at("runwayRandomization").contains(key),"the runway no longer moves");
     Check(Near(c.mission.flareSpeed,52.0),"T6 flare keeps a model-derived airborne speed reserve");
-    Check(T6StallCalibratedSpeed(0.33)>38 && T6StallCalibratedSpeed(0.33)<39,
+    Check(StallCalibratedSpeed(T6Performance,0.33)>38 && StallCalibratedSpeed(T6Performance,0.33)<39,
         "the pinned mass, wing area and flap lift imply a 38-39 m/s stall CAS");
+    // The T-6 flap table reproduces the former piecewise law: 0.02, 0.01 then 0.005 per degree.
+    for(double degrees : {0.0,4.0,10.0,15.0,20.0,27.0,30.0})
+        Check(Near(FlapLiftIncrement(T6Performance,degrees),FormerT6FlapLift(degrees),1e-12),
+            "the T-6 flap lift table is unchanged");
+    Check(Near(FlapLiftIncrement(Pc7Performance,10),0.092,1e-12) && StallCalibratedSpeed(Pc7Performance,0.33)>31
+        && StallCalibratedSpeed(Pc7Performance,0.33)<34,"the PC-7 lift implies a 31-34 m/s stall CAS with approach flaps");
+    Check(FindAircraftPerformance("c172p")==nullptr && FindAircraftPerformance("pc7")==&SupportedAircraft[1],
+        "only the T-6 and the PC-7 are supported");
+    auto const pc7=LoadConfig(std::filesystem::path(PPO_FLIGHT_PC7_CONFIG));
+    Check(pc7.aircraft=="pc7" && pc7.performance.name=="pc7" && pc7.checkpointSignature!=c.checkpointSignature,
+        "the PC-7 scenario is valid and has its own checkpoint contract");
 
     auto invalid=json;invalid["mission"]["patrolEnabled"]=false;
     TemporaryDirectory directory("flight-config-");
@@ -169,7 +188,7 @@ void TargetSpeed()
     for(double flap : {0.0,0.33,1.0}) for(double along : {-1000.0,-300.0,0.0,4000.0})
     {
         aircraft.position=FromRunway(c.runway,along,0,5);aircraft.flapPosition=flap;
-        Check(Guide(c,approach,aircraft).targetSpeed>=1.3*T6StallCalibratedSpeed(flap),
+        Check(Guide(c,approach,aircraft).targetSpeed>=1.3*StallCalibratedSpeed(T6Performance,flap),
             "every airborne target reserves 30 percent above the current-flap stall CAS");
     }
 }
@@ -313,6 +332,86 @@ void CentrelineInterceptTrajectory()
         }
         Check(reachedThreshold,"the intercept reaches the threshold in finite time");
     }
+}
+
+/**
+ * @brief Downwind, base and final gates of a pattern at a given height, as in a curriculum stage.
+ *
+ * The final gate lies on the extended centreline 7 km out, below the glide plane, so the
+ * approach captures the plane from below with the lateral offset already removed.
+ */
+Route PatternRoute(double side,double height)
+{
+    Route route{};
+    route.start={500,side*2500,height};
+    route.gates[0]={-3000,side*2500,height};
+    route.gates[1]={-6000,side*1500,height};
+    route.gates[2]={-7000,0,height};
+    route.count=3;
+    return route;
+}
+
+/** @brief A gate is passed within its radius, or beyond its plane inside the corridor. */
+void GatePassage()
+{
+    Route route{};
+    route.start={0,0,300};
+    route.gates[0]={-3000,0,300};
+    route.gates[1]={-3000,2000,300};
+    route.count=2;
+    Check(GatePassed(route,0,-2800,150) && !GatePassed(route,0,-2500,0),
+        "the first gate is passed within its radius, not before it");
+    Check(GatePassed(route,0,-3100,GateCorridorMeters-1) && !GatePassed(route,0,-3100,GateCorridorMeters+1),
+        "beyond the plane of the inbound leg, only the corridor passes the gate");
+    Check(!GatePassed(route,0,-2900,GateCorridorMeters-1),"before the plane only the radius counts");
+    Check(GatePassed(route,1,-3000+GateCorridorMeters-1,2001) && !GatePassed(route,1,-3000,1500),
+        "a later gate uses the leg from the previous gate");
+}
+
+/** @brief The command flies the route gate by gate, then the unchanged approach. */
+void RouteGuidance()
+{
+    auto c=T6Config();
+    c.runway.origin={150,-200,25};c.runway.headingDegrees=123;
+    auto mission=Flying();
+    mission.route=PatternRoute(1,300);
+    auto aircraft=Approach(c,0,2500);aircraft.position=FromRunway(c.runway,0,2500,250);
+    auto const guidance=Guide(c,mission,aircraft);
+    auto const direction=RunwayAxes(c.runway,guidance.targetDirection);
+    Check(direction.north<0 && Near(direction.east,0,1e-9) && direction.up>0
+        && Near(Length(Subtract(guidance.target,FromRunway(c.runway,-3000,2500,300))),0,1e-6),
+        "on downwind the command flies toward the first gate and climbs to its height");
+    Check(Near(guidance.targetSlope,std::atan(50.0/3000.0),1e-9),"the gate slope reaches the gate height");
+    mission.nextGate=mission.route.count;
+    auto direct=Flying();
+    auto const after=Guide(c,mission,aircraft);
+    auto const reference=Guide(c,direct,aircraft);
+    Check(after.targetDirection.north==reference.targetDirection.north && after.targetDirection.east==reference.targetDirection.east
+        && after.targetDirection.up==reference.targetDirection.up && after.targetSlope==reference.targetSlope,
+        "once the route is complete the command is the direct approach, bit for bit");
+    mission.nextGate=0;
+    Check(Guide(c,Flying(Phase::Rollout),aircraft).targetSlope==0,"the route never applies on the ground");
+}
+
+/** @brief Gates advance in the mission; touching down before the last gate is a crash. */
+void RouteMission()
+{
+    auto c=T6Config();
+    c.runway.origin={0,0,15};c.runway.headingDegrees=0;
+    auto mission=Flying();
+    mission.route=PatternRoute(-1,300);
+    auto before=Approach(c,-2900,-2500);before.position=FromRunway(c.runway,-2900,-2500,300);
+    auto after=before;after.position=FromRunway(c.runway,-3001,-2500,300);
+    AdvanceMission(c,mission,before,after);
+    Check(mission.nextGate==1 && mission.outcome==Outcome::Flying,"passing a gate advances the route");
+    auto landing=Flying();
+    landing.route=PatternRoute(-1,300);
+    auto wheels=Approach(c,600,0);wheels.position=FromRunway(c.runway,600,0,1.5);wheels.weightOnWheels=true;
+    CrashDiagnostic diagnostic{};
+    auto const step=AdvanceMission(c,landing,wheels,wheels,&diagnostic);
+    Check(step.terminated && landing.outcome==Outcome::Crash && !landing.touchedDown
+        && diagnostic.conditions[static_cast<std::size_t>(CrashReason::RouteIncomplete)].failed,
+        "landing with gates remaining is a shortcut and a crash");
 }
 
 /** @brief Following the commanded direction from short final flares onto the runway past the aim point. */
@@ -492,6 +591,38 @@ void Landing()
 }
 
 /** @brief The elevated deck plane cannot invent contact above the sea; native contacts are authoritative. */
+/** @brief Places the three nominal wheel points, without native contact, at a height above the deck. */
+void PlaceWheels(Config const& c,AircraftState& aircraft,double height)
+{
+    aircraft.wheels={WheelContact{FromRunway(c.runway,502,0,height),false},
+        WheelContact{FromRunway(c.runway,499,-1.5,height),false},WheelContact{FromRunway(c.runway,499,1.5,height),false}};
+}
+
+/** @brief With the gear not locked down, the airframe reaching the deck is a crash contact. */
+void BellyContact()
+{
+    auto c=T6Config();
+    c.runway.origin={0,0,15};c.runway.headingDegrees=0;
+    auto aircraft=Approach(c,500);
+    aircraft.position=FromRunway(c.runway,500,0,1.5);
+    aircraft.wheelDataValid=true;
+    PlaceWheels(c,aircraft,0.4);
+    aircraft.gearPosition=0;
+    Check(!ContactDetected(c,aircraft),"a retracted gear above the deck is not a contact");
+    PlaceWheels(c,aircraft,-0.01);
+    Check(ContactDetected(c,aircraft),"the airframe reaching the deck with the gear retracted is a contact");
+    aircraft.gearPosition=0.5*c.mission.gearDownMinimum;
+    Check(ContactDetected(c,aircraft),"a gear still in transit cannot carry the aircraft");
+    auto mission=Flying();
+    CrashDiagnostic diagnostic{};
+    auto const step=AdvanceMission(c,mission,aircraft,aircraft,&diagnostic);
+    Check(step.terminated && mission.outcome==Outcome::Crash
+        && diagnostic.conditions[static_cast<std::size_t>(CrashReason::Gear)].failed,
+        "a belly contact crashes and names the gear");
+    aircraft.gearPosition=1;
+    Check(!ContactDetected(c,aircraft),"with the gear locked down only the native wheel contacts count");
+}
+
 void FiniteSurfaceContacts()
 {
     auto c=T6Config();
@@ -653,6 +784,118 @@ void CurriculumSpawns()
     }
 }
 
+/** @brief The curriculum scale runs over the approach levels, then one unit step per stage. */
+void CurriculumScale()
+{
+    auto const c=T6Config();
+    auto const& curriculum=c.training.curriculum;
+    Check(curriculum.stages.size()>=4 && CurriculumLevels(curriculum)==curriculum.levels+curriculum.stages.size(),
+        "the scenario curriculum continues with its stages");
+    double const steps=static_cast<double>(CurriculumLevels(curriculum)-1);
+    double const approachSteps=static_cast<double>(curriculum.levels-1);
+    for(double level=0;level<=approachSteps;++level)
+    {
+        auto const position=ResolveCurriculum(curriculum,level/steps);
+        Check(!position.staged && Near(position.approachDifficulty,level/approachSteps,1e-12),
+            "the approach levels keep their approach difficulty");
+    }
+    for(std::size_t stage=0;stage<curriculum.stages.size();++stage)
+    {
+        double const level=approachSteps+static_cast<double>(stage)+1;
+        auto const atLevel=ResolveCurriculum(curriculum,level/steps);
+        auto const justAbove=ResolveCurriculum(curriculum,(level-0.999)/steps);
+        Check(atLevel.staged && atLevel.stage==stage && justAbove.staged && justAbove.stage==stage,
+            "each stage covers one unit step of the scale, up to its own level");
+    }
+    Check(ResolveCurriculum(curriculum,1.0).stage==curriculum.stages.size()-1,"difficulty one is the last stage");
+    auto direct=curriculum;direct.stages.clear();
+    for(double difficulty : {0.0,0.37,1.0})
+    {
+        auto const position=ResolveCurriculum(direct,difficulty);
+        Check(!position.staged && Near(position.approachDifficulty,difficulty,1e-12),
+            "without stages the curriculum difficulty is the approach difficulty, as before");
+    }
+}
+
+/**
+ * @brief Follows the command kinematically at approach speed, passing gates as AdvanceMission does.
+ * @return True when the aircraft crosses the threshold after the last gate, within 10 m of the
+ *     centreline and 2 degrees of the runway heading.
+ */
+bool FollowRouteToThreshold(Config const& c,MissionState mission,AircraftState aircraft)
+{
+    constexpr double Speed=56;
+    constexpr double Dt=0.1;
+    for(int step=0;step<30000;++step)
+    {
+        auto const guidance=Guide(c,mission,aircraft);
+        auto const local=DeckCoordinates(c.runway,aircraft.position);
+        while(mission.nextGate<mission.route.count && GatePassed(mission.route,mission.nextGate,local.north,local.east))
+            ++mission.nextGate;
+        if(local.north>=0 && mission.nextGate==mission.route.count && std::abs(local.east)<200)
+            return std::abs(local.east)<10 && std::abs(CommandTrackDegrees(c,Guide(c,mission,aircraft)))<2;
+        aircraft.velocity=Scale(guidance.targetDirection,Speed);
+        aircraft.position=Add(aircraft.position,Scale(aircraft.velocity,Dt));
+    }
+    return false;
+}
+
+/** @brief Stage starts respect their envelope, and their routes lead to an aligned threshold crossing. */
+void StageStarts()
+{
+    auto c=T6Config();
+    c.runway.origin={0,0,15};c.runway.headingDegrees=0;
+    std::mt19937 rng(57U);
+    for(auto const& stage : c.training.curriculum.stages)
+    {
+        for(int sample=0;sample<40;++sample)
+        {
+            auto const side=sample%2 ? ApproachSide::Right : ApproachSide::Left;
+            double const sideSign=side==ApproachSide::Right ? 1.0 : -1.0;
+            auto const start=SampleStageStart(c,c.runway,stage,side,rng);
+            auto const local=DeckCoordinates(c.runway,start.aircraft.position);
+            double const relativeHeading=WrapAngle(start.aircraft.heading)/DegreesToRadians;
+            Check(IsFinite(start.aircraft) && start.aircraft.gearPosition==1 && start.route.count<=MaximumGates
+                && std::hypot(local.north,local.east)<c.mission.maxDistanceMeters && std::abs(local.east)<5000
+                && local.up>c.mission.flareHeightMeters && local.up<2000,
+                "a stage start is finite, gear down, inside the envelope and the observed ranges");
+            if(stage.kind==StageKind::Approach)
+            {
+                double const distance=std::hypot(local.north,local.east);
+                double const above=local.up-ApproachPathHeight(c,local.north);
+                Check(start.route.count==0 && distance>=stage.distanceMeters.minimum-0.01
+                    && distance<=stage.distanceMeters.maximum+0.01 && local.east*sideSign>=-1e-9
+                    && above>=stage.heightMeters.minimum-1e-6 && above<=stage.heightMeters.maximum+1e-6,
+                    "an approach stage draws its distance, side and height above the glide plane");
+                continue;
+            }
+            auto const& last=start.route.gates[start.route.count-1];
+            Check(last.crossMeters==0 && local.up>=stage.heightMeters.minimum-1e-6
+                && local.up<=stage.heightMeters.maximum+1e-6 && local.east*sideSign>=-1e-9,
+                "a route stage starts on its side, at its height, and ends on the extended centreline");
+            if(stage.kind==StageKind::Pattern)
+            {
+                Check(start.route.count==3 && std::abs(std::abs(relativeHeading)-180)<=std::max(-stage.headingOffsetDegrees.minimum,stage.headingOffsetDegrees.maximum)+1e-6
+                    && start.route.gates[0].crossMeters*sideSign>0,"a pattern starts downwind, opposite the runway");
+            }
+            else
+            {
+                Check(start.route.count==5 && start.route.gates[0].alongMeters==stage.fixAlongMeters
+                    && start.route.gates[4].alongMeters==stage.fixAlongMeters
+                    && start.route.gates[2].crossMeters==sideSign*stage.holdingWidthMeters,
+                    "a holding lap leaves the fix to its side and comes back over it");
+            }
+            if(sample<4)
+            {
+                auto mission=Flying();
+                mission.route=start.route;
+                Check(FollowRouteToThreshold(c,mission,start.aircraft),
+                    "following the command along the stage route crosses the threshold aligned");
+            }
+        }
+    }
+}
+
 /** @brief Evaluation campaigns mix rolling starts with stratified approaches up to the curriculum frontier. */
 void EvaluationStratification()
 {
@@ -714,15 +957,21 @@ int main()
         ApproachDirection();
         CentrelineIntercept();
         CentrelineInterceptTrajectory();
+        GatePassage();
+        RouteGuidance();
+        RouteMission();
         FlareTrajectory();
         LandingQuality();
         CrashDiagnostics();
         Landing();
         FiniteSurfaceContacts();
+        BellyContact();
         SignedLogCompression();
         ObservationConditioning();
         Spawns();
         CurriculumSpawns();
+        CurriculumScale();
+        StageStarts();
         EvaluationStratification();
         DisplayReferences();
     }

@@ -129,8 +129,8 @@ constexpr double AdvantageEpsilon = 1e-8;
 constexpr double KlSkipFactor = 1.5;
 /** @brief Derivative of the squared critic error (v - target)^2 with respect to v is 2 (v - target). */
 constexpr double SquaredErrorDerivativeFactor = 2;
-/** @brief Rollout flag value above which the observation is in the ground-roll phase. */
-constexpr float RolloutFlagThreshold = 0.5F;
+/** @brief Value above which a binary observation flag is set. */
+constexpr float FlagThreshold = 0.5F;
 
 void CheckObservation(Observation const& observation)
 {
@@ -721,8 +721,10 @@ PolicyDistribution FlightLearner::Evaluate(Observation const& observation)
 
 PolicyAction FlightLearner::Choose(Observation const& observation, bool deterministic)
 {
-    bool const rollout = observation[RolloutObservation] > RolloutFlagThreshold;
-    return Sample(impl_->Evaluate(observation), impl_->rng, deterministic, rollout);
+    bool const rollout = observation[RolloutObservation] > FlagThreshold;
+    // The gear decision exists only while its extension is not yet latched.
+    bool const gearActive = observation[GearCommandObservation] <= FlagThreshold;
+    return Sample(impl_->Evaluate(observation), impl_->rng, deterministic, rollout, gearActive);
 }
 
 bool FlightLearner::Ready() const noexcept

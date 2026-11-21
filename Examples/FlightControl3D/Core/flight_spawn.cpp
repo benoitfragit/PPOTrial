@@ -125,6 +125,137 @@ AircraftState SampleApproachStart(Config const& config, Runway const& runway, Ap
     return aircraft;
 }
 
+CurriculumPosition ResolveCurriculum(CurriculumSettings const& settings, double difficulty) noexcept
+{
+    CurriculumPosition position{};
+    std::size_t const levels = CurriculumLevels(settings);
+    if (levels <= 1)
+    {
+        return position;
+    }
+    double const scale = std::clamp(difficulty, 0.0, 1.0) * static_cast<double>(levels - 1);
+    double const approachSteps = static_cast<double>(settings.levels - 1);
+    if (scale <= approachSteps)
+    {
+        // A single approach level is the full approach envelope.
+        if (approachSteps > 0)
+        {
+            position.approachDifficulty = scale / approachSteps;
+        }
+        return position;
+    }
+    // Stage k covers the scale interval (approachSteps + k, approachSteps + k + 1].
+    double const stageScale = std::ceil(scale - approachSteps) - 1.0;
+    position.staged = true;
+    position.stage = std::min(static_cast<std::size_t>(std::max(stageScale, 0.0)), settings.stages.size() - 1);
+    return position;
+}
+
+namespace {
+/** @brief Level start of a pattern or holding stage at the stage height. */
+AircraftState LevelStart(Config const& config, Runway const& runway, Gate const& start, double headingDegrees,
+    std::mt19937& rng)
+{
+    auto const& initial = config.initial;
+    AircraftState aircraft{};
+    aircraft.position = FromRunway(runway, start.alongMeters, start.crossMeters, start.heightMeters);
+    aircraft.airspeed = config.mission.approachSpeed + DrawSymmetric(initial.speedToleranceMps, rng);
+    aircraft.heading = WrapAngle(headingDegrees * DegreesToRadians);
+    aircraft.roll = DrawSymmetric(initial.rollDegrees, rng) * DegreesToRadians;
+    aircraft.pitch = Draw(initial.pitchDegrees, rng) * DegreesToRadians;
+    aircraft.gearPosition = GearDown;
+    aircraft.velocity = VelocityAlong(aircraft.airspeed, aircraft.heading, 0.0);
+    return aircraft;
+}
+
+/** @brief Direct approach from the stage envelope, descending along the glide slope. */
+StageStart SampleApproachStage(Config const& config, Runway const& runway, StageSettings const& stage,
+    double sideSign, std::mt19937& rng)
+{
+    auto const& initial = config.initial;
+    double const distanceMeters = Draw(stage.distanceMeters, rng);
+    double const bearingRadians = sideSign * Draw(stage.bearingDegrees, rng) * DegreesToRadians;
+    double const headingOffsetDegrees = Draw(stage.headingOffsetDegrees, rng);
+    double const alongMeters = -distanceMeters * std::cos(bearingRadians);
+    double const crossMeters = distanceMeters * std::sin(bearingRadians);
+    double const heightMeters = ApproachPathHeight(config, alongMeters) + Draw(stage.heightMeters, rng);
+    StageStart start{};
+    auto& aircraft = start.aircraft;
+    aircraft.position = FromRunway(runway, alongMeters, crossMeters, heightMeters);
+    aircraft.airspeed = config.mission.approachSpeed + DrawSymmetric(initial.speedToleranceMps, rng);
+    aircraft.heading = WrapAngle((runway.headingDegrees + headingOffsetDegrees) * DegreesToRadians);
+    aircraft.roll = DrawSymmetric(initial.rollDegrees, rng) * DegreesToRadians;
+    aircraft.pitch = Draw(initial.pitchDegrees, rng) * DegreesToRadians;
+    aircraft.gearPosition = GearDown;
+    double const slopeRadians = (-config.mission.glideDegrees + DrawSymmetric(initial.slopeToleranceDegrees, rng))
+        * DegreesToRadians;
+    aircraft.velocity = VelocityAlong(aircraft.airspeed, aircraft.heading, slopeRadians);
+    return start;
+}
+
+/** @brief Downwind start abeam the runway, then downwind end, base and final gates. */
+StageStart SamplePatternStage(Config const& config, Runway const& runway, StageSettings const& stage,
+    double sideSign, std::mt19937& rng)
+{
+    double const alongMeters = Draw(stage.startAlongMeters, rng);
+    double const downwindOffset = Draw(stage.lateralMeters, rng);
+    double const headingOffsetDegrees = Draw(stage.headingOffsetDegrees, rng);
+    double const heightMeters = Draw(stage.heightMeters, rng);
+    double const crossMeters = sideSign * downwindOffset;
+    constexpr double HalfTurnDegrees = 180.0;
+    StageStart start{};
+    start.route.start = {alongMeters, crossMeters, heightMeters};
+    start.route.gates[0] = {PatternDownwindEndAlongMeters, crossMeters, heightMeters};
+    start.route.gates[1] = {PatternBaseAlongMeters, crossMeters * PatternBaseOffsetFraction, heightMeters};
+    start.route.gates[2] = {PatternFinalAlongMeters, 0.0, heightMeters};
+    start.route.count = 3;
+    // Downwind is flown opposite the runway heading.
+    start.aircraft = LevelStart(config, runway, start.route.start,
+        runway.headingDegrees + HalfTurnDegrees + headingOffsetDegrees, rng);
+    return start;
+}
+
+/** @brief Inbound start toward the fix, one racetrack lap on the given side, back over the fix. */
+StageStart SampleHoldingStage(Config const& config, Runway const& runway, StageSettings const& stage,
+    double sideSign, std::mt19937& rng)
+{
+    double const alongMeters = Draw(stage.startAlongMeters, rng);
+    double const crossMeters = sideSign * Draw(stage.lateralMeters, rng);
+    double const headingOffsetDegrees = Draw(stage.headingOffsetDegrees, rng);
+    double const heightMeters = Draw(stage.heightMeters, rng);
+    double const fix = stage.fixAlongMeters;
+    double const outboundEnd = fix - stage.outboundMeters;
+    double const width = sideSign * stage.holdingWidthMeters;
+    StageStart start{};
+    start.route.start = {alongMeters, crossMeters, heightMeters};
+    // Over the fix, turn to the outbound leg, fly it, turn back inbound and cross the fix again.
+    start.route.gates[0] = {fix, 0.0, heightMeters};
+    start.route.gates[1] = {fix, width, heightMeters};
+    start.route.gates[2] = {outboundEnd, width, heightMeters};
+    start.route.gates[3] = {outboundEnd, 0.0, heightMeters};
+    start.route.gates[4] = {fix, 0.0, heightMeters};
+    start.route.count = 5;
+    start.aircraft = LevelStart(config, runway, start.route.start, runway.headingDegrees + headingOffsetDegrees,
+        rng);
+    return start;
+}
+} // namespace
+
+StageStart SampleStageStart(Config const& config, Runway const& runway, StageSettings const& stage,
+    ApproachSide side, std::mt19937& rng)
+{
+    double const sideSign = side == ApproachSide::Left ? -1.0 : 1.0;
+    if (stage.kind == StageKind::Approach)
+    {
+        return SampleApproachStage(config, runway, stage, sideSign, rng);
+    }
+    if (stage.kind == StageKind::Pattern)
+    {
+        return SamplePatternStage(config, runway, stage, sideSign, rng);
+    }
+    return SampleHoldingStage(config, runway, stage, sideSign, rng);
+}
+
 AircraftState SampleRolloutStart(Config const& config, Runway const& runway, std::mt19937& rng)
 {
     // Start just above the deck; the simulator lowers the wheels onto it.

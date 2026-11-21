@@ -5,8 +5,8 @@
  * Order of one substep (it matters for the rewards):
  * 1. potentials Phi(s) of the state before the substep;
  * 2. guidance and contact detection on the state after the substep, first contact recorded;
- * 3. crash rules, else envelope timeout, else the running Direction cost, the touchdown,
- *    the rollout and the time limit;
+ * 3. crash rules, else envelope timeout, else the running Direction cost, the route gates,
+ *    the touchdown, the rollout and the time limit;
  * 4. potentials Phi(s') after the outcome update (zero if absorbing), then the shaping
  *    gamma_sub * Phi(s') - Phi(s) is added to each channel.
  *
@@ -69,7 +69,10 @@ bool Crashed(Config const& config, MissionState const& mission, AircraftState co
     }
     bool const onSurface = OnLandingSurface(config.runway, guidance.along, guidance.cross)
         && WheelsInside(config, after);
-    if (contact && (!onSurface || !LandingSafe(config, before, after) || !after.weightOnWheels))
+    // Landing before the last route gate is a shortcut, never a completed mission.
+    bool const routeIncomplete = mission.nextGate < mission.route.count;
+    if (contact && (!onSurface || !LandingSafe(config, before, after) || !after.weightOnWheels
+        || routeIncomplete))
     {
         return true;
     }
@@ -115,9 +118,19 @@ void Rollout(Config const& config, MissionState& mission, AircraftState const& b
     SetReward(result, config, Reward::Stop, mission.landingAreaFactor);
 }
 
+/** @brief Moves past every route gate the aircraft has passed; at most route.count iterations. */
+void AdvanceRoute(MissionState& mission, Guidance const& guidance) noexcept
+{
+    while (mission.nextGate < mission.route.count
+        && GatePassed(mission.route, mission.nextGate, guidance.along, guidance.cross))
+    {
+        ++mission.nextGate;
+    }
+}
+
 /**
- * @brief Running cost, touchdown, rollout and time limit of a substep that neither crashed nor
- *        left the envelope.
+ * @brief Running cost, route progress, touchdown, rollout and time limit of a substep that
+ *        neither crashed nor left the envelope.
  */
 void AdvanceNominal(Config const& config, MissionState& mission, AircraftState const& before,
     AircraftState const& after, Guidance const& guidance, bool contact, StepResult& result) noexcept
@@ -125,7 +138,10 @@ void AdvanceNominal(Config const& config, MissionState& mission, AircraftState c
     double const dt = config.mission.physicsDt;
     if (mission.phase == Phase::Approach)
     {
+        // The cost follows the command of the state reached, then the route advances,
+        // so the potentials Phi(s') below already see the next gate.
         SetReward(result, config, Reward::Direction, DirectionCost(guidance, dt));
+        AdvanceRoute(mission, guidance);
     }
     if (contact && !mission.touchedDown)
     {
@@ -188,7 +204,7 @@ StepResult AdvanceMission(Config const& config, MissionState& mission, AircraftS
     {
         if (crashDiagnostic)
         {
-            *crashDiagnostic = DiagnoseCrash(config, mission.phase, before, after, contact);
+            *crashDiagnostic = DiagnoseCrash(config, mission, before, after, contact);
         }
         mission.outcome = Outcome::Crash;
         SetReward(result, config, Reward::Crash, CrashEventValue);

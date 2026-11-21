@@ -124,8 +124,13 @@ private:
     void PrepareEpisode(bool rolling);
     /** @brief Starts an already-landed episode without a free touchdown reward. */
     Observation StartRolling();
-    /** @brief Starts an airborne approach on the given side and difficulty. */
-    Observation StartAirborne(ApproachSide side, double difficulty);
+    /** @brief Starts an airborne approach on the given side and difficulty, gear down or retracted. */
+    Observation StartAirborne(ApproachSide side, double difficulty, bool gearUp);
+    /**
+     * @brief Initial elevator and throttle of an airborne start: JSBSim's trim of its speed,
+     *        flight path and gear, or the action reference when the trim fails.
+     */
+    InitialCommands StartCommands(AircraftState const& initial);
     /** @brief Native reset with all wheels settled on the deck, for rolling starts. */
     AircraftState ResetOnWheels(AircraftState initial);
     /**

@@ -17,7 +17,7 @@
  * Read next: jsbsim_aircraft.hpp, flight_environment.cpp (command filter and action loop).
  */
 #include "jsbsim_aircraft.hpp"
-#include "flight_t6_performance.hpp"
+#include "flight_aircraft_performance.hpp"
 #include <FGFDMExec.h>
 #include <input_output/FGPropertyManager.h>
 #include <models/FGFCS.h>
@@ -29,6 +29,7 @@
 #include <models/FGPropagate.h>
 #include <input_output/FGGroundCallback.h>
 #include <initialization/FGInitialCondition.h>
+#include <initialization/FGTrim.h>
 #include <algorithm>
 #include <stdexcept>
 
@@ -41,8 +42,6 @@ constexpr double EarthSemiMinor = 6356752.314245179;
 constexpr double KnotsToMetersPerSecond = 1852.0 / 3600.0;
 /** @brief JSBSim engine index meaning "every engine". */
 constexpr int AllEngines = -1;
-/** @brief Gear command and position: down and locked for the whole mission. */
-constexpr double GearDownCommand = 1;
 
 /** @brief Applies the WGS84 ellipsoid, in feet, to a JSBSim location. */
 void SetWgs84Ellipse(JSBSim::FGLocation& location)
@@ -298,24 +297,22 @@ struct JsbsimAircraft::Impl final
         conditions->SetRRadpsIC(0);
     }
 
-    /** @brief Sets the initial commands: trimmed approach in flight, idle on the ground, gear down. */
-    void SetInitialControls(Phase phase)
+    /**
+     * @brief Sets the initial commands of a reset.
+     * @param phase Phase selecting the flap detent.
+     * @param gear Initial gear lever and position: 1 down and locked, 0 retracted.
+     * @param commands Initial elevator and throttle.
+     */
+    void SetInitialControls(Phase phase, double gear, InitialCommands commands)
     {
-        // Airborne starts hold the trimmed approach controls; rolling starts are at idle.
-        bool const airborne = phase == Phase::Approach;
         auto* const fcs = fdm.GetFCS().get();
         fcs->SetDaCmd(0);
         fcs->SetDrCmd(0);
         fcs->SetDsCmd(0);
-        double elevator = 0.0;
-        double throttle = 0.0;
-        if (airborne)
-        {
-            elevator = config.initial.elevatorTrim;
-            throttle = config.initial.throttle;
-        }
-        fcs->SetDeCmd(elevator);
-        fcs->SetThrottleCmd(AllEngines, throttle);
+        fcs->SetDeCmd(commands.elevator);
+        // A previous Trim leaves a pitch-trim command; episodes fly on the elevator only.
+        fcs->SetPitchTrimCmd(0);
+        fcs->SetThrottleCmd(AllEngines, commands.throttle);
         fcs->SetMixtureCmd(AllEngines, config.initial.mixture);
         fcs->SetPropAdvanceCmd(AllEngines, config.initial.propeller);
         double flap = config.initial.rolloutFlap;
@@ -325,13 +322,13 @@ struct JsbsimAircraft::Impl final
         }
         fcs->SetDfCmd(flap);
         // Start with the flaps already at the commanded detent.
-        fcs->SetDfPos(JSBSim::ofDeg, T6FlapTravelDegrees * flap);
+        fcs->SetDfPos(JSBSim::ofDeg, config.performance.flapTravelDegrees * flap);
         fcs->SetLBrake(0);
         fcs->SetRBrake(0);
         fcs->SetCBrake(0);
-        // The landing gear is locked down for the whole mission.
-        gearCommand->setDoubleValue(GearDownCommand);
-        fcs->SetGearPos(GearDownCommand);
+        // The gear starts at rest in the requested position, never in transit.
+        gearCommand->setDoubleValue(gear);
+        fcs->SetGearPos(gear);
     }
 };
 
@@ -344,14 +341,27 @@ JsbsimAircraft::~JsbsimAircraft() = default;
 
 AircraftState JsbsimAircraft::Reset(AircraftState const& initial, Phase phase)
 {
-    if (!IsFinite(initial))
+    // Airborne starts hold the action reference (the trimmed approach); rolling starts are at idle.
+    InitialCommands commands{};
+    if (phase == Phase::Approach)
+    {
+        commands = {impl_->config.initial.elevatorTrim, impl_->config.initial.throttle};
+    }
+    return Reset(initial, phase, commands);
+}
+
+AircraftState JsbsimAircraft::Reset(AircraftState const& initial, Phase phase, InitialCommands commands)
+{
+    if (!IsFinite(initial) || !std::isfinite(commands.elevator) || !std::isfinite(commands.throttle))
     {
         throw std::invalid_argument("FlightControl3D: invalid JSBSim initial state");
     }
     auto& impl = *impl_;
     impl.fdm.ResetToInitialConditions(JSBSim::FGFDMExec::DONT_EXECUTE_RUN_IC);
     impl.SetInitialKinematics(initial);
-    impl.SetInitialControls(phase);
+    commands.elevator = std::clamp(commands.elevator, -1.0, 1.0);
+    commands.throttle = std::clamp(commands.throttle, 0.0, 1.0);
+    impl.SetInitialControls(phase, initial.gearPosition, commands);
     if (!impl.fdm.RunIC())
     {
         throw std::runtime_error("FlightControl3D: JSBSim RunIC failed");
@@ -372,11 +382,69 @@ AircraftState JsbsimAircraft::Reset(AircraftState const& initial, Phase phase)
     return state;
 }
 
+TrimResult JsbsimAircraft::Trim(TrimCondition const& condition)
+{
+    auto& impl = *impl_;
+    // FGTrim would corrupt the engine state of an aircraft it cannot trim.
+    if (!impl.config.performance.jsbsimTrim)
+    {
+        return {};
+    }
+    impl.fdm.ResetToInitialConditions(JSBSim::FGFDMExec::DONT_EXECUTE_RUN_IC);
+    // Wings level above the local frame origin, heading north; the trim
+    // itself solves the angle of attack, so only the path and speed are set.
+    auto location = impl.reference.LocalToLocation(ToNed({0, 0, condition.heightMeters}));
+    SetWgs84Ellipse(location);
+    auto* const conditions = impl.fdm.GetIC().get();
+    // Start from blank initial conditions: the attitude, incidence and sideslip of the
+    // previous reset would otherwise seed the trim and make it depend on the history.
+    conditions->InitializeIC();
+    conditions->SetGeodLatitudeDegIC(location.GetGeodLatitudeDeg());
+    conditions->SetLongitudeDegIC(location.GetLongitude() / DegreesToRadians);
+    conditions->SetTerrainElevationFtIC(impl.config.runway.elevationMeters / FeetToMeters);
+    conditions->SetAltitudeASLFtIC(location.GetGeodAltitude());
+    conditions->SetVcalibratedKtsIC(condition.calibratedSpeed / KnotsToMetersPerSecond);
+    conditions->SetFlightPathAngleRadIC(condition.flightPathRadians);
+    conditions->SetPhiRadIC(0);
+    conditions->SetPsiRadIC(0);
+    auto* const fcs = impl.fdm.GetFCS().get();
+    fcs->SetDaCmd(0);
+    fcs->SetDrCmd(0);
+    fcs->SetDeCmd(0);
+    fcs->SetPitchTrimCmd(0);
+    fcs->SetMixtureCmd(AllEngines, impl.config.initial.mixture);
+    fcs->SetPropAdvanceCmd(AllEngines, impl.config.initial.propeller);
+    fcs->SetDfCmd(condition.flap);
+    fcs->SetDfPos(JSBSim::ofDeg, impl.config.performance.flapTravelDegrees * condition.flap);
+    impl.gearCommand->setDoubleValue(condition.gear);
+    fcs->SetGearPos(condition.gear);
+    if (!impl.fdm.RunIC())
+    {
+        throw std::runtime_error("FlightControl3D: JSBSim RunIC failed before trim");
+    }
+    auto const propulsion = impl.fdm.GetPropulsion();
+    for (unsigned int engine = 0; engine < propulsion->GetNumEngines(); ++engine)
+    {
+        propulsion->GetEngine(engine)->InitRunning();
+    }
+    // Longitudinal trim: throttle for udot, alpha for wdot, pitch trim for qdot.
+    // The gamma fallback stays disabled: a trim that cannot hold the requested
+    // path with the throttle fails instead of silently changing the path.
+    JSBSim::FGTrim trim(&impl.fdm, JSBSim::tLongitudinal);
+    TrimResult result{};
+    result.converged = trim.DoTrim();
+    result.elevator = fcs->GetPitchTrimCmd();
+    result.throttle = fcs->GetThrottleCmd(0);
+    result.pitch = impl.fdm.GetPropagate()->GetEuler(JSBSim::FGJSBBase::eTht);
+    fcs->SetPitchTrimCmd(0);
+    return result;
+}
+
 AircraftState JsbsimAircraft::Advance(Controls const& controls)
 {
-    std::array<double, 6> const values{controls.elevator, controls.aileron, controls.rudder,
+    std::array<double, 7> const values{controls.elevator, controls.aileron, controls.rudder,
         controls.throttle,
-        controls.brake, controls.flap};
+        controls.brake, controls.flap, controls.gear};
     for (double const value : values)
     {
         if (!std::isfinite(value))
@@ -403,7 +471,7 @@ AircraftState JsbsimAircraft::Advance(Controls const& controls)
     fcs->SetLBrake(std::clamp(controls.brake, 0.0, 1.0));
     fcs->SetRBrake(std::clamp(controls.brake, 0.0, 1.0));
     fcs->SetCBrake(std::clamp(controls.brake, 0.0, 1.0));
-    impl.gearCommand->setDoubleValue(GearDownCommand);
+    impl.gearCommand->setDoubleValue(std::clamp(controls.gear, 0.0, 1.0));
     bool const advanced = impl.fdm.Run();
     auto state = impl.Read();
     state.finite = state.finite && advanced;

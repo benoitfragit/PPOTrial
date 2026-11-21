@@ -51,7 +51,14 @@ double PathValue(Config const& config, MissionState const& mission, AircraftStat
         return weight;
     }
     double const tolerance = config.reward.pathTolerance;
-    return weight * tolerance / (tolerance + PathDistance(config, aircraft));
+    return weight * tolerance / (tolerance + PathDistance(config, mission, aircraft));
+}
+
+/** @brief Straight-line distance between two points in runway axes, in metres. */
+double GateDistance(Gate const& from, Gate const& to) noexcept
+{
+    return std::hypot(std::hypot(to.alongMeters - from.alongMeters, to.crossMeters - from.crossMeters),
+        to.heightMeters - from.heightMeters);
 }
 
 /**
@@ -129,14 +136,32 @@ bool IsPotentialChannel(Reward channel) noexcept
     return channel == Reward::Path || channel == Reward::VerticalSpeed || channel == Reward::Speed;
 }
 
-double PathDistance(Config const& config, AircraftState const& aircraft) noexcept
+double ApproachDistance(Config const& config, Gate const& point) noexcept
 {
-    auto const local = DeckCoordinates(config.runway, aircraft.position);
-    double const aimAlong = AimPointAlongMeters(config);
     // Past the aim point only the lateral offset and the height remain: the
     // distance is continuous there and never penalizes rolling down the runway.
-    double const remaining = std::max(0.0, aimAlong - local.north);
-    return std::hypot(std::hypot(remaining, local.east), local.up);
+    double const remaining = std::max(0.0, AimPointAlongMeters(config) - point.alongMeters);
+    return std::hypot(std::hypot(remaining, point.crossMeters), point.heightMeters);
+}
+
+double PathDistance(Config const& config, MissionState const& mission, AircraftState const& aircraft) noexcept
+{
+    auto const local = DeckCoordinates(config.runway, aircraft.position);
+    Gate const position{local.north, local.east, local.up};
+    if (mission.nextGate >= mission.route.count)
+    {
+        return ApproachDistance(config, position);
+    }
+    // Remaining route: to the next gate, along the legs still ahead, then the
+    // approach from the last gate. Passing a gate never increases this length
+    // (triangle inequality), so the potential cannot reward missing a gate.
+    auto const& gates = mission.route.gates;
+    double distance = GateDistance(position, gates[mission.nextGate]);
+    for (std::size_t gate = mission.nextGate; gate + 1 < mission.route.count; ++gate)
+    {
+        distance += GateDistance(gates[gate], gates[gate + 1]);
+    }
+    return distance + ApproachDistance(config, gates[mission.route.count - 1]);
 }
 
 std::array<double, RewardCount> ShapingPotentials(Config const& config, MissionState const& mission,
