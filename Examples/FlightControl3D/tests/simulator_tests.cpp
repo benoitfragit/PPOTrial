@@ -1,3 +1,14 @@
+/**
+ * @file simulator_tests.cpp
+ * @brief Regressions on the real JSBSim T-6: command filter, phase controls, resets,
+ *        native contacts, touchdown and stop, nose-wheel steering and action-level shaping.
+ *
+ * Protects: the JSBSim adapter conventions (units, frames, signs of the rudder and the
+ * nose wheel), the deck and sea ground callback, the rolling-start reset on the wheels and
+ * the discounting of potentials inside one action, including truncated actions.
+ *
+ * Read next: Simulator/flight_environment.cpp, Simulator/jsbsim_aircraft.cpp.
+ */
 #include "test_support.hpp"
 #include "flight_mission.hpp"
 #include "flight_reward.hpp"

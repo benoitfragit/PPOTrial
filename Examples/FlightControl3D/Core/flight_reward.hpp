@@ -1,3 +1,28 @@
+/**
+ * @file flight_reward.hpp
+ * @brief Reward potentials, the direction cost and the touchdown quality.
+ *
+ * Role in the chain: mission -> **reward** -> PPO. AdvanceMission (flight_mission.cpp)
+ * calls these functions once per physics substep and weights them with
+ * RewardSettings::weights. The channels are:
+ *
+ * | Channel       | Kind                | Active phase       | Unweighted range           |
+ * |---------------|---------------------|--------------------|----------------------------|
+ * | Path          | potential Phi       | approach + rollout | (0, 1], 1 on the ground    |
+ * | Direction     | running cost        | approach           | [-dt, 0] per substep       |
+ * | VerticalSpeed | potential Phi       | approach           | [-1, 0], 0 on the ground   |
+ * | Speed         | potential Phi       | approach + rollout | [-1, 0] airborne, [0, 1] ground |
+ * | Touchdown     | one-shot event      | first safe contact | quality in [0, 1]          |
+ * | Stop          | one-shot event      | confirmed stop     | landing-area factor [0, 1] |
+ * | Crash         | one-shot event      | any                | 1 (weight is negative)     |
+ *
+ * Potential channels contribute gamma_sub * Phi(s') - Phi(s) per substep, see
+ * flight_mission.cpp and FlightEnvironment::Step for the discounting.
+ *
+ * Not here: deciding when an event happens (flight_mission.cpp, flight_landing.cpp).
+ *
+ * Read next: flight_reward.cpp, flight_mission.cpp, Simulator/flight_environment.cpp.
+ */
 #pragma once
 
 #include "flight_guidance.hpp"
@@ -18,7 +43,7 @@ bool IsPotentialChannel(Reward channel) noexcept;
  * @brief Distance from the approach reference used by the Path potential.
  * @param config Episode configuration and runway pose.
  * @param aircraft Aircraft state.
- * @return Distance to the aim point before it; lateral offset and height once past it.
+ * @return Distance to the aim point before it; lateral offset and height once past it, in metres.
  */
 double PathDistance(Config const& config, AircraftState const& aircraft) noexcept;
 
@@ -43,6 +68,8 @@ std::array<double, RewardCount> ShapingPotentials(Config const& config, MissionS
 
 /**
  * @brief Unweighted running cost of flying away from the commanded direction.
+ *
+ * cost = -dt * (1 - cos(angle between velocity and command)) / 2, so it lies in [-dt, 0].
  * @param guidance Guidance after the physics substep.
  * @param dt Physics substep, in seconds.
  * @return Non-positive cost; a vanishing velocity receives the largest penalty.

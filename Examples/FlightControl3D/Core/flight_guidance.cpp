@@ -1,23 +1,54 @@
+/**
+ * @file flight_guidance.cpp
+ * @brief Construction of the approach reference: aim point, lookahead, gradient, flare and speed.
+ *
+ * Summary of the guidance law (all quantities in runway axes):
+ * - horizontal target: the aim point far out, then a point CentrelineLookaheadMeters ahead
+ *   on the centreline (target along = max(aim along, along + 300 m));
+ * - vertical gradient toward the target point on the deck, -height / horizontal distance,
+ *   bounded to +/- tan(6 degrees);
+ * - below the flare height, a smoothstep blend toward the contact sink gradient
+ *   -contactSink / max(horizontal speed, flare speed);
+ * - reference airspeed: smoothstep deceleration from the approach speed to the flare speed
+ *   between 2.7 km and 2 km before the threshold, never below 1.3 times the stall speed of
+ *   the current flap position, and zero once rolling on the wheels.
+ *
+ * Read next: flight_reward.cpp (how the reference is rewarded), flight_t6_performance.hpp.
+ */
 #include "flight_guidance.hpp"
 #include "flight_t6_performance.hpp"
 #include <algorithm>
 
 namespace ppo::examples::flight {
 namespace {
-/** @brief Steepest commanded descent or climb gradient, tan(6 degrees). */
-double MaximumPathGradient() noexcept { return std::tan(6.0 * DegreesToRadians); }
+/** @brief Steepest commanded descent or climb angle, in degrees (twice a 3-degree glide). */
+constexpr double MaximumPathAngleDegrees = 6.0;
+/** @brief Upper bound of the contact sink rate, in metres per second (a gentle touchdown). */
+constexpr double MaximumContactSinkMps = 0.5;
+/** @brief Contact sink as a fraction of the structural touchdown sink limit. */
+constexpr double ContactSinkFractionOfLimit = 0.5;
+/** @brief Along-track position where the flare speed is reached, in metres (2 km before the threshold). */
+constexpr double FlareSpeedReachedAlongMeters = -2000.0;
+/** @brief Length of the smooth deceleration to the flare speed, in metres. */
+constexpr double DecelerationLengthMeters = 700.0;
 
-/** @brief Cubic smoothstep of a fraction clamped to [0, 1]. */
-double SmoothBlend(double fraction) noexcept
+/** @brief Steepest commanded descent or climb gradient, tan(6 degrees). */
+double MaximumPathGradient() noexcept
 {
-    double const t = std::clamp(fraction, 0.0, 1.0);
-    return t * t * (3.0 - 2.0 * t);
+    return std::tan(MaximumPathAngleDegrees * DegreesToRadians);
 }
 
-/** @brief Gentle sink rate commanded at wheel contact, well inside the touchdown limit. */
+/** @brief Cubic smoothstep 3t^2 - 2t^3 of a fraction clamped to [0, 1]. */
+double SmoothBlend(double fraction) noexcept
+{
+    double const clampedFraction = std::clamp(fraction, 0.0, 1.0);
+    return clampedFraction * clampedFraction * (3.0 - 2.0 * clampedFraction);
+}
+
+/** @brief Gentle sink rate commanded at wheel contact, well inside the touchdown limit, in m/s. */
 double ContactSinkMps(Config const& config) noexcept
 {
-    return std::min(0.5, 0.5 * config.mission.maxTouchdownSink);
+    return std::min(MaximumContactSinkMps, ContactSinkFractionOfLimit * config.mission.maxTouchdownSink);
 }
 
 /**
@@ -31,14 +62,16 @@ double ContactSinkMps(Config const& config) noexcept
 double TargetSpeed(Config const& config, MissionState const& mission, AircraftState const& aircraft,
     double along) noexcept
 {
-    if (mission.phase == Phase::Rollout && aircraft.weightOnWheels) return 0;
+    if (mission.phase == Phase::Rollout && aircraft.weightOnWheels)
+    {
+        return 0;
+    }
     // Decelerate smoothly from the approach speed to the flare speed between
     // 2.7 km and 2 km before the threshold, never below the stall reserve.
-    constexpr double FlareSpeedReachedAlongMeters = -2000.0;
-    constexpr double DecelerationLengthMeters = 700.0;
-    auto const& m = config.mission;
+    auto const& missionSettings = config.mission;
     double const blend = SmoothBlend((FlareSpeedReachedAlongMeters - along) / DecelerationLengthMeters);
-    double const requested = m.flareSpeed + (m.approachSpeed - m.flareSpeed) * blend;
+    double const requested = missionSettings.flareSpeed
+        + (missionSettings.approachSpeed - missionSettings.flareSpeed) * blend;
     return std::max(requested, T6MinimumCalibratedSpeed(aircraft.flapPosition));
 }
 
@@ -59,7 +92,8 @@ double AirborneGradient(Config const& config, double height, double horizontalDi
     // negative contact sink, so the wheels still meet the deck.
     double const flareHeight = config.mission.flareHeightMeters;
     double const flare = SmoothBlend((flareHeight - height) / flareHeight);
-    double const contactGradient = -ContactSinkMps(config) / std::max(horizontalSpeed, config.mission.flareSpeed);
+    double const contactGradient = -ContactSinkMps(config) / std::max(horizontalSpeed,
+        config.mission.flareSpeed);
     return towardTarget + (contactGradient - towardTarget) * flare;
 }
 } // namespace
@@ -96,14 +130,20 @@ ApproachReference ResolveApproachReference(Config const& config, MissionState co
     double const targetForward = targetAlong - local.north;
     double const targetRight = -local.east;
     double const horizontalDistance = std::hypot(targetForward, targetRight);
+    // The rollout reference is level; only the airborne phase commands a gradient.
     double gradient = 0;
     if (mission.phase == Phase::Approach)
     {
         auto const velocity = RunwayAxes(runway, aircraft.velocity);
-        gradient = AirborneGradient(config, local.up, horizontalDistance, std::hypot(velocity.north, velocity.east));
+        gradient = AirborneGradient(config, local.up, horizontalDistance, std::hypot(velocity.north,
+            velocity.east));
     }
-    auto const runwayDirection = Add(Add(Scale(RunwayForward(runway), targetForward / horizontalDistance),
-        Scale(RunwayRight(runway), targetRight / horizontalDistance)), Scale(RunwayNormal(runway), gradient));
+    // Direction = horizontal unit vector toward the target plus the gradient
+    // along the deck normal, then normalized.
+    auto const horizontalForward = Scale(RunwayForward(runway), targetForward / horizontalDistance);
+    auto const horizontalRight = Scale(RunwayRight(runway), targetRight / horizontalDistance);
+    auto const runwayDirection = Add(Add(horizontalForward, horizontalRight), Scale(RunwayNormal(runway),
+        gradient));
     ApproachReference reference{};
     reference.target = FromRunway(runway, targetAlong, 0, 0);
     reference.direction = UnitDirection(runwayDirection);
@@ -113,32 +153,44 @@ ApproachReference ResolveApproachReference(Config const& config, MissionState co
 
 double TargetVerticalSpeed(Guidance const& guidance) noexcept
 {
-    double const horizontalSpeed = std::hypot(guidance.relativeVelocity.north, guidance.relativeVelocity.east);
+    double const horizontalSpeed = std::hypot(guidance.relativeVelocity.north,
+        guidance.relativeVelocity.east);
     return horizontalSpeed * std::tan(guidance.targetSlope);
 }
 
 Guidance Guide(Config const& config, MissionState const& mission, AircraftState const& aircraft) noexcept
 {
     auto const& runway = config.runway;
-    Guidance g{};
+    Guidance guidance{};
     auto const local = DeckCoordinates(runway, aircraft.position);
-    g.along = local.north;
-    g.cross = local.east;
-    g.height = local.up;
-    g.distance = std::hypot(g.along, g.cross);
-    g.relativeVelocity = RunwayAxes(runway, aircraft.velocity);
-    g.velocityDirection = UnitDirection(aircraft.velocity);
-    g.targetSpeed = TargetSpeed(config, mission, aircraft, g.along);
-    bool const lowOverRunway = g.height >= 0 && g.height <= config.mission.flareHeightMeters
-        && OnLandingSurface(runway, g.along, g.cross);
-    if (mission.phase == Phase::Rollout) g.mode = GuidanceMode::Rollout;
-    else g.mode = lowOverRunway ? GuidanceMode::Flare : GuidanceMode::Approach;
+    guidance.along = local.north;
+    guidance.cross = local.east;
+    guidance.height = local.up;
+    guidance.distance = std::hypot(guidance.along, guidance.cross);
+    guidance.relativeVelocity = RunwayAxes(runway, aircraft.velocity);
+    guidance.velocityDirection = UnitDirection(aircraft.velocity);
+    guidance.targetSpeed = TargetSpeed(config, mission, aircraft, guidance.along);
+    // The mode is informative only: Flare means low over the landable surface.
+    bool const lowOverRunway = guidance.height >= 0 && guidance.height <= config.mission.flareHeightMeters
+        && OnLandingSurface(runway, guidance.along, guidance.cross);
+    if (mission.phase == Phase::Rollout)
+    {
+        guidance.mode = GuidanceMode::Rollout;
+    }
+    else if (lowOverRunway)
+    {
+        guidance.mode = GuidanceMode::Flare;
+    }
+    else
+    {
+        guidance.mode = GuidanceMode::Approach;
+    }
     auto const reference = ResolveApproachReference(config, mission, aircraft);
-    g.target = reference.target;
-    g.targetValid = mission.outcome == Outcome::Flying;
-    g.targetSlope = reference.slope;
-    g.targetDirection = reference.direction;
-    g.targetHeading = std::atan2(reference.direction.east, reference.direction.north);
-    return g;
+    guidance.target = reference.target;
+    guidance.targetValid = mission.outcome == Outcome::Flying;
+    guidance.targetSlope = reference.slope;
+    guidance.targetDirection = reference.direction;
+    guidance.targetHeading = std::atan2(reference.direction.east, reference.direction.north);
+    return guidance;
 }
 } // namespace ppo::examples::flight

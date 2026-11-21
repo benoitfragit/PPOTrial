@@ -7,6 +7,10 @@ sûr : ni le passage du seuil ni un survol ne valident l'épisode.
 
 ## Organisation du code
 
+La carte détaillée des modules, les cycles (pas, épisode, update PPO, validation,
+curriculum), le glossaire et les tables de constantes, récompenses et observations sont
+dans [FlightControl3D : architecture et reprise du code](FlightControl3D_Architecture.md).
+
 | Module | Rôle |
 |---|---|
 | `Core/flight_config` | Lecture stricte du JSON (format 2) et contrat de checkpoint |
@@ -18,7 +22,7 @@ sûr : ni le passage du seuil ni un survol ne valident l'épisode.
 | `Core/flight_observation` | Observation normalisée de la politique |
 | `Core/flight_mission` | Machine d'état approche → roulage → arrêt |
 | `Simulator/` | JSBSim natif et boucle de transition |
-| `Training/` | Acteur gaussien PPO (RLtools), checkpoints et BEST |
+| `Training/` | Acteur gaussien PPO (RLtools), checkpoints et BEST (écriture atomique : `flight_atomic_file`) |
 | `Runtime/` | Session partagée desktop/headless et réglage des récompenses |
 
 ## Géométrie d'approche et guidage

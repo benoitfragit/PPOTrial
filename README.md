@@ -56,6 +56,8 @@ La caméra `Runway`, placée à 300 m du seuil ou à mi-piste si elle est courte
 suit l'avion avec un zoom adapté. Un crash déclenche une animation visuelle de
 1,5 seconde, sans suspendre la simulation. La campagne et ses évaluations sont
 décrites dans [FlightControl3D T-6 en CI](docs/PPOTrial_FlightControl3D_T6_Approach_CI.md).
+L'architecture du code et le guide de reprise sont dans
+[FlightControl3D : architecture](docs/FlightControl3D_Architecture.md).
 Les résultats d'une politique doivent être évalués sur des graines indépendantes.
 
 Les deux modes BlueDefense utilisent **exactement la même scène**, la même
