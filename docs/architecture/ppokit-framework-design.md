@@ -337,7 +337,8 @@ Points clés :
   "schema": "ppokit.train/1.0",
   "ppo": { "gamma": 0.99, "lambda": 0.95, "clip": 0.2, "epochs": 10, "minibatch": 256,
            "rolloutSteps": 4096, "learningRate": 3e-4, "entropy": 0.0, "valueCoef": 0.5,
-           "maxGradNorm": 0.5 },
+           "maxGradNorm": 0.5, "targetKL": null },
+  "device": "auto",
   "seed": 1,
   "budget": { "updates": 2000, "mode": "total" },
   "curriculum": [
@@ -359,6 +360,9 @@ Points clés :
   `choice` pondéré.
 - `rehearse` généralise `locReminderProbability` (Flight).
 - `budget.mode` vaut `"total"` ou `"additional"`, comme `TrainingBudget`.
+- `device` vaut `"cpu"`, `"cuda"` ou `"auto"` (§13.6). Il n'agit que sur le
+  backend torch en v1.
+- La signification de chaque paramètre PPO est décrite en §13.4.
 
 ### 5.4 `eval/*.json`
 
@@ -446,6 +450,31 @@ Le défaut de la v1 est la log-prob sur le latent, pour aligner les deux modes.
 un convertisseur ponctuel lit l'ancien format, vérifie la correspondance des
 formes et écrit le nouveau. Les anciens lecteurs restent disponibles jusqu'à
 la fin de la migration.
+
+### 8.1 Reprise des modèles existants
+
+Les modèles déjà entraînés des trois exemples doivent rester utilisables
+**en inférence et en reprise d'entraînement**, sans repartir de zéro.
+
+| Exemple | Ancien format | Reprise d'entraînement | Inférence |
+|---|---|---|---|
+| BlueDefense | Acteur v10, training V7, production promue | Training V7 → `training` : poids acteur et critique, Adam, RNG, compteurs, étape de curriculum | Production → `promoted` |
+| FlightControl3D | Checkpoint learner, meilleur modèle du `FlightModelStore` | → `training` | Meilleur modèle → `promoted` |
+| Airspace | `model.pt` (SNA, RLMission) | → `training` (backend torch) si l'état de l'optimiseur est présent, sinon reprise avec Adam réinitialisé et un avertissement explicite | → `policy` / `promoted` |
+
+**Règles :**
+- `ppokit-import <exemple> <ancien-fichier>` convertit, vérifie les formes et
+  écrit l'artefact. Le chargeur reconnaît aussi l'ancien format directement,
+  pour que les raccourcis actuels (`.bat`, `PPO.exe`) continuent de marcher
+  pendant la migration.
+- **Critères d'acceptation** :
+  - même action déterministe, avant et après conversion, sur un jeu d'états
+    fixé ;
+  - pour la reprise d'entraînement, la première update après conversion
+    produit les mêmes poids, au bit près pour rl_tools et à tolérance fixée
+    pour torch, que l'ancienne chaîne à partir du même checkpoint.
+- Un ancien checkpoint dont la forme ne correspond plus au `task.json` est
+  refusé, avec un message qui donne les dimensions attendues et trouvées.
 
 ## 9. Entraînement
 
@@ -704,7 +733,13 @@ custom sont simplement des composants câblés sur `observation.*` ou sur
 
 ## 13. Studio
 
-Il est développé **en dernier** (§16, étape 8).
+Il est développé **après** la stabilisation des formats (§16, étape 10).
+Principe directeur : **tout réglage visible porte une infobulle**, qui dit ce
+qu'il fait, sa plage habituelle et les symptômes d'une mauvaise valeur. Le
+texte de ces infobulles vient d'un seul fichier de métadonnées
+(`ppokit/meta/parameters.json`), partagé par le studio, la CLI
+(`ppokit-train --explain gamma`) et la documentation générée. Il n'y a donc
+qu'une seule source de vérité.
 
 - **Éditeur de graphe** (imnodes) :
   - palette des blocs intégrés et des composants découverts dans les DLL,
@@ -713,7 +748,8 @@ Il est développé **en dernier** (§16, étape 8).
     codegen ;
   - export vers `graph.json`.
 - **Bouton Build** : lance la configuration et le build CMake du modèle dans
-  `build/<config>` et affiche le journal.
+  `build/<config>` et affiche le journal. Avec le backend torch, le graphe est
+  reconstruit sans build.
 - **Runs** :
   - lancement en headless (processus séparé) ou en mode embarqué (desktop
     existant) ;
@@ -760,6 +796,155 @@ Ce qui rend les exemples faciles à prendre en main :
   d'apprentissage** : la physique, le rendu et la géométrie métier sont
   rangés à part de `task.json` et de `*_task.cpp`, qui sont les deux fichiers
   qu'un nouvel utilisateur lit en premier.
+
+### 13.2 Éditeur de curriculum
+
+Il édite la section `curriculum` de `train.json`. Le fichier reste la source
+de vérité, et le studio n'en est qu'une vue.
+
+- **Frise des étapes** : glisser-déposer pour ordonner, dupliquer, renommer.
+  Chaque étape affiche son état : en attente, active, validée.
+- **Échantillonneurs par paramètre de scénario** : le widget dépend du type
+  déclaré dans `task.json` :
+  - curseur de plage pour `uniform` ;
+  - curseur avec moyenne et écart-type pour `normal` ;
+  - poids par valeur pour `choice` sur un `enum` ;
+  - case à cocher pour un `bool`.
+
+  Les bornes du schéma sont imposées et ne peuvent pas être dépassées.
+- **Aperçu** : bouton « Échantillonner 1 000 scénarios », qui affiche
+  l'histogramme de chaque paramètre et quelques scénarios rejouables. On
+  voit ce qu'une étape produit avant de lancer l'entraînement.
+- **Règle de passage** : métrique, seuil, fenêtre glissante. Pendant
+  l'entraînement, une jauge montre la valeur courante par rapport au seuil.
+- **Répétition** (`rehearse`) : proportion d'épisodes tirés dans les étapes
+  précédentes, pour éviter l'oubli.
+- **Contrôle manuel** : avancer ou reculer d'étape en cours de run. L'action
+  est journalisée dans le run et dans le checkpoint.
+- **Validation** :
+  - étape vide ;
+  - seuil sur une métrique inconnue ;
+  - fenêtre plus grande que le budget ;
+  - recouvrement entre les seeds d'entraînement et d'évaluation.
+
+  Chaque erreur affiche un message qui pointe le champ fautif.
+- **Modèles prédéfinis** : « progression d'une seule variable », « du plus
+  facile au plus dur sur N variables », « une étape fixe ». Ils produisent un
+  JSON lisible et modifiable ensuite.
+
+### 13.3 Tableau de bord des récompenses
+
+Pour chaque canal déclaré dans `task.json` :
+
+| Vue | Contenu |
+|---|---|
+| Moyenne par pas | Valeur brute et valeur pondérée, sur une fenêtre glissante |
+| Cumul par épisode | Moyenne, p5 et p95 sur les N derniers épisodes |
+| Contribution | Part de chaque canal dans le retour total (barres empilées), en valeur absolue et signée |
+| Par agent et par rôle | Pour MAPPO : leader et équipiers séparés, ou un slot précis |
+| Par étape de curriculum | Mêmes vues filtrées par étape |
+| Corrélation | Cumul d'un canal comparé à une métrique d'évaluation (nuage de points), pour voir si un canal sert réellement l'objectif |
+
+**Réglage des poids en cours de run :**
+- Le changement s'applique à la **prochaine frontière d'update**, jamais au
+  milieu d'un rollout.
+- C'est un **événement versionné** du run : ancien poids, nouveau poids,
+  numéro d'update. Il est visible sur toutes les courbes sous la forme d'un
+  repère vertical et enregistré dans le checkpoint.
+- Une infobulle avertit que changer un poids change l'objectif. La fonction
+  de valeur devient temporairement fausse : attendez-vous à un pic de perte
+  de valeur et de KL.
+- Les poids par défaut viennent de `task.json`. Le studio propose
+  d'enregistrer les nouveaux poids dans le fichier ou de les garder pour ce
+  seul run.
+- Pour BlueDefense, les canaux, les poids et les normalisations existants ne
+  changent que sur décision explicite de l'utilisateur (AGENTS.md).
+  L'outil le permet, mais rien n'est modifié automatiquement.
+
+### 13.4 Paramètres PPO commentés
+
+Chaque paramètre a une infobulle et un statut **modifiable à chaud**
+(appliqué à la prochaine frontière d'update) ou **au redémarrage**.
+
+| Paramètre | Ce que ça fait | Plage habituelle | Symptômes d'une mauvaise valeur | Modifiable |
+|---|---|---|---|---|
+| `gamma` | Horizon : poids des récompenses futures. L'horizon effectif vaut environ 1/(1−γ) pas | 0,95–0,999 | Trop bas : agent myope. Trop haut : apprentissage lent et bruité | à chaud |
+| `lambda` (GAE) | Compromis biais/variance de l'avantage | 0,9–0,98 | Bas : biaisé, sous-estime le long terme. Haut : bruité | à chaud |
+| `clip` | Écart maximal du nouveau ratio de probabilité par update | 0,1–0,3 | Trop haut : politique instable, KL élevée. Trop bas : apprentissage lent | à chaud |
+| `learningRate` | Taille des pas de l'optimiseur | 1e-5 – 1e-3 | Trop haut : KL et clip fraction élevées, effondrement. Trop bas : courbes plates | à chaud |
+| `epochs` | Passes sur chaque rollout | 3–15 | Trop haut : sur-ajustement au rollout, KL élevée | à chaud |
+| `minibatch` | Taille des lots d'optimisation | 64–4 096 | Petit : gradients bruités. Grand : moins d'updates par rollout | à chaud |
+| `rolloutSteps` | Pas collectés avant chaque update | 1 024–65 536 | Petit : avantages bruités. Grand : updates rares | au redémarrage (tampons à capacité fixe) |
+| `entropy` | Bonus d'exploration | 0–0,02 | Trop bas : convergence prématurée. Trop haut : politique qui reste aléatoire | à chaud |
+| `valueCoef` | Poids de la perte du critique | 0,25–1 | Trop bas : critique en retard, avantages faux | à chaud |
+| `maxGradNorm` | Écrêtage de la norme du gradient | 0,5–1 | Trop bas : apprentissage freiné | à chaud |
+| `targetKL` (optionnel) | Arrêt anticipé des époques si la KL dépasse la cible | 0,01–0,05 | — | à chaud |
+
+À côté de chaque réglage, le studio affiche les **indicateurs de santé**
+concernés : KL, clip fraction, entropie, variance expliquée du critique,
+norme du gradient. Chacun a son infobulle d'interprétation, par exemple
+« clip fraction > 0,3 : updates trop agressives, baissez le learning rate
+ou le clip ». Tout changement est un événement versionné, comme pour les
+poids de récompense.
+
+### 13.5 Sondes
+
+Une **sonde** se pose sur n'importe quel point observable :
+- un champ d'observation nommé ;
+- une arête ou un port du graphe : activation intermédiaire, sortie d'un
+  composant DLL, poids d'attention ;
+- les paramètres d'une tête : moyenne, log-std, logits, probabilités ;
+- l'action échantillonnée et l'action après `AdaptAction` ;
+- la valeur, l'avantage, le retour ;
+- un canal de récompense, une métrique.
+
+| Type | Affichage |
+|---|---|
+| Série temporelle | Valeur scalaire ou composante choisie, au fil des pas |
+| Histogramme | Distribution sur une fenêtre, utile pour la saturation (tanh) et les entrées mal normalisées |
+| Carte de chaleur | Vecteurs et matrices : poids d'attention par piste, sorties par slot |
+| Statistiques | Min, max, moyenne, écart-type, nombre de valeurs non finies |
+| Déclencheur | Condition (`> x`, non fini, saturation) qui met le run en pause et enregistre l'épisode pour le rejeu |
+
+**Coût et mise en œuvre :**
+- Une sonde désactivée ne coûte **rien** : aucun test dans la boucle chaude.
+- Backend rl_tools : le codegen génère des points de prélèvement
+  compilables, actifs en Debug et en Release. Activer une sonde arme un
+  pointeur vers un tampon circulaire préalloué. Le prélèvement est décimé
+  (1 pas sur N, réglable) et sans allocation.
+- Backend torch : hooks `forward` sur les modules concernés.
+- Composants DLL : leurs ports sont sondables comme les autres, puisque le
+  framework possède les buffers.
+- Les sondes fonctionnent en entraînement, en évaluation, en inférence et en
+  rejeu. Sur un épisode rejoué, on peut poser une sonde après coup et revoir
+  exactement ce qui s'est passé.
+- Les configurations de sondes s'enregistrent dans un fichier
+  (`probes.json`), séparé du modèle : elles n'affectent ni le hash ni les
+  résultats.
+
+### 13.6 GPU
+
+- **Backend torch** : `"device": "cuda"` dans `train.json` (ou `"auto"`). Les
+  réseaux, l'optimiseur et les lots de mise à jour vont sur le GPU. La
+  simulation et la collecte restent sur CPU.
+- **Backend rl_tools** : CPU par défaut (`RL_TOOLS_BACKEND_ENABLE_CUDA` est
+  aujourd'hui à OFF dans `dependencies.cmake`). Le support CUDA de rl_tools
+  est prévu comme option expérimentale du backend, sans engagement.
+- **Repli** : si CUDA est absent ou indisponible, le run passe sur CPU avec un
+  avertissement explicite dans le journal et dans le studio. Il n'y a pas
+  d'échec silencieux.
+- **Déterminisme** : les traces de référence (golden traces) et les tests de
+  parité restent **CPU uniquement**. Sur GPU, la reproductibilité n'est que
+  statistique (opérations cuDNN non déterministes), et l'artefact enregistre
+  le device utilisé.
+- **Attente réaliste** : avec de petits MLP et une simulation sur CPU, le
+  GPU accélère peu, voire ralentit, à cause des transferts. Il devient utile
+  pour les gros lots, l'attention sur beaucoup de pistes et les grands
+  critiques. Le studio affiche le temps passé en collecte et en mise à jour,
+  pour en juger.
+- **Validation** : la CI n'a pas de GPU. Le chemin CUDA est compilé et testé
+  avec un device simulé (tests de placement, de repli et de sérialisation).
+  Les performances réelles sont à mesurer sur une machine équipée.
 
 ## 14. Matrice de couverture
 
@@ -881,8 +1066,8 @@ Chaque étape fait l'objet d'une PR séparée.
 | 6 | Codegen des réseaux, y compris l'attention Blue | Test d'acceptation n°1 (§7) |
 | 7 | `runtime` Owned (Flight) puis Hosted (Blue), évaluation périodique, `eval`, `inference` | Golden trace ; parité d'inférence ; campagne Blue identique sur les mêmes seeds |
 | 8 | `component` (ABI, SDK) | Composant d'exemple (prétraitement avec état, et bloc différentiable) chargé en Debug et Release |
-| 9 | `backend/torch` derrière le même frontal ; Airspace Interception (SNA) migré | Parité d'inférence sur le `model.pt` existant ; entraînement comparable en évaluation multi-seed ; coexistence des deux backends dans `PPO.exe` |
-| 10 | Exemples de référence (§13.1) : structure commune, lanceur, `ppokit-new`, README ; puis `ppokit-studio` | Un exemple créé par `ppokit-new` compile et s'entraîne ; graphe Flight édité, régénéré et entraîné depuis le studio |
+| 9 | `backend/torch` derrière le même frontal (avec `device` CPU/CUDA et repli, §13.6) ; Airspace Interception (SNA) migré | Parité d'inférence sur le `model.pt` existant ; entraînement comparable en évaluation multi-seed ; coexistence des deux backends dans `PPO.exe` |
+| 10 | Exemples de référence (§13.1) : structure commune, lanceur, `ppokit-new`, `ppokit-import`, README ; puis `ppokit-studio` : graphe, curriculum, récompenses, paramètres PPO commentés, sondes (§13.2 à §13.5) | Un exemple créé par `ppokit-new` compile et s'entraîne ; les modèles existants des trois exemples reprennent en inférence et en entraînement (§8.1) ; graphe Flight édité, régénéré et entraîné depuis le studio ; une sonde désactivée ne change ni les traces ni le temps de pas mesuré |
 | 11 | Airspace RLMission migré, puis utilisé par les Rouges de BlueDefense — **sur approbation explicite** | Actions de production identiques (tolérance fixée) sur les mêmes états ; campagne BlueDefense inchangée sur les mêmes seeds |
 
 L'évaluation multi-seed des politiques entraînées est relancée après les
