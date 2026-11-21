@@ -151,7 +151,6 @@
     "resume": true,
     "rolloutSteps": 8192,
     "seed": 42,
-    "targetKl": 0.02,
-    "valueWeight": 0.5
+    "targetKl": 0.02
   }
 }

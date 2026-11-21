@@ -110,8 +110,9 @@ public:
         result.m_common.m_actorloss=static_cast<float>(state.learning.policyLoss);
         result.m_common.m_valueloss=static_cast<float>(state.learning.valueLoss);
         result.m_common.m_entropyloss=static_cast<float>(state.learning.entropy);
-        result.m_common.m_loss=static_cast<float>(state.learning.policyLoss
-            +config_.training.valueWeight*state.learning.valueLoss);
+        // Actor and critic are separate networks with their own optimizers: the
+        // total is the plain sum of the two objectives they actually minimize.
+        result.m_common.m_loss=static_cast<float>(state.learning.policyLoss+state.learning.valueLoss);
         for(std::size_t i=0;i<RewardCount;++i)
         {
             result.m_rewardnames.emplace_back(RewardNames[i]);
