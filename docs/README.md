@@ -17,6 +17,7 @@ ont été retirés : Git conserve leur historique.
 - [MAPPO à effectifs variables](mappo-variable-teams.md)
 - [Séquenceur de patrouille à dix waypoints](architecture/blue-patrol-waypoint-sequencer.md)
 - [Curriculum MAPPO V3 et observation V10](blue-mappo-v3.md)
+- [Conception PPOKit : framework commun, codegen et studio](architecture/ppokit-framework-design.md)
 - [Monde dédié à l'évaluation MAPPO](mappo-evaluation-world-architecture.md)
 - [Contrats génériques des agents](agent-contracts.md)
 - [Noyau RL générique](generic-rl-core.md)
