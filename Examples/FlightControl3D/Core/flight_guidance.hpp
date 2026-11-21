@@ -10,9 +10,11 @@
  *
  * Geometry: the glide plane crosses the threshold at Runway::thresholdHeightMeters and
  * meets the runway at the aim point, AimPointAlongMeters() past the threshold. Far out the
- * command points at the aim point; within CentrelineLookaheadMeters of it the horizontal
- * target slides along the centreline. Below the flare height the descent blends into a
- * gentle contact sink. All lengths are in metres, speeds in m/s and angles in radians.
+ * horizontal command intercepts the extended centreline InterceptLookaheadMeters ahead, at
+ * most MaximumInterceptAngleDegrees off its axis; on short final it points at the aim
+ * point; within CentrelineLookaheadMeters of it the target slides along the centreline.
+ * The vertical command follows the glide plane. Below the flare height the descent blends
+ * into a gentle contact sink. All lengths are in metres, speeds in m/s and angles in radians.
  *
  * Not here: no controller. Guidance never commands a surface; it only defines the
  * reference the policy learns to follow.
@@ -26,13 +28,25 @@
 namespace ppo::examples::flight {
 
 /**
- * @brief Horizontal look-ahead used to converge onto the centreline near and past the aim point, in metres.
+ * @brief Shortest horizontal look-ahead, used near and past the aim point, in metres.
  *
- * Far out, the commanded direction points straight at the aim point. Within
- * this distance of it, the horizontal target slides along the centreline so
- * that a lateral offset is corrected smoothly instead of by a sharp turn.
+ * Within this distance of the aim point the horizontal target slides along the
+ * centreline so that a lateral offset is corrected smoothly instead of by a
+ * sharp turn. The glide reference slides the same way.
  */
 inline constexpr double CentrelineLookaheadMeters = 300.0;
+
+/**
+ * @brief Longest horizontal look-ahead, used far out to intercept the extended centreline, in metres.
+ *
+ * Following the command, a lateral offset decays roughly as
+ * exp(-distance flown / look-ahead), so an aircraft started off the axis is
+ * established on it long before the threshold.
+ */
+inline constexpr double InterceptLookaheadMeters = 2000.0;
+
+/** @brief Largest angle between the commanded horizontal track and the runway axis, in degrees. */
+inline constexpr double MaximumInterceptAngleDegrees = 30.0;
 
 /** @brief World position of the runway threshold centre on the deck. */
 Vec3 ThresholdPoint(Runway const& runway) noexcept;
@@ -58,7 +72,7 @@ double ApproachPathHeight(Config const& config, double along) noexcept;
 /** @brief Target point and commanded unit direction in world axes. */
 struct ApproachReference final
 {
-    /** @brief Horizontal target point on the centreline, in world metres. */
+    /** @brief Centreline point the horizontal command converges toward, in world metres. */
     Vec3 target{};
     /** @brief Unit commanded direction, in world axes. */
     Vec3 direction{};
@@ -71,8 +85,9 @@ struct ApproachReference final
  * @param config Episode configuration and runway pose.
  * @param mission Current phase.
  * @param aircraft Current aircraft state.
- * @return Toward the aim point while far out, along the centreline near and past it, with a
- *     gentle flare sink below the flare height and a level direction while rolling.
+ * @return Toward the extended centreline far out, toward the aim point on short final, along
+ *     the centreline near and past it, descending on the glide plane, with a gentle flare
+ *     sink below the flare height and a level direction while rolling.
  */
 ApproachReference ResolveApproachReference(Config const& config, MissionState const& mission,
     AircraftState const& aircraft) noexcept;

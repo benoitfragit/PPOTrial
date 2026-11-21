@@ -81,7 +81,7 @@
     "pathTolerance": 1500.0,
     "weights": {
       "Crash": -5.0,
-      "Direction": 0.5,
+      "Direction": 2.012,
       "Path": 4.0,
       "Speed": 2.0,
       "Stop": 10.0,
@@ -126,7 +126,7 @@
     "adamBeta1": 0.9,
     "adamBeta2": 0.999,
     "adamEpsilon": 1e-08,
-    "checkpointDirectory": "model/FlightControl3D/t6texan2_joint_v2",
+    "checkpointDirectory": "model/FlightControl3D/t6texan2_joint_v3",
     "checkpointEvery": 1,
     "clip": 0.2,
     "criticRate": 0.0003,

@@ -190,7 +190,7 @@ void AimPointOnRunway()
         "spawns and guidance share the same glide plane");
 }
 
-/** @brief Far out the direction points at the aim point; near it the track converges onto the centreline. */
+/** @brief Short final points at the aim point; near it the track converges onto the centreline. */
 void ApproachDirection()
 {
     auto c=T6Config();
@@ -200,10 +200,13 @@ void ApproachDirection()
     {
         auto const aircraft=Approach(c,along,cross);
         auto const guidance=Guide(c,Flying(),aircraft);
-        auto const toAim=UnitDirection(Subtract(AimPoint(c),aircraft.position));
-        Check(guidance.targetValid && Near(Dot(guidance.targetDirection,toAim),1,1e-9)
-            && Near(Length(Subtract(guidance.target,AimPoint(c))),0,1e-6),
-            "far from the runway the commanded direction points straight at the aim point");
+        if(aimAlong-along<=InterceptLookaheadMeters)
+        {
+            auto const toAim=UnitDirection(Subtract(AimPoint(c),aircraft.position));
+            Check(guidance.targetValid && Near(Dot(guidance.targetDirection,toAim),1,1e-9)
+                && Near(Length(Subtract(guidance.target,AimPoint(c))),0,1e-6),
+                "on short final the commanded direction points straight at the aim point");
+        }
         auto const observation=Observe(c,Flying(),aircraft);
         auto const body=InBodyAxes(AircraftAxes(aircraft.roll,aircraft.pitch,aircraft.heading),guidance.targetDirection);
         Check(Near(observation[Slot(ObservationIndex::TargetDirectionForward)],body.north,1e-6)
@@ -234,6 +237,81 @@ void ApproachDirection()
     {
         auto terminal=Flying();terminal.outcome=outcome;
         Check(!Guide(c,terminal,Approach(c)).targetValid,"a terminal mission has no active target");
+    }
+}
+
+/** @brief Angle between the commanded horizontal track and the runway axis, positive to the right, in degrees. */
+double CommandTrackDegrees(Config const& c,Guidance const& guidance)
+{
+    auto const direction=RunwayAxes(c.runway,guidance.targetDirection);
+    return std::atan2(direction.east,direction.north)/DegreesToRadians;
+}
+
+/** @brief Far out the command intercepts the extended centreline at a bounded angle and keeps the glide plane. */
+void CentrelineIntercept()
+{
+    auto c=T6Config();
+    c.runway.origin={150,-200,25};c.runway.headingDegrees=123;
+    double const aimAlong=AimPointAlongMeters(c);
+    double const along=-9000;
+    auto const onAxis=Guide(c,Flying(),Approach(c,along));
+    Check(Near(CommandTrackDegrees(c,onAxis),0,1e-9)
+        && Near(Length(Subtract(onAxis.target,FromRunway(c.runway,along+InterceptLookaheadMeters,0,0))),0,1e-6),
+        "on the extended centreline the command follows the runway axis toward a point 2 km ahead");
+    for(double cross : {-2900.0,-250.0,-5.0,5.0,250.0,2900.0})
+    {
+        auto const aircraft=Approach(c,along,cross);
+        auto const guidance=Guide(c,Flying(),aircraft);
+        double const expected=std::max(-MaximumInterceptAngleDegrees,std::min(MaximumInterceptAngleDegrees,
+            std::atan2(-cross,InterceptLookaheadMeters)/DegreesToRadians));
+        Check(Near(CommandTrackDegrees(c,guidance),expected,1e-9) && CommandTrackDegrees(c,guidance)*cross<0,
+            "off the centreline the command turns toward it, at most at the intercept angle");
+        Check(Near(CommandTrackDegrees(c,Guide(c,Flying(),Approach(c,along,-cross))),-expected,1e-9),
+            "left and right offsets are intercepted symmetrically");
+        double const height=DeckCoordinates(c.runway,aircraft.position).up;
+        Check(Near(guidance.targetSlope,-std::atan(height/std::hypot(aimAlong-along,cross)),1e-9),
+            "the commanded slope still descends toward the aim point on the glide plane");
+    }
+    // The look-ahead switches from 2 km to the aim point without a jump in the command.
+    double const switchAlong=aimAlong-InterceptLookaheadMeters;
+    auto const before=Guide(c,Flying(),Approach(c,switchAlong-0.01,300));
+    auto const after=Guide(c,Flying(),Approach(c,switchAlong+0.01,300));
+    Check(Near(Dot(before.targetDirection,after.targetDirection),1,1e-9),
+        "the direction is continuous where the look-ahead starts shrinking toward the aim point");
+}
+
+/** @brief Following the command from the widest curriculum start reaches the threshold aligned with the runway. */
+void CentrelineInterceptTrajectory()
+{
+    auto c=T6Config();
+    c.runway.origin={0,0,15};c.runway.headingDegrees=0;
+    constexpr double Speed=56;
+    constexpr double Dt=0.1;
+    double const distance=c.initial.distanceMeters.maximum;
+    double const bearing=c.initial.bearingDegrees.maximum*DegreesToRadians;
+    for(double const side : {-1.0,1.0})
+    {
+        double const startCross=side*distance*std::sin(bearing);
+        auto aircraft=Approach(c,-distance*std::cos(bearing),startCross);
+        double previousCross=std::abs(startCross);
+        bool reachedThreshold=false;
+        for(int step=0;step<10000;++step)
+        {
+            auto const guidance=Guide(c,Flying(),aircraft);
+            auto const local=DeckCoordinates(c.runway,aircraft.position);
+            Check(std::abs(local.east)<=previousCross+1e-9 && local.east*startCross>=0,
+                "the lateral offset decreases toward the centreline without overshooting it");
+            previousCross=std::abs(local.east);
+            if(local.north>=0)
+            {
+                Check(std::abs(local.east)<5 && std::abs(CommandTrackDegrees(c,guidance))<1,
+                    "the aircraft crosses the threshold on the centreline, aligned with the runway");
+                reachedThreshold=true;break;
+            }
+            aircraft.velocity=Scale(guidance.targetDirection,Speed);
+            aircraft.position=Add(aircraft.position,Scale(aircraft.velocity,Dt));
+        }
+        Check(reachedThreshold,"the intercept reaches the threshold in finite time");
     }
 }
 
@@ -634,6 +712,8 @@ int main()
         TargetSpeed();
         AimPointOnRunway();
         ApproachDirection();
+        CentrelineIntercept();
+        CentrelineInterceptTrajectory();
         FlareTrajectory();
         LandingQuality();
         CrashDiagnostics();

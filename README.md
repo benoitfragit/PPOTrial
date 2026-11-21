@@ -31,7 +31,7 @@ Sans `--example`, l'application affiche le sélecteur graphique. Avec
 
 FlightControl3D utilise le scénario d'atterrissage T-6 configuré dans
 `resources/settings/Scenarios/FlightControl3D_T6_Joint.json`. L'entraînement
-reprend `latest` depuis `resources/model/FlightControl3D/t6texan2_joint_v2`,
+reprend `latest` depuis `resources/model/FlightControl3D/t6texan2_joint_v3`,
 avec les poids, les états Adam et le générateur aléatoire du checkpoint. Le
 modèle est distinct du BEST d'atterrissage qualifié requis par le mode inférence.
 

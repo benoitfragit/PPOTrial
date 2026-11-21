@@ -203,6 +203,8 @@ Les valeurs ci-dessous sont dans le code ; le scénario JSON fournit le reste.
 | `ObservationSize` | 33 | — | Core/flight_types.hpp | Nombre de slots `ObservationIndex` (contrat) |
 | `ContinuousActions` | 5 | — | Core/flight_types.hpp | Profondeur, ailerons, direction, gaz, frein |
 | `CentrelineLookaheadMeters` | 300 | m | Core/flight_guidance.hpp | Convergence douce vers l'axe près du point d'aboutissement |
+| `InterceptLookaheadMeters` | 2000 | m | Core/flight_guidance.hpp | Interception de l'axe prolongé loin de la piste |
+| `MaximumInterceptAngleDegrees` | 30 | ° | Core/flight_guidance.hpp | Angle maximal entre la route commandée et l'axe |
 | `MaximumPathAngleDegrees` | 6 | ° | Core/flight_guidance.cpp | Pente commandée maximale (deux fois un plan à 3°) |
 | `MaximumContactSinkMps` | 0,5 | m/s | Core/flight_guidance.cpp | Taux de chute visé au contact (toucher doux) |
 | `ContactSinkFractionOfLimit` | 0,5 | — | Core/flight_guidance.cpp | Marge sur la limite structurale de chute |
@@ -231,7 +233,7 @@ Les valeurs ci-dessous sont dans le code ; le scénario JSON fournit le reste.
 | `KlSkipFactor` | 1,5 | — | Training/flight_learner.cpp | Garde KL alignée sur RLMission |
 | `AdvantageEpsilon` | 1e-8 | — | Training/flight_learner.cpp | Stabilité de la normalisation des avantages |
 | `CheckpointMagic` | `PPO_FLIGHT_POLICY_V3` | — | Training/flight_learner.cpp | Format de checkpoint (contrat) |
-| `ContractVersion` | 5 | — | Core/flight_config.cpp | Version de la sémantique observation/action/récompense |
+| `ContractVersion` | 6 | — | Core/flight_config.cpp | Version de la sémantique observation/action/récompense |
 | `EvaluationProtocolVersion` | 3 | — | Training/flight_model_store.cpp | Protocole de validation stratifié |
 
 Les échelles d'observation sont listées dans la table des observations ci-dessous.

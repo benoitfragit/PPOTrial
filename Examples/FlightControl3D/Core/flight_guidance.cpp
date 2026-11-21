@@ -3,10 +3,14 @@
  * @brief Construction of the approach reference: aim point, lookahead, gradient, flare and speed.
  *
  * Summary of the guidance law (all quantities in runway axes):
- * - horizontal target: the aim point far out, then a point CentrelineLookaheadMeters ahead
- *   on the centreline (target along = max(aim along, along + 300 m));
- * - vertical gradient toward the target point on the deck, -height / horizontal distance,
- *   bounded to +/- tan(6 degrees);
+ * - horizontal direction: toward the extended centreline a look-ahead L ahead,
+ *   L = clamp(aim along - along, 300 m, 2 km), at most 30 degrees off the runway axis.
+ *   Far out the aircraft intercepts the centreline 2 km ahead and is established on it
+ *   well before the threshold; on short final it heads for the aim point; near and past
+ *   the aim point the target slides 300 m ahead;
+ * - vertical gradient toward the glide target on the deck (the aim point, or a point
+ *   300 m ahead near and past it), -height / horizontal distance, bounded to
+ *   +/- tan(6 degrees);
  * - below the flare height, a smoothstep blend toward the contact sink gradient
  *   -contactSink / max(horizontal speed, flare speed);
  * - reference airspeed: smoothstep deceleration from the approach speed to the flare speed
@@ -124,24 +128,34 @@ ApproachReference ResolveApproachReference(Config const& config, MissionState co
 {
     auto const& runway = config.runway;
     auto const local = DeckCoordinates(runway, aircraft.position);
-    // Far out the horizontal target is the aim point itself; closer in it
-    // slides along the centreline so the track converges without a sharp turn.
-    double const targetAlong = std::max(AimPointAlongMeters(config), local.north + CentrelineLookaheadMeters);
-    double const targetForward = targetAlong - local.north;
-    double const targetRight = -local.east;
-    double const horizontalDistance = std::hypot(targetForward, targetRight);
+    double const aimAlong = AimPointAlongMeters(config);
+    // Horizontal reference: a point of the extended centreline a look-ahead
+    // ahead. The look-ahead shrinks from 2 km far out to the aim point on short
+    // final, then to 300 m near and past it, so a lateral offset decays well
+    // before the threshold instead of being flown straight to the aim point.
+    double const lookahead = std::clamp(aimAlong - local.north, CentrelineLookaheadMeters,
+        InterceptLookaheadMeters);
+    double const targetAlong = local.north + lookahead;
+    // A large offset is intercepted at a bounded angle, as on a localizer.
+    double const maximumRight = lookahead * std::tan(MaximumInterceptAngleDegrees * DegreesToRadians);
+    double const targetRight = std::clamp(-local.east, -maximumRight, maximumRight);
+    double const horizontalLength = std::hypot(lookahead, targetRight);
     // The rollout reference is level; only the airborne phase commands a gradient.
     double gradient = 0;
     if (mission.phase == Phase::Approach)
     {
+        // The vertical reference stays on the glide plane: its distance is
+        // measured to the aim point, or to the point sliding 300 m ahead near it.
+        double const glideTargetAlong = std::max(aimAlong, local.north + CentrelineLookaheadMeters);
+        double const glideDistance = std::hypot(glideTargetAlong - local.north, local.east);
         auto const velocity = RunwayAxes(runway, aircraft.velocity);
-        gradient = AirborneGradient(config, local.up, horizontalDistance, std::hypot(velocity.north,
+        gradient = AirborneGradient(config, local.up, glideDistance, std::hypot(velocity.north,
             velocity.east));
     }
-    // Direction = horizontal unit vector toward the target plus the gradient
+    // Direction = horizontal unit vector toward the intercept plus the gradient
     // along the deck normal, then normalized.
-    auto const horizontalForward = Scale(RunwayForward(runway), targetForward / horizontalDistance);
-    auto const horizontalRight = Scale(RunwayRight(runway), targetRight / horizontalDistance);
+    auto const horizontalForward = Scale(RunwayForward(runway), lookahead / horizontalLength);
+    auto const horizontalRight = Scale(RunwayRight(runway), targetRight / horizontalLength);
     auto const runwayDirection = Add(Add(horizontalForward, horizontalRight), Scale(RunwayNormal(runway),
         gradient));
     ApproachReference reference{};
