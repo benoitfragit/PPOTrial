@@ -92,7 +92,9 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
 | 6a. `graph.json` et types rl_tools générés (MLP, modèles externes) | fait | Voir ci-dessous |
 | 6b. Brancher les learners sur les types générés, backend rl_tools unique | à faire, **après le rebase de l'utilisateur** | Modifie le code d'exécution des exemples |
 | 6c. Attention Blue comme composant interne | à faire | |
-| 7. Runtime commun (Owned / Hosted), évaluation, inférence | à faire | **Prochaine action possible sans toucher aux exemples** : le cœur du runtime dans PPOKit |
+| 7a. Rollout, collecte Owned, learner PPO rl_tools générique | fait | Voir ci-dessous |
+| 7b. Mode Hosted (MAPPO, pilotage par l'hôte) | à faire | |
+| 7c. Suites d'évaluation (`eval/*.json`), inférence | à faire | **Prochaine action** |
 | 4 à 11 | à faire | |
 
 ### Détail de l'étape 1a
@@ -236,16 +238,49 @@ aucun code d'exécution des exemples n'est modifié.
 - Toujours additif : aucun learner n'utilise encore les types générés
   (étape 6b, après le rebase).
 
+### Détail de l'étape 7a
+
+- `ppokit/runtime/rollout.hpp` : `Transition` (fin d'épisode `Running`,
+  `Terminated` ou `Truncated`, indicateur `learnable` pour MAPPO),
+  `RolloutBuffer` (alloué une fois, refuse les valeurs non finies),
+  `ComputeAdvantages` (GAE commun), `NormalizeAdvantages` (forme canonique :
+  somme puis division, variance de population, epsilon 1e-8 sous la racine ;
+  Flight et Blue normalisaient de façon équivalente mais pas identique au bit
+  près, à aligner lors de leur migration, décision B), `ExplainedVariance`.
+- `ppokit/runtime/collector.hpp` : `RolloutCollector` en mode Owned. Il
+  enchaîne les épisodes d'un rollout à l'autre, ne bootstrape jamais un état
+  terminé, bootstrape les troncatures, et tient des statistiques d'épisodes.
+  La tâche et la politique sont des classes simples (aucun appel virtuel dans
+  la boucle chaude).
+- `ppokit/backend/rltools/gaussian_mlp_learner.hpp` : learner PPO complet
+  sur les réseaux générés (acteur gaussien, critique), avec Adam, minibatches
+  mélangés, clamp du log-std et statistiques. Il réutilise
+  `EvaluateClippedSurrogate` et les fonctions de la tête gaussienne.
+- PPOKit possède maintenant la dépendance rl_tools (même version figée) ;
+  Flight et `dependencies.cmake` réutilisent la cible. Cible
+  `PPOKit::BackendRltools`.
+- Tests : `PPOKitRuntimeTests` (buffer, GAE sur plusieurs épisodes,
+  troncature, normalisation, collecte sur un couloir) et
+  `PPOKitBackendLearnerTests`, qui entraîne de bout en bout un couloir jouet
+  décrit par `tests/fixtures/corridor/task.json` et `graph.json`. Le retour
+  moyen passe de −3,0 à 3,9 en 30 updates, la politique déterministe atteint
+  le but en 6 pas (optimum), Debug et Release identiques. C'est un test de
+  fumée du moteur, pas une preuve de convergence.
+- Un piège de conception de tâche, documenté dans le test : une récompense
+  qui ne dépend pas de l'action (coût par pas seul) ne donne aucun signal
+  avant le premier succès, rare en exploration aléatoire.
+
 ## Prochaine action
 
-L'utilisateur rebasera ses travaux sur les modèles avant que les learners
-des exemples ne soient modifiés (étape 6b). D'ici là, avancer sur ce qui vit
-entièrement dans PPOKit :
-- Étape 7, cœur du runtime : boucle Owned (`Task` : `Reset`, `Step`,
-  `StepEnd`), collecte dans des tampons à capacité fixe, GAE et surrogate
-  déjà communs, statistiques d'update, garde de valeurs non finies. Le tester
-  sur une tâche jouette de PPOKit (`tests/`), sans toucher aux exemples.
-- Puis les suites d'évaluation (`eval/*.json`, §10 de la conception).
+Étape 7c : évaluation, dans PPOKit.
+1. `ppokit.eval/1` (§5.4 et §10 de la conception) : seeds, épisodes, grilles,
+   cas nommés, gates.
+2. Un évaluateur générique en mode déterministe (moyennes), avec rapport JSON
+   par cellule.
+3. Le tester sur le couloir jouet.
+
+Puis l'étape 7b (mode Hosted pour MAPPO) et, après le rebase de
+l'utilisateur, l'étape 6b (migration des learners des exemples).
 
 ## Dernier état de la CI (PR #105, commit `7278d63`, étape 6a)
 

@@ -130,6 +130,35 @@ le MLP de FlightControl3D chargé depuis un checkpoint de `FlightLearner` donne
 les mêmes sorties au bit près, et le critique de BlueDefense est le même type
 rl_tools.
 
+### Entraîner une tâche : collecte, rollout et learner PPO
+
+En mode *Owned*, l'exemple écrit seulement sa tâche (`Reset`, `Step`) et
+PPOKit mène la boucle. Le learner rl_tools s'appuie sur les réseaux générés
+depuis `graph.json` :
+
+```cpp
+#include <rl_tools/operations/cpu_mux.h>
+#include <rl_tools/nn/operations_cpu_mux.h>
+#include <rl_tools/nn_models/mlp_unconditional_stddev/operations_generic.h>
+#include <rl_tools/nn/optimizers/adam/operations_generic.h>
+#include "my_networks.hpp"
+#include "ppokit/backend/rltools/gaussian_mlp_learner.hpp"
+
+using Learner = ppokit::backend::rltools::GaussianMlpLearner<networks::Actor, networks::Critic>;
+Learner learner(settings);                      // PpoSettings : gamma, lambda, clip, learning rates…
+Learner::Buffer buffer(2048);                   // alloué une fois
+ppokit::runtime::RolloutCollector<MyTask, Learner, Learner::Buffer> collector(task, learner);
+for (int update = 0; update < 100; ++update)
+{
+    collector.Collect(buffer);                  // épisodes enchaînés, troncatures bootstrapées
+    auto const statistics = learner.Update(buffer);   // pertes, KL, clip fraction, variance expliquée
+}
+auto const action = learner.Mean(observation);  // politique déterministe
+```
+
+Exemple complet : `PPOKit/tests/backend_learner_tests.cpp` (couloir jouet
+résolu en 30 updates, de façon reproductible à partir du seed).
+
 ## Organisation
 
 ```
