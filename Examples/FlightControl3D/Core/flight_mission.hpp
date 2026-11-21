@@ -1,46 +1,39 @@
+/**
+ * @file flight_mission.hpp
+ * @brief Episode state machine advanced once per physics substep.
+ *
+ * Role in the chain: JSBSim substep -> **mission** -> rewards -> environment action.
+ * AdvanceMission compares the aircraft state before and after one 10 ms physics substep,
+ * detects contact, crash, touchdown, stop and timeout, and returns the weighted rewards of
+ * that substep, including the shaping term gamma_sub * Phi(s') - Phi(s) of each potential
+ * channel.
+ *
+ * State machine:
+ *   Approach --first safe contact--> Rollout --stopped for stoppedHoldSeconds--> Stopped
+ *   any phase --unsafe contact, invalid state, off-surface roll--> Crash
+ *   any phase --time, distance or altitude limit--> Timeout (truncation, not termination)
+ *
+ * Not here: the action loop, the command filter and the discounting across substeps
+ * (Simulator/flight_environment.cpp).
+ *
+ * Read next: flight_mission.cpp, flight_landing.hpp, flight_reward.hpp.
+ */
 #pragma once
 
 #include "flight_config.hpp"
 
 namespace ppo::examples::flight {
 
-struct FlightPlan final
-{
-    std::array<Vec3, MaximumWaypoints> points{};
-    std::size_t count{};
-};
-
-Vec3 FromRunway(Runway const& runway, double along, double cross, double up) noexcept;
-std::array<double, 2> ToRunway(Runway const& runway, Vec3 const& point) noexcept;
-FlightPlan MakeFlightPlan(Config const& config) noexcept;
-/** Endpoint of the closest 3D segment, used for initial rally and missed-gate recovery. */
-std::size_t ClosestPatrolWaypoint(FlightPlan const& plan,Vec3 position) noexcept;
 /**
- * @brief Resolves the active racetrack, LOC, glide, flare or rollout reference.
- * @param config Validated episode configuration and instantaneous runway pose.
- * @param plan Closed racetrack bound to the current runway pose.
- * @param mission Current phase, capture state and ordered waypoint progress.
- * @param aircraft Current finite aircraft state.
- * @return Value-only guidance consumed by observations, rewards and rendering.
+ * @brief Advance the mission by one physics substep; landing limits also inspect the pre-impact state.
+ * @param config Current episode settings and runway pose.
+ * @param mission Mission state to update.
+ * @param before Aircraft state before the physics substep.
+ * @param after Aircraft state after the physics substep.
+ * @param crashDiagnostic Optional terminal crash details; written only on crash.
+ * @return Weighted rewards and episode boundary flags; after a boundary, only the flags.
  */
-Guidance Guide(Config const& config, FlightPlan const& plan,
-    MissionState const& mission, AircraftState const& aircraft) noexcept;
-/** Called after each FDM substep; landing limits also inspect the pre-impact state. */
-StepResult AdvanceMission(Config const& config, FlightPlan const& plan, MissionState& mission,
-    AircraftState const& before, AircraftState const& after, Runway const* previousRunway = nullptr) noexcept;
-Observation Observe(Config const& config, FlightPlan const& plan, MissionState const& mission,
-    AircraftState const& aircraft) noexcept;
-
-inline constexpr std::array<char const*, ObservationSize> ObservationNames{
-    "target_forward", "target_right", "target_up", "runway_along", "runway_cross", "runway_distance",
-    "height", "airspeed", "velocity_north", "velocity_east", "velocity_up",
-    "roll_sin", "roll_cos", "pitch_sin", "pitch_cos", "heading_error_sin", "heading_error_cos",
-    "roll_rate", "pitch_rate", "yaw_rate", "slope_sin", "slope_cos", "localizer_sin", "glide_error",
-    "ils_valid", "target_speed", "target_slope", "course_error_sin", "course_error_cos", "path_distance",
-    "gear_position", "weight_on_wheels", "patrol", "approach", "rollout", "elapsed",
-    "localizer_captured", "glide_captured", "touchdown", "touchdown_distance", "remaining_runway", "stopped_hold",
-    "deck_velocity_north", "deck_velocity_east", "deck_velocity_up", "deck_normal_north", "deck_normal_east", "deck_normal_up",
-    "deck_angular_north", "deck_angular_east", "deck_angular_up",
-    "lap_progress", "completed_laps", "path_qualified", "localizer_hold", "glide_hold"};
+StepResult AdvanceMission(Config const& config, MissionState& mission, AircraftState const& before,
+    AircraftState const& after, CrashDiagnostic* crashDiagnostic = nullptr) noexcept;
 
 } // namespace ppo::examples::flight

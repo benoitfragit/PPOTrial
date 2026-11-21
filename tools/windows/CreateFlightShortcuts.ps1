@@ -5,26 +5,32 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath $ProjectRoot).Path
 $shell = New-Object -ComObject WScript.Shell
-foreach ($configuration in @('Debug', 'Release')) {
-    $launcher = Join-Path $root "Lancer_FlightControl3D_$configuration.bat"
-    $linkPath = Join-Path $root "FlightControl3D_$configuration.lnk"
-    if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
-        throw "Missing FlightControl3D launcher: $launcher"
+# Remove only the obsolete root shortcuts previously created for FlightControl3D.
+foreach ($obsoleteName in @('FlightControl3D_Debug.lnk', 'FlightControl3D_Release.lnk', 'FlightControl3D_T6_Release.lnk')) {
+    $obsoletePath = Join-Path $root $obsoleteName
+    if (Test-Path -LiteralPath $obsoletePath -PathType Leaf) {
+        if ($Verify) { throw "Obsolete FlightControl3D shortcut: $obsoletePath" }
+        Remove-Item -LiteralPath $obsoletePath
     }
-    if ($Verify -and -not (Test-Path -LiteralPath $linkPath -PathType Leaf)) {
-        throw "Missing generated shortcut: $linkPath"
-    }
-    $link = $shell.CreateShortcut($linkPath)
-    if (-not $Verify) {
-        $link.TargetPath = $launcher
-        $link.WorkingDirectory = $root
-        $link.Arguments = ''
-        $link.Description = "FlightControl3D JSBSim - $configuration"
-        $link.Save()
-        $link = $shell.CreateShortcut($linkPath)
-    }
-    if ($link.TargetPath -ine $launcher -or $link.WorkingDirectory -ine $root -or $link.Arguments -ne '') {
-        throw "Incorrect FlightControl3D shortcut target: $linkPath"
-    }
+}
+$curriculumLauncher = Join-Path $root 'Lancer_FlightControl3D_Curriculum_Release.bat'
+$curriculumLinkPath = Join-Path $root 'FlightControl3D_Curriculum_Release.lnk'
+if (-not (Test-Path -LiteralPath $curriculumLauncher -PathType Leaf)) {
+    throw "Missing FlightControl3D curriculum launcher: $curriculumLauncher"
+}
+if ($Verify -and -not (Test-Path -LiteralPath $curriculumLinkPath -PathType Leaf)) {
+    throw "Missing generated shortcut: $curriculumLinkPath"
+}
+$curriculumLink = $shell.CreateShortcut($curriculumLinkPath)
+if (-not $Verify) {
+    $curriculumLink.TargetPath = $curriculumLauncher
+    $curriculumLink.WorkingDirectory = $root
+    $curriculumLink.Arguments = ''
+    $curriculumLink.Description = 'FlightControl3D T-6 Joint training - Release'
+    $curriculumLink.Save()
+    $curriculumLink = $shell.CreateShortcut($curriculumLinkPath)
+}
+if ($curriculumLink.TargetPath -ine $curriculumLauncher -or $curriculumLink.WorkingDirectory -ine $root -or $curriculumLink.Arguments -ne '') {
+    throw "Incorrect FlightControl3D curriculum shortcut target: $curriculumLinkPath"
 }
 Write-Output 'Verified FlightControl3D root shortcuts'

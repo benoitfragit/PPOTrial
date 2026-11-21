@@ -1,5 +1,16 @@
+/**
+ * @file reward_tests.cpp
+ * @brief Regressions of the reward channels and of the potential-based shaping.
+ *
+ * Protects: the sign and saturation of each potential, the zero potential of absorbing
+ * states, the telescoping of gamma_sub * Phi(s') - Phi(s) over an action, the Path
+ * potential past the threshold, and the touchdown quality factors.
+ *
+ * Read next: Core/flight_reward.hpp (channel table), simulator_tests.cpp (action level).
+ */
 #include "test_support.hpp"
-#include <limits>
+#include "flight_mission.hpp"
+#include "flight_reward.hpp"
 using namespace ppo::examples::flight;
 
 namespace {
@@ -9,199 +20,242 @@ AircraftState At(Config const& c,double along,double cross,double height)
     aircraft.position=FromRunway(c.runway,along,cross,height);
     aircraft.airspeed=c.mission.approachSpeed;
     aircraft.heading=c.runway.headingDegrees*DegreesToRadians;
+    aircraft.velocity=Scale(RunwayForward(c.runway),c.mission.approachSpeed);
+    aircraft.gearPosition=1;
     return aircraft;
-}
-AircraftState WithCourse(Config const& c,AircraftState aircraft,double courseDegrees)
-{
-    double const course=courseDegrees*DegreesToRadians;
-    aircraft.velocity=Add(Scale(RunwayForward(c.runway),aircraft.airspeed*std::cos(course)),
-        Scale(RunwayRight(c.runway),aircraft.airspeed*std::sin(course)));
-    return aircraft;
-}
-StepResult ApproachStep(Config const& c,AircraftState const& before,AircraftState const& after)
-{
-    MissionState mission{};
-    mission.phase=Phase::Approach;
-    mission.capturedLocalizer=true;
-    return AdvanceMission(c,MakeFlightPlan(c),mission,before,after);
 }
 double Channel(StepResult const& step,Reward reward)
 {
     return step.rewards[static_cast<std::size_t>(reward)];
 }
-void Convergence(Config const& c)
+double Potential(Config const& c,MissionState const& mission,AircraftState const& aircraft,Reward channel)
 {
-    auto far=WithCourse(c,At(c,-6000,2000,700),0);
-    auto closer=WithCourse(c,At(c,-6000,1999.8,699.8),0);
-    auto const improvement=ApproachStep(c,far,closer);
-    auto const regression=ApproachStep(c,closer,far);
-    for(auto channel : {Reward::Localizer,Reward::Glide})
-        Check(Channel(improvement,channel)>0 && Channel(regression,channel)<0
-            && Near(Channel(improvement,channel)+Channel(regression,channel),0,1e-12)
-            && Channel(ApproachStep(c,far,far),channel)==0,
-            "signed delta Q gives positive/negative/zero without recurrence");
-    auto const right=At(c,-6000,1000,700),left=At(c,-6000,-1000,700);
-    auto const ri=ApproachStep(c,WithCourse(c,right,0),WithCourse(c,right,-5));
-    auto const ro=ApproachStep(c,WithCourse(c,right,0),WithCourse(c,right,5));
-    auto const li=ApproachStep(c,WithCourse(c,left,0),WithCourse(c,left,5));
-    auto const lo=ApproachStep(c,WithCourse(c,left,0),WithCourse(c,left,-5));
-    Check(Channel(ri,Reward::Localizer)>0 && Channel(ro,Reward::Localizer)<0
-        && Near(Channel(ri,Reward::Localizer),Channel(li,Reward::Localizer),1e-10)
-        && Near(Channel(ro,Reward::Localizer),Channel(lo,Reward::Localizer),1e-10),
-        "inward vs outward route rewards are symmetric");
-    auto glide=At(c,-6000,0,c.runway.thresholdHeightMeters
-        +6000*std::tan(c.mission.glideDegrees*DegreesToRadians));
-    auto down=WithCourse(c,glide,0),up=WithCourse(c,glide,0);
-    down.velocity.up=-glide.airspeed*std::tan(c.mission.glideDegrees*DegreesToRadians);
-    up.velocity.up=glide.airspeed*std::tan(c.mission.glideDegrees*DegreesToRadians);
-    Check(Channel(ApproachStep(c,glide,down),Reward::Glide)>0
-        && Channel(ApproachStep(c,glide,up),Reward::Glide)<0,
-        "glide includes physical descent slope, not just location");
-    auto locOnly=c;locOnly.training.curriculumStage=CurriculumStage::Loc;
-    Check(Channel(ApproachStep(locOnly,far,closer),Reward::Glide)==0
-        && Channel(ApproachStep(locOnly,far,closer),Reward::Localizer)>0,
-        "LOC gate disables glide shaping only");
-    MissionState acquisition{};acquisition.phase=Phase::Approach;
-    auto improvedSpeed=closer;
-    improvedSpeed.airspeed+=1;
-    auto const ungated=AdvanceMission(c,MakeFlightPlan(c),acquisition,far,improvedSpeed);
-    Check(Channel(ungated,Reward::Speed)!=0,
-        "speed shaping is active before LOC capture");
-    auto const outside=At(c,-c.mission.ilsRangeMeters-1,0,700);
-    auto const inside=At(c,-c.mission.ilsRangeMeters+1,0,700);
-    Check(Channel(ApproachStep(c,outside,inside),Reward::Glide)==0,
-        "glide envelope transition does not fabricate delta Q");
-    auto half=c;half.mission.physicsDt/=2;
-    auto const middle=WithCourse(c,At(c,-6000,1999.9,699.9),0);
-    Check(Near(Channel(ApproachStep(half,far,middle),Reward::Localizer)
-        +Channel(ApproachStep(half,middle,closer),Reward::Localizer),
-        Channel(improvement,Reward::Localizer),1e-12),
-        "substep subdivision preserves additive quality difference");
+    return ShapingPotentials(c,mission,aircraft)[static_cast<std::size_t>(channel)];
 }
-void ProgressAndAmplitude(Config const& c)
+double PathPotential(Config const& c,MissionState const& mission,AircraftState const& aircraft)
 {
-    auto aligned=WithCourse(c,At(c,-6000,0,c.runway.thresholdHeightMeters
-        +6000*std::tan(c.mission.glideDegrees*DegreesToRadians)),0);
-    Check(Channel(ApproachStep(c,aligned,aligned),Reward::Localizer)==0
-        && Channel(ApproachStep(c,aligned,aligned),Reward::Glide)==0,
-        "perfect stationary beams cannot accumulate time reward");
-    auto const prior=WithCourse(c,At(c,-6000,1000,600),0);
-    auto const receding=WithCourse(c,At(c,-6010,1000,600),0);
-    auto const r=ApproachStep(c,prior,receding);
-    Check(Channel(r,Reward::Localizer)<=0 && Channel(r,Reward::Glide)<=0,
-        "receding cannot farm angular quality");
-    Check(c.reward.weights[7]==100 && c.reward.weights[8]==100 && c.reward.weights[9]==-100,
-        "terminal outcomes unchanged");
+    return Potential(c,mission,aircraft,Reward::Path);
 }
-void SpeedAndSlopeShaping(Config const& c)
+Config T6Config()
 {
-    auto bad=WithCourse(c,At(c,-6000,0,600),0);
-    bad.airspeed=c.mission.approachSpeed-2*c.reward.speedTolerance;
-    auto good=bad,wrong=bad;
-    good.airspeed+=1;good.velocity.up=-bad.airspeed*0.10;
-    wrong.airspeed-=1;wrong.velocity.up=bad.airspeed*0.10;
-    for(auto channel:{Reward::Speed,Reward::Slope})
-        Check(Channel(ApproachStep(c,bad,good),channel)>0
-            && Channel(ApproachStep(c,bad,wrong),channel)<0
-            && Channel(ApproachStep(c,bad,bad),channel)==0,
-            "speed and slope improve/recede with no constant baseline");
+    auto c=LoadConfig(std::filesystem::path(PPO_FLIGHT_CONFIG));
+    c.runway.origin={};c.runway.headingDegrees=0;
+    return c;
 }
-void SecondaryGuidance(Config const& c)
+MissionState Flying(Phase phase=Phase::Approach)
 {
-    auto const plan=MakeFlightPlan(c);
-    Check(ClosestPatrolWaypoint(plan,plan.points[0])==1 && ClosestPatrolWaypoint(plan,plan.points[1])==2,
-        "rally from a waypoint targets the following segment endpoint");
-    Check(ClosestPatrolWaypoint({}, {})==0,"empty flightplan recovery is bounded");
-    MissionState rally{};
-    AircraftState rallyAircraft{};
-    rallyAircraft.position=plan.points[0];
-    auto const rallyGuidance=Guide(c,plan,rally,rallyAircraft);
-    Check(rallyGuidance.mode==GuidanceMode::Patrol && rallyGuidance.pathDistance==0
-        && std::hypot(rallyGuidance.target.north-plan.points[0].north,
-            rallyGuidance.target.east-plan.points[0].east)>0,
-        "rally guidance projects onto the racetrack and anticipates forward like Blue patrol");
-    rally.pathQualified=true;rally.waypoint=1;
-    auto const followGuidance=Guide(c,plan,rally,rallyAircraft);
-    Check(Near(followGuidance.target.north,plan.points[rally.waypoint].north)
-        && Near(followGuidance.target.east,plan.points[rally.waypoint].east),
-        "confirmed FOLLOW uses the fixed active waypoint like Blue patrol");
-    MissionState acquiring{};
-    rallyAircraft.airspeed=c.mission.patrolSpeed;
-    AdvanceMission(c,plan,acquiring,rallyAircraft,rallyAircraft);
-    Check(acquiring.rallyCorridorLatched && !acquiring.pathQualified,
-        "one in-corridor sample only arms RALLY acquisition");
-    AdvanceMission(c,plan,acquiring,rallyAircraft,rallyAircraft);
-    auto const acquiredGuidance=Guide(c,plan,acquiring,rallyAircraft);
-    Check(acquiring.pathQualified && acquiring.waypoint==1
-        && Near(acquiredGuidance.target.north,plan.points[1].north)
-        && Near(acquiredGuidance.target.east,plan.points[1].east),
-        "confirmed RALLY acquisition exposes the next fixed point rather than the point under the aircraft");
-    MissionState patrol{};
-    auto const midpoint=Scale(Add(plan.points[0],plan.points[1]),0.5);
-    auto before=At(c,0,0,600);before.position=Add(midpoint,Scale(RunwayRight(c.runway),-1500));
-    auto after=before;after.position=Add(before.position,Scale(RunwayRight(c.runway),0.2));
-    auto const toward=AdvanceMission(c,plan,patrol,before,after);
-    auto const away=AdvanceMission(c,plan,patrol,after,before);
-    Check(Channel(toward,Reward::Path)>Channel(away,Reward::Path)
-        && Channel(away,Reward::Path)<0 && !patrol.pathQualified && patrol.completedLaps==0,
-        "Blue-style patrol cost prefers recovery and penalizes retreat without qualifying a lap");
+    MissionState mission{};
+    mission.phase=phase;
+    return mission;
+}
+double SubstepGamma(Config const& c)
+{
+    return std::pow(c.training.gamma,1.0/static_cast<double>(c.mission.actionSubsteps));
+}
+constexpr std::array<Reward,3> PotentialChannels{Reward::Path,Reward::VerticalSpeed,Reward::Speed};
 
-    MissionState missed{};missed.waypoint=1;missed.pathQualified=true;missed.waypointsPassed=5;
-    auto const segment=Subtract(plan.points[1],plan.points[0]);
-    auto const tangent=Scale(segment,1/std::sqrt(Dot(segment,segment)));
-    before.position=Add(plan.points[1],Add(Scale(tangent,201),Scale(RunwayRight(c.runway),201)));
-    after.position=Add(before.position,Scale(tangent,1));
-    AdvanceMission(c,plan,missed,before,after);
-    Check(missed.waypoint!=1 && !missed.pathQualified && missed.waypointsPassed==0 && missed.completedLaps==0,
-        "a missed gate advances guidance through reacquisition without crediting a shortcut");
-
-    auto const outside=At(c,-4000,5000,600),intercepting=At(c,-4000,4999.8,599.8);
-    auto const fallback=ApproachStep(c,outside,intercepting);
-    Check(Channel(fallback,Reward::Path)==0 && Channel(fallback,Reward::Localizer)>0
-        && Channel(fallback,Reward::Glide)>0,
-        "approach uses only dense LOC/glide shaping without a competing path reward");
-    MissionState approach{};approach.phase=Phase::Approach;
-    auto const afterThreshold=At(c,1000,5000,600);
-    auto const acquisition=Guide(c,plan,approach,outside);
-    auto const overflight=Guide(c,plan,approach,afterThreshold);
-    Check(!acquisition.targetValid && !overflight.targetValid
-        && acquisition.target.north==outside.position.north
-        && overflight.target.north==afterThreshold.position.north,
-        "approach has no racetrack, intercept or runway point before or after overflight");
-}
-void MovingFrame(Config c)
+/** @brief Every shaping channel is gamma times the next potential minus the previous one. */
+void PotentialShaping()
 {
-    auto const previous=c.runway;
-    c.runway.origin={100,200,20};c.runway.headingDegrees+=12;c.runway.pitch=0.01;c.runway.roll=-0.01;
-    auto const before=At(c,-6000,2000,700);
-    auto aircraftBefore=before;aircraftBefore.position=FromRunway(previous,-6000,2000,700);
-    MissionState mission{};mission.phase=Phase::Approach;
-    auto const reward=AdvanceMission(c,MakeFlightPlan(c),mission,aircraftBefore,before,&previous);
-    Check(Near(Channel(reward,Reward::Localizer),0,1e-12) && Near(Channel(reward,Reward::Glide),0,1e-12),
-        "rigid runway motion alone does not create progress or convergence");
-    c.reward.localizerCourseBlend=-0.01;
-    Rejects([&] {Validate(c);},"negative LOC course blend rejected");
-    c.reward.localizerCourseBlend=1.01;
-    Rejects([&] {Validate(c);},"LOC course blend above one rejected");
-    c.reward.localizerCourseBlend=0.5;
-    c.reward.localizerInterceptGain=0.99;
-    Rejects([&] {Validate(c);},"LOC intercept gain below one rejected");
-    c.reward.localizerInterceptGain=4.01;
-    Rejects([&] {Validate(c);},"excessive LOC intercept gain rejected");
-    c.reward.localizerInterceptGain=2;
-    c.reward.localizerInterceptLimitDegrees=c.initial.bearingDegrees.maximum+3;
-    Rejects([&] {Validate(c);},"LOC intercept limit must exceed every initial course");
-    c.reward.localizerInterceptLimitDegrees=90;
-    Rejects([&] {Validate(c);},"LOC intercept limit below ninety degrees required");
+    auto const c=T6Config();
+    auto const before=At(c,-2500,200,200);
+    auto closer=At(c,-2400,200,200);closer.airspeed+=3;closer.velocity.up=-2;
+    auto const mission=Flying();
+    double const gamma=SubstepGamma(c);
+    auto forwardMission=mission,stationaryMission=mission;
+    auto const forward=AdvanceMission(c,forwardMission,before,closer);
+    auto const stationary=AdvanceMission(c,stationaryMission,before,before);
+    for(auto const channel : PotentialChannels)
+    {
+        double const phi0=Potential(c,mission,before,channel),phi1=Potential(c,mission,closer,channel);
+        Check(Near(Channel(forward,channel),gamma*phi1-phi0,1e-10)
+            && Near(Channel(stationary,channel),(gamma-1)*phi0,1e-10),
+            "a shaping channel is gamma times the next potential minus the previous potential");
+        Check(IsPotentialChannel(channel),"the channel is declared as a potential");
+    }
+    Check(Potential(c,mission,closer,Reward::Path)>Potential(c,mission,before,Reward::Path),
+        "getting closer increases the Path potential");
+    auto reversed=closer;reversed.velocity=Scale(before.velocity,-1);
+    auto reversedMission=mission;
+    auto const badDirection=AdvanceMission(c,reversedMission,before,reversed);
+    Check(Channel(badDirection,Reward::Direction)<Channel(forward,Reward::Direction),
+        "an opposite velocity has a greater direction cost");
+    for(auto const channel : {Reward::Touchdown,Reward::Stop,Reward::Crash})
+        Check(Channel(forward,channel)==0,"event rewards remain zero in flight");
+
+    auto timeoutMission=mission;
+    timeoutMission.steps=static_cast<std::uint64_t>(c.mission.maxSeconds/c.mission.physicsDt);
+    auto const timeout=AdvanceMission(c,timeoutMission,before,closer);
+    Check(timeout.truncated && !timeout.terminated,"the time limit truncates");
+    for(auto const channel : PotentialChannels)
+        Check(Near(Channel(timeout,channel),gamma*Potential(c,mission,closer,channel)-Potential(c,mission,before,channel),1e-10),
+            "a timeout retains the bootstrapped potentials");
+    auto invalid=before;invalid.finite=false;
+    auto crashMission=mission;
+    auto const crash=AdvanceMission(c,crashMission,before,invalid);
+    Check(crash.terminated && Near(Channel(crash,Reward::Crash),Weight(c.reward,Reward::Crash)),"a crash is terminal");
+    for(auto const channel : PotentialChannels)
+        Check(Near(Channel(crash,channel),-Potential(c,mission,before,channel)),"a crash clears every potential");
 }
+
+/** @brief A closed trajectory cannot farm any shaping potential. */
+void ShapingTelescopes()
+{
+    auto const c=T6Config();
+    auto mission=Flying();
+    auto const start=At(c,-2500,100,150);
+    auto closer=At(c,-2400,100,150);closer.airspeed=c.mission.approachSpeed-4;closer.velocity.up=-5;
+    double const gamma=SubstepGamma(c);
+    auto const forward=AdvanceMission(c,mission,start,closer);
+    auto const backward=AdvanceMission(c,mission,closer,start);
+    Check(!forward.terminated && !backward.terminated,"the loop stays in flight");
+    for(auto const channel : PotentialChannels)
+        Check(Near(Channel(forward,channel)+gamma*Channel(backward,channel),
+            (gamma*gamma-1)*Potential(c,Flying(),start,channel),1e-10),
+            "out-and-back shaping telescopes without a positive recurrent reward");
 }
+
+/** @brief Passing the threshold and the aim point, then rolling, never lowers the Path potential. */
+void PathAfterThreshold()
+{
+    auto const c=T6Config();
+    auto const approach=Flying();
+    double const aimAlong=AimPointAlongMeters(c);
+    double const justBefore=PathPotential(c,approach,At(c,aimAlong-1e-6,10,3));
+    double const justAfter=PathPotential(c,approach,At(c,aimAlong+1e-6,10,3));
+    Check(Near(justBefore,justAfter,1e-6),"the potential is continuous across the aim point");
+    double previous=0;
+    for(double along : {-3000.0,-1000.0,0.0,aimAlong})
+    {
+        double const potential=PathPotential(c,approach,At(c,along,0,ApproachPathHeight(c,along)));
+        Check(potential>previous,"descending the glide plane toward the aim point increases the potential");
+        previous=potential;
+    }
+    Check(Near(previous,Weight(c.reward,Reward::Path)),"the potential reaches its maximum at the aim point");
+    Check(Near(PathPotential(c,approach,At(c,aimAlong+300,0,5)),PathPotential(c,approach,At(c,aimAlong+1500,0,5))),
+        "flying along the runway past the aim point is neither rewarded nor penalized");
+    auto rollout=Flying(Phase::Rollout);rollout.touchedDown=true;
+    for(double along : {100.0,aimAlong,2000.0,3500.0})
+        Check(Near(PathPotential(c,rollout,At(c,along,5,1.5)),Weight(c.reward,Reward::Path)),
+            "rolling down the runway keeps the full potential: no contradiction with stopping");
+    auto stopped=rollout;stopped.outcome=Outcome::Stopped;
+    Check(PathPotential(c,stopped,At(c,2000,0,1.5))==0,"an absorbing stop carries no potential");
+}
+
+/** @brief The vertical-speed potential favours the commanded sink rate in flight only. */
+void VerticalSpeedShaping()
+{
+    auto const c=T6Config();
+    auto const mission=Flying();
+    auto aircraft=At(c,-3000,0,ApproachPathHeight(c,-3000));
+    double const weight=Weight(c.reward,Reward::VerticalSpeed);
+    double const target=TargetVerticalSpeed(Guide(c,mission,aircraft));
+    Check(target<-2 && target>-3.5,"the commanded sink on the 3-degree plane is about 2.9 m/s");
+    aircraft.velocity.up=target;
+    Check(Near(Potential(c,mission,aircraft,Reward::VerticalSpeed),0,1e-9),"the commanded sink has zero potential");
+    aircraft.velocity.up=target-1;
+    Check(Near(Potential(c,mission,aircraft,Reward::VerticalSpeed),-weight/VerticalSpeedErrorScaleMps,1e-9),
+        "a 1 m/s sink error costs half of the weight");
+    aircraft.velocity.up=target+1;
+    Check(Near(Potential(c,mission,aircraft,Reward::VerticalSpeed),-weight/VerticalSpeedErrorScaleMps,1e-9),
+        "climbing above the commanded sink is penalized symmetrically");
+    aircraft.velocity.up=-30;
+    Check(Near(Potential(c,mission,aircraft,Reward::VerticalSpeed),-weight),"the potential saturates at the weight");
+    auto flare=At(c,AimPointAlongMeters(c)+200,0,1);
+    double const flareTarget=TargetVerticalSpeed(Guide(c,mission,flare));
+    Check(flareTarget<0 && flareTarget>-1,"close to the deck the commanded sink becomes gentle");
+    auto rolling=At(c,800,0,1.5);rolling.weightOnWheels=true;rolling.velocity.up=-3;
+    Check(Potential(c,Flying(Phase::Rollout),rolling,Reward::VerticalSpeed)==0,"there is no vertical reference on the ground");
+}
+
+/** @brief The speed potential holds the target airspeed in flight and rewards braking on the ground. */
+void SpeedShaping()
+{
+    auto const c=T6Config();
+    double const weight=Weight(c.reward,Reward::Speed);
+    auto const mission=Flying();
+    auto aircraft=At(c,-6000,0,ApproachPathHeight(c,-6000));
+    double const target=Guide(c,mission,aircraft).targetSpeed;
+    aircraft.airspeed=target;
+    Check(Near(Potential(c,mission,aircraft,Reward::Speed),0,1e-9),"flying at the target airspeed has zero potential");
+    aircraft.airspeed=target+5;
+    Check(Near(Potential(c,mission,aircraft,Reward::Speed),-weight*5/AirspeedErrorScaleMps,1e-9),
+        "flying too fast is penalized in proportion to the error");
+    aircraft.airspeed=target-5;
+    Check(Near(Potential(c,mission,aircraft,Reward::Speed),-weight*5/AirspeedErrorScaleMps,1e-9),
+        "flying too slow is penalized as well");
+    auto const rollout=Flying(Phase::Rollout);
+    double previous=-1;
+    for(double speed : {c.mission.flareSpeed,40.0,20.0,5.0,0.0})
+    {
+        auto rolling=At(c,1000,0,1.5);rolling.weightOnWheels=true;rolling.velocity=Scale(RunwayForward(c.runway),speed);
+        double const potential=Potential(c,rollout,rolling,Reward::Speed);
+        Check(potential>previous,"slowing down on the ground increases the potential");
+        previous=potential;
+    }
+    Check(Near(previous,weight),"a stopped aircraft reaches the full potential");
+    auto touchdown=At(c,400,0,0.2);touchdown.velocity=Scale(RunwayForward(c.runway),c.mission.flareSpeed);
+    touchdown.airspeed=c.mission.flareSpeed;touchdown.flapPosition=c.initial.approachFlap;
+    auto onWheels=touchdown;onWheels.weightOnWheels=true;
+    Check(Near(Potential(c,mission,touchdown,Reward::Speed),0,1e-9)
+        && Near(Potential(c,rollout,onWheels,Reward::Speed),0,1e-9),
+        "an on-speed touchdown keeps the speed potential continuous");
+}
+
+/** @brief The touchdown quality rewards a gentle, on-speed contact in the touchdown zone. */
+void TouchdownQualityFactors()
+{
+    auto const c=T6Config();
+    auto Quality=[&c](double along,double cross,double sink,double speed)
+    {
+        MissionState mission{};
+        mission.touchdownFromThreshold=along;mission.touchdownCrossMeters=cross;
+        mission.touchdownSinkMps=sink;mission.touchdownSpeedMps=speed;
+        return TouchdownQuality(c,mission);
+    };
+    double const ideal=Quality(400,0,0,c.mission.flareSpeed);
+    Check(Near(ideal,1),"an ideal touchdown has full quality");
+    Check(Quality(400,0,1,52)<ideal && Quality(400,0,3,52)<Quality(400,0,1,52)
+        && Quality(400,0,1,52)>0.9 && Near(Quality(400,0,c.mission.maxTouchdownSink,52),0),
+        "the quality decreases quadratically with the sink rate");
+    Check(Quality(400,0,0,58)<ideal && Quality(400,0,0,c.mission.maxTouchdownSpeed)>=0.5-1e-12,
+        "a fast touchdown keeps at least half of the quality");
+    Check(Near(Quality(TouchdownZoneLengthMeters,0,0,52),1) && Quality(1500,0,0,52)<1
+        && Near(Quality(c.runway.lengthMeters/2,0,0,52),0),"a long landing loses its quality by mid-runway");
+    Check(Quality(-25,0,0,52)<ideal && Near(Quality(400,c.runway.widthMeters/2+c.runway.landingMarginMeters,0,52),0),
+        "a touchdown in the safety margin keeps a reduced quality");
+
+    auto landing=At(c,400,0,2.1);landing.velocity={52,0,-1};landing.airspeed=52;
+    auto wheels=landing;wheels.weightOnWheels=true;wheels.velocity.up=0;
+    auto landingMission=Flying();
+    auto const touchdown=AdvanceMission(c,landingMission,landing,wheels);
+    Check(landingMission.touchedDown && Near(landingMission.touchdownQuality,Quality(400,0,1,52))
+        && Near(Channel(touchdown,Reward::Touchdown),Weight(c.reward,Reward::Touchdown)*landingMission.touchdownQuality),
+        "a safe wheel contact is rewarded once with its quality");
+    wheels.velocity={};wheels.airspeed=0;
+    StepResult stop{};
+    for(int step=0;step<3000 && landingMission.outcome==Outcome::Flying;++step)
+        stop=AdvanceMission(c,landingMission,wheels,wheels);
+    Check(landingMission.outcome==Outcome::Stopped && Near(Channel(stop,Reward::Stop),Weight(c.reward,Reward::Stop)),
+        "the stop reward depends only on the landing area, not on the touchdown sink");
+}
+} // namespace
+
 int main()
 {
     try
     {
-        auto const config=LoadConfig(PPO_FLIGHT_CONFIG);
-        Convergence(config);ProgressAndAmplitude(config);SpeedAndSlopeShaping(config);SecondaryGuidance(config);MovingFrame(config);
+        PotentialShaping();
+        ShapingTelescopes();
+        PathAfterThreshold();
+        VerticalSpeedShaping();
+        SpeedShaping();
+        TouchdownQualityFactors();
     }
-    catch(std::exception const& error) {std::cerr<<error.what()<<'\n';return 1;}
-    std::cout<<"Flight guidance reward regressions passed\n";
+    catch(std::exception const& error)
+    {
+        std::cerr<<error.what()<<'\n';
+        return 1;
+    }
+    std::cout<<"Flight reward regressions passed\n";
 }

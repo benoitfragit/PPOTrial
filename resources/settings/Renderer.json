@@ -36,6 +36,7 @@
         "showMinimap": false,
         "showPatrolReferences": true,
         "showPatrolTrack": true,
+        "showPatrolWaypoints": true,
         "showPseudoLidar": false,
         "showSimulation": true,
         "trailDuration": 3.0999999046325684
