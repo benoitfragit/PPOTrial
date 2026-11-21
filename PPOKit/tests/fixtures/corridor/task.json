@@ -1,0 +1,15 @@
+{
+  "schema": "ppokit.task/1",
+  "name": "corridor",
+  "namespace": "ppokit::tests::corridor",
+  "observation": {
+    "state": { "fields": ["position", "elapsed"] }
+  },
+  "actions": {
+    "move": { "head": "gaussian", "names": ["step"], "bounds": [-1, 1], "map": "clip" }
+  },
+  "rewards": {
+    "Time": { "label": "Time cost" },
+    "Goal": { "label": "Goal reached" }
+  }
+}

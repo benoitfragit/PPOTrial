@@ -16,6 +16,8 @@ option(PPO_BUILD_FLIGHT_CONTROL "Build the native JSBSim FlightControl3D example
 if (PPO_BUILD_CORE_TESTS)
     enable_testing()
 endif()
+# PPOKit (only third-party dependency: nlohmann_json) is shared by every build flavour.
+add_subdirectory(PPOKit PPOKit)
 add_subdirectory(Framework/RL/Core Core)
 add_subdirectory(Framework/RL/Runtime Runtime)
 if (PPO_BUILD_CORE_TESTS)

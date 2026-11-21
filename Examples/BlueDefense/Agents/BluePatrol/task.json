@@ -1,0 +1,49 @@
+{
+  "schema": "ppokit.task/1",
+  "name": "blue_patrol",
+  "namespace": "ppo::examples::bluedefense::defenders::task",
+  "agents": { "min": 1, "max": 9 },
+  "observation": {
+    "own": { "size": 7 },
+    "lidar": { "size": 61 },
+    "role": { "size": 2 },
+    "red_tracks": { "set": { "capacity": 10, "features": 13, "mask": "last" } },
+    "blue_tracks": { "set": { "capacity": 8, "features": 9, "mask": "last" } },
+    "objective": { "set": { "capacity": 1, "features": 9, "mask": "last" } },
+    "patrol": { "size": 10 },
+    "global": { "size": 2 },
+    "team_counts": { "size": 2 }
+  },
+  "critic": {
+    "own": { "size": 156 },
+    "team_mean": { "size": 156 },
+    "team_max": { "size": 156 },
+    "living_fraction": { "size": 1 },
+    "team_fraction": { "size": 1 }
+  },
+  "actions": {
+    "motion": {
+      "head": "gaussian",
+      "names": ["turn", "acceleration"],
+      "bounds": [-1, 1],
+      "map": "clip"
+    }
+  },
+  "rewards": {
+    "PatrolTracking": { "label": "Patrol tracking" },
+    "FormationKeeping": { "label": "Formation keeping" },
+    "PursuitProgress": { "label": "Pursuit progress" },
+    "ControlEffort": { "label": "Control effort" },
+    "BlueSurvival": { "label": "Blue survival" },
+    "RedNeutralization": { "label": "Red neutralization" },
+    "ThreatContainment": { "label": "Threat containment" },
+    "ObjectiveSurvival": { "label": "Objective survival" },
+    "MissionOutcome": { "label": "Mission outcome" },
+    "Timeout": { "label": "Timeout" },
+    "BlueSeparation": { "label": "Blue separation" },
+    "RestrictedZoneClearance": { "label": "Restricted zone clearance" },
+    "BoundaryClearance": { "label": "Boundary clearance" },
+    "LowSpeedRisk": { "label": "Low speed risk" },
+    "OwnLoss": { "label": "Own loss" }
+  }
+}

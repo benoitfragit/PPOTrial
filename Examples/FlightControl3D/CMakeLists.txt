@@ -53,7 +53,9 @@ target_link_libraries(FlightControlSimulator PUBLIC FlightControlCore PRIVATE li
 
 add_library(FlightControlLearner STATIC Training/flight_learner.cpp Training/flight_model_store.cpp
     Training/flight_curriculum.cpp)
-target_link_libraries(FlightControlLearner PUBLIC FlightControlCore PRIVATE RLtools::Core)
+target_link_libraries(FlightControlLearner PUBLIC FlightControlCore PPOKit::Core PRIVATE RLtools::Core PPOKit::Artifacts)
+# Actor and critic types come from graph.json (PPOKit code generation).
+ppokit_generate_networks(TARGET FlightControlLearner TASK task.json GRAPH graph.json HEADER flight_networks.hpp)
 
 add_library(FlightControlRuntime STATIC Runtime/flight_session.cpp Runtime/flight_reward_tuning.cpp)
 target_include_directories(FlightControlRuntime PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Runtime")
@@ -76,6 +78,19 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     endforeach()
     # The golden trace is only frozen on its reference platform; elsewhere it reports a skip.
     set_tests_properties(FlightControl_golden_trace_tests PROPERTIES SKIP_RETURN_CODE 77)
+    # task.json (PPOKit) must describe the same observation, actions and rewards as the code.
+    add_executable(FlightControl_task_layout_tests tests/task_layout_tests.cpp)
+    target_link_libraries(FlightControl_task_layout_tests PRIVATE FlightControlRuntime)
+    ppokit_generate_task_layout(TARGET FlightControl_task_layout_tests TASK task.json HEADER flight_task_layout.hpp)
+    add_test(NAME FlightControl_task_layout_tests COMMAND FlightControl_task_layout_tests)
+    # graph.json (PPOKit) generates the same rl_tools networks as FlightLearner.
+    add_executable(FlightControl_network_parity_tests tests/network_parity_tests.cpp)
+    target_link_libraries(FlightControl_network_parity_tests PRIVATE FlightControlRuntime RLtools::Core)
+    target_compile_definitions(FlightControl_network_parity_tests PRIVATE
+        PPO_FLIGHT_CONFIG="${CMAKE_SOURCE_DIR}/resources/settings/Scenarios/FlightControl3D_T6_Joint.json")
+    ppokit_generate_networks(TARGET FlightControl_network_parity_tests
+        TASK task.json GRAPH graph.json HEADER flight_networks.hpp)
+    add_test(NAME FlightControl_network_parity_tests COMMAND FlightControl_network_parity_tests)
     target_sources(FlightControl_learner_tests PRIVATE tests/other_rltools_backend.cpp)
     target_link_libraries(FlightControl_learner_tests PRIVATE RLtools::Core)
 endif()

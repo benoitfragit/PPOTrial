@@ -347,8 +347,12 @@ int main()
         std::cout << "[FLIGHT_GOLDEN] fingerprint=" << Hex(fingerprint) << '\n';
 #if defined(__linux__) && defined(__x86_64__) && defined(__GLIBCXX__) && defined(__GNUC__) \
     && !defined(__clang__) && __GNUC__ == 13
-        // Frozen before the readability refactoring; identical in Debug and Release.
-        constexpr std::uint64_t Reference = 0x848d71c6725f735cULL;
+        // Master #106 with the shared PPOKit Gaussian, Bernoulli and surrogate formulas (user
+        // decision B). Master #106 alone gives 0xca32685b6f786e67: the 19 replayed episodes,
+        // their actions and outcomes are identical, only the last bits of log-probabilities and
+        // weights differ. Identical in Debug and Release. (Master still holds the pre-#87 value
+        // 0x848d71c6725f735c, never re-checked because CI runs GCC 15.)
+        constexpr std::uint64_t Reference = 0xf6a67df909590030ULL;
         Check(fingerprint == Reference, "golden trace changed: the refactoring altered model behaviour");
         std::cout << "Flight golden trace matches the pre-refactoring reference\n";
         return 0;

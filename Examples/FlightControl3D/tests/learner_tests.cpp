@@ -436,7 +436,7 @@ void GearPolicy(Config const& c)
     {
         policy.output[GearOutput]=logit;
         double const p=1/(1+std::exp(-logit));
-        Check(Near(GearEntropy(logit),-p*std::log(p)-(1-p)*std::log(1-p),1e-12),"Bernoulli gear entropy");
+        Check(Near(ppokit::heads::BernoulliEntropy(logit),-p*std::log(p)-(1-p)*std::log(1-p),1e-12),"Bernoulli gear entropy");
         for(double const other : {-0.4,0.7})
         {
             double const q=1/(1+std::exp(-other));

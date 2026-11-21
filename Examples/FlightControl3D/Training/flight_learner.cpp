@@ -23,7 +23,8 @@
  * Runtime/flight_session.cpp (collection loop).
  */
 #include "flight_learner.hpp"
-#include "flight_atomic_file.hpp"
+#include "ppokit/artifacts/atomic_file.hpp"
+#include "ppokit/core/gae.hpp"
 #include "flight_rng_checkpoint.hpp"
 // Upstream CPU headers define non-inline symbols. Use its supported namespace
 // wrapper so this backend can coexist with BlueDefense in the same executable.
@@ -32,6 +33,8 @@
 #include <rl_tools/nn/operations_cpu_mux.h>
 #include <rl_tools/nn_models/mlp_unconditional_stddev/operations_generic.h>
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
+// Generated from task.json + graph.json by ppokit-codegen (CMake: ppokit_generate_networks).
+#include "flight_networks.hpp"
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
@@ -48,11 +51,10 @@ void ComputeAdvantages(Transition* transitions, std::size_t count, TrainingSetti
     for (std::size_t index = count; index > 0; --index)
     {
         auto& row = transitions[index - 1];
-        // The recursion restarts at every episode boundary: the next row
-        // belongs to another episode, whatever the reason the episode ended.
-        bool const episodeEnded = row.terminated || row.truncated;
-        advantage = AdvantageDelta(row.reward, row.value, row.nextValue, row.terminated, settings.gamma)
-            + (episodeEnded ? 0 : settings.gamma * settings.lambda * advantage);
+        // A truncation (time limit) keeps its bootstrap; any episode end restarts the
+        // recursion, because the next row belongs to another episode.
+        advantage = ppokit::core::GaeStep(row.reward, row.value, row.nextValue, advantage,
+            settings.gamma, settings.lambda, row.terminated, row.truncated);
         row.advantage = advantage;
         row.target = advantage + row.value;
     }
@@ -102,22 +104,21 @@ using Device = rlt::devices::DEVICE_FACTORY<>;
 using Index = typename Device::index_t;
 using Optimizer = rlt::nn::optimizers::Adam<rlt::nn::optimizers::adam::Specification<float, Index>>;
 
-/** @brief Input layer, two hidden layers and output layer: three weight layers after the input. */
-constexpr Index NetworkLayers = 3;
 /** @brief Batch size of the per-sample forward and backward passes. */
 constexpr Index SingleSampleBatch = 1;
 
-template<Index Width, Index Outputs>
-using Structure = rlt::nn_models::mlp::StructureSpecification<float, Index, ObservationSize, Outputs,
-    NetworkLayers,
-    Width, rlt::nn::activation_functions::TANH, rlt::nn::activation_functions::IDENTITY, SingleSampleBatch,
-    rlt::MatrixStaticTag>;
-template<Index Width, Index Outputs>
-using Network = rlt::nn_models::mlp::NeuralNetworkAdam<rlt::nn_models::mlp::AdamSpecification<Structure<Width,
-    Outputs>>>;
+// The networks are described in graph.json: MLPs with two tanh hidden layers and identity
+// outputs. The hidden width is a template parameter, chosen at run time among the precompiled
+// widths (FlightLearner constructor), so one build serves every scenario.
+namespace networks = task::networks;
+static_assert(networks::Actor::Inputs == ObservationSize && networks::Actor::Outputs == PolicyOutputs,
+    "graph.json/task.json and the Flight policy contract disagree on the actor");
+static_assert(networks::Critic::Inputs == ObservationSize, "the Flight critic reads the actor observation");
+
 template<Index Width>
-using Actor = rlt::nn_models::mlp_unconditional_stddev::NeuralNetworkAdam<
-    rlt::nn_models::mlp::AdamSpecification<Structure<Width, PolicyOutputs>>>;
+using Actor = networks::Actor::Network<Index, SingleSampleBatch, Width, rlt::MatrixStaticTag>;
+template<Index Width>
+using Critic = networks::Critic::Network<Index, SingleSampleBatch, Width, rlt::MatrixStaticTag>;
 template<Index Columns>
 using Matrix = rlt::MatrixStatic<rlt::matrix::Specification<float, Index, 1, Columns>>;
 
@@ -295,7 +296,7 @@ class Learner final : public FlightLearner::Impl
 {
     Device device_{};
     Actor<Width> actor_{};
-    Network<Width, 1> critic_{};
+    Critic<Width> critic_{};
     Optimizer actorOptimizer_{};
     Optimizer criticOptimizer_{};
     Matrix<ObservationSize> input_{};
@@ -304,7 +305,7 @@ class Learner final : public FlightLearner::Impl
     Matrix<1> valueOutput_{};
     Matrix<1> valueDerivative_{};
     typename Actor<Width>::template Buffer<1, rlt::MatrixStaticTag> actorBuffer_{};
-    typename Network<Width, 1>::template Buffer<1, rlt::MatrixStaticTag> criticBuffer_{};
+    typename Critic<Width>::template Buffer<1, rlt::MatrixStaticTag> criticBuffer_{};
 
     /** @brief Copies a checked observation into the network input. */
     void Input(Observation const& observation)
@@ -660,7 +661,7 @@ public:
         // RLtools static matrices contain self-pointers: never use C++ copies.
         // Stage independent networks on the heap (including on Windows' small stack).
         auto candidateActor = std::make_unique<Actor<Width>>();
-        auto candidateCritic = std::make_unique<Network<Width, 1>>();
+        auto candidateCritic = std::make_unique<Critic<Width>>();
         rlt::forward(device_, actor_, input_, actorOutput_);
         rlt::forward(device_, critic_, input_, valueOutput_);
         rlt::copy(device_, device_, actor_, *candidateActor);
@@ -808,28 +809,26 @@ void FlightLearner::Record(Observation const& observation, PolicyAction const& a
     ++impl_->collected;
 }
 
+namespace {
+
+/** @brief Serializes the complete learner state (networks, Adam, RNG) into an artifact stream. */
+struct LearnerWriter final
+{
+    FlightLearner::Impl const& learner;
+    void operator()(std::ostream& stream) const { learner.Write(stream); }
+};
+
+} // namespace
+
 void FlightLearner::Save(std::filesystem::path const& path) const
 {
     if (impl_->collected != 0)
     {
         throw std::logic_error("FlightControl3D: save at an update boundary");
     }
-    if (!path.parent_path().empty())
-    {
-        std::filesystem::create_directories(path.parent_path());
-    }
-    auto temporary = path;
-    temporary += ".tmp";
-    {
-        std::ofstream stream(temporary, std::ios::trunc);
-        impl_->Write(stream);
-        stream.flush();
-        if (!stream)
-        {
-            throw std::runtime_error("FlightControl3D: checkpoint write failed");
-        }
-    }
-    detail::CommitTemporaryFile(temporary, path);
+    // The CI archives the ".previous" generation, so it is kept after the commit.
+    auto const options = ppokit::artifacts::AtomicWriteOptions::KeepingPrevious(".previous");
+    ppokit::artifacts::WriteFileAtomically(path, LearnerWriter{*impl_}, options, "FlightControl3D checkpoint");
 }
 
 void FlightLearner::Load(std::filesystem::path const& path)

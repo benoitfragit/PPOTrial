@@ -7,10 +7,10 @@
  * identical existing generation), then atomically replace best/current.json. A crash at
  * any point leaves the previous manifest and generation readable.
  *
- * Read next: flight_model_store.hpp, flight_atomic_file.hpp.
+ * Read next: flight_model_store.hpp, PPOKit/include/ppokit/artifacts/atomic_file.hpp.
  */
 #include "flight_model_store.hpp"
-#include "flight_atomic_file.hpp"
+#include "ppokit/artifacts/atomic_file.hpp"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <iomanip>
@@ -153,21 +153,20 @@ void RemovePendingCandidate(std::filesystem::path const& pending)
     std::filesystem::remove(backup);
 }
 
+/** @brief Serializes the BEST manifest as indented JSON followed by a newline. */
+struct ManifestWriter final
+{
+    Json const& manifest;
+    void operator()(std::ostream& stream) const { stream << manifest.dump(ManifestIndent) << '\n'; }
+};
+
 /** @brief Writes the manifest to a temporary file, then atomically replaces the pointer. */
 void CommitPointer(std::filesystem::path const& path, Json const& json)
 {
-    auto temporary = path;
-    temporary += ".tmp";
-    {
-        std::ofstream stream(temporary, std::ios::trunc);
-        stream << json.dump(ManifestIndent) << '\n';
-        stream.flush();
-        if (!stream)
-        {
-            throw std::runtime_error("FlightControl3D: BEST manifest write failed");
-        }
-    }
-    detail::CommitTemporaryFile(temporary, path);
+    // The manifest directory exists with the BEST checkpoint; a missing one is an error.
+    auto options = ppokit::artifacts::AtomicWriteOptions::KeepingPrevious(".previous");
+    options.createParentDirectories = false;
+    ppokit::artifacts::WriteFileAtomically(path, ManifestWriter{json}, options, "FlightControl3D BEST manifest");
 }
 
 /** @brief Manifest of a promoted generation; the key set is a compatibility contract. */

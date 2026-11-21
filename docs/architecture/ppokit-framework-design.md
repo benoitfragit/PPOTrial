@@ -1,0 +1,1104 @@
+# PPOKit — framework commun PPO/MAPPO, backends rl_tools et libtorch, codegen et studio
+
+> Statut : **document de conception**, aucune modification de code.
+> Nom de travail : `PPOKit` (bibliothèque `ppokit`, namespace `ppokit`).
+> Le nom est provisoire.
+
+## 0. Portée et garde-fous
+
+**Dans la portée : les trois exemples.**
+- BlueDefense, c'est-à-dire le MAPPO Blue généralisé
+  (`Examples/BlueDefense/Agents/BluePatrol`), sur le backend rl_tools.
+- FlightControl3D (`Examples/FlightControl3D`), sur le backend rl_tools.
+- Airspace (`Examples/Airspace` : agents Interception/SNA et Mission/RLMission),
+  sur le backend **libtorch**, caché derrière le même frontal (§3.1). La chaîne
+  `Framework/RL/PPO` et `Framework/RL/Bindings` devient un détail
+  d'implémentation de ce backend, puis disparaît.
+
+**Contrainte sur RLMission :** BlueDefense utilise la politique de production
+RLMission pour ses Rouges, et l'AGENTS.md interdit de la modifier pendant
+l'évolution du MAPPO. Sa migration est donc une **étape séparée et la
+dernière** (§16, étape 11). Elle exige l'approbation explicite de
+l'utilisateur et une parité d'inférence sur le modèle `model.pt` existant.
+Jusque-là, BlueDefense continue de charger RLMission par la chaîne actuelle.
+
+**Exemples de référence :** à la fin de la migration, les trois exemples ont
+la même structure et servent de modèles pour un nouvel utilisateur (§13.1).
+
+**Invariants à respecter pendant toute la migration :**
+- Aucun canal de récompense Blue n'est ajouté, renommé, repondéré ou renormalisé.
+  Les 15 canaux de `GeneralizedRewardChannel` et les 7 canaux (depuis #87) de
+  `flight::Reward` sont transcrits à l'identique.
+- Les capacités 1..9 Bleus / 0..10 Rouges, le masquage et les permutations sont
+  préservés.
+- Physique, politiques, calcul des récompenses et adaptation ECS restent
+  séparés. PPOKit ne connaît ni EnTT ni JSBSim.
+- Aucune allocation dans les boucles par pas : acteur, critique, observation,
+  récompense.
+- Chaque étape de migration est validée par une trace bit-identique, ou par
+  une différence justifiée et approuvée explicitement. Les tests unitaires ne
+  prouvent pas la convergence : l'évaluation multi-seed indépendante reste
+  obligatoire.
+
+## 1. Objectifs
+
+1. Une seule implémentation, testée une fois, de ce qui est aujourd'hui
+   dupliqué : rollout, GAE (terminé ≠ tronqué), surrogate PPO clippé, entropie,
+   optimisation, MAPPO (critique centralisé, masques), checkpoints atomiques,
+   état RNG.
+2. Un moteur générique d'observations (schéma, normalisation, masques) et de
+   récompenses (canaux nommés, poids, agrégation). Les **termes** restent chez
+   le client.
+3. Des têtes de sortie composables : catégorielle, Bernoulli, gaussienne
+   (bornée par clip ou tanh), et composite.
+4. Un graphe de réseau décrit en JSON, exécuté par l'un des deux backends :
+   **compilé par génération de code** vers rl_tools, ou construit à
+   l'exécution avec libtorch. Aucun des deux n'est exposé au client.
+5. Un cycle outillé **design → codegen → entraînement → évaluation →
+   inférence**, avec identité vérifiable des artefacts.
+6. Des composants DLL boîte noire, déclarés par leurs ports et capacités et
+   câblés librement dans le graphe, via une ABI C et un SDK C++.
+7. Un studio ImGui + imnodes + ImPlot, construit **en dernier**, sur des
+   formats déjà stabilisés.
+
+**Non-objectifs :**
+- Un moteur de simulation commun.
+- Une autodiff générale.
+- L'exécution dynamique de graphes à dimensions variables à l'exécution.
+
+## 2. Vue d'ensemble
+
+```
+graph.json ─┐
+task.json  ─┼─► ppokit-codegen ─► <model>_generated.hpp/.cpp ─┐
+components/*.manifest.json ─┘                                     │
+                                                               ▼
+client C++ (Task / HostedAgent, hooks) ──► ppokit runtime ◄── backend rl_tools | libtorch (privé)
+                                             │
+              ┌──────────────────────────────┼──────────────────────────┐
+              ▼                              ▼                          ▼
+        Trainer (owned/hosted)        Evaluator (suites)          Inference (forward seul)
+              │                              │                          │
+              ▼                              ▼                          ▼
+     artefacts training/policy        rapports JSON, rejeu      artefact promoted
+              └──────────── télémétrie / commandes ──► Studio (GUI) ou CLI headless
+```
+
+Sens des dépendances : `client → ppokit (API publique) → ppokit/backend
+(privé)`. L'API publique n'inclut aucun en-tête rl_tools, JSBSim, EnTT, raylib
+ni ImGui.
+
+## 3. Modules
+
+| Module | Contenu | Dépend de |
+|---|---|---|
+| `ppokit/core` | Tampons de rollout à capacité fixe, GAE templaté sur le scalaire, surrogate PPO, entropie, statistiques d'update, ordonnancement des minibatches, RNG sérialisable | STL |
+| `ppokit/schema` | Lecture et validation de `task.json`, layouts d'observation, d'action et de scénario, hash canonique | core, nlohmann_json |
+| `ppokit/obs` | Normaliseurs (fixe, running mean-std, clip, custom), application des masques, vérification des valeurs finies | schema |
+| `ppokit/reward` | Canaux nommés, poids, agrégation par agent et par équipe, snapshots par canal | schema |
+| `ppokit/heads` | Têtes catégorielle, Bernoulli, gaussienne, composite : échantillonnage, log-prob, entropie, gradient, action déterministe | core |
+| `ppokit/blocks` | Dense, activations, Concat/Split, encodeur par entité, attention masquée, pooling masqué | backend |
+| `ppokit/backend/rltools` | **Privé.** Instanciation rl_tools, Adam, buffers, une seule cible CMake (supprime `RL_TOOLS_NAMESPACE_WRAPPER`) | rl_tools |
+| `ppokit/backend/torch` | **Privé.** Construction du graphe en `torch::nn`, autograd, Adam libtorch, absorbe `Framework/RL/PPO` et `Framework/RL/Bindings` | libtorch |
+| `ppokit/runtime` | Trainer owned/hosted, MAPPO, curriculum, évaluation périodique et promotion, budgets, télémétrie et commandes | tous les précédents |
+| `ppokit/eval` | Suites, grilles, gates, rapports, rejeu | runtime |
+| `ppokit/artifacts` | Formats de checkpoint, en-têtes d'identité, écriture atomique, migrations | core |
+| `ppokit/component` | Chargement des DLL, ABI C des composants boîte noire, SDK C++ | core |
+| `ppokit-codegen` | Exécutable JSON → C++ | schema |
+| `ppokit-studio` | Éditeur imnodes, suivi des runs, rapports | runtime, eval, imgui, imnodes, implot |
+
+### 3.1 Deux backends, un seul frontal
+
+| | `backend/rltools` | `backend/torch` |
+|---|---|---|
+| Réseaux | Code généré depuis `graph.json` (§7), dimensions figées | Graphe construit **à l'exécution** depuis le même `graph.json` (modules `torch::nn`), sans recompilation |
+| Types client (`Obs`, `Action`, `Rewards`…) | Générés | Générés, identiques |
+| Gradient | Forward et backward explicites | Autograd |
+| Composants DLL (§12) | Appel à la table C | Enveloppés dans une `torch::autograd::Function` qui appelle `forward` et `backward` de la table C |
+| Exemples | BlueDefense, FlightControl3D | Airspace |
+| Option CMake | toujours présent | `PPOKIT_WITH_TORCH` (par défaut ON, car le desktop actuel lie libtorch) |
+
+**Règles :**
+- Le backend est choisi dans `graph.json` (`"backend": "rltools"` ou
+  `"torch"`). Le client ne change pas une ligne de code pour passer de l'un à
+  l'autre.
+- Aucun en-tête rl_tools ni libtorch n'apparaît dans l'API publique. Le
+  frontal manipule des buffers plats et les types générés.
+- Les deux backends **coexistent dans le même processus**. C'est nécessaire
+  pour BlueDefense : MAPPO Blue sur rl_tools et Rouges RLMission sur libtorch.
+- Les têtes, le GAE, le surrogate PPO, les schémas, les artefacts,
+  l'évaluation et le runtime sont communs. Seuls l'acteur, le critique et
+  l'optimiseur sont propres au backend.
+- **Parité :** à l'intérieur d'un backend, l'exigence de traces identiques au
+  bit près demeure. Entre backends, il n'y a pas de bit-exactitude. Il y a un
+  test de parité du forward à tolérance fixée, sur des poids convertis, pour
+  les graphes sans composant, et une comparaison statistique par évaluation
+  multi-seed pour l'entraînement.
+- Les artefacts portent leur backend (§8). Un convertisseur de poids
+  rl_tools ↔ torch est fourni pour les blocs intégrés.
+- La compatibilité ABI Windows Debug/Release de libtorch, déjà traitée dans
+  `generic-rl-core.md`, reste à la charge du backend torch.
+
+## 4. Contrat client
+
+Le client fournit deux choses :
+- des **données** (JSON) : formes, bornes, normalisations, scénarios,
+  curricula, suites d'évaluation, graphe ;
+- du **code** (C++) : sémantique, physique, valeur des features, termes de
+  récompense, métriques.
+
+Règle de séparation : **tout ce qui change une dimension ou une borne passe
+par le JSON**, donc par le codegen. Tout ce qui porte du sens reste en C++.
+
+### 4.1 Fichiers
+
+| Fichier | Rôle | Versionné dans git |
+|---|---|---|
+| `task.json` | Observations, actions, rôles, entrée du critique, canaux de récompense, espace de scénarios, métriques | oui |
+| `graph.json` | Réseaux acteur et critique, blocs, têtes | oui |
+| `train.json` | Hyperparamètres PPO, curriculum, budgets, évaluation périodique, promotion | oui |
+| `eval/*.json` | Suites d'évaluation | oui |
+| `*_generated.*` | Sortie du codegen | non (dossier de build) |
+
+### 4.2 Types générés
+
+À partir de `task.json`, le codegen produit, pour une tâche `Flight` :
+- `FlightObs` et `FlightCriticInput`, avec des champs nommés, plus des vues
+  sur les ensembles masqués ;
+- `FlightAction`, décodée et bornée ;
+- `FlightRewards`, un champ par canal ;
+- `FlightScenario` et `FlightMetrics` ;
+- `FlightSpec`, qui regroupe les constantes de dimension et le hash du schéma.
+
+Le client ne manipule ni indice ni tenseur.
+
+### 4.3 Mode Owned : le framework mène la boucle
+
+Cas de FlightControl3D.
+
+```cpp
+class FlightTask final : public ppokit::Task<FlightSpec>
+{
+public:
+    void Reset(FlightScenario const& scenario, ppokit::Rng& rng, FlightObs& obs) override;
+    ppokit::StepEnd Step(FlightAction const& action, FlightObs& obs, FlightRewards& rewards) override;
+    void EpisodeMetrics(FlightMetrics& metrics) const override;
+    // Optionnels :
+    void StepMetrics(FlightMetrics& metrics) const override;
+    void AdaptAction(FlightAction& action) const noexcept override;
+};
+PPOKIT_REGISTER_TASK("flight", FlightTask);
+```
+
+`StepEnd` vaut `{ Running, Terminated, Truncated }`. GAE annule le bootstrap
+sur `Terminated` et coupe la trace sur `Terminated` et `Truncated`, ce qui
+reproduit le comportement actuel de `ComputeAdvantages`.
+
+### 4.4 Mode Hosted : l'hôte mène la boucle
+
+Cas de BlueDefense, où l'ECS de `Framework/Simulation` appelle `ChooseAction`
+et `SetNewState`.
+
+```cpp
+template<class Spec>
+class HostedDriver
+{
+public:
+    void BeginEpisode(typename Spec::Scenario const& scenario, std::uint64_t seed);
+    // Remplit une action par slot vivant ; les slots masqués sont ignorés.
+    void Act(ppokit::AgentSlots<typename Spec::Obs const> observations,
+             typename Spec::CriticInputs const& critic,
+             ppokit::AgentSlots<typename Spec::Action> actions);
+    // Une fin par agent (perte individuelle) et une fin d'épisode.
+    void Observe(ppokit::AgentSlots<typename Spec::Rewards const> rewards,
+                 ppokit::AgentEnds const& agentEnds, ppokit::StepEnd episodeEnd);
+    ppokit::Telemetry Snapshot() const noexcept;
+    void Command(ppokit::Command const& command) noexcept;
+};
+```
+
+`GeneralizedPatrolMappoAgent` devient un adaptateur ECS mince, qui garde
+`ppo::model::IAgent` vers l'hôte et délègue au `HostedDriver`. Ce que
+l'adaptateur conserve :
+- l'ordre des slots physiques ;
+- la succession du leader ;
+- la correspondance rôle → index physique ;
+- les snapshots avant et après le pas.
+
+Le framework exige seulement que les slots soient stables pendant un épisode.
+
+### 4.5 Hooks
+
+| Hook | Usage | Exemple existant |
+|---|---|---|
+| `AdaptAction` | Règle métier après décodage et bornage | Consigne de throttle de référence, `ApplyPhaseControls` (Flight) |
+| Fournisseur de références | Calcul non appris injecté dans l'observation | `GeneralizedPatrolWaypointSequencer`, `guidancePose` (Blue) ; `Guide` (Flight) |
+| Normaliseur custom | `"norm": "custom:<nom>"` | Enroulement de cap |
+| `StepMetrics` | Métrique continue | RMS d'erreur de glide |
+
+Les hooks sont des fonctions nommées enregistrées, sans lambda capturante
+(AGENTS.md).
+
+## 5. Schémas JSON
+
+Chaque fichier porte `"schema": "ppokit.<type>/<major>.<minor>"`. Un champ
+inconnu est une erreur, pas un avertissement.
+
+### 5.1 `task.json`
+
+```json
+{
+  "schema": "ppokit.task/1.0",
+  "name": "flight",
+  "agents": { "capacity": [1, 1], "roles": [] },
+  "observation": {
+    "groups": {
+      "own": { "fields": {
+        "airspeed": { "norm": { "scale": 0.01 }, "clip": [-5, 5] },
+        "glideErr": { "norm": "running" } } },
+      "tracks": { "set": true, "capacity": 10, "masked": true,
+                  "fields": { "range": { "norm": { "scale": 1e-4 } } } }
+    }
+  },
+  "critic": { "source": "actor" },
+  "action": {
+    "controls": { "head": "gaussian", "size": 4, "bounds": [-1, 1], "map": "clip",
+                  "logStd": { "init": -0.5, "learned": true } },
+    "gear":     { "head": "bernoulli" }
+  },
+  "rewards": { "path": {}, "localizer": {}, "crash": {} },
+  "scenario": {
+    "windKt":    { "type": "float", "range": [0, 25] },
+    "placement": { "type": "enum", "values": ["aligned", "loc", "glide", "random"] }
+  },
+  "metrics": { "landed": { "type": "bool" }, "glideRms": { "type": "float" } }
+}
+```
+
+Points clés :
+- **Groupes** : l'ordre de déclaration fixe l'ordre des offsets. Un groupe
+  `set` produit `capacity × fields` valeurs et un masque.
+- **Rôles** : `"roles": ["leader", "wingman"]` génère une entrée one-hot ou
+  scalaire, au choix (`"roleEncoding"`). La valeur est fournie par le client.
+- **`critic`** : `"source": "actor"` réutilise l'observation de l'acteur.
+  `"source": "custom"` déclare des groupes propres, avec `"perAgent": true`
+  pour une entrée conditionnée par participant (critique Blue de 470 entrées).
+- **`rewards`** : les poids et normalisations par défaut sont neutres (poids 1,
+  sans normalisation). Les valeurs effectives, y compris la normalisation P/N
+  de Blue, sont transcrites telles qu'elles existent aujourd'hui, sans
+  modification.
+- **Versionnement** : le hash canonique de `observation` remplace les
+  constantes manuelles comme `GeneralizedObservationLayout::Version = 10`. On
+  peut garder un alias lisible (`"version": 10`) pour la compatibilité.
+
+### 5.2 `graph.json`
+
+```json
+{
+  "schema": "ppokit.graph/1.0",
+  "task": "flight",
+  "backend": "rltools",
+  "scalar": "float",
+  "actor": {
+    "nodes": [
+      { "id": "in",  "type": "input", "from": "observation" },
+      { "id": "mlp", "type": "dense_stack", "widths": [128, 128, 128], "activation": "tanh" },
+      { "id": "out", "type": "heads", "from": "action" }
+    ],
+    "edges": [["in", "mlp"], ["mlp", "out"]]
+  },
+  "critic": {
+    "nodes": [
+      { "id": "in", "type": "input", "from": "critic" },
+      { "id": "v",  "type": "dense_stack", "widths": [256, 256], "activation": "tanh" },
+      { "id": "value", "type": "value" }
+    ],
+    "edges": [["in", "v"], ["v", "value"]]
+  },
+  "init": { "seed": "train", "scheme": "rl_tools_default" }
+}
+```
+
+- Types de nœuds de la v1 : `input`, `dense`, `dense_stack`, `activation`,
+  `concat`, `split`, `entity_encoder`, `masked_attention`, `masked_pool`,
+  `heads`, `value`, `component:<nom>@<version>` (§12).
+- `input.from` peut viser un groupe (`"observation.tracks"`) pour router les
+  ensembles vers un encodeur par entité.
+- Les arêtes relient des nœuds ou des ports nommés (`"filter.out:features"`).
+- Le codegen vérifie : formes, acyclicité, présence et unicité de
+  `heads`/`value`, cohérence avec `task.json` et les manifestes des
+  composants, masques propagés jusqu'aux blocs qui les consomment, et règles
+  de câblage de §12.4.
+
+### 5.3 `train.json`
+
+```json
+{
+  "schema": "ppokit.train/1.0",
+  "ppo": { "gamma": 0.99, "lambda": 0.95, "clip": 0.2, "epochs": 10, "minibatch": 256,
+           "rolloutSteps": 4096, "learningRate": 3e-4, "entropy": 0.0, "valueCoef": 0.5,
+           "maxGradNorm": 0.5, "targetKL": null },
+  "device": "auto",
+  "seed": 1,
+  "budget": { "updates": 2000, "mode": "total" },
+  "curriculum": [
+    { "name": "glide",
+      "sample": { "placement": "glide", "windKt": { "uniform": [0, 5] } },
+      "promote": { "metric": "landed", "gate": ">= 0.8", "window": 200 } },
+    { "name": "joint",
+      "sample": { "placement": { "choice": { "aligned": 0.6, "random": 0.4 } },
+                  "windKt": { "uniform": [0, 25] } },
+      "rehearse": { "loc": 0.1 } }
+  ],
+  "periodicEvaluation": { "every": 50, "suite": "eval/smoke.json",
+                          "promoteOn": { "metric": "landed", "rule": "max" } },
+  "checkpoint": { "every": 10, "keep": 5 }
+}
+```
+
+- Échantillonneurs : `fixed`, `uniform`, `normal` (bornée par le schéma),
+  `choice` pondéré.
+- `rehearse` généralise `locReminderProbability` (Flight).
+- `budget.mode` vaut `"total"` ou `"additional"`, comme `TrainingBudget`.
+- `device` vaut `"cpu"`, `"cuda"` ou `"auto"` (§13.6). Il n'agit que sur le
+  backend torch en v1.
+- La signification de chaque paramètre PPO est décrite en §13.4.
+
+### 5.4 `eval/*.json`
+
+```json
+{
+  "schema": "ppokit.eval/1.0",
+  "suite": "landing-regression",
+  "grid": { "windKt": [0, 10, 20], "placement": ["aligned", "loc"] },
+  "cases": [ { "name": "crosswind-max", "windKt": 25 } ],
+  "seeds": [101, 202, 303],
+  "episodes": 20,
+  "policy": "deterministic",
+  "gates": { "landed": ">= 0.9", "crash": "<= 0.02" }
+}
+```
+
+## 6. Têtes de sortie
+
+Chaque tête implémente : `Sample(rng)`, `LogProb(action)`, `Entropy()`,
+`Deterministic()`, `Backward(dLogProb, dEntropy)`.
+
+| Tête | Paramètres réseau | Action déterministe | Notes |
+|---|---|---|---|
+| `categorical` | logits `K` | argmax | log-softmax stable, masque d'actions optionnel (logits masqués à −∞) |
+| `bernoulli` | logit | p > 0,5 | |
+| `gaussian` | moyenne `n`, log-std (paramètre libre ou sortie réseau) | moyenne | log-prob et entropie calculées sur le **latent** ; `map: clip` ou `map: tanh` appliqué après |
+| `composite` | concaténation | composante par composante | log-prob = somme, entropie = somme (têtes indépendantes) |
+
+**Compatibilité Flight :** depuis #87, `flight_policy.hpp` utilise une tête
+gaussienne seule (5 actions, log-std indépendant de l'état, latent clippé), avec
+un gradient exact du surrogate. La tête `gaussian(map: clip)` doit reproduire
+ces valeurs au bit près ; la tête composite reste exercée par ses propres tests.
+
+**`map: tanh` :** il faut choisir explicitement entre deux variantes :
+- log-prob sur le latent (cohérent avec le clip actuel) ;
+- log-prob corrigée du jacobien.
+
+Le défaut de la v1 est la log-prob sur le latent, pour aligner les deux modes.
+
+## 7. Génération de code
+
+- **Entrées** : `graph.json`, `task.json`, manifestes des composants.
+- **Sorties** :
+  - `<model>_generated.hpp` : types de §4.2 et `Spec` ;
+  - `<model>_generated.cpp` : instanciation rl_tools, forward, backward,
+    sérialisation des paramètres.
+- **Déterminisme** : à entrée identique, sortie identique octet pour octet.
+  Le fichier généré porte en en-tête le hash des entrées et la version du
+  générateur.
+- **CMake** : `ppokit_add_model(<target> GRAPH graph.json TASK task.json)`
+  ajoute une commande personnalisée et une bibliothèque statique. Tout
+  changement de JSON déclenche une régénération. Les répertoires
+  `build/debug` et `build/release` restent les seuls utilisés (AGENTS.md).
+- **Composants** : un nœud `component:` génère un appel à la table d'appels
+  de la DLL, avec les formes résolues au câblage. Le composant n'est pas
+  inliné.
+- **Test d'acceptation n°1** : régénérer les réseaux actuels (MLP Flight,
+  acteur à attention et critique Blue) depuis JSON, avec une sortie forward
+  identique et des gradients identiques sur des entrées fixées.
+
+## 8. Artefacts et identité
+
+| Type | Contenu | Usage |
+|---|---|---|
+| `training` | Paramètres acteur et critique, état Adam, RNG (`mt19937` portable), statistiques des normaliseurs, étape de curriculum, compteurs d'updates, budget | Reprise exacte |
+| `policy` | Paramètres de l'acteur, statistiques des normaliseurs | Évaluation, inférence |
+| `promoted` | `policy` avec le score et le rapport d'évaluation qui l'ont promu | Production |
+
+**En-tête commun :**
+- magic et version du format ;
+- `backend` (`rltools` ou `torch`) ;
+- `taskHash`, `graphHash`, `generatorVersion`, `scalar` ;
+- hash du binaire, du manifeste et de la configuration de chaque composant ;
+- horodatage et seed d'entraînement.
+
+**Règles :**
+- Au chargement, tout hash incompatible est **refusé**, sauf migration
+  déclarée explicitement.
+- L'écriture est atomique : fichier temporaire, flush, puis renommage. Une
+  seule implémentation remplace les quatre actuelles.
+- Les sauvegardes se font uniquement à une frontière d'update, comme
+  aujourd'hui dans `FlightLearner::Save` et `SaveAtUpdateBoundary`.
+
+**Migration des formats existants** (Blue V7 / obs v10, checkpoints Flight) :
+un convertisseur ponctuel lit l'ancien format, vérifie la correspondance des
+formes et écrit le nouveau. Les anciens lecteurs restent disponibles jusqu'à
+la fin de la migration.
+
+### 8.1 Reprise des modèles existants
+
+Les modèles déjà entraînés des trois exemples doivent rester utilisables
+**en inférence et en reprise d'entraînement**, sans repartir de zéro.
+
+| Exemple | Ancien format | Reprise d'entraînement | Inférence |
+|---|---|---|---|
+| BlueDefense | Acteur v10, training V7, production promue | Training V7 → `training` : poids acteur et critique, Adam, RNG, compteurs, étape de curriculum | Production → `promoted` |
+| FlightControl3D | Checkpoint learner, meilleur modèle du `FlightModelStore` | → `training` | Meilleur modèle → `promoted` |
+| Airspace | `model.pt` (SNA, RLMission) | → `training` (backend torch) si l'état de l'optimiseur est présent, sinon reprise avec Adam réinitialisé et un avertissement explicite | → `policy` / `promoted` |
+
+**Règles :**
+- `ppokit-import <exemple> <ancien-fichier>` convertit, vérifie les formes et
+  écrit l'artefact. Le chargeur reconnaît aussi l'ancien format directement,
+  pour que les raccourcis actuels (`.bat`, `PPO.exe`) continuent de marcher
+  pendant la migration.
+- **Critères d'acceptation** :
+  - même action déterministe, avant et après conversion, sur un jeu d'états
+    fixé ;
+  - pour la reprise d'entraînement, la première update après conversion
+    produit les mêmes poids, au bit près pour rl_tools et à tolérance fixée
+    pour torch, que l'ancienne chaîne à partir du même checkpoint.
+- Un ancien checkpoint dont la forme ne correspond plus au `task.json` est
+  refusé, avec un message qui donne les dimensions attendues et trouvées.
+
+## 9. Entraînement
+
+- **Runner pas à pas** : `Tick(maxSteps)` avance d'au plus N pas, sans jamais
+  dépasser une frontière d'update. Il sert aussi bien au desktop
+  (`FlightSession::Tick`, `ContinueTraining`) qu'au headless
+  (`flight_headless`).
+- **MAPPO** :
+  - acteur partagé ;
+  - critique centralisé conditionné par participant ;
+  - fins d'épisode par agent (`OwnLoss`) ;
+  - masques de slots vivants ;
+  - permutation des pistes, vérifiée par un test d'invariance.
+- **Évaluation périodique et promotion** : le runner suspend la collecte,
+  exécute la suite configurée sur des seeds dédiés, puis promeut le modèle si
+  la règle est satisfaite. Il reprend ensuite en restaurant exactement l'état
+  du générateur d'épisodes, comme `RestoreTrainingInitializer` aujourd'hui.
+  Ce service remplace `StartEvaluation` et `PromoteEvaluatedActor` (Blue),
+  ainsi que `StartValidation` et `FlightModelStore::LoadBest` (Flight).
+- **Télémétrie** : un snapshot publié sous verrou ou en double tampon, qui
+  contient :
+  - les statistiques d'update (KL, clip fraction, entropie, perte de valeur) ;
+  - les récompenses par canal ;
+  - l'étape de curriculum ;
+  - les métriques d'évaluation.
+- **Commandes** : pause, reprise, sauvegarde, évaluation immédiate,
+  changement de mode (entraînement ou inférence).
+- **Garde d'échec** : toute valeur non finie fait échouer le learner, avec
+  reprise depuis un checkpoint valide, comme `FlightLearner::Impl::Check`.
+
+## 10. Évaluation
+
+- Seeds **disjoints** de ceux de l'entraînement, vérifiés au chargement.
+- Mode `deterministic` ou `stochastic`.
+- Agrégations : `rate`, `mean`, `p50`, `p95`, `max`.
+- Gates exprimés par des comparaisons simples.
+- Rapport JSON par cellule de grille et par cas, avec intervalles de
+  confiance binomiaux pour les taux.
+- **Rejeu** : chaque épisode est identifié par (`scenario`, `seed`,
+  `artifactHash`). Le studio peut le rejouer, et un épisode raté peut être
+  exporté comme `case` de régression.
+- Suites types :
+  - `smoke` : CI, quelques épisodes ;
+  - `regression` ;
+  - `heldout` : hors de la distribution d'entraînement.
+- Remplace `GeneralizedEvaluationCampaign` et `generalized_evaluation_metrics`.
+  Les règles de rejet des campagnes incomplètes déjà en place sont conservées
+  (`generic-rl-core.md`).
+
+## 11. Inférence
+
+- Bibliothèque `<model>_inference` : forward de l'acteur seul, sans Adam, sans
+  rollout et sans critique.
+- Action déterministe par tête (§6), puis `AdaptAction`.
+- Remplace `GeneralizedPatrolProductionPolicy`.
+- Test de parité : la sortie d'inférence est égale à l'action déterministe
+  calculée par le learner sur les mêmes entrées.
+
+## 12. Composants externes (DLL boîte noire)
+
+### 12.1 Principe
+
+L'utilisateur fournit une DLL qui déclare un ou plusieurs **composants**. Le
+framework ignore ce qu'ils calculent. Il connaît seulement ce qu'il faut
+pour les **câbler** :
+- des ports d'entrée et de sortie typés ;
+- des capacités déclarées (différentiable, entraînable, avec état…).
+
+Le **rôle** d'un composant n'est pas déclaré par le plugin. Il découle de son
+câblage dans `graph.json` :
+
+| Câblage | Rôle effectif | Exemples |
+|---|---|---|
+| `observation.*` → composant → réseau | Prétraitement, extracteur de features | Modèle capteur, filtre de pistes, encodeur pré-entraîné figé |
+| réseau → composant → réseau | Bloc interne | Attention masquée, couche custom |
+| tête → composant → `action.*` | Post-traitement de l'action, côté environnement | Allocateur de commandes, limiteur, autopilote bas niveau |
+| `observation.*` → composant → `action.*` | Politique externe complète | Modèle C/C++ existant, entraînable ou figé |
+| composant → `critic.*` | Entrée privilégiée du critique | Estimateur d'état global |
+
+La même DLL peut exposer plusieurs composants. Le studio les affiche dans la
+palette d'imnodes avec leurs ports, et le codegen vérifie le câblage.
+
+### 12.2 Descripteur de ports
+
+Chaque port déclare :
+
+| Champ | Valeurs | Rôle |
+|---|---|---|
+| `name` | identifiant | Référence dans les arêtes (`"comp.out:features"`) |
+| `direction` | `in` / `out` | |
+| `dtype` | `f32`, `f64`, `i32`, `bool` | `bool` pour les masques, `i32` pour les indices catégoriels |
+| `shape` | `[n]`, `[capacité, n]` ou dimension symbolique (`"N"`) | Les dimensions symboliques sont résolues au câblage puis figées par le codegen |
+| `mask` | nom d'un port `bool` associé | Propagation des masques d'ensembles |
+| `unit` | texte libre, optionnel | Documentation et vérification facultative |
+| `optional` | booléen | Le port peut rester non connecté |
+
+### 12.3 Capacités
+
+| Capacité | Conséquence vérifiée par le codegen et le runtime |
+|---|---|
+| `differentiable` | Fournit `backward` vers ses entrées. Obligatoire si un nœud entraînable se trouve **en amont**. |
+| `trainable` | Expose paramètres et gradients ; l'optimiseur reste celui du framework. Implique `differentiable` vers ses paramètres. |
+| `stateful` | Fournit `reset`, `stateSize`, `saveState` et `loadState`. Voir §12.5. |
+| `deterministic` | Faux : le framework fournit un seed par instance et par épisode, que le composant doit utiliser. |
+| `threadSafe` | Faux : une instance par worker. |
+| `batch` | Accepte un lot de B échantillons par appel, sinon le framework boucle. |
+
+### 12.4 Règles de câblage
+
+1. **Gradient** : un composant non différentiable ne peut pas se trouver
+   entre deux nœuds entraînables. En pratique il doit être :
+   - soit avant tout nœud entraînable (prétraitement, gelé ou non) ;
+   - soit après l'échantillonnage de l'action.
+
+   Tout autre câblage est une erreur du codegen.
+2. **Post-traitement d'action** : un composant placé après une tête transforme
+   l'action **échantillonnée**. Pour PPO, il fait partie de l'environnement :
+   la log-prob est calculée sur la sortie de la tête, pas sur celle du
+   composant. On garde ainsi un ratio PPO correct quel que soit le contenu de
+   la boîte noire. Le studio affiche cette frontière.
+3. **Formes** : chaque arête relie des ports de même `dtype` et de même forme,
+   après résolution des dimensions symboliques. Les masques suivent leur port.
+4. **Cycles** : interdits dans le graphe d'un pas. La récurrence passe par
+   l'état d'un composant `stateful`.
+
+### 12.5 Composants avec état
+
+- `reset` est appelé à chaque début d'épisode, par agent.
+- Pour l'apprentissage, le framework **stocke dans le rollout la sortie** des
+  composants avec état placés avant les nœuds entraînables. La mise à jour
+  PPO rejoue alors le réseau sur ces sorties, sans réexécuter le composant.
+  C'est une condition de validité du ratio PPO.
+- Un composant avec état **entraînable** (récurrent) n'est pas supporté en v1,
+  faute de rétropropagation dans le temps. Le codegen le refuse.
+- L'état fait partie du checkpoint `training`, et l'état initial fait partie
+  de l'artefact `policy`.
+
+### 12.6 ABI C
+
+```c
+#define PPOKIT_COMPONENT_ABI 1u
+
+typedef struct PpokitBuffer
+{
+    void* data;
+    uint32_t dtype;
+    uint32_t rank;
+    const uint32_t* shape;
+} PpokitBuffer;
+
+typedef struct PpokitComponentApi
+{
+    uint32_t abi;
+    const char* name;
+    uint32_t version;
+    const char* manifestJson;                 /* ports, capacités, paramètres */
+    void* (*create)(const char* configJson, const char* resolvedShapesJson,
+                    char* error, size_t errorSize);
+    void  (*destroy)(void* instance);
+    int   (*forward)(void* instance, uint32_t batch,
+                     const PpokitBuffer* inputs, PpokitBuffer* outputs, void* cache);
+    /* NULL sauf si differentiable */
+    int   (*backward)(void* instance, uint32_t batch, const PpokitBuffer* outputGradients,
+                      const void* cache, PpokitBuffer* inputGradients, float* parameterGradients);
+    /* NULL sauf si trainable */
+    int   (*parameters)(void* instance, float** data, size_t* count);
+    /* NULL sauf si stateful */
+    int   (*reset)(void* instance, uint32_t agentSlot, uint64_t seed);
+    int   (*saveState)(void* instance, void* buffer, size_t size);
+    int   (*loadState)(void* instance, const void* buffer, size_t size);
+    size_t (*stateSize)(void* instance);
+    size_t (*cacheSize)(void* instance, uint32_t batch);
+    int   (*lastError)(void* instance, char* error, size_t errorSize);
+} PpokitComponentApi;
+
+/* Point d'entrée unique de la DLL : liste de ses composants. */
+PPOKIT_EXPORT int ppokit_components(uint32_t requestedAbi,
+                                    const PpokitComponentApi* const** components,
+                                    size_t* count);
+```
+
+Règles de frontière :
+- Pas de STL, d'exception ni d'allocation partagée à la frontière.
+- Le framework possède tous les buffers (entrées, sorties, cache, gradients),
+  ce qui garantit l'absence d'allocation dans la boucle chaude.
+- Erreurs par code de retour et `lastError`. Le SDK intercepte toute exception
+  C++ avant la frontière.
+- Négociation : refus explicite si la version majeure de l'ABI diffère.
+- Le hash du binaire, du manifeste et de la configuration est enregistré dans
+  les artefacts (§8). Changer de DLL invalide donc un checkpoint, sauf
+  déclaration de compatibilité.
+
+### 12.7 Manifeste
+
+```json
+{
+  "schema": "ppokit.component/1.0",
+  "name": "trackfilter", "version": 1,
+  "ports": [
+    { "name": "tracks",   "direction": "in",  "dtype": "f32", "shape": ["N", 13], "mask": "trackMask" },
+    { "name": "trackMask","direction": "in",  "dtype": "bool","shape": ["N"] },
+    { "name": "features", "direction": "out", "dtype": "f32", "shape": [64] }
+  ],
+  "capabilities": { "differentiable": false, "trainable": false, "stateful": true,
+                    "deterministic": true, "threadSafe": false, "batch": true },
+  "config": { "alpha": { "type": "float", "range": [0, 1], "default": 0.3 } }
+}
+```
+
+La section `config` est validée par le framework et éditable dans le studio.
+La DLL reçoit la configuration déjà validée.
+
+### 12.8 Câblage dans `graph.json`
+
+```json
+{ "id": "filter", "type": "component:trackfilter@1", "config": { "alpha": 0.2 } },
+{ "id": "mlp", "type": "dense_stack", "widths": [128, 128], "activation": "tanh" }
+```
+```json
+"edges": [
+  ["observation.red", "filter.in:tracks"],
+  ["observation.red.mask", "filter.in:trackMask"],
+  ["filter.out:features", "concat.in:1"],
+  ["concat.out", "mlp"]
+]
+```
+
+La dimension symbolique `N` est résolue à 10 par le câblage sur
+`observation.red`, puis figée dans le code généré.
+
+### 12.9 SDK C++
+
+```cpp
+class TrackFilter final : public ppokit::sdk::Component
+{
+public:
+    static ppokit::sdk::Manifest Describe();              // ports, capacités, configuration
+    explicit TrackFilter(ppokit::sdk::Config const& config, ppokit::sdk::Shapes const& shapes);
+    void Forward(ppokit::sdk::Batch batch, ppokit::sdk::Inputs in, ppokit::sdk::Outputs out) override;
+    void Reset(std::uint32_t agentSlot, std::uint64_t seed) override;
+    // Backward / Parameters / SaveState… seulement si déclarés dans Describe().
+};
+PPOKIT_COMPONENTS(TrackFilter /*, AutreComposant */);
+```
+
+Le SDK est header-only et ne dépend pas de rl_tools. Il génère le manifeste à
+partir de `Describe()`, ce qui garantit que le manifeste et le code restent
+cohérents. Il vérifie aussi, en Debug, que les capacités déclarées
+correspondent aux méthodes surchargées.
+
+Le même mécanisme sert aux tâches externes : une DLL peut fournir un
+simulateur conforme à l'interface `Task` (table `reset`, `step`, `metrics`
+sur des buffers plats décrits par son `task.json`). Normaliseurs et métriques
+custom sont simplement des composants câblés sur `observation.*` ou sur
+`metrics.*`.
+
+## 13. Studio
+
+Il est développé **après** la stabilisation des formats (§16, étape 10).
+Principe directeur : **tout réglage visible porte une infobulle**, qui dit ce
+qu'il fait, sa plage habituelle et les symptômes d'une mauvaise valeur. Le
+texte de ces infobulles vient d'un seul fichier de métadonnées
+(`ppokit/meta/parameters.json`), partagé par le studio, la CLI
+(`ppokit-train --explain gamma`) et la documentation générée. Il n'y a donc
+qu'une seule source de vérité.
+
+- **Éditeur de graphe** (imnodes) :
+  - palette des blocs intégrés et des composants découverts dans les DLL,
+    avec leurs ports ;
+  - vérification des formes en direct, avec la même bibliothèque que le
+    codegen ;
+  - export vers `graph.json`.
+- **Bouton Build** : lance la configuration et le build CMake du modèle dans
+  `build/<config>` et affiche le journal. Avec le backend torch, le graphe est
+  reconstruit sans build.
+- **Runs** :
+  - lancement en headless (processus séparé) ou en mode embarqué (desktop
+    existant) ;
+  - courbes ImPlot alimentées par la télémétrie ;
+  - comparaison de runs.
+- **Évaluation** : rapports par cellule de grille, rejeu d'épisodes, export
+  de cas de régression.
+
+Le studio n'entre jamais dans la boucle d'entraînement : c'est un client de
+la télémétrie et des commandes.
+
+### 13.1 Exemples de référence, faciles à prendre en main
+
+Chaque exemple migré a la même structure, qui sert de gabarit :
+
+```
+Examples/<Nom>/
+  README.md          ce que fait l'exemple, comment le lancer, quoi modifier en premier
+  task.json          observations, actions, récompenses, scénarios, métriques
+  graph.json         réseaux (éditable dans le studio)
+  train.json         hyperparamètres, curriculum, évaluation périodique
+  eval/              suites smoke, regression, heldout
+  src/<nom>_task.cpp Reset / Step / métriques (+ hooks éventuels)
+  src/physics/…      simulateur propre à l'exemple
+  render/…           rendu optionnel, branché sur la télémétrie
+  CMakeLists.txt     ppokit_add_example(<nom> TASK task.json GRAPH graph.json)
+```
+
+Ce qui rend les exemples faciles à prendre en main :
+- **Une ligne pour enregistrer un exemple** : `PPOKIT_REGISTER_TASK` alimente
+  aussi le catalogue du desktop (`ExampleDefinition`), qui n'a plus à être
+  rempli à la main.
+- **Un seul lanceur** : `ppokit-train <exemple>`, `ppokit-eval <exemple>
+  <suite>`, `ppokit-play <exemple> <artefact>`, et les mêmes actions dans le
+  studio.
+- **Un gabarit** : `ppokit-new <nom>` crée un exemple minimal qui compile et
+  s'entraîne : une tâche jouet, un graphe MLP, une suite smoke.
+- **Des messages d'erreur orientés utilisateur** : chaque erreur de schéma,
+  de câblage ou de checkpoint indique le fichier, le champ et la correction
+  attendue.
+- **Les README des exemples** suivent le même plan : ce que l'agent apprend,
+  lancer, observer, modifier la récompense, modifier le réseau, évaluer.
+- **Les fichiers complexes restent dans l'exemple, pas dans le chemin
+  d'apprentissage** : la physique, le rendu et la géométrie métier sont
+  rangés à part de `task.json` et de `*_task.cpp`, qui sont les deux fichiers
+  qu'un nouvel utilisateur lit en premier.
+
+### 13.2 Éditeur de curriculum
+
+Il édite la section `curriculum` de `train.json`. Le fichier reste la source
+de vérité, et le studio n'en est qu'une vue.
+
+- **Frise des étapes** : glisser-déposer pour ordonner, dupliquer, renommer.
+  Chaque étape affiche son état : en attente, active, validée.
+- **Échantillonneurs par paramètre de scénario** : le widget dépend du type
+  déclaré dans `task.json` :
+  - curseur de plage pour `uniform` ;
+  - curseur avec moyenne et écart-type pour `normal` ;
+  - poids par valeur pour `choice` sur un `enum` ;
+  - case à cocher pour un `bool`.
+
+  Les bornes du schéma sont imposées et ne peuvent pas être dépassées.
+- **Aperçu** : bouton « Échantillonner 1 000 scénarios », qui affiche
+  l'histogramme de chaque paramètre et quelques scénarios rejouables. On
+  voit ce qu'une étape produit avant de lancer l'entraînement.
+- **Règle de passage** : métrique, seuil, fenêtre glissante. Pendant
+  l'entraînement, une jauge montre la valeur courante par rapport au seuil.
+- **Répétition** (`rehearse`) : proportion d'épisodes tirés dans les étapes
+  précédentes, pour éviter l'oubli.
+- **Contrôle manuel** : avancer ou reculer d'étape en cours de run. L'action
+  est journalisée dans le run et dans le checkpoint.
+- **Validation** :
+  - étape vide ;
+  - seuil sur une métrique inconnue ;
+  - fenêtre plus grande que le budget ;
+  - recouvrement entre les seeds d'entraînement et d'évaluation.
+
+  Chaque erreur affiche un message qui pointe le champ fautif.
+- **Modèles prédéfinis** : « progression d'une seule variable », « du plus
+  facile au plus dur sur N variables », « une étape fixe ». Ils produisent un
+  JSON lisible et modifiable ensuite.
+
+### 13.3 Tableau de bord des récompenses
+
+Pour chaque canal déclaré dans `task.json` :
+
+| Vue | Contenu |
+|---|---|
+| Moyenne par pas | Valeur brute et valeur pondérée, sur une fenêtre glissante |
+| Cumul par épisode | Moyenne, p5 et p95 sur les N derniers épisodes |
+| Contribution | Part de chaque canal dans le retour total (barres empilées), en valeur absolue et signée |
+| Par agent et par rôle | Pour MAPPO : leader et équipiers séparés, ou un slot précis |
+| Par étape de curriculum | Mêmes vues filtrées par étape |
+| Corrélation | Cumul d'un canal comparé à une métrique d'évaluation (nuage de points), pour voir si un canal sert réellement l'objectif |
+
+**Réglage des poids en cours de run :**
+- Le changement s'applique à la **prochaine frontière d'update**, jamais au
+  milieu d'un rollout.
+- C'est un **événement versionné** du run : ancien poids, nouveau poids,
+  numéro d'update. Il est visible sur toutes les courbes sous la forme d'un
+  repère vertical et enregistré dans le checkpoint.
+- Une infobulle avertit que changer un poids change l'objectif. La fonction
+  de valeur devient temporairement fausse : attendez-vous à un pic de perte
+  de valeur et de KL.
+- Les poids par défaut viennent de `task.json`. Le studio propose
+  d'enregistrer les nouveaux poids dans le fichier ou de les garder pour ce
+  seul run.
+- Pour BlueDefense, les canaux, les poids et les normalisations existants ne
+  changent que sur décision explicite de l'utilisateur (AGENTS.md).
+  L'outil le permet, mais rien n'est modifié automatiquement.
+
+### 13.4 Paramètres PPO commentés
+
+Chaque paramètre a une infobulle et un statut **modifiable à chaud**
+(appliqué à la prochaine frontière d'update) ou **au redémarrage**.
+
+| Paramètre | Ce que ça fait | Plage habituelle | Symptômes d'une mauvaise valeur | Modifiable |
+|---|---|---|---|---|
+| `gamma` | Horizon : poids des récompenses futures. L'horizon effectif vaut environ 1/(1−γ) pas | 0,95–0,999 | Trop bas : agent myope. Trop haut : apprentissage lent et bruité | à chaud |
+| `lambda` (GAE) | Compromis biais/variance de l'avantage | 0,9–0,98 | Bas : biaisé, sous-estime le long terme. Haut : bruité | à chaud |
+| `clip` | Écart maximal du nouveau ratio de probabilité par update | 0,1–0,3 | Trop haut : politique instable, KL élevée. Trop bas : apprentissage lent | à chaud |
+| `learningRate` | Taille des pas de l'optimiseur | 1e-5 – 1e-3 | Trop haut : KL et clip fraction élevées, effondrement. Trop bas : courbes plates | à chaud |
+| `epochs` | Passes sur chaque rollout | 3–15 | Trop haut : sur-ajustement au rollout, KL élevée | à chaud |
+| `minibatch` | Taille des lots d'optimisation | 64–4 096 | Petit : gradients bruités. Grand : moins d'updates par rollout | à chaud |
+| `rolloutSteps` | Pas collectés avant chaque update | 1 024–65 536 | Petit : avantages bruités. Grand : updates rares | au redémarrage (tampons à capacité fixe) |
+| `entropy` | Bonus d'exploration | 0–0,02 | Trop bas : convergence prématurée. Trop haut : politique qui reste aléatoire | à chaud |
+| `valueCoef` | Poids de la perte du critique | 0,25–1 | Trop bas : critique en retard, avantages faux | à chaud |
+| `maxGradNorm` | Écrêtage de la norme du gradient | 0,5–1 | Trop bas : apprentissage freiné | à chaud |
+| `targetKL` (optionnel) | Arrêt anticipé des époques si la KL dépasse la cible | 0,01–0,05 | — | à chaud |
+
+À côté de chaque réglage, le studio affiche les **indicateurs de santé**
+concernés : KL, clip fraction, entropie, variance expliquée du critique,
+norme du gradient. Chacun a son infobulle d'interprétation, par exemple
+« clip fraction > 0,3 : updates trop agressives, baissez le learning rate
+ou le clip ». Tout changement est un événement versionné, comme pour les
+poids de récompense.
+
+### 13.5 Sondes
+
+Une **sonde** se pose sur n'importe quel point observable :
+- un champ d'observation nommé ;
+- une arête ou un port du graphe : activation intermédiaire, sortie d'un
+  composant DLL, poids d'attention ;
+- les paramètres d'une tête : moyenne, log-std, logits, probabilités ;
+- l'action échantillonnée et l'action après `AdaptAction` ;
+- la valeur, l'avantage, le retour ;
+- un canal de récompense, une métrique.
+
+| Type | Affichage |
+|---|---|
+| Série temporelle | Valeur scalaire ou composante choisie, au fil des pas |
+| Histogramme | Distribution sur une fenêtre, utile pour la saturation (tanh) et les entrées mal normalisées |
+| Carte de chaleur | Vecteurs et matrices : poids d'attention par piste, sorties par slot |
+| Statistiques | Min, max, moyenne, écart-type, nombre de valeurs non finies |
+| Déclencheur | Condition (`> x`, non fini, saturation) qui met le run en pause et enregistre l'épisode pour le rejeu |
+
+**Coût et mise en œuvre :**
+- Une sonde désactivée ne coûte **rien** : aucun test dans la boucle chaude.
+- Backend rl_tools : le codegen génère des points de prélèvement
+  compilables, actifs en Debug et en Release. Activer une sonde arme un
+  pointeur vers un tampon circulaire préalloué. Le prélèvement est décimé
+  (1 pas sur N, réglable) et sans allocation.
+- Backend torch : hooks `forward` sur les modules concernés.
+- Composants DLL : leurs ports sont sondables comme les autres, puisque le
+  framework possède les buffers.
+- Les sondes fonctionnent en entraînement, en évaluation, en inférence et en
+  rejeu. Sur un épisode rejoué, on peut poser une sonde après coup et revoir
+  exactement ce qui s'est passé.
+- Les configurations de sondes s'enregistrent dans un fichier
+  (`probes.json`), séparé du modèle : elles n'affectent ni le hash ni les
+  résultats.
+
+### 13.6 GPU
+
+- **Backend torch** : `"device": "cuda"` dans `train.json` (ou `"auto"`). Les
+  réseaux, l'optimiseur et les lots de mise à jour vont sur le GPU. La
+  simulation et la collecte restent sur CPU.
+- **Backend rl_tools** : CPU par défaut (`RL_TOOLS_BACKEND_ENABLE_CUDA` est
+  aujourd'hui à OFF dans `dependencies.cmake`). Le support CUDA de rl_tools
+  est prévu comme option expérimentale du backend, sans engagement.
+- **Repli** : si CUDA est absent ou indisponible, le run passe sur CPU avec un
+  avertissement explicite dans le journal et dans le studio. Il n'y a pas
+  d'échec silencieux.
+- **Déterminisme** : les traces de référence (golden traces) et les tests de
+  parité restent **CPU uniquement**. Sur GPU, la reproductibilité n'est que
+  statistique (opérations cuDNN non déterministes), et l'artefact enregistre
+  le device utilisé.
+- **Attente réaliste** : avec de petits MLP et une simulation sur CPU, le
+  GPU accélère peu, voire ralentit, à cause des transferts. Il devient utile
+  pour les gros lots, l'attention sur beaucoup de pistes et les grands
+  critiques. Le studio affiche le temps passé en collecte et en mise à jour,
+  pour en juger.
+- **Validation** : la CI n'a pas de GPU. Le chemin CUDA est compilé et testé
+  avec un device simulé (tests de placement, de repli et de sérialisation).
+  Les performances réelles sont à mesurer sur une machine équipée.
+
+## 14. Matrice de couverture
+
+### 14.1 BlueDefense (MAPPO Blue généralisé)
+
+| Service actuel | Fichier(s) | PPOKit | Reste client |
+|---|---|---|---|
+| Boucle ECS `IAgent` (`ChooseAction`, `SetNewState`) | `generalized_patrol_team_agent.*` | `runtime` mode Hosted (§4.4) | Adaptateur ECS mince |
+| Modes Training / ProductionInference | `GeneralizedPatrolExecutionMode` | `runtime` + `inference` | Choix du mode par l'hôte |
+| Commandes temps réel, snapshot | `ProcessCommand`, `GetSnapshot` | `runtime` télémétrie et commandes | Champs métier du snapshot |
+| Observation v10 (own, lidar 61, rôle 2, Rouges 10×13, Bleus 8×9, objectif, patrouille, global, effectifs 2) | `generalized_observation.hpp`, `generalized_runtime_state.hpp` | `schema` + `obs` (groupes, ensembles masqués, rôles) | Calcul des features depuis l'ECS |
+| Entrée critique centralisée par participant (470) | `generalized_critic_observation.hpp`, `generalized_critic_network.hpp` | `critic.source: custom`, `perAgent` | Remplissage |
+| Rôles leader/équipiers, succession | `blue_team_roles.hpp`, `generalized_leader_succession.hpp` | Champ de rôle du schéma, slots stables | Affectation et succession |
+| Capacités P 1..9, N 0..10, masques, permutations | `team_capacity.hpp` | `agents.capacity`, masques, test d'invariance | — |
+| Acteur à attention masquée, backward manuel | `generalized_attention_actor.hpp`, `attention_actor.hpp` | Bloc `masked_attention` (ou composant interne pendant la transition) | — |
+| Tête gaussienne (action 2) | `generalized_patrol_learner.hpp` | `heads.gaussian` | — |
+| 15 canaux de récompense, normalisation P/N | `generalized_cooperative_reward.hpp` | `reward` (canaux, poids, agrégation) | Termes et normalisation P/N, transcrits à l'identique |
+| Façonnage dense (patrouille, formation, proximité, frontière, basse vitesse) | `generalized_reward_shaping.hpp` | — | Entièrement client |
+| Séquenceur RALLY/FOLLOW, `guidancePose` | `generalized_patrol_waypoint_sequencer.hpp` | Hook fournisseur de références | Entièrement client |
+| Géométrie de l'hippodrome | `patrol_geometry.hpp` | — | Client |
+| Fin d'épisode (succès, échec, timeout) et pertes individuelles | `generalized_episode_outcome.hpp` | `StepEnd` + `AgentEnds` | Décision de fin |
+| GAE MAPPO (float) | `generalized_advantage.hpp` | `core` GAE `<float>` | — |
+| Collecte, PPO, minibatches | `generalized_patrol_learner.hpp` | `core` + `runtime` | — |
+| Configuration RLtools, hyperparamètres | `patrol_rltools.hpp`, `patrol_training_settings.hpp`, `patrol_config.hpp` | `backend` + `train.json` | — |
+| Checkpoints acteur, training V7, production | `generalized_checkpoint.hpp`, `generalized_training_checkpoint.hpp`, `patrol_*checkpoint.hpp` | `artifacts` (training, policy, promoted) + convertisseur | — |
+| Évaluation, promotion, score promu | `StartEvaluation`, `PromoteEvaluatedActor`, `SavePromotedScore` | `runtime` évaluation périodique | Métriques métier |
+| Campagnes d'évaluation, métriques | `generalized_evaluation_campaign.hpp`, `generalized_evaluation_metrics.hpp` | `eval` | Déclaration des métriques |
+| Restauration de l'initialiseur après évaluation | `RestoreTrainingInitializer` | `runtime` (restauration exacte du générateur) | — |
+| Spawn, contraintes de placement | `spawn.hpp`, `spawn_config.hpp`, `initializer.hpp` | `scenario` (§5.1) + curriculum | Placement physique dans `Reset` |
+| Règles de monde (collisions, zones, menaces) | `bluedefenserules.hpp` | — | Client (ECS) |
+| Politique de production déterministe | `generalized_patrol_production_policy.hpp` | `inference` | — |
+
+### 14.2 FlightControl3D
+
+| Service actuel | Fichier(s) | PPOKit | Reste client |
+|---|---|---|---|
+| Environnement `Reset` / `Step` | `flight_environment.*` | `runtime` mode Owned (§4.3) | Corps de `Reset` / `Step` |
+| JSBSim, mouvement de piste | `jsbsim_aircraft.*`, `runway_motion.*` | — | Client |
+| Mission, guidage (LOC, glide, flare, rollout) | `flight_mission.*`, `flight_types.hpp` | Hook fournisseur de références | Client |
+| Observation (33 depuis #87) | `flight_types.hpp` | `schema` + `obs` | Calcul des features |
+| Tête gaussienne (5 actions, log-std indépendant de l'état), clip, entropie analytique (depuis #87) | `flight_policy.hpp` | `heads.gaussian(map: clip)` + test de parité | — |
+| Contrôles forcés par phase, throttle de référence | `ApplyPhaseControls`, `flight_policy.hpp` | Hook `AdaptAction` | Règles |
+| 7 canaux de récompense, poids, réglage des récompenses (`flight_reward_tuning`) | `flight_types.hpp`, `flight_config.*`, `Runtime/flight_reward_tuning.*` | `reward` | Termes |
+| Curriculum Loc/Glide/Joint, reminder LOC, placements | `flight_config.*`, `flight_environment.cpp` | `train.json` curriculum + `rehearse` | Placement dans `Reset` |
+| GAE (double), PPO, MLP rl_tools, Adam | `flight_learner.*` | `core` GAE `<double>` + `backend` | — |
+| Checkpoint atomique, RNG portable | `flight_learner.cpp` | `artifacts` | — |
+| Validation, meilleur modèle | `FlightSession::StartValidation`, `flight_model_store.*` | `runtime` évaluation périodique + `promoted` | Métriques (`ValidationMetrics`) |
+| Session pas à pas, budgets, snapshot | `flight_session.*` | Runner `Tick`, budget, télémétrie | Champs métier du snapshot |
+| Headless | `flight_headless.cpp` | CLI `ppokit-train` ou main client minimal | — |
+| Rendu et instruments | `Renderer/*` | — | Client (lit la télémétrie) |
+| Golden trace | `tests/golden_trace_tests.cpp` | Inchangé : critère d'acceptation de chaque étape | — |
+
+### 14.3 Airspace (backend libtorch)
+
+| Service actuel | Fichier(s) | PPOKit | Reste client |
+|---|---|---|---|
+| Agent Interception (SNA) : entraînement et production | `Interception.*` (`SNATrainingAgent`, `SNAProdAgent`) | `runtime` Hosted + `inference` | Adaptateur ECS mince |
+| Réseau acteur-critique MLP, log-std en sortie du réseau | `actorcriticnet.*` | `graph.json` backend `torch`, `heads.gaussian` avec `logStd: "network"` | — |
+| Agent Mission (RLMission), attention sur les pistes, 3 actions | `actorcriticmission.*`, `missionlayout.hpp` | Bloc `masked_attention` (torch), `heads.gaussian` ; **étape 11** | — |
+| Filtre de pistes de mission | `missiontrackfilter.hpp` | Composant de prétraitement non entraînable (§12) ou fournisseur de références | Logique de filtrage |
+| Sélection de cible | `targetselector.*` | — | Client (pas de contrôleur d'affectation externe ajouté) |
+| PPO libtorch, learner, bindings | `Framework/RL/PPO`, `Framework/RL/Bindings` | `backend/torch` + `core` (GAE et surrogate communs) | — |
+| Canaux de récompense (destruction de cible, de l'ownship…) | `Interception.hpp` | `reward` | Termes |
+| Initialisation aléatoire ou depuis checkpoint | `randominitializersystem.*`, `checkpointinitializersystem.*` | `scenario` + curriculum | Placement dans l'ECS |
+| Méta-registre, règles de monde | `airspacemeta.*`, `airspaceworldrules.*` | — | Client (ECS) |
+| Évaluateur | `evaluator.*` | `eval` | Métriques métier |
+| Rendu tactique | `Renderer/*` | — | Client (lit la télémétrie) |
+| Checkpoints `model.pt` | `TorchLearner`, `TorchProductionPolicy` | `artifacts` (backend `torch`) + lecteur de l'ancien format | — |
+
+**Conclusion :** aucun service des trois exemples ne reste sans emplacement.
+Ce qui reste chez le client est soit de la physique, soit de la sémantique
+métier (termes de récompense, guidage, placement, rôles), conformément aux
+garde-fous de §0.
+
+## 15. Transcription (esquisses)
+
+### 15.1 Blue (`task.json`, extrait)
+
+```json
+{
+  "name": "blue-patrol",
+  "agents": { "capacity": [1, 9], "roles": ["leader", "wingman"], "roleEncoding": "onehot" },
+  "observation": { "groups": {
+    "own": { "size": 7 }, "lidar": { "size": 61 }, "role": { "builtin": "role" },
+    "red":  { "set": true, "capacity": 10, "fields": 13, "masked": true },
+    "blue": { "set": true, "capacity": 8,  "fields": 9,  "masked": true },
+    "objective": { "set": true, "capacity": 1, "fields": 9, "masked": true },
+    "patrol": { "size": "…" }, "global": { "size": "…" }, "teamCounts": { "size": 2 } } },
+  "critic": { "source": "custom", "perAgent": true, "groups": { "…": "470 entrées" } },
+  "action": { "steer": { "head": "gaussian", "size": 2, "bounds": [-1, 1], "map": "clip" } },
+  "rewards": { "patrolTracking": {}, "formationKeeping": {}, "pursuitProgress": {},
+               "controlEffort": {}, "blueSurvival": {}, "redNeutralization": {},
+               "threatContainment": {}, "objectiveSurvival": {}, "missionOutcome": {},
+               "timeout": {}, "blueSeparation": {}, "restrictedZoneClearance": {},
+               "boundaryClearance": {}, "lowSpeedRisk": {}, "ownLoss": {} }
+}
+```
+
+Les « … » sont repris des constantes existantes au moment de la migration. La
+normalisation et les éventuels normaliseurs déjà appliqués dans
+`generalized_runtime_state.hpp` doivent être transcrits sans changement.
+
+### 15.2 Flight
+
+Voir §5.1. Les tailles de la tête `controls` et la liste exacte des canaux
+sont reprises de `flight_types.hpp` et `flight_policy.hpp` lors de l'étape 3.
+
+## 16. Plan de migration
+
+Chaque étape fait l'objet d'une PR séparée. L'avancement réel est suivi dans
+[`PPOKit/PROGRESS.md`](../../PPOKit/PROGRESS.md).
+
+| # | Étape | Critère d'acceptation |
+|---|---|---|
+| 0 | Golden trace Flight (absente de master) : 3 updates PPO depuis un seed fixe, checkpoint complet hashé | Empreinte identique en Debug et Release, enregistrée sur master avant toute refonte |
+| 1a | `ppokit/artifacts` : écriture atomique. Remplacement des 4 implémentations | Golden trace Flight inchangée ; tests Blue de checkpoint au vert ; Debug et Release, CTest |
+| 1b | En-tête d'identité et RNG portable des artefacts (reporté avec l'étape 5, pour ne changer les formats sur disque qu'une fois) | Lecture des anciens formats conservée (§8.1) |
+| 2 | `ppokit/core` : GAE `<T>` ; Flight et Blue l'appellent. Le surrogate PPO passe à l'étape 3, car les deux implémentations diffèrent (bornes du log-ratio, règle d'activation du gradient) | Golden trace Flight identique ; trace de `generalized_learner_tests` identique au bit près |
+| 3 | `ppokit/heads` (gaussienne) et surrogate PPO communs ; une **formule unique** (décision de l'utilisateur) remplace celles de Flight et de Blue. Bernoulli, catégorielle et composite arrivent avec le codegen | Écart d'au plus 1 ulp sur la log-densité ; épisodes de la golden trace inchangés ; nouvelles références enregistrées ; évaluation multi-seed avant fusion |
+| 4 | `ppokit/backend/rltools` unique : suppression de `RL_TOOLS_NAMESPACE_WRAPPER` | BlueDefense et Flight liés dans le même exécutable ; pas de régression |
+| 5 | `schema` + codegen des layouts (§4.2), sans réseaux. Fait de façon additive : `task.json` de Flight et de Blue, tests de correspondance. Les normaliseurs (`obs`) et le moteur de récompense (`reward`) arrivent avec le runtime (étape 7) | Layouts générés égaux aux offsets actuels (`static_assert`) ; hash stable |
+| 6 | Codegen des réseaux. Fait : `graph.json` v1 (MLP, modèles externes), types rl_tools générés, parité prouvée (Flight au bit près, critique Blue de même type). Restent : brancher les learners (après le rebase de l'utilisateur), backend unique, attention Blue | Test d'acceptation n°1 (§7) |
+| 7 | `runtime` Owned (Flight) puis Hosted (Blue), évaluation périodique, `eval`, `inference`. Fait : rollout, collecte Owned et learner PPO générique sur réseaux générés, validés sur une tâche jouet | Golden trace ; parité d'inférence ; campagne Blue identique sur les mêmes seeds |
+| 8 | `component` (ABI, SDK) | Composant d'exemple (prétraitement avec état, et bloc différentiable) chargé en Debug et Release |
+| 9 | `backend/torch` derrière le même frontal (avec `device` CPU/CUDA et repli, §13.6) ; Airspace Interception (SNA) migré | Parité d'inférence sur le `model.pt` existant ; entraînement comparable en évaluation multi-seed ; coexistence des deux backends dans `PPO.exe` |
+| 10 | Exemples de référence (§13.1) : structure commune, lanceur, `ppokit-new`, `ppokit-import`, README ; puis `ppokit-studio` : graphe, curriculum, récompenses, paramètres PPO commentés, sondes (§13.2 à §13.5) | Un exemple créé par `ppokit-new` compile et s'entraîne ; les modèles existants des trois exemples reprennent en inférence et en entraînement (§8.1) ; graphe Flight édité, régénéré et entraîné depuis le studio ; une sonde désactivée ne change ni les traces ni le temps de pas mesuré |
+| 11 | Airspace RLMission migré, puis utilisé par les Rouges de BlueDefense — **sur approbation explicite** | Actions de production identiques (tolérance fixée) sur les mêmes états ; campagne BlueDefense inchangée sur les mêmes seeds |
+
+L'évaluation multi-seed des politiques entraînées est relancée après les
+étapes 3, 6, 7, 9 et 11. Aucune conclusion de convergence n'est tirée des tests
+unitaires.
+
+## 17. Risques et questions ouvertes
+
+1. **Bit-exactitude** : float pour Blue, double pour Flight ; l'ordre des
+   réductions dans GAE et dans les pertes. Mitigation : templater sur le
+   scalaire et reproduire l'ordre exact des opérations ; une différence non
+   nulle est un échec.
+2. **Attention Blue** : backward manuel de 731 lignes. Il faut extraire le
+   bloc tel quel, d'abord comme composant interne différentiable, avant toute
+   réécriture.
+3. **Sur-abstraction** : trois clients (mono-agent, MAPPO, et deux agents
+   libtorch). Ne rien ajouter à l'API sans cas d'usage dans l'un d'eux.
+4. **Temps de compilation** du codegen rl_tools, avec un modèle par cible.
+   À mesurer dès l'étape 6.
+5. **Airspace / libtorch** : *décidé*. Backend libtorch derrière le même
+   frontal (§3.1). Restent ouverts : la tolérance de parité entre backends, et
+   le coût d'enveloppement des composants DLL dans l'autograd.
+6. **`map: tanh`** : log-prob sur le latent ou corrigée du jacobien (§6).
+7. **Relation avec `Framework/RL/Core`** : `ppo::core::IEnvironment`,
+   `IPolicy` et `ILearner` deviennent des adaptateurs vers PPOKit pendant les
+   étapes 9 à 11, puis sont supprimés une fois les trois exemples migrés.
+8. **Facilité de prise en main** : à mesurer concrètement, par exemple en
+   comptant le nombre de lignes de C++ client et de fichiers à lire pour
+   l'exemple généré par `ppokit-new`. Cible : un seul fichier C++ et quatre
+   fichiers JSON.
+9. **Nom définitif** de la bibliothèque.
