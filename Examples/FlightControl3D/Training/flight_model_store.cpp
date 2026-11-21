@@ -138,6 +138,21 @@ std::optional<BestRecord> ReadBest(Config const& config, std::filesystem::path c
     return record;
 }
 
+/**
+ * @brief Removes a pending candidate and its backup left by an interrupted promotion.
+ *
+ * The pending file is scratch space, never a generation: clearing it first means
+ * FlightLearner::Save() has no previous file to back up as "<pending>.previous".
+ * @param pending Path of the pending candidate checkpoint.
+ */
+void RemovePendingCandidate(std::filesystem::path const& pending)
+{
+    auto backup = pending;
+    backup += ".previous";
+    std::filesystem::remove(pending);
+    std::filesystem::remove(backup);
+}
+
 /** @brief Writes the manifest to a temporary file, then atomically replaces the pointer. */
 void CommitPointer(std::filesystem::path const& path, Json const& json)
 {
@@ -296,6 +311,7 @@ bool FlightModelStore::Promote(FlightLearner const& learner, ValidationMetrics c
     auto const bestDirectory = directory_ / "best";
     std::filesystem::create_directories(bestDirectory);
     auto const pending = bestDirectory / "candidate.pending";
+    RemovePendingCandidate(pending);
     learner.Save(pending);
     auto const checksum = Checksum(pending);
     auto const filename = "flight_" + std::to_string(metrics.update) + "_" + checksum + ".txt";
@@ -303,11 +319,13 @@ bool FlightModelStore::Promote(FlightLearner const& learner, ValidationMetrics c
     // Generations are immutable: an existing file must be byte-identical.
     if (std::filesystem::exists(destination))
     {
-        if (Checksum(destination) != checksum)
+        bool const identical = Checksum(destination) == checksum;
+        // The candidate is discarded whether or not the existing generation matches.
+        std::filesystem::remove(pending);
+        if (!identical)
         {
             throw std::runtime_error("FlightControl3D: existing BEST generation mismatch");
         }
-        std::filesystem::remove(pending);
     }
     else
     {

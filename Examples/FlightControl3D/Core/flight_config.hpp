@@ -230,12 +230,6 @@ struct TrainingSettings final
     double clip{};
     /** @brief Entropy bonus coefficient. */
     double entropy{};
-    /**
-     * @brief Value-loss weight of the combined loss reported to the desktop framework.
-     *
-     * The critic has its own optimizer and its gradient does not use this weight.
-     */
-    double valueWeight{};
     /** @brief Target for the sampled old-to-new minibatch KL; skip above 1.5 times this value. */
     double targetKl{0.02};
     double adamBeta1{};

@@ -105,12 +105,18 @@ void SignatureCompatibility()
     auto changed=signature;changed["reward"]["weights"]["Path"]=1.0;changed["initial"]["distanceMeters"]={1000,2000};
     Check(changed.dump()!=c.checkpointSignature && CompatibleTrainingSignature(changed.dump(),c.checkpointSignature),
         "reward and spawn changes keep a compatible warm start");
-    for(auto const* field : {"throttle","elevatorTrim"})
+    for(auto const* field : {"throttle","elevatorTrim","approachFlap","rolloutFlap","propeller","mixture"})
     {
-        changed=signature;changed["initial"][field]=changed["initial"][field].get<double>()+0.05;
+        changed=signature;changed["initial"][field]=changed["initial"][field].get<double>()-0.05;
         Check(!CompatibleTrainingSignature(changed.dump(),c.checkpointSignature),
-            "the trimmed controls behind a zero actor output are part of the contract");
+            "fixed controls and aircraft configuration are part of the contract");
     }
+    changed=signature;changed["initial"]["unknownControl"]=1.0;
+    Check(!CompatibleTrainingSignature(changed.dump(),c.checkpointSignature),
+        "an unlisted initial field is incompatible by default");
+    changed=signature;changed["initial"]["rolloutStart"]["speedMps"]={10,20};changed["initial"]["rollDegrees"]=3.0;
+    Check(CompatibleTrainingSignature(changed.dump(),c.checkpointSignature),
+        "rollout and attitude spawn ranges keep a compatible warm start");
     for(auto const* field : {"glideDegrees","flareSpeed","maxTouchdownSink"})
     {
         changed=signature;changed["mission"][field]=changed["mission"][field].get<double>()+1.0;
