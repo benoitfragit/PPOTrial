@@ -5,6 +5,10 @@ Ce fichier dit **où en est la migration** et **comment reprendre**. Il est mis
 
 - Conception : [`docs/architecture/ppokit-framework-design.md`](../docs/architecture/ppokit-framework-design.md)
 - Règles du dépôt : [`AGENTS.md`](../AGENTS.md), à relire avant toute modification.
+- PR de suivi (brouillon) : [#105](https://github.com/benoitfragit/PPOTrial/pull/105).
+  Elle déclenche la CI Windows `desktop-windows.yml`, seule à compiler
+  BlueDefense et Airspace avec libtorch. Consulter ses jobs après chaque push :
+  `gh api "repos/benoitfragit/PPOTrial/actions/runs?branch=design/ppokit-framework&per_page=10" --jq '.workflow_runs[] | "\(.name) \(.status) \(.conclusion)"'`
 
 ## Reprendre en 5 minutes
 
@@ -124,27 +128,52 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
 - Vérifié : golden trace Flight inchangée, trace MAPPO Blue identique sur ses
   80 lignes, `ctest` 18/18 en Debug et en Release.
 
-### Surrogate PPO : différences constatées (à trancher à l'étape 3)
+### Têtes et surrogate PPO : différences constatées (décision utilisateur requise)
 
-| | FlightControl3D (`ClippedLoss`, `flight_policy.hpp` depuis #87 ; à revérifier) | BlueDefense (learner) |
+Relevé sur master après #87 :
+
+| | FlightControl3D (`flight_policy.hpp`) | BlueDefense (`generalized_patrol_learner.hpp`) |
 |---|---|---|
-| Borne du log-ratio avant `exp` | ±80 | ±20 |
-| Gradient actif | `A ≥ 0 ? r ≤ 1+ε : r ≥ 1−ε`, et log-ratio non saturé | `r·A ≤ clip(r)·A` |
-| Différence observable | à `A = 0` exactement (signe de zéro du gradient) et quand le log-ratio sature | |
+| Scalaire | double | float |
+| Log-densité gaussienne | `z = (x−μ)·exp(−s)` ; `logp −= 0.5·z² + s + 0.5·log 2π` | `n = (x−μ)/exp(s)` ; `logp += −0.5·n² − s − 0.5·log 2π` |
+| Masquage d'axes | oui (frein actif ou non) | non |
+| Borne du log-ratio | ±20 | ±20 |
+| Gradient du surrogate actif | `A ≥ 0 ? r ≤ 1+ε : r ≥ 1−ε` | `r·A ≤ clip(r)·A` |
+| Écart observable du surrogate | signe du zéro du gradient quand `A = 0` exactement et `r > 1+ε` | |
 
-Unifier changerait les calculs dans des cas limites. La fonction commune doit
-donc soit prendre ces conventions en paramètre, soit en imposer une avec
-l'accord de l'utilisateur et une nouvelle référence de trace.
+Les deux log-densités sont mathématiquement égales mais **pas bit à bit**
+(multiplication par `exp(−s)` contre division par `exp(s)`, regroupement des
+termes). Une tête gaussienne commune ne peut donc pas reproduire les deux
+exemples au bit près. Il faut choisir :
+- **A. Bit-exact** : la tête commune porte une variante arithmétique par
+  exemple. Les traces restent identiques, mais l'API est moins propre.
+- **B. Formule canonique unique** : une seule formule. Nouvelles références
+  de traces, parité à tolérance (≈1e-6 relatif) contre les anciennes
+  formules, puis validation par évaluation multi-seed en CI (AGENTS.md).
+  L'inférence des modèles existants est inchangée, car l'action
+  déterministe est la moyenne.
+
+Recommandation proposée à l'utilisateur : **B**, appliquée exemple par
+exemple, avec un commit qui actualise la référence et documente l'écart
+mesuré.
 
 ## Prochaine action
 
-Étape 3 : `ppokit/heads`.
-1. Têtes gaussienne, Bernoulli, catégorielle, composite : log-prob,
-   entropie, action déterministe, gradient.
-2. Surrogate commun (voir ci-dessus) : proposer à l'utilisateur de garder les
-   deux conventions en paramètre, ce qui garantit des traces identiques.
-3. Brancher Flight (`flight_policy.hpp`) puis Blue (learner), en gardant les
-   deux garde-fous identiques.
+**En attente de la décision A ou B ci-dessus.** Ensuite, étape 3 : `ppokit/heads`.
+1. Têtes gaussienne (avec masquage d'axes, nécessaire à Flight), Bernoulli,
+   catégorielle, composite : log-prob, entropie, action déterministe,
+   gradient.
+2. Surrogate commun.
+3. Brancher Flight (`flight_policy.hpp`) puis Blue (learner).
+
+En attendant la décision, travail indépendant possible : étape 4 (backend
+rl_tools unique, sans `RL_TOOLS_NAMESPACE_WRAPPER`), à vérifier par la CI
+Windows, qui lie Flight et Blue dans le même exécutable.
+
+## Dernier état de la CI (PR #105, commit `e6161e4`)
+
+Tout est au vert : Core C++17 tests ; FlightControl3D JSBSim (Ubuntu GCC 15 et
+Windows, Debug et Release) ; Desktop VS2022 (Debug et Release, CTest compris).
 
 ## Pièges connus
 
