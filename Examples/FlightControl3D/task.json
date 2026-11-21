@@ -10,7 +10,7 @@
     "directions": { "fields": [
       "target_direction_body_forward", "target_direction_body_right", "target_direction_body_up",
       "velocity_direction_body_forward", "velocity_direction_body_right", "velocity_direction_body_up"] },
-    "phase": { "fields": ["weight_on_wheels", "rollout", "stop_progress", "elapsed"] },
+    "phase": { "fields": ["weight_on_wheels", "rollout", "stop_progress", "elapsed", "gear_position", "gear_commanded"] },
     "controls": { "fields": ["filtered_elevator", "filtered_aileron", "filtered_rudder", "filtered_throttle", "filtered_brake"] }
   },
   "actions": {
@@ -19,7 +19,8 @@
       "names": ["elevator", "aileron", "rudder", "throttle", "brake"],
       "bounds": [-1, 1],
       "map": "clip"
-    }
+    },
+    "gear": { "head": "bernoulli", "names": ["gear"] }
   },
   "rewards": {
     "Path": {},

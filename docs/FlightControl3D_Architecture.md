@@ -20,7 +20,7 @@ flowchart LR
         types[flight_types] --> config[flight_config]
         config --> geometry[runway_geometry]
         geometry --> guidance[flight_guidance]
-        perf[flight_t6_performance] --> guidance
+        perf[flight_aircraft_performance] --> guidance
         geometry --> landing[flight_landing]
         guidance --> reward[flight_reward]
         guidance --> observation[flight_observation]
@@ -200,22 +200,23 @@ Les valeurs ci-dessous sont dans le code ; le scénario JSON fournit le reste.
 | Nom | Valeur | Unité | Fichier | Justification |
 |---|---|---|---|---|
 | `FeetToMeters` | 0,3048 | m/ft | Core/flight_types.hpp | Pied international exact (JSBSim travaille en pieds) |
-| `ObservationSize` | 33 | — | Core/flight_types.hpp | Nombre de slots `ObservationIndex` (contrat) |
+| `ObservationSize` | 35 | — | Core/flight_types.hpp | Nombre de slots `ObservationIndex` (contrat) |
 | `ContinuousActions` | 5 | — | Core/flight_types.hpp | Profondeur, ailerons, direction, gaz, frein |
 | `CentrelineLookaheadMeters` | 300 | m | Core/flight_guidance.hpp | Convergence douce vers l'axe près du point d'aboutissement |
 | `InterceptLookaheadMeters` | 2000 | m | Core/flight_guidance.hpp | Interception de l'axe prolongé loin de la piste |
 | `MaximumInterceptAngleDegrees` | 30 | ° | Core/flight_guidance.hpp | Angle maximal entre la route commandée et l'axe |
+| `GateRadiusMeters` | 300 | m | Core/flight_guidance.hpp | Rayon de passage d'une gate de route |
+| `GateCorridorMeters` | 600 | m | Core/flight_guidance.hpp | Demi-largeur du couloir de passage au-delà du plan d'une gate |
+| `MaximumGates` | 8 | — | Core/flight_types.hpp | Capacité fixe d'une route (circuit, attente) |
 | `MaximumPathAngleDegrees` | 6 | ° | Core/flight_guidance.cpp | Pente commandée maximale (deux fois un plan à 3°) |
 | `MaximumContactSinkMps` | 0,5 | m/s | Core/flight_guidance.cpp | Taux de chute visé au contact (toucher doux) |
 | `ContactSinkFractionOfLimit` | 0,5 | — | Core/flight_guidance.cpp | Marge sur la limite structurale de chute |
 | `FlareSpeedReachedAlongMeters` | −2000 | m | Core/flight_guidance.cpp | Vitesse d'arrondi atteinte 2 km avant le seuil |
 | `DecelerationLengthMeters` | 700 | m | Core/flight_guidance.cpp | Décélération smoothstep entre −2,7 km et −2 km |
-| `T6ApproachSpeedStallFactor` | 1,3 | — | Core/flight_t6_performance.hpp | Réserve de décrochage 1,3 Vs |
-| `T6FlapTravelDegrees` | 30 | ° | Core/flight_t6_performance.hpp | Débattement des volets du T-6 JSBSim |
-| `T6InitialMassPounds` | 5500 | lb | Core/flight_t6_performance.hpp | 5000 lb à vide + 500 lb de carburant |
-| `T6WingAreaSquareFeet` | 176 | ft² | Core/flight_t6_performance.hpp | Surface de référence du modèle |
-| `T6CleanMaximumLiftCoefficient` | 1,47 | — | Core/flight_t6_performance.hpp | CLmax lisse du modèle |
-| `SeaLevelDensity` | 1,225 | kg/m³ | Core/flight_t6_performance.hpp | Atmosphère standard au niveau de la mer |
+| `ApproachSpeedStallFactor` | 1,3 | — | Core/flight_aircraft_performance.hpp | Réserve de décrochage 1,3 Vs |
+| `T6Performance` | 5500 lb, 176 ft², CLmax 1,47, volets 30° | — | Core/flight_aircraft_performance.hpp | T-6 JSBSim ; `FGTrim` utilisable |
+| `Pc7Performance` | 4443 lb, 178,7 ft², CLmax 1,747, volets 30° | — | Core/flight_aircraft_performance.hpp | PC-7 JSBSim ; trim par vol simulé (`FlyTrim`) |
+| `SeaLevelDensity` | 1,225 | kg/m³ | Core/flight_aircraft_performance.hpp | Atmosphère standard au niveau de la mer |
 | `VerticalSpeedErrorScaleMps` | 2 | m/s | Core/flight_reward.hpp | Saturation du potentiel `VerticalSpeed` |
 | `AirspeedErrorScaleMps` | 10 | m/s | Core/flight_reward.hpp | Saturation du potentiel `Speed` en vol |
 | `TouchdownZoneLengthMeters` | 900 | m | Core/flight_reward.hpp | Zone de toucher OACI |
@@ -233,7 +234,7 @@ Les valeurs ci-dessous sont dans le code ; le scénario JSON fournit le reste.
 | `KlSkipFactor` | 1,5 | — | Training/flight_learner.cpp | Garde KL alignée sur RLMission |
 | `AdvantageEpsilon` | 1e-8 | — | Training/flight_learner.cpp | Stabilité de la normalisation des avantages |
 | `CheckpointMagic` | `PPO_FLIGHT_POLICY_V3` | — | Training/flight_learner.cpp | Format de checkpoint (contrat) |
-| `ContractVersion` | 6 | — | Core/flight_config.cpp | Version de la sémantique observation/action/récompense |
+| `ContractVersion` | 7 | — | Core/flight_config.cpp | Version de la sémantique observation/action/récompense |
 | `EvaluationProtocolVersion` | 3 | — | Training/flight_model_store.cpp | Protocole de validation stratifié |
 
 Les échelles d'observation sont listées dans la table des observations ci-dessous.
@@ -244,7 +245,7 @@ Les poids viennent de `reward.weights` (valeurs du scénario de référence entr
 
 | Canal | Type | Phase | Formule (non pondérée) | Saturation |
 |---|---|---|---|---|
-| Path (4) | potentiel | vol + sol | vol : `tol / (tol + d)`, `tol = pathTolerance` (1500 m), `d` = distance au point d'aboutissement puis écart latéral et hauteur au-delà ; sol : 1 | ∈ (0, 1] |
+| Path (4) | potentiel | vol + sol | vol : `tol / (tol + d)`, `tol = pathTolerance` (1500 m), `d` = distance au point d'aboutissement puis écart latéral et hauteur au-delà ; avec des gates restantes, distance à la gate suivante + branches restantes + même distance depuis la dernière gate ; sol : 1 | ∈ (0, 1] |
 | Direction (0,5) | coût continu | vol | `−dt × (1 − cos(angle vitesse/commande)) / 2` par sous-pas | ∈ [−dt, 0] |
 | VerticalSpeed (2) | potentiel | vol | `−min(|vz − vz_cible| / 2 m/s, 1)` ; sol : 0 | ∈ [−1, 0] |
 | Speed (2) | potentiel | vol + sol | vol : `−min(|CAS − cible| / 10 m/s, 1)` ; sol : `1 − min(v / flareSpeed, 1)` | vol [−1, 0], sol [0, 1] |
@@ -279,7 +280,9 @@ Toutes les valeurs sont dans [−1, 1]. `SignedLog(x, r, M) = sign(x)·log(1 + |
 | 25 | rollout | phase de roulage (active le frein) | 0 ou 1 |
 | 26 | stop_progress | temps arrêté / stoppedHoldSeconds | borné |
 | 27 | elapsed | temps simulé / maxSeconds | borné |
-| 28–32 | filtered_* | commandes filtrées appliquées | déjà bornées |
+| 28 | gear_position | extension du train (1 = sorti verrouillé) | déjà bornée |
+| 29 | gear_commanded | sortie du train commandée (verrouillée, masque l'action train) | 0 ou 1 |
+| 30–34 | filtered_* | commandes filtrées appliquées | déjà bornées |
 
 ## Reprendre le code
 

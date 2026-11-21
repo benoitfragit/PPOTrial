@@ -18,17 +18,17 @@ FlightCurriculum::FlightCurriculum(CurriculumSettings const& settings) noexcept 
 
 double FlightCurriculum::Difficulty() const noexcept
 {
-    if (settings_.levels <= 1)
+    if (Levels() <= 1)
     {
         return 1.0;
     }
-    return static_cast<double>(level_) / static_cast<double>(settings_.levels - 1);
+    return static_cast<double>(level_) / static_cast<double>(Levels() - 1);
 }
 
 bool FlightCurriculum::Record(bool stopped) noexcept
 {
     // The full task has no further level.
-    if (level_ + 1 >= settings_.levels)
+    if (level_ + 1 >= Levels())
     {
         return false;
     }
@@ -56,7 +56,7 @@ bool FlightCurriculum::Record(bool stopped) noexcept
 
 void FlightCurriculum::Restore(std::size_t level) noexcept
 {
-    level_ = std::min(level, settings_.levels - 1);
+    level_ = std::min(level, Levels() - 1);
     episodes_ = 0;
     stops_ = 0;
 }

@@ -34,9 +34,11 @@ inline constexpr double DegreesToRadians = Pi / 180.0;
 /** @brief Continuous actor outputs: elevator, aileron, rudder, throttle and brake. */
 inline constexpr std::size_t ContinuousActions = 5;
 /** @brief Number of named observation slots, see ObservationIndex. */
-inline constexpr std::size_t ObservationSize = 33;
+inline constexpr std::size_t ObservationSize = 35;
 /** @brief Observation slot that flags the ground-roll phase and enables the brake action. */
 inline constexpr std::size_t RolloutObservation = 25;
+/** @brief Observation slot that flags a latched gear extension and disables the gear action. */
+inline constexpr std::size_t GearCommandObservation = 29;
 /** @brief Every normalized observation lies within [-ObservationBound, ObservationBound]. */
 inline constexpr float ObservationBound = 1.F;
 
@@ -105,11 +107,11 @@ struct AircraftState final
 };
 
 /**
- * @brief Physical control inputs; the landing gear always stays extended.
+ * @brief Physical control inputs.
  *
  * Written by ToControls (policy mapping) and the environment command filter; read by
- * JsbsimAircraft::Advance. Elevator, aileron and rudder lie in [-1, 1]; throttle, brake
- * and flap in [0, 1].
+ * JsbsimAircraft::Advance. Elevator, aileron and rudder lie in [-1, 1]; throttle, brake,
+ * flap and gear in [0, 1].
  */
 struct Controls final
 {
@@ -125,6 +127,13 @@ struct Controls final
     double brake{};
     /** @brief Flap command, in [0, 1], selected by the mission phase. */
     double flap{};
+    /**
+     * @brief Gear lever, 0 (up) or 1 (down).
+     *
+     * From the policy it is an extension request; the environment latches the first
+     * request, so the gear is never retracted during an episode.
+     */
+    double gear{};
 };
 
 /** @brief Mission phase: airborne approach until the first safe contact, then ground roll. */
@@ -149,6 +158,7 @@ enum class CrashReason : std::size_t
     PitchHigh,
     Heading,
     NoWheelContact,
+    RouteIncomplete,
     Count
 };
 /** @brief Number of CrashReason values. */
@@ -234,6 +244,32 @@ inline constexpr std::size_t RewardCount = static_cast<std::size_t>(Reward::Coun
 inline constexpr std::array<char const*, RewardCount> RewardNames{
     "Path", "Direction", "VerticalSpeed", "Speed", "Touchdown", "Stop", "Crash"};
 
+/** @brief Largest number of gates of one episode route (a holding lap and its joining legs). */
+inline constexpr std::size_t MaximumGates = 8;
+
+/** @brief Point of a route, in runway axes: along past the threshold, cross right of the centreline, up. */
+struct Gate final
+{
+    double alongMeters{};
+    double crossMeters{};
+    double heightMeters{};
+};
+
+/**
+ * @brief Fixed-capacity sequence of gates flown before the final approach.
+ *
+ * Empty for a direct approach. The start point is kept so that the first leg has a
+ * direction, like every later leg between two gates.
+ */
+struct Route final
+{
+    std::array<Gate, MaximumGates> gates{};
+    /** @brief Number of gates in use, at most MaximumGates. */
+    std::size_t count{};
+    /** @brief Horizontal start of the route, in runway axes (heightMeters unused). */
+    Gate start{};
+};
+
 /**
  * @brief Mutable episode state, written only by AdvanceMission and the environment resets.
  *
@@ -251,6 +287,12 @@ struct MissionState final
     double stoppedSeconds{};
     /** @brief Last filtered physical controls, included in the policy observation. */
     Controls filteredControls{};
+    /** @brief True once the gear extension is commanded; it stays latched until the episode ends. */
+    bool gearDownCommanded{true};
+    /** @brief Gates to fly before the final approach; empty for a direct approach. */
+    Route route{};
+    /** @brief Index of the next gate; equal to route.count once the route is complete. */
+    std::size_t nextGate{};
     /** @brief True after the first safe touchdown (or for a rolling start). */
     bool touchedDown{};
     /** @brief True once the first ground contact was recorded. */

@@ -17,7 +17,7 @@ if (NOT TARGET RLtools::Core)
     FetchContent_MakeAvailable(rltools)
 endif()
 
-# JSBSim 1.3.3, immutable release commit and native T-6 data.
+# JSBSim 1.3.3, immutable release commit and native T-6 and PC-7 data.
 set(BUILD_PYTHON_MODULE OFF CACHE BOOL "" FORCE)
 set(BUILD_JULIA_PACKAGE OFF CACHE BOOL "" FORCE)
 set(BUILD_MATLAB_SFUNCTION OFF CACHE BOOL "" FORCE)
@@ -31,7 +31,7 @@ FetchContent_MakeAvailable(jsbsim)
 
 set(PPO_JSBSIM_DATA_ROOT "${CMAKE_BINARY_DIR}/resources/FlightControl3D/jsbsim")
 file(MAKE_DIRECTORY "${PPO_JSBSIM_DATA_ROOT}/aircraft" "${PPO_JSBSIM_DATA_ROOT}/engine" "${PPO_JSBSIM_DATA_ROOT}/systems")
-file(COPY "${jsbsim_SOURCE_DIR}/aircraft/t6texan2"
+file(COPY "${jsbsim_SOURCE_DIR}/aircraft/t6texan2" "${jsbsim_SOURCE_DIR}/aircraft/pc7"
     DESTINATION "${PPO_JSBSIM_DATA_ROOT}/aircraft")
 file(COPY "${jsbsim_SOURCE_DIR}/engine/PT6A-68.xml" "${jsbsim_SOURCE_DIR}/engine/direct.xml"
     DESTINATION "${PPO_JSBSIM_DATA_ROOT}/engine")
@@ -45,7 +45,8 @@ target_compile_features(FlightControlCore PUBLIC cxx_std_17)
 target_include_directories(FlightControlCore PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Core" "${CMAKE_CURRENT_SOURCE_DIR}/Training")
 target_link_libraries(FlightControlCore PUBLIC nlohmann_json::nlohmann_json)
 
-add_library(FlightControlSimulator STATIC Simulator/jsbsim_aircraft.cpp Simulator/flight_environment.cpp)
+add_library(FlightControlSimulator STATIC Simulator/jsbsim_aircraft.cpp Simulator/flight_environment.cpp
+    Simulator/flight_trim.cpp)
 target_include_directories(FlightControlSimulator PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Simulator")
 target_compile_definitions(FlightControlSimulator PRIVATE PPO_JSBSIM_DATA_ROOT="${PPO_JSBSIM_DATA_ROOT}")
 target_link_libraries(FlightControlSimulator PUBLIC FlightControlCore PRIVATE libJSBSim)
@@ -69,7 +70,8 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         add_executable(FlightControl_${test_name}_tests tests/${test_name}_tests.cpp)
         target_link_libraries(FlightControl_${test_name}_tests PRIVATE FlightControlRuntime)
         target_compile_definitions(FlightControl_${test_name}_tests PRIVATE
-            PPO_FLIGHT_CONFIG="${CMAKE_SOURCE_DIR}/resources/settings/Scenarios/FlightControl3D_T6_Joint.json")
+            PPO_FLIGHT_CONFIG="${CMAKE_SOURCE_DIR}/resources/settings/Scenarios/FlightControl3D_T6_Joint.json"
+            PPO_FLIGHT_PC7_CONFIG="${CMAKE_SOURCE_DIR}/resources/settings/Scenarios/FlightControl3D_PC7_Joint.json")
         add_test(NAME FlightControl_${test_name}_tests COMMAND FlightControl_${test_name}_tests)
     endforeach()
     # The golden trace is only frozen on its reference platform; elsewhere it reports a skip.

@@ -39,24 +39,40 @@ d'aboutissement, qui doit rester sur la première moitié de la piste. Les dépa
 le guidage, l'observation, le potentiel `Path` et la vue de profil utilisent cette
 même géométrie.
 
-La direction commandée pointe directement vers le point d'aboutissement tant que
-l'avion en est à plus de 300 m. Plus près, puis au-dessus de la piste, la cible
-horizontale glisse sur l'axe 300 m devant l'avion : la trajectoire rejoint l'axe
-sans virage brusque et continue vers l'avant, sans jamais viser un point derrière
-l'avion. Sous `flareHeightMeters`, la descente se raccorde continûment à un taux
-de contact doux (0,5 m/s). Au roulage, la direction est horizontale, vers l'axe.
+La direction commandée horizontale vise un point de l'axe prolongé situé
+`L = clamp(aboutissement − along, 300 m, 2 km)` devant l'avion, à au plus 30° de
+l'axe : loin de la piste, l'avion intercepte l'axe puis s'y réaligne bien avant le
+seuil ; en finale courte, il vise le point d'aboutissement ; plus près, puis
+au-dessus de la piste, la cible glisse sur l'axe 300 m devant l'avion, sans jamais
+viser un point derrière lui. La référence verticale suit le plan de descente vers
+le point d'aboutissement. Sous `flareHeightMeters`, la descente se raccorde
+continûment à un taux de contact doux (0,5 m/s). Au roulage, la direction est
+horizontale, vers l'axe.
+
+Un épisode peut d'abord suivre une **route de gates** (vent arrière, base,
+finale, tour d'attente) : la direction vise la gate suivante et monte ou descend
+vers sa hauteur (pente bornée à 6°). Une gate est passée à moins de 300 m, ou
+une fois franchi le plan normal à sa branche d'arrivée dans un couloir de ±600 m ;
+sinon la commande ramène l'avion vers elle. Après la dernière gate, le guidage
+d'approche ci-dessus s'applique tel quel. Toucher la piste avant la dernière gate
+est un raccourci, donc un crash (`CrashReason::RouteIncomplete`).
 
 Le potentiel `Path` vaut `w · L / (L + d)`, avec `d` la distance au point
 d'aboutissement avant celui-ci, puis l'écart latéral et la hauteur au-delà : il
 est continu au point d'aboutissement et ne pénalise ni le passage du seuil ni le
-vol au-dessus de la piste. Une fois l'avion au roulage, il reste à sa valeur
-maximale `w` : aucun signal de distance ne contredit l'arrêt.
+vol au-dessus de la piste. Avec des gates restantes, `d` est la distance à la gate
+suivante, plus les branches restantes, plus la même distance depuis la dernière
+gate ; passer une gate ne peut que réduire `d` (inégalité triangulaire). Sans
+route, la formule est identique à la précédente, ce qu'un test vérifie au bit
+près. Une fois l'avion au roulage, il reste à sa valeur maximale `w` : aucun
+signal de distance ne contredit l'arrêt.
 
 ## Actions
 
 L'acteur produit cinq actions gaussiennes : profondeur, ailerons, direction,
 gaz et frein. Une sortie nulle commande le **trim de la descente à 3°**
-(`initial.throttle` = 0,40 et `initial.elevatorTrim` = −0,21, soit environ
+(`initial.throttle` = 0,41 et `initial.elevatorTrim` = −0,194, trim JSBSim donné
+par `FlightControlHeadless --trim`, soit environ
 −2,9 m/s à 55 m/s avec les volets d'approche) : une politique non entraînée
 suit déjà le plan au lieu de piquer. La profondeur ajoute l'action au trim avec
 un gain uniforme ; les gaz vont du trim au ralenti pour les actions négatives et
@@ -70,6 +86,19 @@ avant (±7° dans le modèle JSBSim, même sens de lacet que la gouverne) : sans
 elle, la trajectoire au sol ne se corrigeait plus une fois l'avion ralenti. Les départs
 en vol démarrent sur ces commandes trimées, les départs au roulage au ralenti.
 Ces deux valeurs font partie du contrat de checkpoint.
+
+Une sixième sortie, un logit, commande la **sortie du train** par un tirage de
+Bernoulli (probabilité sigmoïde du logit ; logit ≥ 0 en inférence
+déterministe). Elle n'existe que tant que la sortie n'est pas commandée :
+l'environnement verrouille la première demande, le train ne remonte jamais
+pendant l'épisode et une fois verrouillé il ne compte plus dans la
+vraisemblance, l'entropie ni le KL. Les départs train rentré
+(`EpisodeStart::gearUp`) obligent la politique à le sortir. Les modèles
+JSBSim n'ont de points de contact qu'aux roues et n'appliquent aucune force
+par un train non verrouillé : dès qu'un point de roue nominal atteint la
+surface avec le train sous `gearDownMinimum`, c'est un contact du fuselage,
+donc un crash (`CrashReason::Gear`). Aucune récompense n'est ajoutée : le
+crash existant suffit.
 
 ## Récompenses
 
@@ -121,13 +150,18 @@ depuis un départ à 14 km (≈ 2 500 actions), le `Stop` garde un poids actuali
 de 0,08 (contre 1e-11 avec 0,99). Le `lambda` de GAE vaut 0,98 : avec 0,95,
 l'avantage ne portait que sur environ 2 s, si bien qu'un virage loin du sol
 semblait éviter le crash avant que le critique ne sache en compter le coût
-`Direction`, et l'agent apprenait à faire demi-tour. Les rollouts PPO passent à 8 192 pas
-(minibatch 2 048), soit plusieurs épisodes par mise à jour. La limite de temps
-de 480 s couvre l'approche la plus longue et le roulage.
+`Direction`, et l'agent apprenait à faire demi-tour. `gamma` et `lambda` restent
+inchangés avec les étapes longues : le potentiel `Path` le long de la route donne la
+progression à chaque pas, et le `Stop` n'a besoin d'être visible que pendant la
+finale (moins de 100 s). La limite de temps passe à 900 s : un tour d'attente puis
+l'approche durent 6 à 8 minutes. Les rollouts passent à 32 768 pas (≈ 55 min
+simulées, minibatch 4 096) pour garder plusieurs épisodes complets par mise à jour,
+même à la dernière étape ; à 8 192 pas, une mise à jour n'aurait vu qu'un seul
+épisode d'attente.
 
 ## Observations
 
-Les 33 entrées sont nommées par `ObservationIndex` et toutes bornées à [−1, 1].
+Les 35 entrées sont nommées par `ObservationIndex` et toutes bornées à [−1, 1].
 Positions et vitesses sont exprimées dans le repère piste : l'observation ne
 dépend pas du cap ni de la position tirés pour la piste.
 
@@ -153,12 +187,27 @@ La section `training.curriculum` règle une difficulté de départ adaptative :
 | Réglage | Valeur | Effet |
 |---|---|---|
 | `firstDistanceMeters` | 1 500–3 000 m | départs du niveau 0 : finale courte, sur l'axe et le plan, cap aligné |
-| `levels` | 6 | le dernier niveau est la tâche complète (`initial`) |
+| `levels` | 6 | niveaux d'approche ; le dernier est l'enveloppe complète (`initial`) |
 | `promotionSuccessRate` | 0,6 | taux d'arrêts sur la fenêtre qui fait passer au niveau suivant |
 | `windowEpisodes` | 30 | épisodes en vol par décision |
 | `rolloutStartShare` | 0,15 | part des départs déjà posés, pour apprendre le freinage |
+| `stages` | 4 étapes | niveaux suivants, un par étape ; la dernière est la tâche complète |
 
-Entre les niveaux, la plage de distance est interpolée et les écarts de gisement,
+Les étapes (`stages`) prolongent l'échelle après les niveaux d'approche :
+
+| Étape | Type | Départ | Route | Train rentré |
+|---|---|---|---|---|
+| `offset` | `approach` | 5–8 km, gisement 12–28°, cap ±60°, ±50 m autour du plan | aucune | 0 % |
+| `high-far` | `approach` | 12–17 km, gisement ≤ 12°, cap ±45°, 150–500 m au-dessus du plan | aucune | 50 % |
+| `downwind` | `pattern` | par le travers, 2–3 km de l'axe, cap opposé ±15°, 250–350 m | fin de vent arrière (−3 km), base (−6 km), finale sur l'axe (−7 km) | 50 % |
+| `holding` | `holding` | 12,5–14,5 km, en rapprochement, 550–650 m | point d'attente à −10 km, un tour (branche de 3,4 km, largeur 1,1 km), retour au point | 50 % |
+
+La difficulté reste un scalaire dans [0, 1] partout (session, BEST, CI) : ses
+`levels − 1` premiers pas interpolent l'approche, chaque pas suivant est une étape
+(`ResolveCurriculum`). Les départs en vol démarrent sur le trim JSBSim de leur
+vitesse, pente et train, et non plus sur le point neutre de la descente à 3°.
+
+Entre les niveaux d'approche, la plage de distance est interpolée et les écarts de gisement,
 de cap et de hauteur sont mis à l'échelle de la difficulté. Chaque départ en vol
 tire sa difficulté entre 0 et le niveau courant, avec une densité croissante
 vers ce niveau : la frontière est la plus pratiquée, et les cas faciles restent

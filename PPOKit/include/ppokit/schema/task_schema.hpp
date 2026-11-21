@@ -82,6 +82,8 @@ enum class ActionHead : std::uint8_t
 {
     /** @brief Diagonal Gaussian, one mean per component (ppokit/heads/gaussian.hpp). */
     Gaussian,
+    /** @brief Yes/no decision, one logit per component (ppokit/heads/bernoulli.hpp). */
+    Bernoulli,
 };
 
 /** @brief How a sampled action is turned into the command applied to the environment. */
@@ -93,7 +95,11 @@ enum class ActionMapping : std::uint8_t
     None,
 };
 
-/** @brief Contiguous block of the action vector sharing one head. */
+/**
+ * @brief Contiguous block of the action vector sharing one head.
+ * @details The actor outputs one value per component whatever the head: a Gaussian mean
+ * or a Bernoulli logit. Bounds and mapping only apply to Gaussian components.
+ */
 struct ActionGroup final
 {
     std::string name;

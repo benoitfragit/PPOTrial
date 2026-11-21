@@ -178,9 +178,23 @@ ActionGroup ReadActionGroup(std::string const& name, Json const& value, std::str
     RequireKnownKeys(value, {"head", "names", "size", "bounds", "map"}, path, errors);
     ActionGroup group;
     group.name = name;
-    if (!value.contains("head") || value.at("head") != "gaussian")
+    if (!value.contains("head"))
     {
-        errors.Fail(path + ".head", "expected \"gaussian\" (the only head available in this version)");
+        errors.Fail(path + ".head", "missing (\"gaussian\" or \"bernoulli\")");
+    }
+    if (value.at("head") == "gaussian")
+    {
+        group.head = ActionHead::Gaussian;
+    }
+    else if (value.at("head") == "bernoulli")
+    {
+        group.head = ActionHead::Bernoulli;
+        group.mapping = ActionMapping::None;
+        RequireKnownKeys(value, {"head", "names", "size"}, path, errors);
+    }
+    else
+    {
+        errors.Fail(path + ".head", "expected \"gaussian\" or \"bernoulli\"");
     }
     bool const hasNames = value.contains("names");
     if (hasNames == value.contains("size"))
@@ -401,6 +415,7 @@ std::uint64_t ShapeHash(TaskSchema const& schema)
     for (auto const& group : schema.actions)
     {
         AppendCanonical(canonical, group.name);
+        AppendCanonical(canonical, group.head == ActionHead::Gaussian ? "gaussian" : "bernoulli");
         for (auto const& component : group.componentNames)
         {
             AppendCanonical(canonical, component);

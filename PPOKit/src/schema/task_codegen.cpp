@@ -153,26 +153,39 @@ void WriteInputLayout(CodeWriter& code, std::string const& structName, std::stri
     code.Close(";");
 }
 
+/** @brief Writes the struct of one action group; bounds and clipping only exist for Gaussian heads. */
+void WriteActionGroup(CodeWriter& code, ActionGroup const& group)
+{
+    bool const gaussian = group.head == ActionHead::Gaussian;
+    std::string const head =
+        gaussian ? "Gaussian head (one mean per component)" : "Bernoulli head (one logit per component)";
+    code.Line("/** @brief Group \"" + group.name + "\": " + head + ", " + std::to_string(group.Size())
+        + " components. */");
+    code.Open("struct " + GroupStructName(group.name, "actions") + " final");
+    code.Line("static constexpr std::size_t Offset = " + std::to_string(group.offset) + ";");
+    code.Line("static constexpr std::size_t Size = " + std::to_string(group.Size()) + ";");
+    code.Line(std::string("static constexpr bool Gaussian = ") + (gaussian ? "true" : "false") + ";");
+    if (gaussian)
+    {
+        code.Line("static constexpr double LowerBound = " + DoubleLiteral(group.lowerBound) + ";");
+        code.Line("static constexpr double UpperBound = " + DoubleLiteral(group.upperBound) + ";");
+        bool const clipped = group.mapping == ActionMapping::Clip;
+        code.Line("/** @brief True when the sample is clipped to the bounds before use. */");
+        code.Line(std::string("static constexpr bool Clipped = ") + (clipped ? "true" : "false") + ";");
+    }
+    code.Close(";");
+}
+
 void WriteActions(CodeWriter& code, TaskSchema const& schema)
 {
-    code.Line("/** @brief Action vector produced by the actor (raw, before mapping to commands). */");
+    code.Line("/** @brief Action vector: one actor output per component (Gaussian mean or Bernoulli logit). */");
     code.Open("struct Action final");
     code.Line("static constexpr std::size_t Size = " + std::to_string(schema.actionSize) + ";");
     std::vector<std::string> names;
     for (auto const& group : schema.actions)
     {
         code.Line();
-        code.Line("/** @brief Group \"" + group.name + "\": Gaussian head, " + std::to_string(group.Size())
-            + " components. */");
-        code.Open("struct " + GroupStructName(group.name, "actions") + " final");
-        code.Line("static constexpr std::size_t Offset = " + std::to_string(group.offset) + ";");
-        code.Line("static constexpr std::size_t Size = " + std::to_string(group.Size()) + ";");
-        code.Line("static constexpr double LowerBound = " + DoubleLiteral(group.lowerBound) + ";");
-        code.Line("static constexpr double UpperBound = " + DoubleLiteral(group.upperBound) + ";");
-        bool const clipped = group.mapping == ActionMapping::Clip;
-        code.Line("/** @brief True when the sample is clipped to the bounds before use. */");
-        code.Line(std::string("static constexpr bool Clipped = ") + (clipped ? "true" : "false") + ";");
-        code.Close(";");
+        WriteActionGroup(code, group);
         names.insert(names.end(), group.componentNames.begin(), group.componentNames.end());
     }
     code.Line();

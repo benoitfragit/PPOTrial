@@ -167,13 +167,15 @@ char const* ActivationName(Activation activation) noexcept
  * @param networkTemplate rl_tools network family, e.g. "mlp_unconditional_stddev".
  */
 void WriteMlp(CodeWriter& code, std::string const& name, std::string const& description, std::size_t inputs,
-    std::size_t outputs, MlpSpec const& mlp, std::string const& networkTemplate)
+    std::size_t outputs, MlpSpec const& mlp, std::string const& networkTemplate, bool gaussianOnly = true)
 {
     code.Line("/** @brief " + description + " */");
     code.Open("struct " + name + " final");
     code.Line("static constexpr std::size_t Inputs = " + std::to_string(inputs) + ";");
     code.Line("static constexpr std::size_t Outputs = " + std::to_string(outputs) + ";");
     code.Line("static constexpr std::size_t HiddenLayers = " + std::to_string(mlp.hiddenLayers) + ";");
+    code.Line("/** @brief True when every output is a Gaussian mean (no Bernoulli logit). */");
+    code.Line(std::string("static constexpr bool GaussianOnly = ") + (gaussianOnly ? "true" : "false") + ";");
     code.Line("/** @brief Width written in graph.json; another width can be chosen per instantiation. */");
     code.Line("static constexpr std::size_t DefaultWidth = " + std::to_string(mlp.width) + ";");
     code.Line();
@@ -191,6 +193,19 @@ void WriteMlp(CodeWriter& code, std::string const& name, std::string const& desc
     code.Line("using Network = rlt::nn_models::" + networkTemplate + "::NeuralNetworkAdam<");
     code.Line("    rlt::nn_models::mlp::AdamSpecification<Structure<Index, BatchSize, Width, ContainerTag>>>;");
     code.Close(";");
+}
+
+/** @brief True when every action group of the task uses a Gaussian head. */
+bool GaussianOnly(TaskSchema const& task) noexcept
+{
+    for (auto const& group : task.actions)
+    {
+        if (group.head != ActionHead::Gaussian)
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -255,8 +270,10 @@ std::string GenerateNetworksHeader(NetworkSchema const& networks, TaskSchema con
     {
         code.Line();
         WriteMlp(code, "Actor",
-            "Actor: observation -> Gaussian means, with one learned log-std per action component.",
-            networks.actor.inputs, networks.actor.outputs, networks.actor.mlp, "mlp_unconditional_stddev");
+            "Actor: observation -> one output per action component (Gaussian mean or Bernoulli logit), "
+            "with one learned log-std per component (unused by Bernoulli components).",
+            networks.actor.inputs, networks.actor.outputs, networks.actor.mlp, "mlp_unconditional_stddev",
+            GaussianOnly(task));
     }
     if (networks.critic.model == NetworkModel::Mlp)
     {

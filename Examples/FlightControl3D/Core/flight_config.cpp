@@ -13,7 +13,7 @@
  * (runtime edits of reward weights), Training/flight_model_store.cpp (signature checks).
  */
 #include "flight_config.hpp"
-#include "flight_t6_performance.hpp"
+#include "flight_aircraft_performance.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <array>
@@ -26,7 +26,7 @@ namespace {
 using Json = nlohmann::json;
 
 /** @brief Version of the observation, action, guidance, reward and spawn semantics stored in checkpoints. */
-constexpr int ContractVersion = 6;
+constexpr int ContractVersion = 7;
 /** @brief Accepted value of the scenario "formatVersion" field. */
 constexpr int ConfigurationFormatVersion = 2;
 /**
@@ -44,6 +44,7 @@ constexpr std::array<char const*, 9> WarmStartSpawnFields{"distanceMeters", "bea
 // physical and numerical rules live in the Validate* functions below.
 constexpr std::size_t MaximumActionSubsteps = 100;
 constexpr std::size_t MaximumCurriculumLevels = 100;
+constexpr std::size_t MaximumCurriculumStages = 16;
 constexpr std::size_t MaximumCurriculumWindowEpisodes = 100000;
 constexpr std::size_t MaximumRolloutSteps = 65536;
 constexpr std::size_t MaximumMinibatch = 65536;
@@ -77,6 +78,12 @@ constexpr double MaximumInitialRollDegrees = 30.0;
 constexpr double MaximumAbsoluteInitialPitchDegrees = 15.0;
 /** @brief Rolling starts stay within width / RolloutCrossWidthDivisor of the centreline (a quarter width). */
 constexpr double RolloutCrossWidthDivisor = 4.0;
+/** @brief Highest stage start or gate above the deck, in metres (below the observed height range of 2 km). */
+constexpr double MaximumStageHeightMeters = 1500.0;
+/** @brief Largest stage lateral offset, in metres (below the observed cross range of 5 km). */
+constexpr double MaximumStageCrossMeters = 4000.0;
+/** @brief Smallest distance between route gates, in metres (more than three gate radii). */
+constexpr double MinimumGateSpacingMeters = 1000.0;
 /** @brief Shortest first curriculum start distance, in metres. */
 constexpr double MinimumFirstCurriculumDistanceMeters = 1000.0;
 /** @brief Accepted saturation threshold range of the diagnostics. */
@@ -244,14 +251,79 @@ RewardSettings ReadReward(Json const& section)
     return reward;
 }
 
+/** @brief Reads the kind name of a stage: "approach", "pattern" or "holding". */
+StageKind ReadStageKind(Json const& stage)
+{
+    auto const& value = stage.at("kind");
+    Require(value.is_string(), "curriculum stage kind");
+    auto const kind = value.get<std::string>();
+    if (kind == "approach")
+    {
+        return StageKind::Approach;
+    }
+    if (kind == "pattern")
+    {
+        return StageKind::Pattern;
+    }
+    Require(kind == "holding", "curriculum stage kind must be approach, pattern or holding");
+    return StageKind::Holding;
+}
+
+/** @brief Reads one curriculum stage; each kind has its own exact set of fields. */
+StageSettings ReadStage(Json const& section)
+{
+    Require(section.is_object() && section.contains("kind") && section.contains("name")
+        && section.at("name").is_string(), "curriculum stage name and kind");
+    StageSettings stage{};
+    stage.name = section.at("name").get<std::string>();
+    stage.kind = ReadStageKind(section);
+    if (stage.kind == StageKind::Approach)
+    {
+        Keys(section, {"name", "kind", "distanceMeters", "bearingDegrees", "headingOffsetDegrees",
+            "heightAboveGlideMeters", "gearUpShare"});
+        stage.distanceMeters = Bounds(section, "distanceMeters");
+        stage.bearingDegrees = Bounds(section, "bearingDegrees");
+        stage.heightMeters = Bounds(section, "heightAboveGlideMeters");
+    }
+    else if (stage.kind == StageKind::Pattern)
+    {
+        Keys(section, {"name", "kind", "startAlongMeters", "downwindOffsetMeters", "headingOffsetDegrees",
+            "heightMeters", "gearUpShare"});
+        stage.startAlongMeters = Bounds(section, "startAlongMeters");
+        stage.lateralMeters = Bounds(section, "downwindOffsetMeters");
+        stage.heightMeters = Bounds(section, "heightMeters");
+    }
+    else
+    {
+        Keys(section, {"name", "kind", "startAlongMeters", "startCrossMeters", "headingOffsetDegrees",
+            "heightMeters", "fixAlongMeters", "outboundMeters", "widthMeters", "gearUpShare"});
+        stage.startAlongMeters = Bounds(section, "startAlongMeters");
+        stage.lateralMeters = Bounds(section, "startCrossMeters");
+        stage.heightMeters = Bounds(section, "heightMeters");
+        stage.fixAlongMeters = Number(section, "fixAlongMeters");
+        stage.outboundMeters = Number(section, "outboundMeters");
+        stage.holdingWidthMeters = Number(section, "widthMeters");
+    }
+    stage.headingOffsetDegrees = Bounds(section, "headingOffsetDegrees");
+    stage.gearUpShare = Number(section, "gearUpShare");
+    return stage;
+}
+
 CurriculumSettings ReadCurriculum(Json const& section)
 {
     Keys(section, {"firstDistanceMeters", "levels", "promotionSuccessRate", "windowEpisodes",
-        "rolloutStartShare"});
-    return {Bounds(section, "firstDistanceMeters"), Integer(section, "levels", MaximumCurriculumLevels),
-        Number(section, "promotionSuccessRate"), Integer(section, "windowEpisodes",
-            MaximumCurriculumWindowEpisodes),
-        Number(section, "rolloutStartShare")};
+        "rolloutStartShare", "stages"});
+    CurriculumSettings curriculum{Bounds(section, "firstDistanceMeters"),
+        Integer(section, "levels", MaximumCurriculumLevels), Number(section, "promotionSuccessRate"),
+        Integer(section, "windowEpisodes", MaximumCurriculumWindowEpisodes),
+        Number(section, "rolloutStartShare"), {}};
+    auto const& stages = section.at("stages");
+    Require(stages.is_array() && stages.size() <= MaximumCurriculumStages, "curriculum stages");
+    for (auto const& stage : stages)
+    {
+        curriculum.stages.push_back(ReadStage(stage));
+    }
+    return curriculum;
 }
 
 TrainingSettings ReadTraining(Json const& section)
@@ -381,10 +453,10 @@ void ValidateMission(Config const& config)
     Require(mission.approachSpeed > mission.flareSpeed && mission.flareSpeed > mission.stoppedSpeed
         && mission.stoppedSpeed >= 0 && mission.flareHeightMeters > mission.contactHeightMeters,
         "target speeds and flare");
-    // Both reference speeds must keep the 1.3 Vs stall reserve of the T-6 model.
-    Require(mission.flareSpeed >= T6MinimumCalibratedSpeed(config.initial.approachFlap)
-        && mission.approachSpeed >= T6MinimumCalibratedSpeed(0),
-        "T6 calibrated speeds must retain the model stall reserve");
+    // Both reference speeds must keep the 1.3 Vs stall reserve of the aircraft model.
+    Require(mission.flareSpeed >= MinimumCalibratedSpeed(config.performance, config.initial.approachFlap)
+        && mission.approachSpeed >= MinimumCalibratedSpeed(config.performance, 0),
+        "calibrated speeds must retain the model stall reserve");
     Require(mission.maxTouchdownSink > 0 && mission.maxTouchdownSpeed >= mission.flareSpeed
         && mission.maxTouchdownRollDegrees > 0
         && mission.minTouchdownPitchDegrees < mission.maxTouchdownPitchDegrees
@@ -482,6 +554,57 @@ void ValidateTraining(Config const& config)
         && training.adamEpsilon > 0, "Adam hyperparameters");
 }
 
+/** @brief Height of the glide plane at a distance before the threshold, in metres. */
+double GlideHeightAt(Config const& config, double distanceMeters) noexcept
+{
+    return config.runway.thresholdHeightMeters
+        + distanceMeters * std::tan(config.mission.glideDegrees * DegreesToRadians);
+}
+
+/**
+ * @brief Checks one curriculum stage: starts inside the envelope and the observation ranges,
+ *        above the flare height, and route gates far enough apart to be passed one by one.
+ */
+void ValidateStage(Config const& config, StageSettings const& stage)
+{
+    auto const& mission = config.mission;
+    Require(!stage.name.empty() && stage.gearUpShare >= 0 && stage.gearUpShare <= 1
+        && MaximumMagnitude(stage.headingOffsetDegrees) <= HalfTurnDegrees,
+        "curriculum stage name, gear or heading");
+    if (stage.kind == StageKind::Approach)
+    {
+        double const largestBearing = MaximumMagnitude(stage.bearingDegrees);
+        Require(stage.distanceMeters.minimum >= MinimumFirstCurriculumDistanceMeters
+            && stage.distanceMeters.maximum < mission.maxDistanceMeters && largestBearing < QuarterTurnDegrees
+            && stage.distanceMeters.maximum * std::sin(largestBearing * DegreesToRadians) < MaximumStageCrossMeters,
+            "approach stage distance or bearing");
+        Require(GlideHeightAt(config, stage.distanceMeters.minimum) + stage.heightMeters.minimum
+            > mission.flareHeightMeters
+            && GlideHeightAt(config, stage.distanceMeters.maximum) + stage.heightMeters.maximum
+            < MaximumStageHeightMeters, "approach stage height");
+        return;
+    }
+    Require(stage.heightMeters.minimum > mission.flareHeightMeters
+        && stage.heightMeters.maximum < MaximumStageHeightMeters
+        && MaximumMagnitude(stage.startAlongMeters) < mission.maxDistanceMeters
+        && MaximumMagnitude(stage.lateralMeters) < MaximumStageCrossMeters, "pattern or holding stage start");
+    if (stage.kind == StageKind::Pattern)
+    {
+        // The start lies before the downwind end, and the base gate keeps away from the final one.
+        Require(stage.lateralMeters.minimum * PatternBaseOffsetFraction >= MinimumGateSpacingMeters
+            && stage.startAlongMeters.minimum >= PatternDownwindEndAlongMeters + MinimumGateSpacingMeters
+            && -PatternFinalAlongMeters < mission.maxDistanceMeters, "pattern stage geometry");
+        return;
+    }
+    // A holding start is inbound to the fix, before it.
+    Require(stage.startAlongMeters.maximum <= stage.fixAlongMeters - MinimumGateSpacingMeters
+        && stage.fixAlongMeters <= -MinimumGateSpacingMeters
+        && stage.outboundMeters >= MinimumGateSpacingMeters && stage.holdingWidthMeters >= MinimumGateSpacingMeters
+        && std::hypot(stage.fixAlongMeters - stage.outboundMeters, stage.holdingWidthMeters)
+        < mission.maxDistanceMeters
+        && stage.holdingWidthMeters < MaximumStageCrossMeters, "holding stage geometry");
+}
+
 void ValidateCurriculum(Config const& config)
 {
     auto const& curriculum = config.training.curriculum;
@@ -494,6 +617,10 @@ void ValidateCurriculum(Config const& config)
         + curriculum.firstDistanceMeters.minimum * std::tan(config.mission.glideDegrees * DegreesToRadians);
     Require(firstHeight > config.mission.flareHeightMeters,
         "the first curriculum starts must remain above the flare height");
+    for (auto const& stage : curriculum.stages)
+    {
+        ValidateStage(config, stage);
+    }
 }
 
 /**
@@ -552,6 +679,10 @@ Config LoadConfig(std::filesystem::path const& path)
     Config config{};
     Require(root.at("aircraft").is_string(), "aircraft");
     config.aircraft = root.at("aircraft").get<std::string>();
+    if (auto const* const performance = FindAircraftPerformance(config.aircraft))
+    {
+        config.performance = *performance;
+    }
     config.runway = ReadRunway(root.at("runway"));
     config.runwayRandomization = ReadRunwayRandomization(root.at("runwayRandomization"));
     config.mission = ReadMission(root.at("mission"));
@@ -599,7 +730,9 @@ bool CompatibleTrainingSignature(std::string const& stored, std::string const& c
 
 void Validate(Config const& config)
 {
-    Require(config.aircraft == "t6texan2", "runtime aircraft must be t6texan2");
+    auto const* const performance = FindAircraftPerformance(config.aircraft);
+    Require(performance != nullptr && performance->name == config.performance.name,
+        "runtime aircraft must be t6texan2 or pc7, with its performance data");
     ValidateRunway(config);
     ValidateMission(config);
     ValidateInitial(config);

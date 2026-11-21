@@ -3,6 +3,8 @@
  * @brief Construction of the approach reference: aim point, lookahead, gradient, flare and speed.
  *
  * Summary of the guidance law (all quantities in runway axes):
+ * - while route gates remain: straight at the next gate, climbing or descending toward its
+ *   height with a gradient bounded to +/- tan(6 degrees); the rules below then apply;
  * - horizontal direction: toward the extended centreline a look-ahead L ahead,
  *   L = clamp(aim along - along, 300 m, 2 km), at most 30 degrees off the runway axis.
  *   Far out the aircraft intercepts the centreline 2 km ahead and is established on it
@@ -17,10 +19,10 @@
  *   between 2.7 km and 2 km before the threshold, never below 1.3 times the stall speed of
  *   the current flap position, and zero once rolling on the wheels.
  *
- * Read next: flight_reward.cpp (how the reference is rewarded), flight_t6_performance.hpp.
+ * Read next: flight_reward.cpp (how the reference is rewarded), flight_aircraft_performance.hpp.
  */
 #include "flight_guidance.hpp"
-#include "flight_t6_performance.hpp"
+#include "flight_aircraft_performance.hpp"
 #include <algorithm>
 
 namespace ppo::examples::flight {
@@ -76,7 +78,7 @@ double TargetSpeed(Config const& config, MissionState const& mission, AircraftSt
     double const blend = SmoothBlend((FlareSpeedReachedAlongMeters - along) / DecelerationLengthMeters);
     double const requested = missionSettings.flareSpeed
         + (missionSettings.approachSpeed - missionSettings.flareSpeed) * blend;
-    return std::max(requested, T6MinimumCalibratedSpeed(aircraft.flapPosition));
+    return std::max(requested, MinimumCalibratedSpeed(config.performance, aircraft.flapPosition));
 }
 
 /**
@@ -100,7 +102,61 @@ double AirborneGradient(Config const& config, double height, double horizontalDi
         config.mission.flareSpeed);
     return towardTarget + (contactGradient - towardTarget) * flare;
 }
+
+/** @brief Horizontal distance below which the gate direction is not resolved, in metres. */
+constexpr double MinimumGateDistanceMeters = 1.0;
+
+/**
+ * @brief Command toward a route gate: straight at its horizontal position, climbing or
+ *        descending toward its height at no more than the steepest path angle.
+ * @param config Episode configuration and runway pose.
+ * @param gate Next gate of the route.
+ * @param aircraft Current aircraft state.
+ * @return Gate point, unit direction and commanded flight-path angle.
+ */
+ApproachReference GateReference(Config const& config, Gate const& gate, AircraftState const& aircraft) noexcept
+{
+    auto const& runway = config.runway;
+    auto const local = DeckCoordinates(runway, aircraft.position);
+    double const forward = gate.alongMeters - local.north;
+    double const right = gate.crossMeters - local.east;
+    double const horizontalDistance = std::max(std::hypot(forward, right), MinimumGateDistanceMeters);
+    double const limit = MaximumPathGradient();
+    double const gradient = std::clamp((gate.heightMeters - local.up) / horizontalDistance, -limit, limit);
+    auto const horizontalForward = Scale(RunwayForward(runway), forward / horizontalDistance);
+    auto const horizontalRight = Scale(RunwayRight(runway), right / horizontalDistance);
+    ApproachReference reference{};
+    reference.target = FromRunway(runway, gate.alongMeters, gate.crossMeters, gate.heightMeters);
+    reference.direction = UnitDirection(Add(Add(horizontalForward, horizontalRight),
+        Scale(RunwayNormal(runway), gradient)));
+    reference.slope = std::atan(gradient);
+    return reference;
+}
 } // namespace
+
+bool GatePassed(Route const& route, std::size_t index, double along, double cross) noexcept
+{
+    auto const& gate = route.gates[index];
+    double const toAircraftAlong = along - gate.alongMeters;
+    double const toAircraftCross = cross - gate.crossMeters;
+    if (std::hypot(toAircraftAlong, toAircraftCross) <= GateRadiusMeters)
+    {
+        return true;
+    }
+    // Inbound leg: from the previous gate, or from the route start for the first gate.
+    Gate const& from = index == 0 ? route.start : route.gates[index - 1];
+    double const legAlong = gate.alongMeters - from.alongMeters;
+    double const legCross = gate.crossMeters - from.crossMeters;
+    double const legLength = std::hypot(legAlong, legCross);
+    if (legLength <= 0)
+    {
+        return false;
+    }
+    // Signed distance beyond the gate plane and lateral offset from the gate, along the leg axes.
+    double const beyond = (toAircraftAlong * legAlong + toAircraftCross * legCross) / legLength;
+    double const lateral = std::abs(toAircraftCross * legAlong - toAircraftAlong * legCross) / legLength;
+    return beyond >= 0 && lateral <= GateCorridorMeters;
+}
 
 Vec3 ThresholdPoint(Runway const& runway) noexcept
 {
@@ -126,6 +182,11 @@ double ApproachPathHeight(Config const& config, double along) noexcept
 ApproachReference ResolveApproachReference(Config const& config, MissionState const& mission,
     AircraftState const& aircraft) noexcept
 {
+    // A route is flown gate by gate before the approach starts.
+    if (mission.phase == Phase::Approach && mission.nextGate < mission.route.count)
+    {
+        return GateReference(config, mission.route.gates[mission.nextGate], aircraft);
+    }
     auto const& runway = config.runway;
     auto const local = DeckCoordinates(runway, aircraft.position);
     double const aimAlong = AimPointAlongMeters(config);

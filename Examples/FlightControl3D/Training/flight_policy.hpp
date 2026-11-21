@@ -1,18 +1,23 @@
 /**
  * @file flight_policy.hpp
- * @brief Diagonal Gaussian policy: sampling, likelihood, KL, entropy and clipped PPO loss.
+ * @brief Diagonal Gaussian and Bernoulli policy: sampling, likelihood, KL, entropy and clipped
+ *        PPO loss.
  *
  * Role in the chain: observation -> actor network (flight_learner.cpp) -> **policy** ->
- * physical controls -> environment. The actor outputs one mean per action axis; the
- * standard deviations are global, state-independent parameters (log-std) bounded to
- * [MinimumLogStandardDeviation, MaximumLogStandardDeviation].
+ * physical controls -> environment. The actor outputs one mean per continuous action axis
+ * and one gear logit; the standard deviations are global, state-independent parameters
+ * (log-std) bounded to [MinimumLogStandardDeviation, MaximumLogStandardDeviation].
  *
- * Action axes: elevator, aileron, rudder, throttle, brake. The brake axis is "active"
+ * Continuous axes: elevator, aileron, rudder, throttle, brake. The brake axis is "active"
  * (sampled, scored and optimized) only during the ground roll; in flight it is excluded
  * from the likelihood, the KL and the entropy.
  *
- * Likelihoods are those of the latent Gaussian sample, not of the clipped physical
- * control: clipping happens afterwards in ToControls.
+ * Gear: a Bernoulli extension request with probability sigmoid(logit). It is active only
+ * while the extension is not yet commanded; the environment latches the first request, so
+ * the gear is never retracted and a latched gear contributes nothing to PPO.
+ *
+ * Likelihoods are those of the latent Gaussian sample and of the Bernoulli draw, not of
+ * the clipped physical control: clipping happens afterwards in ToControls.
  *
  * The per-axis Gaussian formulas and the clipped surrogate are the PPOKit ones
  * (ppokit/heads/gaussian.hpp, ppokit/core/ppo_surrogate.hpp), shared with BlueDefense.
@@ -25,6 +30,7 @@
 
 #include "flight_config.hpp"
 #include "ppokit/core/ppo_surrogate.hpp"
+#include "ppokit/heads/bernoulli.hpp"
 #include "ppokit/heads/gaussian.hpp"
 #include <algorithm>
 #include <limits>
@@ -33,8 +39,10 @@
 
 namespace ppo::examples::flight {
 
-/** @brief Actor outputs: one Gaussian mean per continuous control. */
-inline constexpr std::size_t PolicyOutputs = ContinuousActions;
+/** @brief Actor outputs: one Gaussian mean per continuous control, then the gear logit. */
+inline constexpr std::size_t PolicyOutputs = ContinuousActions + 1;
+/** @brief Index of the gear extension logit in the actor output. */
+inline constexpr std::size_t GearOutput = ContinuousActions;
 /** @brief Index of the brake action, active only on the ground. */
 inline constexpr std::size_t BrakeAction = 4;
 /** @brief Index of the throttle action. */
@@ -57,7 +65,7 @@ inline constexpr double MaximumAbsoluteLogRatio = 20.0;
 inline constexpr std::array<char const*, ContinuousActions> ActionNames{
     "elevator", "aileron", "rudder", "throttle", "brake"};
 inline constexpr std::array<char const*, PolicyOutputs> PolicyOutputNames{
-    "elevator_mean", "aileron_mean", "rudder_mean", "throttle_mean", "brake_mean"};
+    "elevator_mean", "aileron_mean", "rudder_mean", "throttle_mean", "brake_mean", "gear_logit"};
 
 /** @brief State-dependent actor means and global Gaussian exploration parameters. */
 struct PolicyDistribution final
@@ -87,6 +95,10 @@ struct PolicyAction final
     double logProbability{};
     /** @brief The brake is sampled and optimized only while rolling on the ground. */
     bool brakeActive{true};
+    /** @brief Bernoulli gear draw: true requests the extension. */
+    bool gearDown{};
+    /** @brief The gear is sampled and optimized only while its extension is not yet commanded. */
+    bool gearActive{};
     /** @brief Frozen collection distribution used by likelihood ratios and analytic KL tests. */
     PolicyDistribution policy{};
 };
@@ -98,13 +110,19 @@ inline bool ActiveAxis(std::size_t axis, bool brakeActive) noexcept
 }
 
 /**
- * @brief Log-density of the latent Gaussian sample, not of the clipped physical control.
+ * @brief Log-density of the latent Gaussian sample and of an active gear draw, not of the
+ *        clipped physical control.
  *
- * log p = sum over active axes of -(z^2 / 2 + log sigma + log(2 pi) / 2), z = (x - mu) / sigma.
+ * log p = sum over active axes of -(z^2 / 2 + log sigma + log(2 pi) / 2), z = (x - mu) / sigma,
+ * plus the Bernoulli log-probability of the gear draw when the gear is active.
  */
 inline double LogProbability(PolicyDistribution const& policy, PolicyAction const& action) noexcept
 {
     double logProbability = 0;
+    if (action.gearActive)
+    {
+        logProbability += ppokit::heads::BernoulliLogProbability(policy.output[GearOutput], action.gearDown);
+    }
     for (std::size_t axis = 0; axis < ContinuousActions; ++axis)
     {
         if (!ActiveAxis(axis, action.brakeActive))
@@ -118,15 +136,33 @@ inline double LogProbability(PolicyDistribution const& policy, PolicyAction cons
 }
 
 /**
- * @brief Exact old-to-new Gaussian KL on the physically active controls.
+ * @brief Exact old-to-new KL of two gear Bernoulli distributions given by their logits.
  *
- * Per axis, with s = log sigma_old - log sigma_new:
- * KL = (exp(2 s) - 1) / 2 - s + (mu_old - mu_new)^2 / (2 sigma_new^2).
+ * KL = p_old (softplus(-l_new) - softplus(-l_old)) + (1 - p_old) (softplus(l_new) - softplus(l_old)).
+ */
+inline double GearKl(double previousLogit, double currentLogit) noexcept
+{
+    using ppokit::heads::Softplus;
+    double const previousProbability = ppokit::heads::Sigmoid(previousLogit);
+    return previousProbability * (Softplus(-currentLogit) - Softplus(-previousLogit))
+        + (1 - previousProbability) * (Softplus(currentLogit) - Softplus(previousLogit));
+}
+
+/**
+ * @brief Exact old-to-new KL on the physically active controls.
+ *
+ * Per Gaussian axis, with s = log sigma_old - log sigma_new:
+ * KL = (exp(2 s) - 1) / 2 - s + (mu_old - mu_new)^2 / (2 sigma_new^2); plus GearKl when the
+ * gear is active.
  */
 inline double PolicyKl(PolicyDistribution const& previous, PolicyDistribution const& current,
     PolicyAction const& action) noexcept
 {
     double result = 0;
+    if (action.gearActive)
+    {
+        result += GearKl(previous.output[GearOutput], current.output[GearOutput]);
+    }
     for (std::size_t axis = 0; axis < ContinuousActions; ++axis)
     {
         if (!ActiveAxis(axis, action.brakeActive))
@@ -141,10 +177,17 @@ inline double PolicyKl(PolicyDistribution const& previous, PolicyDistribution co
     return std::max(0.0, result);
 }
 
-/** @brief Analytic entropy of the active latent Gaussian axes: sum of log(2 pi e) / 2 + log sigma. */
-inline double Entropy(PolicyDistribution const& policy, bool brakeActive = true) noexcept
+/**
+ * @brief Analytic entropy of the active axes: sum of log(2 pi e) / 2 + log sigma per active
+ *        Gaussian axis, plus the Bernoulli gear entropy when the gear is active.
+ */
+inline double Entropy(PolicyDistribution const& policy, bool brakeActive = true, bool gearActive = false) noexcept
 {
     double entropy = 0;
+    if (gearActive)
+    {
+        entropy += ppokit::heads::BernoulliEntropy(policy.output[GearOutput]);
+    }
     for (std::size_t axis = 0; axis < ContinuousActions; ++axis)
     {
         if (ActiveAxis(axis, brakeActive))
@@ -176,7 +219,9 @@ inline double BrakeCommand(double raw) noexcept
  * A zero actor output flies the trimmed 3-degree approach: the elevator adds the
  * action to its trim with a uniform gain, and the throttle spans from its trim
  * to idle for negative actions and to full power for positive ones. The brake
- * follows BrakeCommand during the ground roll and stays released in flight.
+ * follows BrakeCommand during the ground roll and stays released in flight. The gear lever
+ * requests the extension only when an active gear draw asks for it; the environment keeps a
+ * latched extension.
  * @param action Raw sampled or deterministic actor action.
  * @param initial Trimmed approach controls.
  * @return Physically bounded controls.
@@ -202,24 +247,31 @@ inline Controls ToControls(PolicyAction const& action, InitialSettings const& in
     {
         controls.brake = BrakeCommand(action.raw[BrakeAction]);
     }
+    if (action.gearActive && action.gearDown)
+    {
+        controls.gear = 1.0;
+    }
     return controls;
 }
 
 /**
  * @brief Samples a raw action from the policy, or returns its means.
  *
- * Draws one std::normal_distribution sample per active axis, in axis order; the inactive
- * brake axis draws nothing, so the RNG stream depends on the phase.
- * @param policy Actor means and log-std.
+ * Draws one std::normal_distribution sample per active axis, in axis order, then one
+ * std::bernoulli_distribution sample for an active gear; inactive axes draw nothing, so the
+ * RNG stream depends on the phase and on the gear latch. A deterministic gear requests the
+ * extension when its logit is non-negative.
+ * @param policy Actor means, gear logit and log-std.
  * @param rng Random engine (the learner RNG).
  * @param deterministic True to return the means without drawing.
  * @param brakeActive True during the ground roll.
+ * @param gearActive True while the gear extension is not yet commanded.
  * @return Raw action with its log-probability and the frozen collection distribution.
  * @throws std::runtime_error for non-finite means or deviations.
  */
 template<typename Engine>
 PolicyAction Sample(PolicyDistribution const& policy, Engine& rng, bool deterministic,
-    bool brakeActive = true)
+    bool brakeActive = true, bool gearActive = false)
 {
     for (double const value : policy.output)
     {
@@ -253,6 +305,19 @@ PolicyAction Sample(PolicyDistribution const& policy, Engine& rng, bool determin
         // The ternary keeps the draw conditional: a deterministic action consumes no random number.
         action.raw[axis] = deterministic ? policy.output[axis] : distribution(rng);
     }
+    action.gearActive = gearActive;
+    if (gearActive)
+    {
+        double const logit = policy.output[GearOutput];
+        if (deterministic)
+        {
+            action.gearDown = logit >= 0;
+        }
+        else
+        {
+            action.gearDown = std::bernoulli_distribution(ppokit::heads::Sigmoid(logit))(rng);
+        }
+    }
     action.logProbability = LogProbability(policy, action);
     return action;
 }
@@ -279,7 +344,8 @@ struct PolicyLoss final
  * 1 + eps) A) has a non-zero gradient only where the unclipped term is the minimum
  * (r A <= clip(r) A). There d loss / d log pi = -A r, and
  * d log pi / d mu = (x - mu) / sigma^2, d log pi / d log sigma = (x - mu)^2 / sigma^2 - 1.
- * The entropy term adds -entropy coefficient to each active log-std derivative.
+ * The entropy term adds -entropy coefficient to each active log-std derivative. An active
+ * gear adds d log p / d l = gearDown - sigmoid(l) and its Bernoulli entropy derivative.
  */
 inline PolicyLoss ClippedLoss(PolicyDistribution const& policy, PolicyAction const& action,
     double advantage, TrainingSettings const& settings) noexcept
@@ -288,7 +354,7 @@ inline PolicyLoss ClippedLoss(PolicyDistribution const& policy, PolicyAction con
     auto const surrogate = ppokit::core::EvaluateClippedSurrogate(LogProbability(policy, action),
         action.logProbability, advantage, settings.clip, MaximumAbsoluteLogRatio);
     result.ratio = surrogate.ratio;
-    result.entropy = Entropy(policy, action.brakeActive);
+    result.entropy = Entropy(policy, action.brakeActive, action.gearActive);
     result.loss = -surrogate.objective - settings.entropy * result.entropy;
     for (std::size_t axis = 0; axis < ContinuousActions; ++axis)
     {
@@ -303,6 +369,14 @@ inline PolicyLoss ClippedLoss(PolicyDistribution const& policy, PolicyAction con
         // The entropy bonus contributes d entropy / d log-std = 1 per active axis.
         result.logStandardDeviationDerivative[axis] =
             surrogate.logProbabilityGradient * gradient.logStd - settings.entropy;
+    }
+    if (action.gearActive)
+    {
+        // Chain rule on the logit l, plus the entropy bonus: d(-c H) / d l = -c dH / dl.
+        double const logit = policy.output[GearOutput];
+        result.outputDerivative[GearOutput] =
+            surrogate.logProbabilityGradient * ppokit::heads::BernoulliLogProbabilityGradient(logit, action.gearDown)
+            - settings.entropy * ppokit::heads::BernoulliEntropyGradient(logit);
     }
     return result;
 }

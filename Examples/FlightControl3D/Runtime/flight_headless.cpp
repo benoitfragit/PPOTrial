@@ -11,12 +11,14 @@
  * CI workflows: their text and order are a compatibility contract.
  *
  * Read-only modes: --inspect-contract prints the network contract and signature as JSON;
- * --check-checkpoint FILE loads a checkpoint against the scenario.
+ * --check-checkpoint FILE loads a checkpoint against the scenario; --trim prints the JSBSim
+ * trim of the nominal approach and of level flight.
  *
  * Read next: flight_session.hpp, tools/flight/curriculum_ci.py,
  * docs/PPOTrial_FlightControl3D_T6_Approach_CI.md.
  */
 #include "flight_session.hpp"
+#include "flight_trim.hpp"
 #include <nlohmann/json.hpp>
 #include <charconv>
 #include <algorithm>
@@ -84,6 +86,7 @@ struct Options final
     std::filesystem::path checkpointToCheck;
     bool training{true};
     bool inspectContract{};
+    bool trim{};
     bool help{};
     std::optional<std::size_t> updates;
     std::optional<std::size_t> episodes;
@@ -103,6 +106,11 @@ Options ParseOptions(int argc, char** argv)
         if (option == "--inspect-contract")
         {
             options.inspectContract = true;
+            continue;
+        }
+        if (option == "--trim")
+        {
+            options.trim = true;
             continue;
         }
         if (option == "--help")
@@ -163,6 +171,42 @@ void Inspect(Options const& options, Config const& config)
     FlightLearner candidate(config);
     candidate.Load(options.checkpointToCheck);
     std::cout << "[FLIGHT_CHECKPOINT] compatible=true updates=" << candidate.Stats().updates << '\n';
+}
+
+/** @brief Prints one trim result as a [FLIGHT_TRIM] line. */
+void PrintTrimLine(Config const& config, char const* method, double pathDegrees, double speed,
+    TrimResult const& trim)
+{
+    std::cout << "[FLIGHT_TRIM] aircraft=" << config.aircraft << " method=" << method << " path_deg="
+        << pathDegrees << " speed_mps=" << speed << " elevator=" << trim.elevator << " throttle="
+        << trim.throttle << " pitch_deg=" << trim.pitch / DegreesToRadians << " converged="
+        << std::boolalpha << trim.converged << '\n';
+}
+
+/**
+ * @brief Prints the trim of the nominal 3-degree approach and of level flight, with JSBSim's
+ *        FGTrim and by simulated flight.
+ *
+ * The approach trim is the action reference of the scenario ("elevatorTrim" and
+ * "throttle"): use it when configuring a new aircraft. FGTrim cannot trim a turboprop such
+ * as the PC-7; the simulated flight can.
+ * @param config Validated scenario.
+ */
+void PrintTrim(Config const& config)
+{
+    constexpr double TrimHeightMeters = 300.0;
+    JsbsimAircraft aircraft(config, DefaultDataRoot());
+    TrimCondition condition{};
+    condition.calibratedSpeed = config.mission.approachSpeed;
+    condition.flap = config.initial.approachFlap;
+    condition.heightMeters = TrimHeightMeters;
+    for (double const pathDegrees : {-config.mission.glideDegrees, 0.0})
+    {
+        condition.flightPathRadians = pathDegrees * DegreesToRadians;
+        PrintTrimLine(config, "jsbsim", pathDegrees, condition.calibratedSpeed, aircraft.Trim(condition));
+        PrintTrimLine(config, "flight", pathDegrees, condition.calibratedSpeed, FlyTrim(aircraft, config,
+            condition));
+    }
 }
 
 void WriteTelemetryHeader(std::ofstream& telemetry)
@@ -343,7 +387,7 @@ int main(int argc, char** argv)
         if (options.help)
         {
             std::cout << "FlightControlHeadless [--config FILE] [--output DIRECTORY] [--updates N] "
-                << "[--evaluate --episodes N] [--inspect-contract | --check-checkpoint FILE]\n";
+                << "[--evaluate --episodes N] [--inspect-contract | --check-checkpoint FILE | --trim]\n";
             return 0;
         }
         auto config = LoadConfig(options.configPath);
@@ -355,6 +399,11 @@ int main(int argc, char** argv)
         if ((options.training && options.episodes) || (!options.training && options.updates))
         {
             throw std::invalid_argument("--updates is for training; --episodes is for evaluation");
+        }
+        if (options.trim)
+        {
+            PrintTrim(config);
+            return 0;
         }
         if (options.inspectContract || !options.checkpointToCheck.empty())
         {

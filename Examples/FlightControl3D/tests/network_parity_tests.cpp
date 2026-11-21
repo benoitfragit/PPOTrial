@@ -151,10 +151,14 @@ void GeneratedNetworksReproduceTheLearner()
         }
         rlt::forward(device, *actor, input, output);
         auto const expected = learner.Evaluate(observation);
+        // Gaussian means, then the gear logit.
         for (Index index = 0; index < generated::Actor::Outputs; ++index)
         {
             Check(static_cast<double>(rlt::get(output, 0, index)) == expected.output[index],
-                "generated actor mean equals FlightLearner bit for bit");
+                "generated actor output equals FlightLearner bit for bit");
+        }
+        for (Index index = 0; index < ContinuousActions; ++index)
+        {
             Check(static_cast<double>(rlt::get(actor->log_std.parameters, 0, index))
                     == expected.logStandardDeviations[index],
                 "generated log-std equals FlightLearner");

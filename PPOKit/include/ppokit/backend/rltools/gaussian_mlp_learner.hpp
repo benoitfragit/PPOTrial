@@ -108,6 +108,8 @@ public:
     static_assert(CriticModel::Inputs == ObservationSize,
         "GaussianMlpLearner collects one observation per step: the critic must read the actor observation");
     static_assert(CriticModel::Outputs == 1, "the critic outputs one value");
+    static_assert(ActorModel::GaussianOnly,
+        "GaussianMlpLearner trains Gaussian heads only; tasks with Bernoulli actions are not supported yet");
 
     using Observation = std::array<float, ObservationSize>;
     using Action = std::array<float, ActionSize>;

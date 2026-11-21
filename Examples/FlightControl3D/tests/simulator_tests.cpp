@@ -13,6 +13,7 @@
 #include "flight_mission.hpp"
 #include "flight_reward.hpp"
 #include "flight_policy.hpp"
+#include "flight_trim.hpp"
 #include <utility>
 using namespace ppo::examples::flight;
 
@@ -21,13 +22,14 @@ Config T6Config()
 {
     return LoadConfig(std::filesystem::path(PPO_FLIGHT_CONFIG));
 }
-/** @brief Trimmed approach controls with an optional brake command. */
+/** @brief Trimmed approach controls, gear down, with an optional brake command. */
 Controls Neutral(Config const& c,double brake=0)
 {
     Controls controls{};
     controls.elevator=c.initial.elevatorTrim;
     controls.throttle=c.initial.throttle;
     controls.brake=brake;
+    controls.gear=1;
     return controls;
 }
 std::size_t ControlObservation(std::size_t axis) { return ObservationSize-ContinuousActions+axis; }
@@ -38,9 +40,13 @@ void FilteredControls()
     auto const c=T6Config();
     FlightEnvironment env(c,DefaultDataRoot(),778U);
     auto observation=env.Reset(778U);
-    double const trim=c.initial.elevatorTrim;
-    Check(Near(observation[ControlObservation(0)],trim,1e-6) && Near(observation[ControlObservation(1)],0)
-        && Near(observation[ControlObservation(3)],c.initial.throttle),"reset exposes the trimmed applied controls");
+    // An airborne start begins on JSBSim's trim of its own speed and flight path, close to
+    // the action reference trimmed on the nominal 3-degree approach.
+    double const trim=env.Mission().filteredControls.elevator;
+    double const throttle=env.Mission().filteredControls.throttle;
+    Check(Near(trim,c.initial.elevatorTrim,0.05) && Near(throttle,c.initial.throttle,0.15)
+        && Near(observation[ControlObservation(0)],trim,1e-6) && Near(observation[ControlObservation(1)],0)
+        && Near(observation[ControlObservation(3)],throttle,1e-6),"reset exposes the trimmed applied controls");
     Controls target{};target.elevator=0.3;target.aileron=-0.6;target.rudder=0.2;target.throttle=1.0;
     double const actionSeconds=c.StepSeconds();
     double const rudderAuthority=c.mission.airborneRudderAuthority;
@@ -53,7 +59,7 @@ void FilteredControls()
         observation=env.ObservationNow();
         Check(Near(applied.elevator,trim+(0.3-trim)*alpha) && Near(applied.aileron,-0.6*alpha)
             && Near(applied.rudder,0.2*rudderAuthority*alpha)
-            && Near(applied.throttle,c.initial.throttle+(1.0-c.initial.throttle)*alpha),
+            && Near(applied.throttle,throttle+(1.0-throttle)*alpha),
             "continuous commands follow the physics-step first-order response");
         Check(Near(observation[ControlObservation(0)],applied.elevator,1e-6)
             && Near(observation[ControlObservation(1)],applied.aileron,1e-6)
@@ -67,7 +73,7 @@ void FilteredControls()
     Check(Near(before.aileron,env.Mission().filteredControls.aileron),"a rejected command cannot advance the filter");
     observation=env.Reset(778U);
     Check(Near(observation[ControlObservation(0)],trim,1e-6) && Near(observation[ControlObservation(1)],0)
-        && Near(observation[ControlObservation(3)],c.initial.throttle),
+        && Near(observation[ControlObservation(3)],throttle,1e-6),
         "a new episode does not inherit the prior filter state");
 }
 
@@ -289,7 +295,7 @@ void NativeTouchdownAndStop()
     initial.velocity={initial.airspeed,0,-15};
     before=fdm.Reset(initial);
     mission={};
-    Controls idle{};idle.flap=config.initial.approachFlap;
+    Controls idle{};idle.flap=config.initial.approachFlap;idle.gear=1;idle.gear=1;
     for(int step=0;step<500 && mission.outcome==Outcome::Flying;++step)
     {
         auto const after=fdm.Advance(idle);
@@ -337,9 +343,8 @@ void NeutralRolloutBrakesToStop()
  * @param rudder Rudder pedal command in [-1, 1].
  * @return Heading change relative to the runway after two seconds, in radians.
  */
-double TaxiHeadingChange(double rudder)
+double TaxiHeadingChange(Config c,double rudder)
 {
-    auto c=T6Config();
     // At taxi speed the rudder has almost no aerodynamic authority: only the
     // nose wheel can turn the aircraft.
     constexpr double TaxiSpeedMps=8.0;
@@ -360,9 +365,9 @@ double TaxiHeadingChange(double rudder)
 void NoseWheelSteering()
 {
     // Same convention as the airborne rudder probe: a negative command yaws the nose right.
-    double const noseRight=TaxiHeadingChange(-0.5);
-    double const straight=TaxiHeadingChange(0.0);
-    double const noseLeft=TaxiHeadingChange(0.5);
+    double const noseRight=TaxiHeadingChange(T6Config(),-0.5);
+    double const straight=TaxiHeadingChange(T6Config(),0.0);
+    double const noseLeft=TaxiHeadingChange(T6Config(),0.5);
     std::cout<<"[STEERING_PROBE] nose_right="<<noseRight/DegreesToRadians<<" straight="<<straight/DegreesToRadians
         <<" nose_left="<<noseLeft/DegreesToRadians<<" deg\n";
     // The rudder alone turns the T-6 by less than one degree here; the nose wheel turns it much more.
@@ -449,6 +454,177 @@ void IndependentResetAttitude()
 }
 } // namespace
 
+/** @brief A retracted start extends the gear only on request, then keeps it latched down. */
+void GearExtensionLatch()
+{
+    auto const c=T6Config();
+    FlightEnvironment env(c,DefaultDataRoot(),31U);
+    EpisodeStart start{};start.difficulty=0;start.gearUp=true;
+    auto observation=env.Reset(31U,start);
+    Check(Near(env.Aircraft().gearPosition,0) && !env.Mission().gearDownCommanded
+        && observation[Slot(ObservationIndex::GearPosition)]==0 && observation[GearCommandObservation]==0,
+        "a gear-up start begins retracted with no extension commanded");
+    Controls hold=Neutral(c);hold.gear=0;
+    for(int action=0;action<20;++action) env.Step(hold);
+    Check(Near(env.Aircraft().gearPosition,0) && !env.Mission().gearDownCommanded,
+        "without a request the gear stays retracted");
+    Controls extend=hold;extend.gear=1;
+    env.Step(extend);
+    Check(env.Mission().gearDownCommanded && env.ObservationNow()[GearCommandObservation]==1,
+        "the first request latches the extension");
+    double previous=env.Aircraft().gearPosition;
+    bool locked=false;
+    for(int action=0;action<300 && !locked;++action)
+    {
+        auto const result=env.Step(hold);
+        Check(!result.terminated && !result.truncated,"the gear extension test stays airborne");
+        double const position=env.Aircraft().gearPosition;
+        Check(position>=previous-1e-9 && env.Mission().gearDownCommanded,
+            "a latched gear never retracts, even when the lever request stops");
+        previous=position;
+        locked=position>=c.mission.gearDownMinimum;
+    }
+    Check(locked && Near(env.ObservationNow()[Slot(ObservationIndex::GearPosition)],env.Aircraft().gearPosition,1e-6),
+        "the native gear reaches the down-and-locked position and is observed");
+    auto const gearDown=env.Reset(32U);
+    Check(Near(env.Aircraft().gearPosition,1) && env.Mission().gearDownCommanded && gearDown[GearCommandObservation]==1,
+        "a default start keeps the gear down and latched");
+}
+
+/** @brief Touching the runway with the gear retracted is a crash, whatever the sink rate. */
+void GearUpTouchdownCrashes()
+{
+    auto config=T6Config();
+    config.runway.origin={0,0,15};config.runway.headingDegrees=0;
+    JsbsimAircraft fdm(config,DefaultDataRoot());fdm.SetRunway(config.runway);
+    AircraftState initial{};initial.position=FromRunway(config.runway,100,0,2);
+    initial.airspeed=config.mission.flareSpeed;initial.heading=0;initial.gearPosition=0;
+    initial.velocity={initial.airspeed,0,-0.5};initial.pitch=1.5*DegreesToRadians;
+    auto before=fdm.Reset(initial);
+    Check(Near(before.gearPosition,0),"the native gear starts retracted");
+    MissionState mission{};mission.gearDownCommanded=false;
+    Controls controls=Neutral(config);controls.gear=0;controls.throttle=0;controls.flap=config.initial.approachFlap;
+    CrashDiagnostic diagnostic{};
+    for(int step=0;step<3000 && mission.outcome==Outcome::Flying;++step)
+    {
+        auto const after=fdm.Advance(controls);
+        AdvanceMission(config,mission,before,after,&diagnostic);
+        before=after;
+    }
+    Check(mission.outcome==Outcome::Crash && !mission.touchedDown,"a gear-up contact is a terminal crash");
+    auto const& gear=diagnostic.conditions[static_cast<std::size_t>(CrashReason::Gear)];
+    auto const& structure=diagnostic.conditions[static_cast<std::size_t>(CrashReason::StructuralContact)];
+    Check(gear.failed || structure.failed,"the crash names the retracted gear or the belly contact");
+}
+
+/** @brief Seeded episodes resolve the curriculum: full task is the last stage, with its route, gear draw and trim. */
+void StageEpisodes()
+{
+    auto const c=T6Config();
+    FlightEnvironment env(c,DefaultDataRoot(),41U);
+    auto const& last=c.training.curriculum.stages.back();
+    int gearUp=0;
+    constexpr int Episodes=12;
+    for(std::uint32_t seed=600U;seed<600U+Episodes;++seed)
+    {
+        EpisodeStart start{};start.difficulty=1.0;
+        env.Reset(seed,start);
+        auto const& mission=env.Mission();
+        Check(last.kind==StageKind::Holding && mission.route.count==5 && mission.nextGate==0,
+            "the full task flies the holding lap of the last stage");
+        Check(mission.gearDownCommanded==(env.Aircraft().gearPosition>0.5),"the gear position matches its latch");
+        gearUp+=mission.gearDownCommanded ? 0 : 1;
+        // Level flight needs more power than the 3-degree descent of the action reference.
+        Check(mission.filteredControls.throttle>c.initial.throttle,"a level start begins on its own trim");
+        auto const local=DeckCoordinates(env.Settings().runway,env.Aircraft().position);
+        Check(local.north<=last.startAlongMeters.maximum+1 && local.up>last.heightMeters.minimum-5,
+            "the holding start is inbound before the fix, at the holding height");
+    }
+    Check(gearUp>0 && gearUp<Episodes,"the stage draws gear-up and gear-down starts");
+    EpisodeStart first{};first.difficulty=0;
+    env.Reset(700U,first);
+    Check(env.Mission().route.count==0 && env.Mission().gearDownCommanded,"the first level is a direct approach, gear down");
+}
+
+/** @brief Heading change of an airborne aircraft after a few seconds of constant rudder, in radians. */
+double AirborneHeadingChange(Config const& c,double rudder)
+{
+    FlightEnvironment environment(c,DefaultDataRoot(),43U);
+    EpisodeStart start{};start.difficulty=0;
+    environment.Reset(43U,start);
+    double const initialHeading=environment.Aircraft().heading;
+    auto controls=Neutral(c);
+    controls.rudder=rudder;
+    for(int step=0;step<20;++step) environment.Step(controls);
+    Check(environment.Mission().outcome==Outcome::Flying,"the airborne rudder probe stays in flight");
+    return WrapAngle(environment.Aircraft().heading-initialHeading);
+}
+
+/** @brief The PC-7 loads, trims by simulated flight to its action reference, steers and extends its gear. */
+void Pc7Aircraft()
+{
+    auto const c=LoadConfig(std::filesystem::path(PPO_FLIGHT_PC7_CONFIG));
+    Check(c.aircraft=="pc7" && !c.performance.jsbsimTrim && c.performance.name=="pc7",
+        "the PC-7 scenario resolves the PC-7 performance");
+    JsbsimAircraft aircraft(c,DefaultDataRoot());
+    TrimCondition nominal{};
+    nominal.calibratedSpeed=c.mission.approachSpeed;
+    nominal.flightPathRadians=-c.mission.glideDegrees*DegreesToRadians;
+    nominal.flap=c.initial.approachFlap;
+    nominal.heightMeters=300;
+    Check(!aircraft.Trim(nominal).converged,"FGTrim is never run on the PC-7 turboprop");
+    auto const flown=FlyTrim(aircraft,c,nominal);
+    std::cout<<"[FLIGHT_TRIM] aircraft=pc7 method=flight elevator="<<flown.elevator<<" throttle="<<flown.throttle<<'\n';
+    Check(flown.converged && Near(flown.elevator,c.initial.elevatorTrim,0.005) && Near(flown.throttle,c.initial.throttle,0.01),
+        "the PC-7 action reference is its trimmed 3-degree approach");
+    // Same steering convention as the T-6: the nose wheel turns the way the rudder yaws.
+    double const airborne=AirborneHeadingChange(c,-0.5)-AirborneHeadingChange(c,0.5);
+    double const taxi=TaxiHeadingChange(c,-0.5)-TaxiHeadingChange(c,0.5);
+    std::cout<<"[STEERING_PROBE] aircraft=pc7 airborne="<<airborne/DegreesToRadians<<" taxi="<<taxi/DegreesToRadians<<" deg\n";
+    Check(airborne>0 && taxi>3.0*DegreesToRadians,"PC-7 pedals yaw and steer the nose wheel the same way");
+    // A retracted start extends and locks the PC-7 gear once commanded.
+    FlightEnvironment env(c,DefaultDataRoot(),47U);
+    EpisodeStart start{};start.difficulty=0;start.gearUp=true;
+    env.Reset(47U,start);
+    Check(Near(env.Aircraft().gearPosition,0),"the PC-7 gear starts retracted");
+    auto extend=Neutral(c);
+    bool locked=false;
+    for(int action=0;action<300 && !locked;++action)
+    {
+        env.Step(extend);
+        locked=env.Aircraft().gearPosition>=c.mission.gearDownMinimum;
+    }
+    Check(locked && env.Mission().outcome==Outcome::Flying,"the PC-7 gear extends and locks in flight");
+}
+
+/** @brief JSBSim's trim of the nominal approach reproduces the action reference of the scenario. */
+void ApproachTrimMatchesActionReference()
+{
+    auto const c=T6Config();
+    JsbsimAircraft aircraft(c,DefaultDataRoot());
+    TrimCondition nominal{};
+    nominal.calibratedSpeed=c.mission.approachSpeed;
+    nominal.flightPathRadians=-c.mission.glideDegrees*DegreesToRadians;
+    nominal.flap=c.initial.approachFlap;
+    nominal.heightMeters=300;
+    auto const trim=aircraft.Trim(nominal);
+    std::cout<<"[FLIGHT_TRIM] elevator="<<trim.elevator<<" throttle="<<trim.throttle
+        <<" pitch_deg="<<trim.pitch/DegreesToRadians<<" converged="<<trim.converged<<'\n';
+    Check(trim.converged,"JSBSim trims the nominal 3-degree approach");
+    Check(Near(trim.elevator,c.initial.elevatorTrim,0.002) && Near(trim.throttle,c.initial.throttle,0.002),
+        "the scenario action reference is the trimmed 3-degree approach");
+    // The trim leaves no pitch-trim command behind: the next episode flies on the elevator only.
+    std::mt19937 rng(1U);
+    auto const reset=aircraft.Reset(SampleApproachStart(c,c.runway,ApproachSide::Left,0.0,rng));
+    Check(IsFinite(reset),"a reset after a trim restores a normal episode start");
+    // The trim of a condition does not depend on what the simulator flew before.
+    Controls manoeuvre=Neutral(c);manoeuvre.elevator=0.3;manoeuvre.aileron=-0.4;manoeuvre.throttle=1;
+    for(int step=0;step<300;++step) aircraft.Advance(manoeuvre);
+    auto const again=aircraft.Trim(nominal);
+    Check(again.converged && again.elevator==trim.elevator && again.throttle==trim.throttle && again.pitch==trim.pitch,
+        "a trim is reproduced bit for bit after any previous flight");
+}
+
 int main()
 {
     try
@@ -463,6 +639,11 @@ int main()
         NoseWheelSteering();
         ActionLevelPotential();
         IndependentResetAttitude();
+        ApproachTrimMatchesActionReference();
+        GearExtensionLatch();
+        GearUpTouchdownCrashes();
+        StageEpisodes();
+        Pc7Aircraft();
     }
     catch(std::exception const& e) { std::cerr<<e.what()<<'\n'; return 1; }
     std::cout<<"Native JSBSim regressions passed\n";

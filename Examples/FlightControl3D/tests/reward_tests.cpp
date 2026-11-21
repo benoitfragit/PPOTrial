@@ -239,6 +239,67 @@ void TouchdownQualityFactors()
     Check(landingMission.outcome==Outcome::Stopped && Near(Channel(stop,Reward::Stop),Weight(c.reward,Reward::Stop)),
         "the stop reward depends only on the landing area, not on the touchdown sink");
 }
+
+/** @brief Path distance of the direct approach, as it was before routes existed (reference copy). */
+double DirectPathDistance(Config const& c,AircraftState const& aircraft)
+{
+    auto const local=DeckCoordinates(c.runway,aircraft.position);
+    double const aimAlong=AimPointAlongMeters(c);
+    double const remaining=std::max(0.0,aimAlong-local.north);
+    return std::hypot(std::hypot(remaining,local.east),local.up);
+}
+
+/** @brief Without a route the Path potential is bit-identical to the direct-approach formula. */
+void PathWithoutRouteUnchanged()
+{
+    auto c=T6Config();
+    c.runway.origin={120,-80,15};c.runway.headingDegrees=237;
+    double const tolerance=c.reward.pathTolerance;
+    double const weight=Weight(c.reward,Reward::Path);
+    auto complete=Flying();
+    complete.route.count=2;complete.nextGate=2;
+    for(double along : {-17000.0,-9000.0,-2000.0,-14.0,0.0,286.0,900.0,3000.0})
+        for(double cross : {-4000.0,-60.0,0.0,25.0,3000.0})
+            for(double height : {0.5,15.0,300.0,1500.0})
+            {
+                auto const aircraft=At(c,along,cross,height);
+                double const reference=DirectPathDistance(c,aircraft);
+                Check(PathDistance(c,Flying(),aircraft)==reference && PathDistance(c,complete,aircraft)==reference,
+                    "without remaining gates the Path distance is the direct-approach distance, bit for bit");
+                Check(PathPotential(c,Flying(),aircraft)==weight*tolerance/(tolerance+reference),
+                    "without remaining gates the Path potential is unchanged");
+            }
+}
+
+/** @brief With gates ahead, the Path distance follows the remaining route and never jumps up at a gate. */
+void PathAlongRoute()
+{
+    auto const c=T6Config();
+    auto mission=Flying();
+    mission.route.start={-3000,2500,300};
+    mission.route.gates[0]={-6000,2500,300};
+    mission.route.gates[1]={-6000,0,350};
+    mission.route.count=2;
+    auto const aircraft=At(c,-4000,2400,320);
+    auto const local=DeckCoordinates(c.runway,aircraft.position);
+    Gate const position{local.north,local.east,local.up};
+    double const expected=std::hypot(std::hypot(-6000-local.north,2500-local.east),300-local.up)
+        +std::hypot(2500.0,50.0)+ApproachDistance(c,mission.route.gates[1]);
+    Check(Near(PathDistance(c,mission,aircraft),expected,1e-9),
+        "the Path distance runs to the next gate, along the remaining legs, then down the approach");
+    Check(Near(ApproachDistance(c,position),DirectPathDistance(c,aircraft),1e-12),
+        "the approach distance of a point is the direct-approach formula");
+    // Passing a gate anywhere within its corridor can only shorten the remaining route.
+    for(double offset : {-550.0,-200.0,0.0,250.0,580.0})
+    {
+        auto near=At(c,-6001,2500+offset,300);
+        auto passed=mission;passed.nextGate=1;
+        Check(PathDistance(c,passed,near)<=PathDistance(c,mission,near)+1e-9,
+            "passing a gate never lengthens the remaining route");
+        Check(PathPotential(c,passed,near)>=PathPotential(c,mission,near)-1e-12,
+            "passing a gate never lowers the Path potential");
+    }
+}
 } // namespace
 
 int main()
@@ -251,6 +312,8 @@ int main()
         VerticalSpeedShaping();
         SpeedShaping();
         TouchdownQualityFactors();
+        PathWithoutRouteUnchanged();
+        PathAlongRoute();
     }
     catch(std::exception const& error)
     {
