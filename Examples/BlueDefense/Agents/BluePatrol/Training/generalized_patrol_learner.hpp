@@ -9,6 +9,8 @@
 #include "generalized_training_checkpoint.hpp"
 #include "generalized_critic_network.hpp"
 #include "generalized_advantage.hpp"
+#include "ppokit/core/ppo_surrogate.hpp"
+#include "ppokit/heads/gaussian.hpp"
 
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
 
@@ -237,7 +239,6 @@ public:
         BuildAgentCriticObservations(availability, pendingAgentCritic_);
 
         Actions actions{};
-        constexpr float kTwoPi = 6.28318530717958647692F;
         for (std::size_t agent = 0U; agent < counts_.blueMobiles; ++agent)
         {
             auto& transition = transitions_[TransitionIndex(
@@ -273,10 +274,8 @@ public:
                     throw std::runtime_error(GeneralizedOptimizationGuard::Diagnostic(
                         __FILE__, __LINE__, "ChooseActions",
                         "nonfinite action for agent=" + std::to_string(agent)));
-                float const normalized = (sampled - mean) / deviation;
                 transition.oldLogProbability +=
-                    -0.5F * normalized * normalized - logStd
-                    - 0.5F * std::log(kTwoPi);
+                    ppokit::heads::GaussianAxisLogDensity(sampled, mean, logStd);
                 actions[agent][action] = sampled;
                 transition.action[action] = sampled;
             }
@@ -1229,44 +1228,28 @@ private:
                 continue;
 
             float currentLogProbability = 0.F;
-            constexpr float kTwoPi = 6.28318530717958647692F;
             for (Index action = 0;
                  action < static_cast<Index>(
                               GeneralizedObservationLayout::ActionSize);
                  ++action)
             {
-                float const mean = rlt::get(
-                    trainingActorOutput_, row, action);
-                float const logStd = rlt::get(
-                    actor_.log_std.parameters, 0, action);
-                float const deviation = std::exp(logStd);
-                float const normalized =
-                    (transition->action[action] - mean) / deviation;
-                currentLogProbability +=
-                    -0.5F * normalized * normalized - logStd
-                    - 0.5F * std::log(kTwoPi);
+                currentLogProbability += ppokit::heads::GaussianAxisLogDensity(
+                    transition->action[action],
+                    rlt::get(trainingActorOutput_, row, action),
+                    rlt::get(actor_.log_std.parameters, 0, action));
             }
-            float const ratio = std::exp(std::clamp(
-                currentLogProbability - transition->oldLogProbability,
-                -20.F, 20.F));
-            float const logRatio = std::clamp(
-                currentLogProbability - transition->oldLogProbability,
-                -20.F, 20.F);
-            float const clipped = std::clamp(
-                ratio, 1.F - PPOParameters::EPSILON_CLIP,
-                1.F + PPOParameters::EPSILON_CLIP);
-            float const surrogate = ratio * transition->advantage;
-            float const clippedSurrogate = clipped * transition->advantage;
-            diagnostics_.policyLoss -= std::min(surrogate, clippedSurrogate);
+            auto const surrogate = ppokit::core::EvaluateClippedSurrogate(
+                currentLogProbability, transition->oldLogProbability,
+                transition->advantage, PPOParameters::EPSILON_CLIP);
+            diagnostics_.policyLoss -= surrogate.objective;
             diagnostics_.approximateKl += std::max(
-                0.F, ratio - 1.F - logRatio);
-            if (std::abs(ratio - 1.F) > PPOParameters::EPSILON_CLIP)
+                0.F, surrogate.ratio - 1.F - surrogate.logRatio);
+            if (surrogate.outsideClipRange)
                 diagnostics_.clipFraction += 1.F;
+            // Mean over the learnable samples of the minibatch.
             float const logProbabilityDerivative =
-                surrogate <= clippedSurrogate
-                    ? -transition->advantage * ratio
-                          / static_cast<float>(batchLearnable)
-                    : 0.F;
+                surrogate.logProbabilityGradient
+                / static_cast<float>(batchLearnable);
             for (Index action = 0;
                  action < static_cast<Index>(
                               GeneralizedObservationLayout::ActionSize);
@@ -1276,20 +1259,19 @@ private:
                     trainingActorOutput_, row, action);
                 float const logStd = rlt::get(
                     actor_.log_std.parameters, 0, action);
-                diagnostics_.entropy += logStd
-                    + 0.5F * (1.F + std::log(kTwoPi));
-                float const variance = std::exp(2.F * logStd);
-                float const difference = transition->action[action] - mean;
+                diagnostics_.entropy +=
+                    ppokit::heads::GaussianAxisEntropy(logStd);
+                auto const gradient =
+                    ppokit::heads::GaussianAxisLogDensityGradient(
+                        transition->action[action], mean, logStd);
                 float const derivative =
-                    logProbabilityDerivative * difference / variance;
+                    logProbabilityDerivative * gradient.mean;
                 rlt::set(
                     trainingActorDerivative_, row, action,
                     derivative);
                 diagnostics_.actorDerivativeL1 += std::abs(derivative);
-                float const normalizedSquared =
-                    difference * difference / variance;
                 float const logStdGradient =
-                    logProbabilityDerivative * (normalizedSquared - 1.F)
+                    logProbabilityDerivative * gradient.logStd
                     - PPOParameters::ACTION_ENTROPY_COEFFICIENT
                           / static_cast<float>(batchLearnable);
                 rlt::increment(actor_.log_std.gradient, 0, action,

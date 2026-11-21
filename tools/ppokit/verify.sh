@@ -51,7 +51,7 @@ blue_manual_checks() {
     # Wall-clock timings are the only non-deterministic fields of the trace.
     sed -E 's/(_ms|elapsed_ms)=[0-9]+/\1=X/g' "$out/generalized_learner_tests.log" > "$out/blue_learner_trace.txt"
     if diff -u PPOKit/tests/reference/blue_learner_trace_linux_gcc13.txt "$out/blue_learner_trace.txt"; then
-        echo "Blue MAPPO learner trace identical to master"
+        echo "Blue MAPPO learner trace identical to the recorded reference"
     else
         echo "FAILED: Blue MAPPO learner trace changed"; exit 1
     fi

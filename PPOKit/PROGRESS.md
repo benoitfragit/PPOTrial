@@ -41,8 +41,8 @@ Ce fichier dit **où en est la migration** et **comment reprendre**. Il est mis
 
 | Garde-fou | Valeur de référence | Plateforme |
 |---|---|---|
-| `FlightControl_golden_trace_tests` de master : épisodes JSBSim, récompenses, actions, 2 updates PPO, checkpoint hashé | `0x471aaf859adb0883` | Linux x86-64, **GCC 13**, Debug = Release |
-| Trace du learner MAPPO Blue (`generalized_learner_tests`, 10 updates, diagnostics à 9 chiffres) | `PPOKit/tests/reference/blue_learner_trace_linux_gcc13.txt` | Linux x86-64, GCC 13, `-O2` |
+| `FlightControl_golden_trace_tests` de master : épisodes JSBSim, récompenses, actions, 2 updates PPO, checkpoint hashé | `0x67f683c02a76946c` (depuis l'étape 3 ; avant : `0x471aaf859adb0883`) | Linux x86-64, **GCC 13**, Debug = Release |
+| Trace du learner MAPPO Blue (`generalized_learner_tests`, 10 updates, diagnostics à 9 chiffres) | `PPOKit/tests/reference/blue_learner_trace_linux_gcc13.txt` (réenregistrée à l'étape 3) | Linux x86-64, GCC 13, `-O2` |
 
 Sur une autre plateforme, le test affiche son empreinte et se déclare *skipped*
 (code 77). **La CI Ubuntu utilise GCC 15 : le test y est toujours sauté.** Il
@@ -85,7 +85,9 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
 | 1b. En-tête d'identité et RNG portable des artefacts | reporté | Change les formats sur disque ; regroupé avec l'étape 5 (schémas et hashes) pour ne migrer les formats qu'une fois |
 | 2. GAE commun (`ppokit::core::GaeStep`) | fait | Flight et Blue identiques au bit près ; voir ci-dessous |
 | 2b. Surrogate PPO commun | reporté à l'étape 3 | Les deux implémentations **diffèrent** : décision à prendre, voir ci-dessous |
-| 3. Têtes de sortie | à faire | **Prochaine action** |
+| 3a. Tête gaussienne et surrogate PPO communs | fait | Décision B de l'utilisateur ; voir ci-dessous |
+| 3b. Têtes Bernoulli, catégorielle, composite | reporté à l'étape 5/6 | Aucun exemple ne les utilise aujourd'hui ; l'AGENTS.md interdit les interfaces sans appelant. Elles arriveront avec le schéma et le codegen |
+| 4. Backend rl_tools unique | à faire | **Prochaine action** |
 | 4 à 11 | à faire | |
 
 ### Détail de l'étape 1a
@@ -128,47 +130,40 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
 - Vérifié : golden trace Flight inchangée, trace MAPPO Blue identique sur ses
   80 lignes, `ctest` 18/18 en Debug et en Release.
 
-### Têtes et surrogate PPO : différences constatées (décision utilisateur requise)
+### Détail de l'étape 3a (décision B : « on veut du commun »)
 
-Relevé sur master après #87 :
-
-| | FlightControl3D (`flight_policy.hpp`) | BlueDefense (`generalized_patrol_learner.hpp`) |
-|---|---|---|
-| Scalaire | double | float |
-| Log-densité gaussienne | `z = (x−μ)·exp(−s)` ; `logp −= 0.5·z² + s + 0.5·log 2π` | `n = (x−μ)/exp(s)` ; `logp += −0.5·n² − s − 0.5·log 2π` |
-| Masquage d'axes | oui (frein actif ou non) | non |
-| Borne du log-ratio | ±20 | ±20 |
-| Gradient du surrogate actif | `A ≥ 0 ? r ≤ 1+ε : r ≥ 1−ε` | `r·A ≤ clip(r)·A` |
-| Écart observable du surrogate | signe du zéro du gradient quand `A = 0` exactement et `r > 1+ε` | |
-
-Les deux log-densités sont mathématiquement égales mais **pas bit à bit**
-(multiplication par `exp(−s)` contre division par `exp(s)`, regroupement des
-termes). Une tête gaussienne commune ne peut donc pas reproduire les deux
-exemples au bit près. Il faut choisir :
-- **A. Bit-exact** : la tête commune porte une variante arithmétique par
-  exemple. Les traces restent identiques, mais l'API est moins propre.
-- **B. Formule canonique unique** : une seule formule. Nouvelles références
-  de traces, parité à tolérance (≈1e-6 relatif) contre les anciennes
-  formules, puis validation par évaluation multi-seed en CI (AGENTS.md).
-  L'inférence des modèles existants est inchangée, car l'action
-  déterministe est la moyenne.
-
-Recommandation proposée à l'utilisateur : **B**, appliquée exemple par
-exemple, avec un commit qui actualise la référence et documente l'écart
-mesuré.
+- `ppokit/heads/gaussian.hpp` : `GaussianAxisLogDensity`, `GaussianAxisEntropy`,
+  `GaussianAxisLogDensityGradient`, par axe, ce qui permet le masquage d'axes de
+  Flight (frein).
+- `ppokit/core/ppo_surrogate.hpp` : `EvaluateClippedSurrogate` (log-ratio borné
+  à ±20, objectif `min(rA, clip(r)A)`, gradient `−A·r` là où le terme non
+  clippé est le minimum, indicateur pour la clip fraction).
+- Flight (`flight_policy.hpp`) et Blue (`generalized_patrol_learner.hpp`)
+  utilisent ces fonctions ; leurs anciennes formules sont supprimées.
+- Écarts mesurés :
+  - log-densité : au plus 1 ulp (2,2e-16 en double, 7,2e-7 en relatif en float),
+    vérifié par `PPOKitHeadsTests` ;
+  - golden trace Flight : les 19 épisodes rejoués ont les mêmes actions et les
+    mêmes issues ; seuls les derniers bits des log-probabilités et des poids
+    changent ;
+  - trace MAPPO Blue : value loss, entropie, KL et clip fraction identiques ;
+    écart relatif maximal de 8,6e-6 sur la policy loss (moyenne de termes qui
+    se compensent), 3,7e-7 sur les normes de gradient.
+- **Reste à faire avant de fusionner dans master (AGENTS.md)** : une évaluation
+  multi-seed d'une politique entraînée avec les formules communes, par exemple
+  avec les workflows `flight-control-training.yml` et
+  `mappo-blue-defense-windows.yml` lancés sur la branche. Les tests unitaires
+  ne prouvent pas la convergence.
 
 ## Prochaine action
 
-**En attente de la décision A ou B ci-dessus.** Ensuite, étape 3 : `ppokit/heads`.
-1. Têtes gaussienne (avec masquage d'axes, nécessaire à Flight), Bernoulli,
-   catégorielle, composite : log-prob, entropie, action déterministe,
-   gradient.
-2. Surrogate commun.
-3. Brancher Flight (`flight_policy.hpp`) puis Blue (learner).
-
-En attendant la décision, travail indépendant possible : étape 4 (backend
-rl_tools unique, sans `RL_TOOLS_NAMESPACE_WRAPPER`), à vérifier par la CI
-Windows, qui lie Flight et Blue dans le même exécutable.
+Étape 4 : un seul backend rl_tools partagé.
+- Aujourd'hui Flight inclut rl_tools sous `RL_TOOLS_NAMESPACE_WRAPPER ppo_flight_backend`
+  pour coexister avec BlueDefense dans le même exécutable.
+- Objectif : une cible `ppokit_backend_rltools` (privée) qui instancie les
+  opérations rl_tools une seule fois, utilisée par les deux exemples.
+- Validation : CI Windows desktop (Flight et Blue liés dans `PPO.exe`),
+  golden trace et trace Blue inchangées au bit près.
 
 ## Dernier état de la CI (PR #105, commit `e6161e4`)
 

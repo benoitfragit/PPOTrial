@@ -5,7 +5,7 @@
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=3/4 elapsed_ms=X
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=4/4 elapsed_ms=X
 [MAPPO_TIMING] optimizer=done update=1 learnable=2 critic_rows=2 critic_baselines_ms=X advantages_ms=X ppo_ms=X total_ms=X
-[MAPPO_UPDATE] update=1 policy_loss=-0.00892616063 value_loss=0.159504265 entropy=2.83787656 approx_kl=9.32216644e-05 clip_fraction=0 explained_variance=0 advantage_abs_mean=0.404176712 actor_derivative_l1=5.42610741 critic_derivative_l1=3.05279326 log_std_gradient_l1=7.82429361 action_std_mean=0.999998927 learnable=2 critic_rows=2 total_ms=X
+[MAPPO_UPDATE] update=1 policy_loss=-0.00892613083 value_loss=0.159504265 entropy=2.83787656 approx_kl=9.32216644e-05 clip_fraction=0 explained_variance=0 advantage_abs_mean=0.404176712 actor_derivative_l1=5.42610693 critic_derivative_l1=3.05279326 log_std_gradient_l1=7.82429409 action_std_mean=0.999998927 learnable=2 critic_rows=2 total_ms=X
 [MAPPO_TIMING] optimizer=begin update=1 transitions=2
 [MAPPO_TIMING] phase=critic_baselines_done update=1 elapsed_ms=X
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=1/4 elapsed_ms=X
@@ -21,7 +21,7 @@
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=3/4 elapsed_ms=X
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=4/4 elapsed_ms=X
 [MAPPO_TIMING] optimizer=done update=1 learnable=4 critic_rows=6 critic_baselines_ms=X advantages_ms=X ppo_ms=X total_ms=X
-[MAPPO_UPDATE] update=1 policy_loss=-0.00804749131 value_loss=95.8717117 entropy=2.83877707 approx_kl=0.000103883445 clip_fraction=0 explained_variance=-0.000609397888 advantage_abs_mean=6.00221205 actor_derivative_l1=8.25851631 critic_derivative_l1=32.0698013 log_std_gradient_l1=4.20455599 action_std_mean=1.00119853 learnable=4 critic_rows=6 total_ms=X
+[MAPPO_UPDATE] update=1 policy_loss=-0.00804749876 value_loss=95.8717117 entropy=2.83877707 approx_kl=0.000103883445 clip_fraction=0 explained_variance=-0.000609397888 advantage_abs_mean=6.00221205 actor_derivative_l1=8.25851631 critic_derivative_l1=32.0698013 log_std_gradient_l1=4.20455599 action_std_mean=1.00119853 learnable=4 critic_rows=6 total_ms=X
 [MAPPO_TIMING] optimizer=begin update=1 transitions=6
 [MAPPO_TIMING] phase=critic_baselines_done update=1 elapsed_ms=X
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=1/4 elapsed_ms=X
@@ -29,7 +29,7 @@
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=3/4 elapsed_ms=X
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=4/4 elapsed_ms=X
 [MAPPO_TIMING] optimizer=done update=1 learnable=4 critic_rows=6 critic_baselines_ms=X advantages_ms=X ppo_ms=X total_ms=X
-[MAPPO_UPDATE] update=1 policy_loss=-0.00804759935 value_loss=210.881546 entropy=2.83877707 approx_kl=0.000103883445 clip_fraction=0 explained_variance=-0.000339508057 advantage_abs_mean=8.21356201 actor_derivative_l1=8.25847149 critic_derivative_l1=69.6603546 log_std_gradient_l1=4.204494 action_std_mean=1.00119853 learnable=4 critic_rows=6 total_ms=X
+[MAPPO_UPDATE] update=1 policy_loss=-0.00804758444 value_loss=210.881546 entropy=2.83877707 approx_kl=0.000103883445 clip_fraction=0 explained_variance=-0.000339508057 advantage_abs_mean=8.21356201 actor_derivative_l1=8.25847149 critic_derivative_l1=69.6603546 log_std_gradient_l1=4.204494 action_std_mean=1.00119853 learnable=4 critic_rows=6 total_ms=X
 [MAPPO_TIMING] optimizer=begin update=1 transitions=2
 [MAPPO_TIMING] phase=critic_baselines_done update=1 elapsed_ms=X
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=1/4 elapsed_ms=X
@@ -37,7 +37,7 @@
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=3/4 elapsed_ms=X
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=4/4 elapsed_ms=X
 [MAPPO_TIMING] optimizer=done update=1 learnable=2 critic_rows=2 critic_baselines_ms=X advantages_ms=X ppo_ms=X total_ms=X
-[MAPPO_UPDATE] update=1 policy_loss=-0.0211087316 value_loss=0.175002649 entropy=2.83697748 approx_kl=0.000487364829 clip_fraction=0 explained_variance=0 advantage_abs_mean=0.420713663 actor_derivative_l1=10.5284138 critic_derivative_l1=3.21293688 log_std_gradient_l1=17.6896858 action_std_mean=0.998801529 learnable=2 critic_rows=2 total_ms=X
+[MAPPO_UPDATE] update=1 policy_loss=-0.0211088508 value_loss=0.175002649 entropy=2.83697748 approx_kl=0.000487364829 clip_fraction=0 explained_variance=0 advantage_abs_mean=0.420713663 actor_derivative_l1=10.5284119 critic_derivative_l1=3.21293688 log_std_gradient_l1=17.6896801 action_std_mean=0.998801529 learnable=2 critic_rows=2 total_ms=X
 [MAPPO_TIMING] optimizer=begin update=1 transitions=6
 [MAPPO_TIMING] phase=critic_baselines_done update=1 elapsed_ms=X
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=1/4 elapsed_ms=X
@@ -45,7 +45,7 @@
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=3/4 elapsed_ms=X
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=4/4 elapsed_ms=X
 [MAPPO_TIMING] optimizer=done update=1 learnable=4 critic_rows=6 critic_baselines_ms=X advantages_ms=X ppo_ms=X total_ms=X
-[MAPPO_UPDATE] update=1 policy_loss=-0.012956433 value_loss=0.174879968 entropy=2.83877707 approx_kl=0.000355966389 clip_fraction=0 explained_variance=-0.00132679939 advantage_abs_mean=0.421459943 actor_derivative_l1=8.06949711 critic_derivative_l1=3.21147132 log_std_gradient_l1=12.8869762 action_std_mean=1.00120234 learnable=4 critic_rows=6 total_ms=X
+[MAPPO_UPDATE] update=1 policy_loss=-0.0129563287 value_loss=0.174879968 entropy=2.83877707 approx_kl=0.000355966389 clip_fraction=0 explained_variance=-0.00132679939 advantage_abs_mean=0.421459943 actor_derivative_l1=8.06949425 critic_derivative_l1=3.21147132 log_std_gradient_l1=12.8869715 action_std_mean=1.00120234 learnable=4 critic_rows=6 total_ms=X
 [MAPPO_TIMING] optimizer=begin update=1 transitions=8
 [MAPPO_TIMING] phase=critic_baselines_done update=1 elapsed_ms=X
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=1/4 elapsed_ms=X
@@ -53,7 +53,7 @@
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=3/4 elapsed_ms=X
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=4/4 elapsed_ms=X
 [MAPPO_TIMING] optimizer=done update=1 learnable=6 critic_rows=8 critic_baselines_ms=X advantages_ms=X ppo_ms=X total_ms=X
-[MAPPO_UPDATE] update=1 policy_loss=-0.0104589518 value_loss=0.175092429 entropy=2.83787727 approx_kl=0.000247741758 clip_fraction=0 explained_variance=-0.000650405884 advantage_abs_mean=0.423321575 actor_derivative_l1=7.99089909 critic_derivative_l1=3.21340132 log_std_gradient_l1=11.0012798 action_std_mean=1.00000143 learnable=6 critic_rows=8 total_ms=X
+[MAPPO_UPDATE] update=1 policy_loss=-0.0104589416 value_loss=0.175092429 entropy=2.83787727 approx_kl=0.000247741758 clip_fraction=0 explained_variance=-0.000650405884 advantage_abs_mean=0.423321575 actor_derivative_l1=7.99089813 critic_derivative_l1=3.21340132 log_std_gradient_l1=11.0012789 action_std_mean=1.00000143 learnable=6 critic_rows=8 total_ms=X
 [MAPPO_TIMING] optimizer=begin update=1 transitions=4
 [MAPPO_TIMING] phase=critic_baselines_done update=1 elapsed_ms=X
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=1/4 elapsed_ms=X
@@ -69,7 +69,7 @@
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=3/4 elapsed_ms=X
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=4/4 elapsed_ms=X
 [MAPPO_TIMING] optimizer=done update=1 learnable=16 critic_rows=18 critic_baselines_ms=X advantages_ms=X ppo_ms=X total_ms=X
-[MAPPO_UPDATE] update=1 policy_loss=-0.00261369534 value_loss=0.175544351 entropy=2.83787608 approx_kl=0.000144590624 clip_fraction=0 explained_variance=-0.000454545021 advantage_abs_mean=0.431117356 actor_derivative_l1=6.89798975 critic_derivative_l1=3.21614885 log_std_gradient_l1=8.76400852 action_std_mean=0.999998927 learnable=16 critic_rows=18 total_ms=X
+[MAPPO_UPDATE] update=1 policy_loss=-0.00261367299 value_loss=0.175544351 entropy=2.83787608 approx_kl=0.000144590624 clip_fraction=0 explained_variance=-0.000454545021 advantage_abs_mean=0.431117356 actor_derivative_l1=6.89798927 critic_derivative_l1=3.21614885 log_std_gradient_l1=8.76400852 action_std_mean=0.999998927 learnable=16 critic_rows=18 total_ms=X
 [MAPPO_TIMING] optimizer=begin update=1 transitions=2
 [MAPPO_TIMING] phase=critic_baselines_done update=1 elapsed_ms=X
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=1/4 elapsed_ms=X
@@ -77,4 +77,4 @@
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=3/4 elapsed_ms=X
 [MAPPO_TIMING] phase=epoch_done update=1 epoch=4/4 elapsed_ms=X
 [MAPPO_TIMING] optimizer=done update=1 learnable=2 critic_rows=2 critic_baselines_ms=X advantages_ms=X ppo_ms=X total_ms=X
-[MAPPO_UPDATE] update=1 policy_loss=-0.00737589598 value_loss=0.983253002 entropy=2.83877683 approx_kl=7.16894865e-05 clip_fraction=0 explained_variance=0 advantage_abs_mean=1.01427758 actor_derivative_l1=6.98762274 critic_derivative_l1=7.93150759 log_std_gradient_l1=2.49780726 action_std_mean=1.00119925 learnable=2 critic_rows=2 total_ms=X
+[MAPPO_UPDATE] update=1 policy_loss=-0.00737586617 value_loss=0.983253002 entropy=2.83877683 approx_kl=7.16894865e-05 clip_fraction=0 explained_variance=0 advantage_abs_mean=1.01427758 actor_derivative_l1=6.98762321 critic_derivative_l1=7.93150759 log_std_gradient_l1=2.49780726 action_std_mean=1.00119925 learnable=2 critic_rows=2 total_ms=X

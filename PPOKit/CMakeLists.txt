@@ -5,7 +5,7 @@
 # The public headers live under include/ppokit and never expose a backend
 # (rl_tools, libtorch), a simulator or a GUI library.
 
-# --- ppokit::core : algorithmic building blocks (header-only) --------------
+# --- ppokit::core and ppokit::heads : algorithmic building blocks (header-only)
 add_library(ppokit_core INTERFACE)
 add_library(PPOKit::Core ALIAS ppokit_core)
 target_include_directories(ppokit_core INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -25,4 +25,8 @@ if (PPO_BUILD_CORE_TESTS)
     add_executable(PPOKitGaeTests tests/gae_tests.cpp)
     target_link_libraries(PPOKitGaeTests PRIVATE PPOKit::Core)
     add_test(NAME PPOKitGaeTests COMMAND PPOKitGaeTests)
+
+    add_executable(PPOKitHeadsTests tests/heads_tests.cpp)
+    target_link_libraries(PPOKitHeadsTests PRIVATE PPOKit::Core)
+    add_test(NAME PPOKitHeadsTests COMMAND PPOKitHeadsTests)
 endif()

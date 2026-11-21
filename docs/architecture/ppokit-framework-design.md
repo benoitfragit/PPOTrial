@@ -1063,7 +1063,7 @@ Chaque étape fait l'objet d'une PR séparée. L'avancement réel est suivi dans
 | 1a | `ppokit/artifacts` : écriture atomique. Remplacement des 4 implémentations | Golden trace Flight inchangée ; tests Blue de checkpoint au vert ; Debug et Release, CTest |
 | 1b | En-tête d'identité et RNG portable des artefacts (reporté avec l'étape 5, pour ne changer les formats sur disque qu'une fois) | Lecture des anciens formats conservée (§8.1) |
 | 2 | `ppokit/core` : GAE `<T>` ; Flight et Blue l'appellent. Le surrogate PPO passe à l'étape 3, car les deux implémentations diffèrent (bornes du log-ratio, règle d'activation du gradient) | Golden trace Flight identique ; trace de `generalized_learner_tests` identique au bit près |
-| 3 | `ppokit/heads` : têtes, puis composite pour Flight et gaussienne pour Blue | Parité de log-prob, d'entropie et de gradient avec `flight_policy.hpp` et le learner Blue ; golden trace |
+| 3 | `ppokit/heads` (gaussienne) et surrogate PPO communs ; une **formule unique** (décision de l'utilisateur) remplace celles de Flight et de Blue. Bernoulli, catégorielle et composite arrivent avec le codegen | Écart d'au plus 1 ulp sur la log-densité ; épisodes de la golden trace inchangés ; nouvelles références enregistrées ; évaluation multi-seed avant fusion |
 | 4 | `ppokit/backend/rltools` unique : suppression de `RL_TOOLS_NAMESPACE_WRAPPER` | BlueDefense et Flight liés dans le même exécutable ; pas de régression |
 | 5 | `schema` + `obs` + `reward` + codegen des types (§4.2), sans réseaux | Layouts générés égaux aux offsets actuels (`static_assert`) ; hash stable |
 | 6 | Codegen des réseaux, y compris l'attention Blue | Test d'acceptation n°1 (§7) |

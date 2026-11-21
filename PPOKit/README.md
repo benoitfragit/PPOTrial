@@ -33,6 +33,30 @@ auto const options = ppokit::artifacts::AtomicWriteOptions::KeepingPrevious(".pr
 
 CMake : `target_link_libraries(<cible> PRIVATE PPOKit::Artifacts)`.
 
+### `PPOKit::Core` — briques PPO (header-only)
+
+```cpp
+#include "ppokit/core/gae.hpp"
+#include "ppokit/core/ppo_surrogate.hpp"
+#include "ppokit/heads/gaussian.hpp"
+
+// GAE, en remontant la trajectoire : `terminated` coupe le bootstrap,
+// `truncated` (limite de temps) le garde mais arrête la trace.
+advantage = ppokit::core::GaeStep(reward, value, nextValue, advantage, gamma, lambda, terminated, truncated);
+
+// Politique gaussienne, axe par axe (un axe inactif est simplement sauté).
+logPi += ppokit::heads::GaussianAxisLogDensity(sample, mean, logStd);
+
+// Surrogate PPO clippé, puis règle de chaîne vers les sorties de l'acteur.
+auto const surrogate = ppokit::core::EvaluateClippedSurrogate(logPi, oldLogPi, advantage, clip);
+auto const gradient = ppokit::heads::GaussianAxisLogDensityGradient(sample, mean, logStd);
+double const dLossDMean = surrogate.logProbabilityGradient * gradient.mean;
+```
+
+CMake : `target_link_libraries(<cible> PUBLIC PPOKit::Core)`.
+
+FlightControl3D et BlueDefense utilisent exactement ces fonctions.
+
 ## Organisation
 
 ```

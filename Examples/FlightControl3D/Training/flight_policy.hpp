@@ -1,6 +1,6 @@
 /**
  * @file flight_policy.hpp
- * @brief Diagonal Gaussian policy: sampling, likelihood, KL, entropy, clipped PPO loss and GAE delta.
+ * @brief Diagonal Gaussian policy: sampling, likelihood, KL, entropy and clipped PPO loss.
  *
  * Role in the chain: observation -> actor network (flight_learner.cpp) -> **policy** ->
  * physical controls -> environment. The actor outputs one mean per action axis; the
@@ -14,6 +14,9 @@
  * Likelihoods are those of the latent Gaussian sample, not of the clipped physical
  * control: clipping happens afterwards in ToControls.
  *
+ * The per-axis Gaussian formulas and the clipped surrogate are the PPOKit ones
+ * (ppokit/heads/gaussian.hpp, ppokit/core/ppo_surrogate.hpp), shared with BlueDefense.
+ *
  * Not here: the networks and the optimizer (flight_learner.cpp).
  *
  * Read next: flight_learner.cpp (how these terms are used), Core/flight_types.hpp.
@@ -21,6 +24,8 @@
 #pragma once
 
 #include "flight_config.hpp"
+#include "ppokit/core/ppo_surrogate.hpp"
+#include "ppokit/heads/gaussian.hpp"
 #include <algorithm>
 #include <limits>
 #include <random>
@@ -106,9 +111,8 @@ inline double LogProbability(PolicyDistribution const& policy, PolicyAction cons
         {
             continue;
         }
-        double const logStd = policy.logStandardDeviations[axis];
-        double const standardized = (action.raw[axis] - policy.output[axis]) * std::exp(-logStd);
-        logProbability -= 0.5 * standardized * standardized + logStd + 0.5 * std::log(2 * Pi);
+        logProbability += ppokit::heads::GaussianAxisLogDensity(action.raw[axis], policy.output[axis],
+            policy.logStandardDeviations[axis]);
     }
     return logProbability;
 }
@@ -145,7 +149,7 @@ inline double Entropy(PolicyDistribution const& policy, bool brakeActive = true)
     {
         if (ActiveAxis(axis, brakeActive))
         {
-            entropy += 0.5 * std::log(2 * Pi * std::exp(1.0)) + policy.logStandardDeviations[axis];
+            entropy += ppokit::heads::GaussianAxisEntropy(policy.logStandardDeviations[axis]);
         }
     }
     return entropy;
@@ -272,8 +276,8 @@ struct PolicyLoss final
  * @brief Exact clipped PPO surrogate derivative, including the log-std entropy bonus.
  *
  * r = exp(clamp(log pi_new - log pi_old, -20, 20)). The surrogate -min(r A, clip(r, 1 - eps,
- * 1 + eps) A) has a non-zero gradient only where the unclipped term is the active minimum:
- * A >= 0 and r <= 1 + eps, or A < 0 and r >= 1 - eps. There d loss / d log pi = -A r, and
+ * 1 + eps) A) has a non-zero gradient only where the unclipped term is the minimum
+ * (r A <= clip(r) A). There d loss / d log pi = -A r, and
  * d log pi / d mu = (x - mu) / sigma^2, d log pi / d log sigma = (x - mu)^2 / sigma^2 - 1.
  * The entropy term adds -entropy coefficient to each active log-std derivative.
  */
@@ -281,33 +285,24 @@ inline PolicyLoss ClippedLoss(PolicyDistribution const& policy, PolicyAction con
     double advantage, TrainingSettings const& settings) noexcept
 {
     PolicyLoss result{};
-    double const logRatio = LogProbability(policy, action) - action.logProbability;
-    result.ratio = std::exp(std::clamp(logRatio, -MaximumAbsoluteLogRatio, MaximumAbsoluteLogRatio));
-    double const clipped = std::clamp(result.ratio, 1 - settings.clip, 1 + settings.clip);
+    auto const surrogate = ppokit::core::EvaluateClippedSurrogate(LogProbability(policy, action),
+        action.logProbability, advantage, settings.clip, MaximumAbsoluteLogRatio);
+    result.ratio = surrogate.ratio;
     result.entropy = Entropy(policy, action.brakeActive);
-    result.loss = -std::min(result.ratio * advantage, clipped * advantage) - settings.entropy
-        * result.entropy;
-    bool unclippedActive = result.ratio >= 1 - settings.clip;
-    if (advantage >= 0)
-    {
-        unclippedActive = result.ratio <= 1 + settings.clip;
-    }
-    double logProbabilityDerivative = 0;
-    if (unclippedActive)
-    {
-        logProbabilityDerivative = -advantage * result.ratio;
-    }
+    result.loss = -surrogate.objective - settings.entropy * result.entropy;
     for (std::size_t axis = 0; axis < ContinuousActions; ++axis)
     {
         if (!ActiveAxis(axis, action.brakeActive))
         {
             continue;
         }
-        double const inverseVariance = std::exp(-2 * policy.logStandardDeviations[axis]);
-        double const difference = action.raw[axis] - policy.output[axis];
-        result.outputDerivative[axis] = logProbabilityDerivative * difference * inverseVariance;
+        // Chain rule: d loss / d parameter = d loss / d log pi * d log pi / d parameter.
+        auto const gradient = ppokit::heads::GaussianAxisLogDensityGradient(action.raw[axis],
+            policy.output[axis], policy.logStandardDeviations[axis]);
+        result.outputDerivative[axis] = surrogate.logProbabilityGradient * gradient.mean;
+        // The entropy bonus contributes d entropy / d log-std = 1 per active axis.
         result.logStandardDeviationDerivative[axis] =
-            logProbabilityDerivative * (difference * difference * inverseVariance - 1) - settings.entropy;
+            surrogate.logProbabilityGradient * gradient.logStd - settings.entropy;
     }
     return result;
 }

@@ -347,10 +347,11 @@ int main()
         std::cout << "[FLIGHT_GOLDEN] fingerprint=" << Hex(fingerprint) << '\n';
 #if defined(__linux__) && defined(__x86_64__) && defined(__GLIBCXX__) && defined(__GNUC__) \
     && !defined(__clang__) && __GNUC__ == 13
-        // Frozen on master after #87 (T-6 approach), before the PPOKit migration;
-        // identical in Debug and Release. The former value predated the intended
-        // behaviour changes of #87 and was never re-checked, as CI runs GCC 15.
-        constexpr std::uint64_t Reference = 0x471aaf859adb0883ULL;
+        // PPOKit step 3 (user decision B): one shared Gaussian/PPO formula, which moves
+        // log-probabilities and weights by about one ulp. Episodes, actions and outcomes are
+        // unchanged. Previous reference, master after #87: 0x471aaf859adb0883.
+        // Identical in Debug and Release.
+        constexpr std::uint64_t Reference = 0x67f683c02a76946cULL;
         Check(fingerprint == Reference, "golden trace changed: the refactoring altered model behaviour");
         std::cout << "Flight golden trace matches the pre-refactoring reference\n";
         return 0;
