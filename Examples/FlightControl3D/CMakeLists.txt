@@ -52,7 +52,7 @@ target_link_libraries(FlightControlSimulator PUBLIC FlightControlCore PRIVATE li
 
 add_library(FlightControlLearner STATIC Training/flight_learner.cpp Training/flight_model_store.cpp
     Training/flight_curriculum.cpp)
-target_link_libraries(FlightControlLearner PUBLIC FlightControlCore PRIVATE RLtools::Core)
+target_link_libraries(FlightControlLearner PUBLIC FlightControlCore PRIVATE RLtools::Core PPOKit::Core PPOKit::Artifacts)
 
 add_library(FlightControlRuntime STATIC Runtime/flight_session.cpp Runtime/flight_reward_tuning.cpp)
 target_include_directories(FlightControlRuntime PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Runtime")

@@ -37,12 +37,14 @@ Ce fichier dit **où en est la migration** et **comment reprendre**. Il est mis
 
 | Garde-fou | Valeur de référence | Plateforme |
 |---|---|---|
-| `FlightControl_golden_trace_tests` (3 updates PPO, checkpoint complet hashé) | `0x0f0414a118b47b70` | Linux x86-64, GCC 13, Debug = Release |
+| `FlightControl_golden_trace_tests` de master : épisodes JSBSim, récompenses, actions, 2 updates PPO, checkpoint hashé | `0x471aaf859adb0883` | Linux x86-64, **GCC 13**, Debug = Release |
 | Trace du learner MAPPO Blue (`generalized_learner_tests`, 10 updates, diagnostics à 9 chiffres) | `PPOKit/tests/reference/blue_learner_trace_linux_gcc13.txt` | Linux x86-64, GCC 13, `-O2` |
 
 Sur une autre plateforme, le test affiche son empreinte et se déclare *skipped*
-(code 77). Pour y enregistrer une référence, lancer le test avec `--print`
-**sur le code de master**, puis l'ajouter dans `golden_trace_tests.cpp`.
+(code 77). **La CI Ubuntu utilise GCC 15 : le test y est toujours sauté.** Il
+n'est vérifié que localement, avec GCC 13. La référence de master datait
+d'avant #87 et échouait sur master : elle a été actualisée sur le code de
+master, inchangé (commit `test(flight): refresh the golden reference…`).
 
 ## Vérifier le code Blue sans le desktop
 
@@ -74,7 +76,7 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
 
 | Étape (plan §16) | État | Notes |
 |---|---|---|
-| 0. Golden trace Flight | fait | Absente de master : ajoutée avant toute refonte |
+| 0. Golden trace Flight | fait | Master (#87) en apporte une plus complète : elle remplace celle de la branche, avec une référence actualisée |
 | 1a. `ppokit::artifacts` écriture atomique, 4 implémentations remplacées | fait | Voir le détail ci-dessous |
 | 1b. En-tête d'identité et RNG portable des artefacts | reporté | Change les formats sur disque ; regroupé avec l'étape 5 (schémas et hashes) pour ne migrer les formats qu'une fois |
 | 2. GAE commun (`ppokit::core::GaeStep`) | fait | Flight et Blue identiques au bit près ; voir ci-dessous |
@@ -84,6 +86,8 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
 
 ### Détail de l'étape 1a
 
+- Master (#87) avait entre-temps factorisé Flight dans `flight_atomic_file.hpp`.
+  Après la fusion de master, ce fichier est supprimé au profit de PPOKit.
 - Bibliothèque `PPOKit/` (cible `PPOKit::Artifacts`), sans dépendance tierce,
   ajoutée avant la séparation desktop/headless du `CMakeLists.txt` racine.
 - `WriteFileAtomically(path, writer, options, context)` : écriture dans
@@ -101,7 +105,7 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
     faisait déjà.
   - L'erreur levée est `ppokit::artifacts::ArtifactWriteError` (dérivée de
     `std::runtime_error`) au lieu de `std::filesystem::filesystem_error`.
-- Vérifié : Debug et Release, `ctest` 17/17, golden trace identique, tests
+- Vérifié (avant la fusion de #87, puis à nouveau après) : Debug et Release, `ctest`, golden trace identique, tests
   Blue `generalized_actor`, `generalized_learner` et `attention` compilés et
   passés, syntaxe de `generalized_patrol_team_agent.cpp` identique à master.
 - Non vérifié ici : build desktop Windows (libtorch), à confirmer par la CI.
@@ -111,7 +115,7 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
 - `PPOKit::Core` (header-only) : `TemporalDifference<T>` et `GaeStep<T>`,
   documentés (différence entre `terminated` et `truncated`).
 - Flight : `ComputeAdvantages` appelle `GaeStep<double>` ; `AdvantageDelta`
-  est supprimé.
+  (dans `flight_policy.hpp` depuis #87) est supprimé.
 - Blue : `GeneralizedMissionAdvantage` devient un appel à `GaeStep<float>` (le
   nom est gardé pour les tests et le learner).
 - Les deux formules avaient déjà la même structure, `((r + γ·b) − v) + (γ·λ)·trace`.
@@ -122,7 +126,7 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
 
 ### Surrogate PPO : différences constatées (à trancher à l'étape 3)
 
-| | FlightControl3D (`ClippedLoss`) | BlueDefense (learner) |
+| | FlightControl3D (`ClippedLoss`, `flight_policy.hpp` depuis #87 ; à revérifier) | BlueDefense (learner) |
 |---|---|---|
 | Borne du log-ratio avant `exp` | ±80 | ±20 |
 | Gradient actif | `A ≥ 0 ? r ≤ 1+ε : r ≥ 1−ε`, et log-ratio non saturé | `r·A ≤ clip(r)·A` |
@@ -139,10 +143,16 @@ l'accord de l'utilisateur et une nouvelle référence de trace.
    entropie, action déterministe, gradient.
 2. Surrogate commun (voir ci-dessus) : proposer à l'utilisateur de garder les
    deux conventions en paramètre, ce qui garantit des traces identiques.
-3. Brancher Flight (`hybrid_policy.hpp`) puis Blue (learner), en gardant les
+3. Brancher Flight (`flight_policy.hpp`) puis Blue (learner), en gardant les
    deux garde-fous identiques.
 
 ## Pièges connus
+
+- Master avance pendant la migration : avant chaque session, faire
+  `git fetch --depth=50 origin master` puis fusionner master dans la branche
+  (sans réécrire l'historique). En cas de conflit sur un exemple, prendre la
+  version de master, refaire l'intégration PPOKit par-dessus, puis vérifier
+  avec `tools/ppokit/verify.sh`.
 
 - Le `.gitignore` du dépôt exclut tout dossier nommé `artifacts/` (règle .NET).
   Les dossiers de PPOKit portant ce nom sont réintégrés explicitement. Après

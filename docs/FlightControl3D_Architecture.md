@@ -34,7 +34,7 @@ flowchart LR
     subgraph Training["FlightControlLearner (Training/)"]
         policy[flight_policy] --> learner[flight_learner]
         rng[flight_rng_checkpoint] --> learner
-        atomic[flight_atomic_file] --> learner
+        atomic[PPOKit artifacts] --> learner
         learner --> store[flight_model_store]
         atomic --> store
         curriculum[flight_curriculum]

@@ -27,7 +27,7 @@ la même structure et servent de modèles pour un nouvel utilisateur (§13.1).
 
 **Invariants à respecter pendant toute la migration :**
 - Aucun canal de récompense Blue n'est ajouté, renommé, repondéré ou renormalisé.
-  Les 15 canaux de `GeneralizedRewardChannel` et les 10 canaux de
+  Les 15 canaux de `GeneralizedRewardChannel` et les 7 canaux (depuis #87) de
   `flight::Reward` sont transcrits à l'identique.
 - Les capacités 1..9 Bleus / 0..10 Rouges, le masquage et les permutations sont
   préservés.
@@ -391,10 +391,10 @@ Chaque tête implémente : `Sample(rng)`, `LogProb(action)`, `Entropy()`,
 | `gaussian` | moyenne `n`, log-std (paramètre libre ou sortie réseau) | moyenne | log-prob et entropie calculées sur le **latent** ; `map: clip` ou `map: tanh` appliqué après |
 | `composite` | concaténation | composante par composante | log-prob = somme, entropie = somme (têtes indépendantes) |
 
-**Compatibilité Flight :** `hybrid_policy.hpp` calcule déjà la densité du
-latent gaussien × Bernoulli et un gradient exact du surrogate. La tête
-composite `gaussian(map: clip) + bernoulli` doit reproduire ces valeurs à la
-précision près, avec un test de parité.
+**Compatibilité Flight :** depuis #87, `flight_policy.hpp` utilise une tête
+gaussienne seule (5 actions, log-std indépendant de l'état, latent clippé), avec
+un gradient exact du surrogate. La tête `gaussian(map: clip)` doit reproduire
+ces valeurs au bit près ; la tête composite reste exercée par ses propres tests.
 
 **`map: tanh` :** il faut choisir explicitement entre deux variantes :
 - log-prob sur le latent (cohérent avec le clip actuel) ;
@@ -984,10 +984,10 @@ Une **sonde** se pose sur n'importe quel point observable :
 | Environnement `Reset` / `Step` | `flight_environment.*` | `runtime` mode Owned (§4.3) | Corps de `Reset` / `Step` |
 | JSBSim, mouvement de piste | `jsbsim_aircraft.*`, `runway_motion.*` | — | Client |
 | Mission, guidage (LOC, glide, flare, rollout) | `flight_mission.*`, `flight_types.hpp` | Hook fournisseur de références | Client |
-| Observation (56) | `flight_types.hpp` | `schema` + `obs` | Calcul des features |
-| Tête hybride gaussienne × Bernoulli, clip, entropie analytique | `hybrid_policy.hpp` | `heads.composite(gaussian clip, bernoulli)` + test de parité | — |
-| Contrôles forcés par phase, throttle de référence | `ApplyPhaseControls`, `hybrid_policy.hpp` | Hook `AdaptAction` | Règles |
-| 10 canaux de récompense, poids | `flight_types.hpp`, `flight_config.*` | `reward` | Termes |
+| Observation (33 depuis #87) | `flight_types.hpp` | `schema` + `obs` | Calcul des features |
+| Tête gaussienne (5 actions, log-std indépendant de l'état), clip, entropie analytique (depuis #87) | `flight_policy.hpp` | `heads.gaussian(map: clip)` + test de parité | — |
+| Contrôles forcés par phase, throttle de référence | `ApplyPhaseControls`, `flight_policy.hpp` | Hook `AdaptAction` | Règles |
+| 7 canaux de récompense, poids, réglage des récompenses (`flight_reward_tuning`) | `flight_types.hpp`, `flight_config.*`, `Runtime/flight_reward_tuning.*` | `reward` | Termes |
 | Curriculum Loc/Glide/Joint, reminder LOC, placements | `flight_config.*`, `flight_environment.cpp` | `train.json` curriculum + `rehearse` | Placement dans `Reset` |
 | GAE (double), PPO, MLP rl_tools, Adam | `flight_learner.*` | `core` GAE `<double>` + `backend` | — |
 | Checkpoint atomique, RNG portable | `flight_learner.cpp` | `artifacts` | — |
@@ -1050,7 +1050,7 @@ normalisation et les éventuels normaliseurs déjà appliqués dans
 ### 15.2 Flight
 
 Voir §5.1. Les tailles de la tête `controls` et la liste exacte des canaux
-sont reprises de `flight_types.hpp` et `hybrid_policy.hpp` lors de l'étape 3.
+sont reprises de `flight_types.hpp` et `flight_policy.hpp` lors de l'étape 3.
 
 ## 16. Plan de migration
 
@@ -1063,7 +1063,7 @@ Chaque étape fait l'objet d'une PR séparée. L'avancement réel est suivi dans
 | 1a | `ppokit/artifacts` : écriture atomique. Remplacement des 4 implémentations | Golden trace Flight inchangée ; tests Blue de checkpoint au vert ; Debug et Release, CTest |
 | 1b | En-tête d'identité et RNG portable des artefacts (reporté avec l'étape 5, pour ne changer les formats sur disque qu'une fois) | Lecture des anciens formats conservée (§8.1) |
 | 2 | `ppokit/core` : GAE `<T>` ; Flight et Blue l'appellent. Le surrogate PPO passe à l'étape 3, car les deux implémentations diffèrent (bornes du log-ratio, règle d'activation du gradient) | Golden trace Flight identique ; trace de `generalized_learner_tests` identique au bit près |
-| 3 | `ppokit/heads` : têtes, puis composite pour Flight et gaussienne pour Blue | Parité de log-prob, d'entropie et de gradient avec `hybrid_policy.hpp` et le learner Blue ; golden trace |
+| 3 | `ppokit/heads` : têtes, puis composite pour Flight et gaussienne pour Blue | Parité de log-prob, d'entropie et de gradient avec `flight_policy.hpp` et le learner Blue ; golden trace |
 | 4 | `ppokit/backend/rltools` unique : suppression de `RL_TOOLS_NAMESPACE_WRAPPER` | BlueDefense et Flight liés dans le même exécutable ; pas de régression |
 | 5 | `schema` + `obs` + `reward` + codegen des types (§4.2), sans réseaux | Layouts générés égaux aux offsets actuels (`static_assert`) ; hash stable |
 | 6 | Codegen des réseaux, y compris l'attention Blue | Test d'acceptation n°1 (§7) |

@@ -23,7 +23,8 @@
  * Runtime/flight_session.cpp (collection loop).
  */
 #include "flight_learner.hpp"
-#include "flight_atomic_file.hpp"
+#include "ppokit/artifacts/atomic_file.hpp"
+#include "ppokit/core/gae.hpp"
 #include "flight_rng_checkpoint.hpp"
 // Upstream CPU headers define non-inline symbols. Use its supported namespace
 // wrapper so this backend can coexist with BlueDefense in the same executable.
@@ -48,11 +49,10 @@ void ComputeAdvantages(Transition* transitions, std::size_t count, TrainingSetti
     for (std::size_t index = count; index > 0; --index)
     {
         auto& row = transitions[index - 1];
-        // The recursion restarts at every episode boundary: the next row
-        // belongs to another episode, whatever the reason the episode ended.
-        bool const episodeEnded = row.terminated || row.truncated;
-        advantage = AdvantageDelta(row.reward, row.value, row.nextValue, row.terminated, settings.gamma)
-            + (episodeEnded ? 0 : settings.gamma * settings.lambda * advantage);
+        // A truncation (time limit) keeps its bootstrap; any episode end restarts the
+        // recursion, because the next row belongs to another episode.
+        advantage = ppokit::core::GaeStep(row.reward, row.value, row.nextValue, advantage,
+            settings.gamma, settings.lambda, row.terminated, row.truncated);
         row.advantage = advantage;
         row.target = advantage + row.value;
     }
@@ -806,28 +806,26 @@ void FlightLearner::Record(Observation const& observation, PolicyAction const& a
     ++impl_->collected;
 }
 
+namespace {
+
+/** @brief Serializes the complete learner state (networks, Adam, RNG) into an artifact stream. */
+struct LearnerWriter final
+{
+    FlightLearner::Impl const& learner;
+    void operator()(std::ostream& stream) const { learner.Write(stream); }
+};
+
+} // namespace
+
 void FlightLearner::Save(std::filesystem::path const& path) const
 {
     if (impl_->collected != 0)
     {
         throw std::logic_error("FlightControl3D: save at an update boundary");
     }
-    if (!path.parent_path().empty())
-    {
-        std::filesystem::create_directories(path.parent_path());
-    }
-    auto temporary = path;
-    temporary += ".tmp";
-    {
-        std::ofstream stream(temporary, std::ios::trunc);
-        impl_->Write(stream);
-        stream.flush();
-        if (!stream)
-        {
-            throw std::runtime_error("FlightControl3D: checkpoint write failed");
-        }
-    }
-    detail::CommitTemporaryFile(temporary, path);
+    // The CI archives the ".previous" generation, so it is kept after the commit.
+    auto const options = ppokit::artifacts::AtomicWriteOptions::KeepingPrevious(".previous");
+    ppokit::artifacts::WriteFileAtomically(path, LearnerWriter{*impl_}, options, "FlightControl3D checkpoint");
 }
 
 void FlightLearner::Load(std::filesystem::path const& path)

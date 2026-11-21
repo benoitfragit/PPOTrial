@@ -312,16 +312,4 @@ inline PolicyLoss ClippedLoss(PolicyDistribution const& policy, PolicyAction con
     return result;
 }
 
-/**
- * @brief One-step TD error of GAE: bootstrap on time limits, but never carry value across a reset.
- *
- * delta = r + gamma * V(s') - V(s), with V(s') = 0 only for a terminated (absorbing)
- * transition; a truncated transition keeps its bootstrap.
- */
-inline double AdvantageDelta(double reward, double value, double nextValue, bool terminated,
-    double gamma) noexcept
-{
-    return reward + (terminated ? 0 : gamma * nextValue) - value;
-}
-
 } // namespace ppo::examples::flight
