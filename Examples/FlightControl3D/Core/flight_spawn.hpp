@@ -33,6 +33,8 @@ struct EpisodeStart final
     bool rolling{};
     /** @brief Airborne start difficulty in [0, 1]; a rolling start ignores it. */
     double difficulty{1.0};
+    /** @brief Airborne start with the gear retracted: the policy must command its extension. */
+    bool gearUp{};
 };
 
 /**
@@ -77,6 +79,58 @@ Runway SampleRunway(Config const& config, std::mt19937& rng);
  */
 AircraftState SampleApproachStart(Config const& config, Runway const& runway, ApproachSide side,
     double difficulty, std::mt19937& rng);
+
+/** @brief Position of a difficulty on the curriculum scale: an approach level or a stage. */
+struct CurriculumPosition final
+{
+    /** @brief True for a stage start, false for an approach start. */
+    bool staged{};
+    /** @brief Approach difficulty in [0, 1], used when staged is false. */
+    double approachDifficulty{1.0};
+    /** @brief Stage index, used when staged is true. */
+    std::size_t stage{};
+};
+
+/**
+ * @brief Maps a curriculum difficulty to an approach difficulty or a stage.
+ *
+ * The scale has CurriculumLevels() - 1 unit steps: the first levels - 1 steps interpolate
+ * the approach difficulty from 0 to 1, then each further step (k, k + 1] is stage k.
+ * Difficulty 1 is therefore the last stage, or the full approach without stages.
+ * @param settings Curriculum settings.
+ * @param difficulty Curriculum difficulty in [0, 1].
+ * @return Approach difficulty or stage index.
+ */
+CurriculumPosition ResolveCurriculum(CurriculumSettings const& settings, double difficulty) noexcept;
+
+/** @brief Airborne start of a curriculum stage: the aircraft and the route of gates to fly first. */
+struct StageStart final
+{
+    AircraftState aircraft{};
+    Route route{};
+};
+
+/**
+ * @brief Samples the airborne start of a curriculum stage.
+ *
+ * - approach: direct approach from the stage envelope (distance, bearing signed by the side,
+ *   heading offset, height above the glide plane), no route;
+ * - pattern: level flight downwind, abeam the runway on the given side, heading opposite the
+ *   runway; gates at the downwind end, on base and on the extended centreline 7 km out;
+ * - holding: level flight inbound toward a fix on the extended centreline; gates around one
+ *   racetrack lap on the given side, back over the fix, then the approach.
+ *
+ * Draw order: two position draws (distance and bearing, start along and lateral offset), the
+ * heading offset, the height, then the speed, roll and pitch, and for an approach the slope.
+ * @param config Validated configuration.
+ * @param runway Episode runway pose.
+ * @param stage Stage settings.
+ * @param side Side of the centreline of the start and of the route.
+ * @param rng Episode random generator.
+ * @return Initial aircraft state (gear down) and the route of the episode.
+ */
+StageStart SampleStageStart(Config const& config, Runway const& runway, StageSettings const& stage,
+    ApproachSide side, std::mt19937& rng);
 
 /**
  * @brief Samples an already-landed rolling start; the simulator settles its wheels on the deck.

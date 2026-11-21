@@ -27,6 +27,17 @@
 
 namespace ppo::examples::flight {
 namespace {
+/** @brief Name of the curriculum frontier for the logs: "approach" or the stage name. */
+std::string CurriculumStageName(CurriculumSettings const& settings, double difficulty)
+{
+    auto const position = ResolveCurriculum(settings, difficulty);
+    if (!position.staged)
+    {
+        return "approach";
+    }
+    return settings.stages[position.stage].name;
+}
+
 /** @brief Largest accepted inference budget, in episodes. */
 constexpr std::size_t MaximumInferenceEpisodes = 1000000;
 /** @brief Difficulty of the inference mix: the full task. */
@@ -463,7 +474,9 @@ void FlightSession::AdvanceCurriculum(MissionState const& episode)
     }
     environment_->SetDifficulty(curriculum_.Difficulty());
     std::cout << "[FLIGHT_CURRICULUM] level=" << curriculum_.Level() << "/" << curriculum_.Levels() - 1
-        << " difficulty=" << curriculum_.Difficulty() << " update=" << learner_.Stats().updates << std::endl;
+        << " difficulty=" << curriculum_.Difficulty()
+        << " stage=" << CurriculumStageName(config_.training.curriculum, curriculum_.Difficulty())
+        << " update=" << learner_.Stats().updates << std::endl;
 }
 
 void FlightSession::SaveLatest()

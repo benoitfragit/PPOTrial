@@ -19,9 +19,11 @@
  */
 #pragma once
 
+#include "flight_aircraft_performance.hpp"
 #include "flight_types.hpp"
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace ppo::examples::flight {
 
@@ -179,17 +181,74 @@ struct RewardSettings final
     double pathTolerance{};
 };
 
+/** @brief Kind of airborne start of a curriculum stage. */
+enum class StageKind : std::uint8_t
+{
+    /** @brief Direct approach from a wider, higher or farther envelope than the approach levels. */
+    Approach,
+    /** @brief Downwind abeam the runway, then base and final gates. */
+    Pattern,
+    /** @brief One racetrack lap around a holding fix on the extended centreline, then the approach. */
+    Holding
+};
+
+/** @brief Pattern route: downwind end, past the threshold (negative), in metres. */
+inline constexpr double PatternDownwindEndAlongMeters = -3000.0;
+/** @brief Pattern route: base gate, past the threshold (negative), in metres. */
+inline constexpr double PatternBaseAlongMeters = -6000.0;
+/** @brief Pattern route: lateral offset of the base gate as a fraction of the downwind offset. */
+inline constexpr double PatternBaseOffsetFraction = 0.6;
+/**
+ * @brief Pattern route: final gate on the extended centreline, past the threshold (negative), in metres.
+ *
+ * Far enough out for the approach to remove the residual lateral offset before the threshold.
+ */
+inline constexpr double PatternFinalAlongMeters = -7000.0;
+
+/**
+ * @brief One curriculum stage beyond the approach levels ("curriculum.stages" JSON array).
+ *
+ * Fields that a kind does not use are left at zero and absent from its JSON object.
+ */
+struct StageSettings final
+{
+    /** @brief Log and display name. */
+    std::string name;
+    StageKind kind{StageKind::Approach};
+    /** @brief Approach: start distance from the threshold, in metres. */
+    Range distanceMeters{};
+    /** @brief Approach: bearing of the start from the extended centreline, in degrees. */
+    Range bearingDegrees{};
+    /** @brief Pattern and holding: start distance past the threshold, in metres (negative before it). */
+    Range startAlongMeters{};
+    /** @brief Pattern: downwind offset from the centreline; holding: start offset; in metres. */
+    Range lateralMeters{};
+    /** @brief Heading offset from the nominal heading of the start, in degrees. */
+    Range headingOffsetDegrees{};
+    /** @brief Approach: height above the glide plane; pattern and holding: height above the deck; in metres. */
+    Range heightMeters{};
+    /** @brief Holding: fix position on the extended centreline, past the threshold (negative), in metres. */
+    double fixAlongMeters{};
+    /** @brief Holding: length of the outbound leg, in metres. */
+    double outboundMeters{};
+    /** @brief Holding: distance between the inbound and outbound legs, in metres. */
+    double holdingWidthMeters{};
+    /** @brief Share of the stage starts with the gear retracted, in [0, 1]. */
+    double gearUpShare{};
+};
+
 /**
  * @brief Adaptive start-difficulty curriculum used only by training episodes.
  *
- * Difficulty 0 is a short, aligned final approach; difficulty 1 is the full
- * configured start envelope. Validations evaluate the mix up to the current level.
+ * The scale runs over the approach levels, from a short aligned final to the full
+ * configured start envelope, then over the stages. Difficulty 1 is the last stage.
+ * Validations evaluate the mix up to the current level.
  */
 struct CurriculumSettings final
 {
     /** @brief Start distance range at difficulty 0, in metres. */
     Range firstDistanceMeters{};
-    /** @brief Number of difficulty levels, the last one being the full task. */
+    /** @brief Number of approach levels, from the short aligned final to the full start envelope. */
     std::size_t levels{1};
     /** @brief Stop rate over the window that promotes to the next level. */
     double promotionSuccessRate{};
@@ -197,7 +256,15 @@ struct CurriculumSettings final
     std::size_t windowEpisodes{1};
     /** @brief Share of training episodes that start already landed, to practise braking. */
     double rolloutStartShare{};
+    /** @brief Stages after the approach levels, in order of difficulty. */
+    std::vector<StageSettings> stages;
 };
+
+/** @brief Total curriculum levels: the approach levels followed by one level per stage. */
+inline std::size_t CurriculumLevels(CurriculumSettings const& settings) noexcept
+{
+    return settings.levels + settings.stages.size();
+}
 
 /** @brief PPO and checkpoint settings ("training" JSON section). */
 struct TrainingSettings final
@@ -285,6 +352,8 @@ struct Config final
     RuntimeSettings runtime{};
     /** @brief JSBSim aircraft model name. */
     std::string aircraft;
+    /** @brief Model-derived performance of the aircraft, resolved from its name when loading. */
+    AircraftPerformance performance{};
     /** @brief Canonical JSON of every task-defining setting, stored in checkpoints and BEST manifests. */
     std::string checkpointSignature;
 

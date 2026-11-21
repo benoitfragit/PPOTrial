@@ -98,6 +98,41 @@ void DiagnoseTouchdownLimits(CrashDiagnostic& report, MissionSettings const& lim
         measured.heading > limits.maxTouchdownHeadingDegrees * DegreesToRadians,
         measured.heading / DegreesToRadians, limits.maxTouchdownHeadingDegrees);
 }
+
+/** @brief Height of a world point above the surface below it: the deck, or the sea off the deck. */
+double HeightAboveSurface(Config const& config, Vec3 point) noexcept
+{
+    auto const local = DeckCoordinates(config.runway, point);
+    if (OnLandingSurface(config.runway, local.north, local.east))
+    {
+        return local.up;
+    }
+    return point.up - config.runwayRandomization.seaHeightMeters;
+}
+
+/**
+ * @brief Belly contact of an aircraft whose gear is not down and locked.
+ *
+ * The pinned models have contact points only at the wheels, and JSBSim applies no ground
+ * force through a gear that is not locked down: the airframe would sink through the deck
+ * unnoticed. The nominal wheel locations, fixed in the body, stand for the lowest airframe
+ * points, so one of them reaching the surface is a contact.
+ */
+bool BellyContact(Config const& config, AircraftState const& aircraft) noexcept
+{
+    if (aircraft.gearPosition >= config.mission.gearDownMinimum)
+    {
+        return false;
+    }
+    for (auto const& wheel : aircraft.wheels)
+    {
+        if (HeightAboveSurface(config, wheel.point) <= 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
 } // namespace
 
 bool ContactDetected(Config const& config, AircraftState const& aircraft) noexcept
@@ -110,16 +145,10 @@ bool ContactDetected(Config const& config, AircraftState const& aircraft) noexce
     // A tangent-plane height cannot override a valid physical contact sample.
     if (aircraft.wheelDataValid)
     {
-        return false;
+        return BellyContact(config, aircraft);
     }
     // Geometric fallback: height of the CG above the deck, or above the sea off the deck.
-    auto const local = DeckCoordinates(config.runway, aircraft.position);
-    double surfaceHeight = aircraft.position.up - config.runwayRandomization.seaHeightMeters;
-    if (OnLandingSurface(config.runway, local.north, local.east))
-    {
-        surfaceHeight = local.up;
-    }
-    return surfaceHeight <= config.mission.contactHeightMeters;
+    return HeightAboveSurface(config, aircraft.position) <= config.mission.contactHeightMeters;
 }
 
 bool WheelsInside(Config const& config, AircraftState const& aircraft) noexcept
@@ -167,7 +196,7 @@ bool LandingSafe(Config const& config, AircraftState const& before, AircraftStat
         && measured.heading <= limits.maxTouchdownHeadingDegrees * DegreesToRadians;
 }
 
-CrashDiagnostic DiagnoseCrash(Config const& config, Phase phase, AircraftState const& before,
+CrashDiagnostic DiagnoseCrash(Config const& config, MissionState const& mission, AircraftState const& before,
     AircraftState const& after, bool contact) noexcept
 {
     auto const& limits = config.mission;
@@ -186,7 +215,7 @@ CrashDiagnostic DiagnoseCrash(Config const& config, Phase phase, AircraftState c
     SetCrashCondition(report, CrashReason::Altitude, local.up > limits.maxAltitudeMeters, local.up,
         limits.maxAltitudeMeters);
     // Surface limits, once on the ground.
-    if (contact || phase == Phase::Rollout)
+    if (contact || mission.phase == Phase::Rollout)
     {
         SetCrashCondition(report, CrashReason::LandingArea,
             !OnLandingSurface(config.runway, local.north, local.east));
@@ -201,6 +230,8 @@ CrashDiagnostic DiagnoseCrash(Config const& config, Phase phase, AircraftState c
         after.gearPosition, limits.gearDownMinimum);
     SetCrashCondition(report, CrashReason::StructuralContact, after.structuralContact);
     SetCrashCondition(report, CrashReason::NoWheelContact, !after.weightOnWheels);
+    SetCrashCondition(report, CrashReason::RouteIncomplete, mission.nextGate < mission.route.count,
+        static_cast<double>(mission.nextGate), static_cast<double>(mission.route.count));
     DiagnoseTouchdownLimits(report, limits, Measure(config.runway, before, after));
     return report;
 }

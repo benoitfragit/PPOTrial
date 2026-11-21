@@ -45,7 +45,7 @@ double FilteredValue(double previous, double target, double alpha) noexcept
  * @param previous Controls applied during the previous physics step.
  * @param target Finite, physically bounded requested controls.
  * @param alpha Discrete filter coefficient in [0,1].
- * @return Filtered continuous controls with an immediate flap selection.
+ * @return Filtered continuous controls with an immediate flap and gear selection.
  */
 Controls FilterControls(Controls const& previous, Controls const& target, double alpha) noexcept
 {
@@ -53,8 +53,11 @@ Controls FilterControls(Controls const& previous, Controls const& target, double
         FilteredValue(previous.aileron, target.aileron, alpha),
         FilteredValue(previous.rudder, target.rudder, alpha),
         FilteredValue(previous.throttle, target.throttle, alpha),
-        FilteredValue(previous.brake, target.brake, alpha), target.flap};
+        FilteredValue(previous.brake, target.brake, alpha), target.flap, target.gear};
 }
+
+/** @brief Gear lever value above which an extension is requested. */
+constexpr double GearRequestThreshold = 0.5;
 
 /** @brief Clamp requested controls to their physical ranges; airborne rudder authority is reduced. */
 Controls BoundedControls(Controls controls, Phase phase, double airborneRudderAuthority) noexcept
@@ -69,6 +72,7 @@ Controls BoundedControls(Controls controls, Phase phase, double airborneRudderAu
     controls.rudder = std::clamp(controls.rudder, -1.0, 1.0) * rudderAuthority;
     controls.throttle = std::clamp(controls.throttle, 0.0, 1.0);
     controls.brake = std::clamp(controls.brake, 0.0, 1.0);
+    controls.gear = std::clamp(controls.gear, 0.0, 1.0);
     return controls;
 }
 
@@ -165,7 +169,7 @@ Observation FlightEnvironment::Reset()
     }
     auto const side = NextTrainingSide();
     double const difficulty = difficulty_ * std::sqrt(std::uniform_real_distribution<double>(0.0, 1.0)(rng_));
-    return StartAirborne(side, difficulty);
+    return StartAirborne(side, difficulty, false);
 }
 
 Observation FlightEnvironment::Reset(std::uint32_t episodeSeed, EpisodeStart start)
@@ -184,7 +188,7 @@ Observation FlightEnvironment::Reset(std::uint32_t episodeSeed, EpisodeStart sta
     {
         side = ApproachSide::Right;
     }
-    return StartAirborne(side, start.difficulty);
+    return StartAirborne(side, start.difficulty, start.gearUp);
 }
 
 void FlightEnvironment::PrepareEpisode(bool rolling)
@@ -221,11 +225,55 @@ Observation FlightEnvironment::StartRolling()
     return ObservationNow();
 }
 
-Observation FlightEnvironment::StartAirborne(ApproachSide side, double difficulty)
+Observation FlightEnvironment::StartAirborne(ApproachSide side, double difficulty, bool gearUp)
 {
-    auto const initial = SampleApproachStart(config_, episodeConfig_.runway, side, difficulty, rng_);
-    aircraft_ = fdm_.Reset(initial, Phase::Approach);
+    auto const& curriculum = config_.training.curriculum;
+    auto const position = ResolveCurriculum(curriculum, difficulty);
+    StageStart start{};
+    if (position.staged)
+    {
+        auto const& stage = curriculum.stages[position.stage];
+        start = SampleStageStart(config_, episodeConfig_.runway, stage, side, rng_);
+        // Drawn only for stages, so the approach levels keep their draw sequence.
+        gearUp = std::bernoulli_distribution(stage.gearUpShare)(rng_) || gearUp;
+    }
+    else
+    {
+        start.aircraft = SampleApproachStart(config_, episodeConfig_.runway, side, position.approachDifficulty,
+            rng_);
+    }
+    // A retracted gear stays up until the policy commands its extension.
+    if (gearUp)
+    {
+        start.aircraft.gearPosition = 0.0;
+        mission_.gearDownCommanded = false;
+    }
+    mission_.route = start.route;
+    auto const commands = StartCommands(start.aircraft);
+    mission_.filteredControls.elevator = commands.elevator;
+    mission_.filteredControls.throttle = commands.throttle;
+    aircraft_ = fdm_.Reset(start.aircraft, Phase::Approach, commands);
     return ObservationNow();
+}
+
+InitialCommands FlightEnvironment::StartCommands(AircraftState const& initial)
+{
+    // Trim the sampled speed and flight path, wings level, in the start configuration;
+    // the sampled attitude is then applied by the reset. A failed trim keeps the
+    // action reference, as an untrimmed start did.
+    TrimCondition condition{};
+    condition.calibratedSpeed = initial.airspeed;
+    condition.flightPathRadians = std::atan2(initial.velocity.up, std::hypot(initial.velocity.north,
+        initial.velocity.east));
+    condition.flap = config_.initial.approachFlap;
+    condition.gear = initial.gearPosition;
+    condition.heightMeters = initial.position.up;
+    auto const trim = fdm_.Trim(condition);
+    if (!trim.converged)
+    {
+        return {config_.initial.elevatorTrim, config_.initial.throttle};
+    }
+    return {trim.elevator, trim.throttle};
 }
 
 std::size_t FlightEnvironment::RunSubsteps(Controls const& controls, StepResult& total)
@@ -292,15 +340,22 @@ StepResult FlightEnvironment::Step(Controls const& action)
     {
         throw std::logic_error("FlightControl3D: reset required after episode boundary");
     }
-    for (double const value : {action.elevator, action.aileron, action.rudder, action.throttle, action.brake})
+    for (double const value : {action.elevator, action.aileron, action.rudder, action.throttle, action.brake,
+             action.gear})
     {
         if (!std::isfinite(value))
         {
             throw std::invalid_argument("FlightControl3D: invalid flight control");
         }
     }
-    auto const controls = BoundedControls(ApplyPhaseControls(action, mission_.phase, config_.initial),
+    // The first extension request latches the gear down for the rest of the episode.
+    if (action.gear > GearRequestThreshold)
+    {
+        mission_.gearDownCommanded = true;
+    }
+    auto controls = BoundedControls(ApplyPhaseControls(action, mission_.phase, config_.initial),
         mission_.phase, config_.mission.airborneRudderAuthority);
+    controls.gear = mission_.gearDownCommanded ? 1.0 : 0.0;
     StepResult total{};
     std::size_t const executed = RunSubsteps(controls, total);
     CorrectPartialTimeout(executed, total);

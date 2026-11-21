@@ -31,9 +31,16 @@ Sans `--example`, l'application affiche le sélecteur graphique. Avec
 
 FlightControl3D utilise le scénario d'atterrissage T-6 configuré dans
 `resources/settings/Scenarios/FlightControl3D_T6_Joint.json`. L'entraînement
-reprend `latest` depuis `resources/model/FlightControl3D/t6texan2_joint_v3`,
+reprend `latest` depuis `resources/model/FlightControl3D/t6texan2_joint_v4`,
 avec les poids, les états Adam et le générateur aléatoire du checkpoint. Le
 modèle est distinct du BEST d'atterrissage qualifié requis par le mode inférence.
+
+Un second avion, le Pilatus PC-7 JSBSim, a son propre scénario
+(`FlightControl3D_PC7_Joint.json`, modèle `resources/model/FlightControl3D/pc7_joint_v1`)
+et son lanceur `Lancer_FlightControl3D_PC7_Curriculum_Release.bat`. Chaque avion a
+son propre modèle. `FlightControlHeadless --trim --config FICHIER` donne le point
+neutre des actions d'un avion (`initial.elevatorTrim` et `initial.throttle`) : trim
+JSBSim quand il fonctionne, sinon trim par vol simulé (cas du turbopropulseur du PC-7).
 
 `Lancer_FlightControl3D_Curriculum_Release.bat` utilise `--auto-run` : il évalue
 et entraîne directement la politique d'atterrissage du T-6. Ajouter
