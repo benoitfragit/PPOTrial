@@ -41,7 +41,7 @@ Ce fichier dit **où en est la migration** et **comment reprendre**. Il est mis
 
 | Garde-fou | Valeur de référence | Plateforme |
 |---|---|---|
-| `FlightControl_golden_trace_tests` de master : épisodes JSBSim, récompenses, actions, 2 updates PPO, checkpoint hashé | `0x67f683c02a76946c` (depuis l'étape 3 ; avant : `0x471aaf859adb0883`) | Linux x86-64, **GCC 13**, Debug = Release |
+| `FlightControl_golden_trace_tests` de master : épisodes JSBSim, récompenses, actions, 2 updates PPO, checkpoint hashé | `0xf6a67df909590030` (master #106 + formules PPOKit ; master #106 seul : `0xca32685b6f786e67`, mêmes 19 épisodes) | Linux x86-64, **GCC 13**, Debug = Release |
 | Trace du learner MAPPO Blue (`generalized_learner_tests`, 10 updates, diagnostics à 9 chiffres) | `PPOKit/tests/reference/blue_learner_trace_linux_gcc13.txt` (réenregistrée à l'étape 3) | Linux x86-64, GCC 13, `-O2` |
 
 Sur une autre plateforme, le test affiche son empreinte et se déclare *skipped*
@@ -311,6 +311,12 @@ de MSVC (vérifié dans les logs des jobs).
 
 ## Pièges connus
 
+- Quand master change Flight, mesurer l'empreinte golden du master pur
+  **dans `build/release`** : `git checkout origin/master -- Examples/FlightControl3D`,
+  construire et lancer `FlightControl_golden_trace_tests`, puis restaurer avec
+  `git reset -q HEAD -- Examples/FlightControl3D && git checkout -- Examples/FlightControl3D && git clean -fdq Examples/FlightControl3D`.
+  Comparer ensuite les lignes `[FLIGHT_GOLDEN_EPISODE]` des deux versions.
+
 - Master avance pendant la migration : avant chaque session, faire
   `git fetch --depth=50 origin master` puis fusionner master dans la branche
   (sans réécrire l'historique). En cas de conflit sur un exemple, prendre la
@@ -323,6 +329,17 @@ de MSVC (vérifié dans les logs des jobs).
 - Le build desktop (BlueDefense, Airspace) n'est pas compilable ici, faute de
   libtorch : passer par les vérifications manuelles ci-dessus et par la CI
   Windows.
+
+### Fusion de master #106
+
+- Master a ajouté une tête **Bernoulli** (demande de sortie du train), deux
+  observations (35 au total), un trim JSBSim et un scénario PC-7.
+- `ppokit/heads/bernoulli.hpp` remplace les fonctions de Flight (Softplus,
+  Sigmoid, log-probabilité, entropie et gradients du train). `task.json`
+  accepte `"head": "bernoulli"`. `GaussianMlpLearner` refuse pour l'instant
+  les tâches avec des actions Bernoulli (`static_assert` sur `GaussianOnly`).
+- Le test de correspondance de `task.json` a détecté le changement de
+  contrat dès la fusion : c'est son rôle.
 
 ## Décisions prises avec l'utilisateur
 

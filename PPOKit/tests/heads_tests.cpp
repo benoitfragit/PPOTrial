@@ -3,6 +3,7 @@
  * @brief Gaussian head and clipped PPO surrogate: values, gradients and parity with the former formulas.
  */
 #include "ppokit/core/ppo_surrogate.hpp"
+#include "ppokit/heads/bernoulli.hpp"
 #include "ppokit/heads/gaussian.hpp"
 
 #include <algorithm>
@@ -110,6 +111,37 @@ void GaussianParityWithFormerFormulas()
     Check(worstFloat < 2e-5F, "float log-density equals the former BlueDefense formula up to rounding");
 }
 
+void BernoulliHead()
+{
+    using ppokit::heads::BernoulliEntropy;
+    using ppokit::heads::BernoulliEntropyGradient;
+    using ppokit::heads::BernoulliLogProbability;
+    using ppokit::heads::BernoulliLogProbabilityGradient;
+    Check(std::abs(BernoulliEntropy(0.0) - std::log(2.0)) < 1e-15, "a fair decision has entropy log 2");
+    Check(std::abs(std::exp(BernoulliLogProbability(0.7, true)) + std::exp(BernoulliLogProbability(0.7, false)) - 1.0)
+            < 1e-15,
+        "the two outcomes sum to probability one");
+    for (double const logit : {-1000.0, 1000.0})
+    {
+        Check(std::isfinite(BernoulliLogProbability(logit, true)) && std::isfinite(BernoulliLogProbability(logit, false))
+                && std::isfinite(BernoulliEntropy(logit)),
+            "extreme logits stay finite");
+    }
+    constexpr double Step = 1e-6;
+    for (double const logit : {-3.0, -0.2, 0.4, 2.5})
+    {
+        for (bool const drawn : {false, true})
+        {
+            double const numerical = (BernoulliLogProbability(logit + Step, drawn)
+                - BernoulliLogProbability(logit - Step, drawn)) / (2 * Step);
+            Check(RelativeDifference(BernoulliLogProbabilityGradient(logit, drawn), numerical) < 1e-6,
+                "d log p / d logit");
+        }
+        double const entropySlope = (BernoulliEntropy(logit + Step) - BernoulliEntropy(logit - Step)) / (2 * Step);
+        Check(RelativeDifference(BernoulliEntropyGradient(logit), entropySlope) < 1e-6, "d entropy / d logit");
+    }
+}
+
 void SurrogateRegions()
 {
     constexpr double Clip = 0.2;
@@ -159,6 +191,7 @@ int main()
     GaussianValues();
     GaussianGradientMatchesFiniteDifferences();
     GaussianParityWithFormerFormulas();
+    BernoulliHead();
     SurrogateRegions();
     SurrogateGradientMatchesFiniteDifferences();
     if (failures != 0)
