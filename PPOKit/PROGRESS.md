@@ -10,7 +10,15 @@ Ce fichier dit **où en est la migration** et **comment reprendre**. Il est mis
 
 1. `git checkout design/ppokit-framework && git pull`
 2. Lire la section **État** ci-dessous, puis **Prochaine action**.
-3. Configurer et construire (Linux, sans desktop ni libtorch, comme la CI
+3. Tout vérifier d'une commande (builds Debug et Release, CTest, golden
+   trace Flight, tests Blue hors desktop, trace MAPPO Blue au bit près) :
+
+   ```sh
+   tools/ppokit/verify.sh            # ou: tools/ppokit/verify.sh release
+   ```
+
+   Le détail des commandes suit.
+4. Configurer et construire (Linux, sans desktop ni libtorch, comme la CI
    `flight-control.yml`). Seuls `build/debug` et `build/release` sont utilisés :
 
    ```sh
@@ -22,7 +30,7 @@ Ce fichier dit **où en est la migration** et **comment reprendre**. Il est mis
 
    Même chose avec `build/debug` et `-DCMAKE_BUILD_TYPE=Debug`. Le premier build
    compile JSBSim, ce qui prend environ 15 minutes sur 2 cœurs.
-4. Garde-fou numérique : `build/<config>/Examples/FlightControl3D/FlightControl_golden_trace_tests`
+5. Garde-fou numérique : `build/<config>/Examples/FlightControl3D/FlightControl_golden_trace_tests`
    doit afficher la référence ci-dessous en Debug **et** en Release.
 
 ## Garde-fous numériques
@@ -30,6 +38,7 @@ Ce fichier dit **où en est la migration** et **comment reprendre**. Il est mis
 | Garde-fou | Valeur de référence | Plateforme |
 |---|---|---|
 | `FlightControl_golden_trace_tests` (3 updates PPO, checkpoint complet hashé) | `0x0f0414a118b47b70` | Linux x86-64, GCC 13, Debug = Release |
+| Trace du learner MAPPO Blue (`generalized_learner_tests`, 10 updates, diagnostics à 9 chiffres) | `PPOKit/tests/reference/blue_learner_trace_linux_gcc13.txt` | Linux x86-64, GCC 13, `-O2` |
 
 Sur une autre plateforme, le test affiche son empreinte et se déclare *skipped*
 (code 77). Pour y enregistrer une référence, lancer le test avec `--print`
@@ -68,8 +77,10 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
 | 0. Golden trace Flight | fait | Absente de master : ajoutée avant toute refonte |
 | 1a. `ppokit::artifacts` écriture atomique, 4 implémentations remplacées | fait | Voir le détail ci-dessous |
 | 1b. En-tête d'identité et RNG portable des artefacts | reporté | Change les formats sur disque ; regroupé avec l'étape 5 (schémas et hashes) pour ne migrer les formats qu'une fois |
-| 2. GAE et surrogate PPO communs | à faire | **Prochaine action** |
-| 3 à 11 | à faire | |
+| 2. GAE commun (`ppokit::core::GaeStep`) | fait | Flight et Blue identiques au bit près ; voir ci-dessous |
+| 2b. Surrogate PPO commun | reporté à l'étape 3 | Les deux implémentations **diffèrent** : décision à prendre, voir ci-dessous |
+| 3. Têtes de sortie | à faire | **Prochaine action** |
+| 4 à 11 | à faire | |
 
 ### Détail de l'étape 1a
 
@@ -95,13 +106,50 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
   passés, syntaxe de `generalized_patrol_team_agent.cpp` identique à master.
 - Non vérifié ici : build desktop Windows (libtorch), à confirmer par la CI.
 
+### Détail de l'étape 2
+
+- `PPOKit::Core` (header-only) : `TemporalDifference<T>` et `GaeStep<T>`,
+  documentés (différence entre `terminated` et `truncated`).
+- Flight : `ComputeAdvantages` appelle `GaeStep<double>` ; `AdvantageDelta`
+  est supprimé.
+- Blue : `GeneralizedMissionAdvantage` devient un appel à `GaeStep<float>` (le
+  nom est gardé pour les tests et le learner).
+- Les deux formules avaient déjà la même structure, `((r + γ·b) − v) + (γ·λ)·trace`.
+  `PPOKitGaeTests` vérifie l'égalité **bit à bit** avec les deux anciennes
+  formules sur 200 000 tirages et sur les zéros signés.
+- Vérifié : golden trace Flight inchangée, trace MAPPO Blue identique sur ses
+  80 lignes, `ctest` 18/18 en Debug et en Release.
+
+### Surrogate PPO : différences constatées (à trancher à l'étape 3)
+
+| | FlightControl3D (`ClippedLoss`) | BlueDefense (learner) |
+|---|---|---|
+| Borne du log-ratio avant `exp` | ±80 | ±20 |
+| Gradient actif | `A ≥ 0 ? r ≤ 1+ε : r ≥ 1−ε`, et log-ratio non saturé | `r·A ≤ clip(r)·A` |
+| Différence observable | à `A = 0` exactement (signe de zéro du gradient) et quand le log-ratio sature | |
+
+Unifier changerait les calculs dans des cas limites. La fonction commune doit
+donc soit prendre ces conventions en paramètre, soit en imposer une avec
+l'accord de l'utilisateur et une nouvelle référence de trace.
+
 ## Prochaine action
 
-Étape 2 : `ppokit/core` avec un GAE templaté sur le scalaire.
-- Flight : `ComputeAdvantages` (double, `flight_learner.cpp`).
-- Blue : `GeneralizedMissionAdvantage` (float, `generalized_advantage.hpp`).
-- Reproduire **exactement** l'ordre des opérations de chacun ; la golden trace
-  et `generalized_learner_tests` doivent rester identiques.
+Étape 3 : `ppokit/heads`.
+1. Têtes gaussienne, Bernoulli, catégorielle, composite : log-prob,
+   entropie, action déterministe, gradient.
+2. Surrogate commun (voir ci-dessus) : proposer à l'utilisateur de garder les
+   deux conventions en paramètre, ce qui garantit des traces identiques.
+3. Brancher Flight (`hybrid_policy.hpp`) puis Blue (learner), en gardant les
+   deux garde-fous identiques.
+
+## Pièges connus
+
+- Le `.gitignore` du dépôt exclut tout dossier nommé `artifacts/` (règle .NET).
+  Les dossiers de PPOKit portant ce nom sont réintégrés explicitement. Après
+  avoir ajouté un dossier, vérifier `git status --ignored PPOKit`.
+- Le build desktop (BlueDefense, Airspace) n'est pas compilable ici, faute de
+  libtorch : passer par les vérifications manuelles ci-dessus et par la CI
+  Windows.
 
 ## Décisions prises avec l'utilisateur
 

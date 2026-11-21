@@ -48,7 +48,7 @@ target_compile_definitions(FlightControlSimulator PRIVATE PPO_JSBSIM_DATA_ROOT="
 target_link_libraries(FlightControlSimulator PUBLIC FlightControlCore PRIVATE libJSBSim)
 
 add_library(FlightControlLearner STATIC Training/flight_learner.cpp Training/flight_model_store.cpp)
-target_link_libraries(FlightControlLearner PUBLIC FlightControlCore PRIVATE RLtools::Core PPOKit::Artifacts)
+target_link_libraries(FlightControlLearner PUBLIC FlightControlCore PRIVATE RLtools::Core PPOKit::Core PPOKit::Artifacts)
 
 add_library(FlightControlRuntime STATIC Runtime/flight_session.cpp)
 target_include_directories(FlightControlRuntime PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Runtime")

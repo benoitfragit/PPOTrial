@@ -22,6 +22,7 @@ foreach(test IN ITEMS RewardEvaluation RewardShaping RuntimeState Advantage Patr
     target_include_directories(BlueDefenseGeneralized${test}Tests PRIVATE
         ../Agents/BluePatrol/Core ../Agents/BluePatrol/Runtime
         ../Agents/BluePatrol/Training ../Evaluation)
+    target_link_libraries(BlueDefenseGeneralized${test}Tests PRIVATE PPOKit::Core)
     add_test(NAME BlueDefenseGeneralized${test}Tests
         COMMAND BlueDefenseGeneralized${test}Tests)
 endforeach()

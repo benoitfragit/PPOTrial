@@ -1,5 +1,6 @@
 #include "flight_learner.hpp"
 #include "ppokit/artifacts/atomic_file.hpp"
+#include "ppokit/core/gae.hpp"
 // Upstream CPU headers define non-inline symbols. Use its supported namespace
 // wrapper so this backend can coexist with BlueDefense in the same executable.
 #define RL_TOOLS_NAMESPACE_WRAPPER ppo_flight_backend
@@ -22,8 +23,8 @@ void ComputeAdvantages(Transition* transitions, std::size_t count, TrainingSetti
     for (std::size_t i=count; i>0; --i)
     {
         auto& row = transitions[i-1];
-        gae = AdvantageDelta(row.reward,row.value,row.nextValue,row.terminated,t.gamma)
-            + ((row.terminated || row.truncated) ? 0 : t.gamma*t.lambda*gae);
+        // Bootstrap on time limits, but never carry an advantage across a reset.
+        gae = ppokit::core::GaeStep(row.reward,row.value,row.nextValue,gae,t.gamma,t.lambda,row.terminated,row.truncated);
         row.advantage = gae;
         row.target = gae+row.value;
     }

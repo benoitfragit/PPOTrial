@@ -104,10 +104,4 @@ inline PolicyLoss ClippedLoss(PolicyVector const& output, PolicyAction const& ac
     return result;
 }
 
-/** GAE: bootstrap on time limits, but never carry advantage across a reset. */
-inline double AdvantageDelta(double reward, double value, double nextValue, bool terminated, double gamma) noexcept
-{
-    return reward + (terminated ? 0 : gamma*nextValue)-value;
-}
-
 } // namespace ppo::examples::flight

@@ -6,6 +6,8 @@
  */
 #pragma once
 
+#include "ppokit/core/gae.hpp"
+
 namespace ppo::examples::bluedefense::defenders {
 
 /**
@@ -20,9 +22,8 @@ inline float GeneralizedMissionAdvantage(
     float const followingAdvantage, float const gamma, float const lambda,
     bool const terminated, bool const truncated) noexcept
 {
-    float const bootstrap = terminated ? 0.F : nextValue;
-    float const trace = terminated || truncated ? 0.F : followingAdvantage;
-    return reward + gamma * bootstrap - value + gamma * lambda * trace;
+    return ppokit::core::GaeStep(reward, value, nextValue, followingAdvantage, gamma, lambda,
+        terminated, truncated);
 }
 
 } // namespace ppo::examples::bluedefense::defenders
