@@ -148,8 +148,13 @@ void TrainingValidationAndBest()
         "bounded inference runs without PPO updates");
     Check(ReadFile(checkpoint)==original && ReadFile(pointer)==initialBest,"evaluation never writes latest or BEST");
     auto improved=successful;improved.stopSumMeters=500;
+    auto const pending=directory.path/"best/candidate.pending";
+    { std::ofstream stale(pending);stale<<"interrupted promotion"; }
     Check(store.Promote(training.Learner(),improved) && store.BestMetrics()->MeanStop()==250,
         "equal success prefers a shorter safe stop");
+    auto pendingBackup=pending;pendingBackup+=".previous";
+    Check(!std::filesystem::exists(pending) && !std::filesystem::exists(pendingBackup),
+        "a promotion leaves no pending candidate or backup behind");
     // A harder curriculum campaign supersedes an easier one, whatever their stop rates.
     auto easier=improved;easier.difficulty=0.4;
     auto harder=improved;harder.difficulty=0.6;harder.stopSumMeters=1200;
