@@ -98,6 +98,38 @@ Une faute dans le fichier est signalée avec son chemin exact :
 ppokit-codegen: task.json: observation.tracks.set.capacty: unknown key (accepted: capacity, features, fields, mask)
 ```
 
+### Réseaux décrits dans `graph.json`
+
+`graph.json` décrit l'acteur et le critique. Leurs tailles d'entrée et de sortie
+viennent de `task.json`, donc les deux fichiers ne peuvent pas se contredire.
+Un réseau écrit à la main reste possible (`"model": "external"`, cas de
+l'acteur à attention de BlueDefense).
+
+```json
+{
+  "schema": "ppokit.graph/1",
+  "actor":  { "model": "mlp", "hidden": { "layers": 2, "width": 128 }, "activation": "tanh",
+              "log_std": "state_independent" },
+  "critic": { "model": "mlp", "input": "observation", "hidden": { "layers": 2, "width": 128 },
+              "activation": "tanh" }
+}
+```
+
+```cmake
+ppokit_generate_networks(TARGET my_target TASK task.json GRAPH graph.json HEADER my_networks.hpp)
+```
+
+```cpp
+#include <rl_tools/operations/cpu_mux.h>   // d'abord les opérations rl_tools
+#include "my_networks.hpp"
+using Actor = ppokit::tasks::my_task::networks::Actor::Network<Index, BatchSize>;
+```
+
+Les types générés sont exactement ceux que les exemples écrivaient à la main :
+le MLP de FlightControl3D chargé depuis un checkpoint de `FlightLearner` donne
+les mêmes sorties au bit près, et le critique de BlueDefense est le même type
+rl_tools.
+
 ## Organisation
 
 ```

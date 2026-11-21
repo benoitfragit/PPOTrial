@@ -35,3 +35,18 @@ target_include_directories(BlueDefenseTaskLayoutTests PRIVATE
 ppokit_generate_task_layout(TARGET BlueDefenseTaskLayoutTests
     TASK ../Agents/BluePatrol/task.json HEADER blue_patrol_task_layout.hpp)
 add_test(NAME BlueDefenseTaskLayoutTests COMMAND BlueDefenseTaskLayoutTests)
+
+# BluePatrol/graph.json (PPOKit) generates the hand-written critic type. It needs rl_tools,
+# which the headless build fetches with FlightControl3D.
+if (TARGET RLtools::Core)
+    add_executable(BlueDefenseNetworkTypeTests network_type_tests.cpp)
+    target_compile_features(BlueDefenseNetworkTypeTests PRIVATE cxx_std_17)
+    target_include_directories(BlueDefenseNetworkTypeTests PRIVATE
+        ../Agents/BluePatrol/Core ../Agents/BluePatrol/Runtime
+        ../Agents/BluePatrol/Training ../Evaluation)
+    target_link_libraries(BlueDefenseNetworkTypeTests PRIVATE RLtools::Core GenericRLCore PPOKit::Core)
+    ppokit_generate_networks(TARGET BlueDefenseNetworkTypeTests
+        TASK ../Agents/BluePatrol/task.json GRAPH ../Agents/BluePatrol/graph.json
+        HEADER blue_patrol_networks.hpp)
+    add_test(NAME BlueDefenseNetworkTypeTests COMMAND BlueDefenseNetworkTypeTests)
+endif()

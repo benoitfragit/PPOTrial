@@ -79,6 +79,14 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     target_link_libraries(FlightControl_task_layout_tests PRIVATE FlightControlRuntime)
     ppokit_generate_task_layout(TARGET FlightControl_task_layout_tests TASK task.json HEADER flight_task_layout.hpp)
     add_test(NAME FlightControl_task_layout_tests COMMAND FlightControl_task_layout_tests)
+    # graph.json (PPOKit) generates the same rl_tools networks as FlightLearner.
+    add_executable(FlightControl_network_parity_tests tests/network_parity_tests.cpp)
+    target_link_libraries(FlightControl_network_parity_tests PRIVATE FlightControlRuntime RLtools::Core)
+    target_compile_definitions(FlightControl_network_parity_tests PRIVATE
+        PPO_FLIGHT_CONFIG="${CMAKE_SOURCE_DIR}/resources/settings/Scenarios/FlightControl3D_T6_Joint.json")
+    ppokit_generate_networks(TARGET FlightControl_network_parity_tests
+        TASK task.json GRAPH graph.json HEADER flight_networks.hpp)
+    add_test(NAME FlightControl_network_parity_tests COMMAND FlightControl_network_parity_tests)
     target_sources(FlightControl_learner_tests PRIVATE tests/other_rltools_backend.cpp)
     target_link_libraries(FlightControl_learner_tests PRIVATE RLtools::Core)
 endif()

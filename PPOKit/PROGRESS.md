@@ -89,7 +89,10 @@ Windows `desktop-windows.yml`, déclenchée par une PR vers `master`.
 | 3b. Têtes Bernoulli, catégorielle, composite | reporté à l'étape 5/6 | Aucun exemple ne les utilise aujourd'hui ; l'AGENTS.md interdit les interfaces sans appelant. Elles arriveront avec le schéma et le codegen |
 | 4. Backend rl_tools unique | fusionné dans l'étape 6 | Voir ci-dessous |
 | 5. Schéma `task.json`, `ppokit-codegen`, layouts générés | fait (partie forme) | Voir ci-dessous ; scénarios et métriques viendront avec le runtime (étape 7) |
-| 6. Codegen des réseaux (inclut l'ancienne étape 4) | à faire | **Prochaine action** |
+| 6a. `graph.json` et types rl_tools générés (MLP, modèles externes) | fait | Voir ci-dessous |
+| 6b. Brancher les learners sur les types générés, backend rl_tools unique | à faire, **après le rebase de l'utilisateur** | Modifie le code d'exécution des exemples |
+| 6c. Attention Blue comme composant interne | à faire | |
+| 7. Runtime commun (Owned / Hosted), évaluation, inférence | à faire | **Prochaine action possible sans toucher aux exemples** : le cœur du runtime dans PPOKit |
 | 4 à 11 | à faire | |
 
 ### Détail de l'étape 1a
@@ -202,22 +205,47 @@ aucun code d'exécution des exemples n'est modifié.
   exemples (pas de seconde source de vérité). `DefaultWeights` vaut 1 tant
   que la migration du runtime (étape 7) n'a pas eu lieu.
 
+### Détail de l'étape 6a
+
+- `ppokit.graph/1` (`ppokit/schema/network_schema.hpp`) : acteur et critique,
+  `"model": "mlp"` (`hidden.layers`, `hidden.width`, `activation` parmi
+  tanh, relu ou identity, `log_std: state_independent` pour l'acteur) ou
+  `"model": "external"`. Le critique lit l'observation, ou l'entrée `critic`
+  de la tâche (par défaut quand elle existe). Les tailles viennent du
+  `task.json`.
+- Les helpers privés communs aux deux schémas ont été extraits :
+  `src/schema/json_validation.*` (validation, messages) et
+  `src/schema/code_writer.hpp` (mise en forme du code généré).
+- `ppokit-codegen` a deux sous-commandes : `layout` et `networks`. CMake
+  fournit `ppokit_generate_task_layout` et `ppokit_generate_networks`.
+- L'en-tête généré n'inclut pas rl_tools : il exige que l'appelant l'ait
+  inclus avant (`#error` sinon) et suit son `RL_TOOLS_NAMESPACE_WRAPPER`. La
+  largeur est un paramètre template, avec par défaut celle de `graph.json`,
+  ce qui garde possible le choix 32/64/128 de Flight.
+- `graph.json` ajoutés : Flight (acteur et critique MLP 2×128 tanh) et Blue
+  (acteur `external`, critique MLP 2×256 ReLU sur l'entrée centralisée de
+  470).
+- Preuves :
+  - `FlightControl_network_parity_tests` : un checkpoint écrit par
+    `FlightLearner` est relu dans les réseaux générés (le fichier est consommé
+    entièrement), et l'acteur généré donne les **mêmes moyennes au bit près**
+    que `FlightLearner::Evaluate` sur 8 observations, ainsi que les mêmes
+    log-std ;
+  - `BlueDefenseNetworkTypeTests` : `std::is_same` entre le critique généré
+    et `GeneralizedCriticConfig::Network`.
+- Toujours additif : aucun learner n'utilise encore les types générés
+  (étape 6b, après le rebase).
+
 ## Prochaine action
 
-Étape 6 : génération des réseaux (`graph.json`) vers rl_tools, avec un backend
-unique (l'ancienne étape 4).
-1. Définir `ppokit.graph/1` : `dense_stack`, activations, entrée depuis
-   `task.json`, tête gaussienne, critique `value`.
-2. Générer le MLP de Flight (`mlp_unconditional_stddev`, voir
-   `flight_learner.cpp`) et vérifier une sortie forward **identique** à
-   l'implémentation actuelle sur des poids et des entrées fixés.
-3. Observation : `flight_learner.cpp` instancie déjà le MLP pour trois
-   largeurs précompilées (32, 64, 128) et choisit à l'exécution selon
-   `training.hiddenWidth`. Le code généré peut reprendre ce motif pour
-   éviter une recompilation à chaque essai de largeur.
-4. L'attention Blue passera d'abord comme composant interne différentiable.
-5. Comme pour l'étape 5, rester additif tant que l'utilisateur n'a pas rebasé
-   ses travaux sur les modèles.
+L'utilisateur rebasera ses travaux sur les modèles avant que les learners
+des exemples ne soient modifiés (étape 6b). D'ici là, avancer sur ce qui vit
+entièrement dans PPOKit :
+- Étape 7, cœur du runtime : boucle Owned (`Task` : `Reset`, `Step`,
+  `StepEnd`), collecte dans des tampons à capacité fixe, GAE et surrogate
+  déjà communs, statistiques d'update, garde de valeurs non finies. Le tester
+  sur une tâche jouette de PPOKit (`tests/`), sans toucher aux exemples.
+- Puis les suites d'évaluation (`eval/*.json`, §10 de la conception).
 
 ## Dernier état de la CI (PR #105, commit `e149d36`, étape 5)
 

@@ -6,156 +6,27 @@
  */
 #include "ppokit/schema/task_schema.hpp"
 
-#include <nlohmann/json.hpp>
+#include "json_validation.hpp"
 
-#include <cmath>
-#include <fstream>
-#include <iterator>
 #include <set>
-#include <sstream>
 #include <utility>
 
 namespace ppokit::schema {
 namespace {
 
-// ordered_json keeps the groups and channels in the order the author wrote them.
-using Json = nlohmann::ordered_json;
+using detail::ChildPath;
+using detail::ErrorReporter;
+using detail::IsIdentifier;
+using detail::IsQualifiedName;
+using detail::Json;
+using detail::RequireFiniteNumber;
+using detail::RequireIdentifier;
+using detail::RequireKnownKeys;
+using detail::RequireObject;
+using detail::RequirePositiveInteger;
 
 /** @brief Format identifier accepted in the "schema" key. */
 constexpr char const* TaskSchemaVersion = "ppokit.task/1";
-
-/** @brief Reports validation errors with the source file and the dotted key path. */
-class ErrorReporter final
-{
-public:
-    explicit ErrorReporter(std::string_view sourceName) : source_(sourceName) {}
-
-    [[noreturn]] void Fail(std::string const& path, std::string const& message) const
-    {
-        std::string location = source_;
-        if (!path.empty())
-        {
-            location += ": " + path;
-        }
-        throw SchemaError(location + ": " + message);
-    }
-
-private:
-    std::string source_;
-};
-
-/** @brief True for an ASCII letter or '_', the characters that may start an identifier. */
-bool IsIdentifierStart(char character) noexcept
-{
-    return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || character == '_';
-}
-
-/** @brief True for a character allowed after the first one of an identifier. */
-bool IsIdentifierCharacter(char character) noexcept
-{
-    return IsIdentifierStart(character) || (character >= '0' && character <= '9');
-}
-
-/** @brief True for a C/C++ identifier: a letter or '_' followed by letters, digits or '_'. */
-bool IsIdentifier(std::string const& text) noexcept
-{
-    if (text.empty() || !IsIdentifierStart(text.front()))
-    {
-        return false;
-    }
-    for (char const character : text)
-    {
-        if (!IsIdentifierCharacter(character))
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-/** @brief Dotted path of `key` below `path`; the root path is empty. */
-std::string ChildPath(std::string const& path, std::string const& key)
-{
-    if (path.empty())
-    {
-        return key;
-    }
-    return path + "." + key;
-}
-
-/** @brief True for identifiers separated by "::", such as "ppo::examples::flight". */
-bool IsQualifiedName(std::string const& text)
-{
-    std::size_t begin = 0;
-    while (true)
-    {
-        std::size_t const separator = text.find("::", begin);
-        std::string const part = text.substr(begin, separator - begin);
-        if (!IsIdentifier(part))
-        {
-            return false;
-        }
-        if (separator == std::string::npos)
-        {
-            return true;
-        }
-        begin = separator + 2;
-    }
-}
-
-/** @brief Rejects any key of `object` that is not in `allowed`, listing the accepted keys. */
-void RequireKnownKeys(Json const& object, std::set<std::string> const& allowed, std::string const& path,
-    ErrorReporter const& errors)
-{
-    for (auto const& item : object.items())
-    {
-        if (allowed.count(item.key()) == 0)
-        {
-            std::string accepted;
-            for (auto const& key : allowed)
-            {
-                accepted += accepted.empty() ? key : ", " + key;
-            }
-            errors.Fail(ChildPath(path, item.key()), "unknown key (accepted: " + accepted + ")");
-        }
-    }
-}
-
-Json const& RequireObject(Json const& value, std::string const& path, ErrorReporter const& errors)
-{
-    if (!value.is_object())
-    {
-        errors.Fail(path, "expected an object { ... }");
-    }
-    return value;
-}
-
-std::string RequireIdentifier(Json const& value, std::string const& path, ErrorReporter const& errors)
-{
-    if (!value.is_string() || !IsIdentifier(value.get<std::string>()))
-    {
-        errors.Fail(path, "expected an identifier (letters, digits and '_', not starting with a digit)");
-    }
-    return value.get<std::string>();
-}
-
-std::size_t RequirePositiveInteger(Json const& value, std::string const& path, ErrorReporter const& errors)
-{
-    if (!value.is_number_unsigned() || value.get<std::size_t>() == 0)
-    {
-        errors.Fail(path, "expected a positive integer");
-    }
-    return value.get<std::size_t>();
-}
-
-double RequireFiniteNumber(Json const& value, std::string const& path, ErrorReporter const& errors)
-{
-    if (!value.is_number() || !std::isfinite(value.get<double>()))
-    {
-        errors.Fail(path, "expected a finite number");
-    }
-    return value.get<double>();
-}
 
 /** @brief Reads a non-empty array of distinct identifiers. */
 std::vector<std::string> RequireNameList(Json const& value, std::string const& path, ErrorReporter const& errors)
@@ -470,16 +341,7 @@ void AppendCanonicalLayout(std::string& text, char const* tag, InputLayout const
 TaskSchema ParseTaskSchema(std::string_view text, std::string_view sourceName)
 {
     ErrorReporter const errors(sourceName);
-    Json root;
-    try
-    {
-        root = Json::parse(text);
-    }
-    catch (Json::parse_error const& error)
-    {
-        errors.Fail("", std::string("invalid JSON: ") + error.what());
-    }
-    RequireObject(root, "", errors);
+    Json const root = detail::ParseRootObject(text, errors);
     RequireKnownKeys(root, {"schema", "name", "namespace", "agents", "observation", "critic", "actions", "rewards"},
         "", errors);
     if (!root.contains("schema") || root.at("schema") != TaskSchemaVersion)
@@ -523,13 +385,7 @@ TaskSchema ParseTaskSchema(std::string_view text, std::string_view sourceName)
 
 TaskSchema LoadTaskSchema(std::filesystem::path const& path)
 {
-    std::ifstream stream(path, std::ios::binary);
-    if (!stream)
-    {
-        throw SchemaError(path.string() + ": cannot open the task file");
-    }
-    std::string const text{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
-    return ParseTaskSchema(text, path.filename().string());
+    return ParseTaskSchema(detail::ReadTextFile(path), path.filename().string());
 }
 
 std::uint64_t ShapeHash(TaskSchema const& schema)

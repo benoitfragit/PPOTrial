@@ -19,7 +19,8 @@ if (NOT TARGET nlohmann_json::nlohmann_json)
     FetchContent_MakeAvailable(json)
 endif()
 
-add_library(ppokit_schema STATIC src/schema/task_schema.cpp src/schema/task_codegen.cpp)
+add_library(ppokit_schema STATIC src/schema/json_validation.cpp src/schema/task_schema.cpp
+    src/schema/task_codegen.cpp src/schema/network_schema.cpp)
 add_library(PPOKit::Schema ALIAS ppokit_schema)
 target_include_directories(ppokit_schema PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_compile_features(ppokit_schema PUBLIC cxx_std_17)
@@ -57,4 +58,8 @@ if (PPO_BUILD_CORE_TESTS)
     ppokit_generate_task_layout(TARGET PPOKitTaskSchemaTests
         TASK tests/fixtures/sample_task.json HEADER sample_task_layout.hpp)
     add_test(NAME PPOKitTaskSchemaTests COMMAND PPOKitTaskSchemaTests)
+
+    add_executable(PPOKitNetworkSchemaTests tests/network_schema_tests.cpp)
+    target_link_libraries(PPOKitNetworkSchemaTests PRIVATE PPOKit::Schema)
+    add_test(NAME PPOKitNetworkSchemaTests COMMAND PPOKitNetworkSchemaTests)
 endif()

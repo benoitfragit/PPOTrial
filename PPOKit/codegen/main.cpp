@@ -1,17 +1,22 @@
 /**
  * @file PPOKit/codegen/main.cpp
- * @brief Command-line generator of task layout headers.
+ * @brief Command-line generator of PPOKit headers.
  *
- *     ppokit-codegen <task.json> <output.hpp>
+ *     ppokit-codegen layout   <task.json>              <output.hpp>
+ *     ppokit-codegen networks <task.json> <graph.json> <output.hpp>
  *
- * The build system runs it only when the task file or the generator changed; the
- * header is then always rewritten, so that its timestamp tells the build tool the
- * generation is up to date. Errors are printed as "<file>: <key path>: <message>".
+ * `layout` writes the constants of the task (offsets, names, hash); `networks` writes
+ * the rl_tools types of the networks described in graph.json. The build system runs
+ * the generator only when an input changed, and the header is then always rewritten
+ * so that its timestamp records the generation. Errors are printed as
+ * "<file>: <key path>: <message>".
  */
 #include "ppokit/artifacts/atomic_file.hpp"
+#include "ppokit/schema/network_schema.hpp"
 #include "ppokit/schema/task_codegen.hpp"
 
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <string>
 
@@ -24,25 +29,48 @@ struct HeaderWriter final
     void operator()(std::ostream& stream) const { stream << text; }
 };
 
+void WriteHeader(std::filesystem::path const& output, std::string const& header)
+{
+    ppokit::artifacts::AtomicWriteOptions options;
+    options.mode = std::ios::binary;
+    ppokit::artifacts::WriteFileAtomically(output, HeaderWriter{header}, options, "ppokit-codegen");
+}
+
+int PrintUsage()
+{
+    std::cerr << "usage: ppokit-codegen layout <task.json> <output.hpp>\n"
+                 "       ppokit-codegen networks <task.json> <graph.json> <output.hpp>\n";
+    return 2;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
-    if (argc != 3)
+    if (argc < 2)
     {
-        std::cerr << "usage: ppokit-codegen <task.json> <output.hpp>\n";
-        return 2;
+        return PrintUsage();
     }
-    std::filesystem::path const taskFile = argv[1];
-    std::filesystem::path const output = argv[2];
+    std::string const command = argv[1];
     try
     {
-        auto const schema = ppokit::schema::LoadTaskSchema(taskFile);
-        std::string const header = ppokit::schema::GenerateTaskLayoutHeader(schema, taskFile.filename().string());
-        ppokit::artifacts::AtomicWriteOptions options;
-        options.mode = std::ios::binary;
-        ppokit::artifacts::WriteFileAtomically(output, HeaderWriter{header}, options, "ppokit-codegen");
-        return 0;
+        if (command == "layout" && argc == 4)
+        {
+            std::filesystem::path const taskFile = argv[2];
+            auto const task = ppokit::schema::LoadTaskSchema(taskFile);
+            WriteHeader(argv[3], ppokit::schema::GenerateTaskLayoutHeader(task, taskFile.filename().string()));
+            return 0;
+        }
+        if (command == "networks" && argc == 5)
+        {
+            std::filesystem::path const graphFile = argv[3];
+            auto const task = ppokit::schema::LoadTaskSchema(argv[2]);
+            auto const networks = ppokit::schema::LoadNetworkSchema(graphFile, task);
+            WriteHeader(argv[4],
+                ppokit::schema::GenerateNetworksHeader(networks, task, graphFile.filename().string()));
+            return 0;
+        }
+        return PrintUsage();
     }
     catch (std::exception const& error)
     {

@@ -6,6 +6,8 @@
  */
 #include "ppokit/schema/task_codegen.hpp"
 
+#include "code_writer.hpp"
+
 #include <cctype>
 #include <cstdio>
 #include <set>
@@ -15,74 +17,19 @@
 namespace ppokit::schema {
 namespace {
 
+using detail::CodeWriter;
+using detail::DoubleLiteral;
+using detail::Quoted;
+
 /** @brief Names used by the generated structs themselves; groups may not take them. */
 std::set<std::string> const ReservedMemberNames{"Size", "Slot", "SlotNames", "Component", "ComponentNames",
     "Channel", "Count", "Names", "Labels", "DefaultWeights"};
-
-/** @brief Accumulates indented lines of generated code. */
-class CodeWriter final
-{
-public:
-    void Line(std::string const& text = {})
-    {
-        if (!text.empty())
-        {
-            text_.append(static_cast<std::size_t>(indent_) * 4, ' ');
-            text_ += text;
-        }
-        text_ += '\n';
-    }
-    void Open(std::string const& text)
-    {
-        Line(text);
-        Line("{");
-        ++indent_;
-    }
-    void Close(std::string const& suffix = {})
-    {
-        --indent_;
-        Line("}" + suffix);
-    }
-    std::string const& Text() const noexcept { return text_; }
-
-private:
-    std::string text_;
-    int indent_ = 0;
-};
-
-/** @brief Shortest decimal text that reads back as the same double. */
-std::string DoubleLiteral(double value)
-{
-    std::ostringstream text;
-    text.precision(17);
-    text << value;
-    std::string literal = text.str();
-    if (literal.find_first_of(".eE") == std::string::npos)
-    {
-        literal += ".0";
-    }
-    return literal;
-}
 
 std::string HexLiteral(std::uint64_t value)
 {
     char buffer[32];
     std::snprintf(buffer, sizeof(buffer), "0x%016llxULL", static_cast<unsigned long long>(value));
     return buffer;
-}
-
-std::string Quoted(std::string const& text)
-{
-    std::string quoted = "\"";
-    for (char const character : text)
-    {
-        if (character == '"' || character == '\\')
-        {
-            quoted += '\\';
-        }
-        quoted += character;
-    }
-    return quoted + "\"";
 }
 
 /** @brief Converts names to PascalCase enumerators and rejects collisions. */
