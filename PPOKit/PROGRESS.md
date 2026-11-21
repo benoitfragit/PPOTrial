@@ -211,17 +211,21 @@ unique (l'ancienne étape 4).
 2. Générer le MLP de Flight (`mlp_unconditional_stddev`, voir
    `flight_learner.cpp`) et vérifier une sortie forward **identique** à
    l'implémentation actuelle sur des poids et des entrées fixés.
-3. L'attention Blue passera d'abord comme composant interne différentiable.
-4. Comme pour l'étape 5, rester additif tant que l'utilisateur n'a pas rebasé
+3. Observation : `flight_learner.cpp` instancie déjà le MLP pour trois
+   largeurs précompilées (32, 64, 128) et choisit à l'exécution selon
+   `training.hiddenWidth`. Le code généré peut reprendre ce motif pour
+   éviter une recompilation à chaque essai de largeur.
+4. L'attention Blue passera d'abord comme composant interne différentiable.
+5. Comme pour l'étape 5, rester additif tant que l'utilisateur n'a pas rebasé
    ses travaux sur les modèles.
 
-## Dernier état de la CI (PR #105, commit `18494cb`, étape 3a)
+## Dernier état de la CI (PR #105, commit `e149d36`, étape 5)
 
-Tout est au vert : Core C++17 tests ; FlightControl3D JSBSim (Ubuntu GCC 15 et
-Windows, Debug et Release) ; Desktop VS2022 Debug et Release, 65/65 tests,
-dont `BlueDefenseGeneralizedLearnerTests` et `BlueDefenseGeneralizedActorTests`
-(vérifié dans les logs des jobs). La golden trace Flight y est *skipped*,
-comme attendu hors GCC 13.
+Tout est au vert : Core C++17 tests (configuration sans Flight, où PPOKit
+récupère lui-même nlohmann_json) ; FlightControl3D JSBSim (Ubuntu GCC 15 et
+Windows, Debug et Release) ; Desktop VS2022 Debug et Release, y compris
+`ppokit-codegen` et `FlightControl_task_layout_tests` sous MSVC (vérifié dans
+les logs des jobs).
 
 ## Pièges connus
 
