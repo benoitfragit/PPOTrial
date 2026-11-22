@@ -175,7 +175,9 @@ StageStart SampleApproachStage(Config const& config, Runway const& runway, Stage
     auto const& initial = config.initial;
     double const distanceMeters = Draw(stage.distanceMeters, rng);
     double const bearingRadians = sideSign * Draw(stage.bearingDegrees, rng) * DegreesToRadians;
-    double const headingOffsetDegrees = Draw(stage.headingOffsetDegrees, rng);
+    // A positive heading offset turns toward the extended centreline: the start lies on the
+    // side of sideSign, so the centreline is reached by turning against that sign.
+    double const headingOffsetDegrees = -sideSign * Draw(stage.headingOffsetDegrees, rng);
     double const alongMeters = -distanceMeters * std::cos(bearingRadians);
     double const crossMeters = distanceMeters * std::sin(bearingRadians);
     double const heightMeters = ApproachPathHeight(config, alongMeters) + Draw(stage.heightMeters, rng);
