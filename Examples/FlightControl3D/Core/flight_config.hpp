@@ -252,7 +252,11 @@ struct StageSettings final
     Range startAlongMeters{};
     /** @brief Pattern: downwind offset from the centreline; holding: start offset; in metres. */
     Range lateralMeters{};
-    /** @brief Heading offset from the nominal heading of the start, in degrees. */
+    /**
+     * @brief Heading offset from the nominal heading of the start, in degrees. Approach: from
+     *        the runway heading, positive toward the extended centreline; pattern and holding:
+     *        clockwise from the leg heading.
+     */
     Range headingOffsetDegrees{};
     /** @brief Approach: height above the glide plane; pattern and holding: height above the deck; in metres. */
     Range heightMeters{};

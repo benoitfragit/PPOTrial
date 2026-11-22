@@ -1055,6 +1055,11 @@ void StageStarts()
             {
                 double const distance=std::hypot(local.north,local.east);
                 double const above=local.up-ApproachPathHeight(c,local.north);
+                // The runway heading is zero here: a turn against the side sign heads for the centreline.
+                double const towardCentreline=-sideSign*relativeHeading;
+                Check(towardCentreline>=stage.headingOffsetDegrees.minimum-1e-6
+                    && towardCentreline<=stage.headingOffsetDegrees.maximum+1e-6,
+                    "an approach stage heading offset is positive toward the extended centreline");
                 Check(start.route.count==0 && distance>=stage.distanceMeters.minimum-0.01
                     && distance<=stage.distanceMeters.maximum+0.01 && local.east*sideSign>=-1e-9
                     && above>=stage.heightMeters.minimum-1e-6 && above<=stage.heightMeters.maximum+1e-6,
@@ -1086,6 +1091,175 @@ void StageStarts()
             }
         }
     }
+}
+
+/** @brief Bank angle of the feasibility follower, in degrees: a firm but ordinary approach turn. */
+constexpr double FeasibilityBankDegrees = 30.0;
+/**
+ * @brief Largest centreline offset at the threshold of a landable start, in metres: half the
+ *        lateral half-width of the landing surface, leaving room for the flare.
+ *
+ * Measured: the corners of the approach levels 0 to 5, which the T-6 policy lands, cross the
+ * threshold within 22 m and 4.3 degrees.
+ */
+constexpr double LandableThresholdCrossMeters = 30.0;
+/** @brief Largest track error at the threshold of a landable start, in degrees (a quarter of the touchdown limit). */
+constexpr double LandableThresholdTrackDegrees = 5.0;
+
+/** @brief Lateral state of the follower when it crosses the threshold after the last gate. */
+struct ThresholdCrossing final
+{
+    bool reached{};
+    double crossMeters{};
+    double trackDegrees{};
+};
+
+/**
+ * @brief Flies the command at approach speed with a turn rate bounded by FeasibilityBankDegrees,
+ *        passing gates as AdvanceMission does.
+ * @return Centreline offset and track error at the first threshold crossing after the last gate;
+ *     not reached within the step budget otherwise.
+ */
+ThresholdCrossing FlyToThreshold(Config const& c,MissionState mission,AircraftState aircraft)
+{
+    double const speed=c.mission.approachSpeed;
+    constexpr double Dt=0.1;
+    constexpr int MaximumSteps=30000;
+    double const turnRate=StandardGravity*std::tan(FeasibilityBankDegrees*DegreesToRadians)/speed;
+    auto const horizontal=RunwayAxes(c.runway,aircraft.velocity);
+    double track=std::atan2(horizontal.east,horizontal.north);
+    double previousAlong=DeckCoordinates(c.runway,aircraft.position).north;
+    for(int step=0;step<MaximumSteps;++step)
+    {
+        auto const local=DeckCoordinates(c.runway,aircraft.position);
+        while(mission.nextGate<mission.route.count && GatePassed(mission.route,mission.nextGate,local.north,local.east))
+            ++mission.nextGate;
+        // A pattern starts abeam the runway: only a crossing from before the threshold counts.
+        bool const crossed=previousAlong<0 && local.north>=0;
+        if(crossed && mission.nextGate==mission.route.count)
+            return {true,local.east,WrapAngle(track)/DegreesToRadians};
+        previousAlong=local.north;
+        auto const guidance=Guide(c,mission,aircraft);
+        double const error=WrapAngle(CommandTrackDegrees(c,guidance)*DegreesToRadians-track);
+        track+=std::clamp(error,-turnRate*Dt,turnRate*Dt);
+        double const climb=speed*std::sin(guidance.targetSlope);
+        double const level=speed*std::cos(guidance.targetSlope);
+        aircraft.velocity=Add(Add(Scale(RunwayForward(c.runway),level*std::cos(track)),
+            Scale(RunwayRight(c.runway),level*std::sin(track))),Scale(RunwayNormal(c.runway),climb));
+        aircraft.position=Add(aircraft.position,Scale(aircraft.velocity,Dt));
+    }
+    return {};
+}
+
+/** @brief True when a threshold crossing leaves a normal flare and touchdown. */
+bool Landable(ThresholdCrossing const& crossing) noexcept
+{
+    return crossing.reached && std::abs(crossing.crossMeters)<=LandableThresholdCrossMeters
+        && std::abs(crossing.trackDegrees)<=LandableThresholdTrackDegrees;
+}
+
+/** @brief Range reduced to one of its bounds. */
+Range Corner(Range const& range,bool upper)
+{
+    double const bound=upper ? range.maximum : range.minimum;
+    return {bound,bound};
+}
+
+/**
+ * @brief Flies one start corner, logging and counting it as a failure when it is not landable.
+ * @return Centreline offset magnitude at the threshold, in metres (infinite when not reached).
+ */
+double MeasureCorner(Config const& c,char const* scenario,std::string const& level,
+    MissionState const& mission,AircraftState const& aircraft,std::size_t& failures)
+{
+    auto const crossing=FlyToThreshold(c,mission,aircraft);
+    if(!Landable(crossing))
+    {
+        ++failures;
+        auto const local=DeckCoordinates(c.runway,aircraft.position);
+        std::cout<<"[FEASIBILITY_FAIL] "<<scenario<<" "<<level<<" along="<<local.north<<" cross="<<local.east
+            <<" heading_deg="<<WrapAngle(aircraft.heading)/DegreesToRadians<<" reached="<<crossing.reached
+            <<" threshold_cross_m="<<crossing.crossMeters<<" threshold_track_deg="<<crossing.trackDegrees<<"\n";
+    }
+    if(!crossing.reached)
+        return std::numeric_limits<double>::infinity();
+    return std::abs(crossing.crossMeters);
+}
+
+/** @brief Corners of the full approach envelope at every approach level. */
+void ApproachLevelCorners(Config const& base,char const* scenario,std::size_t& failures)
+{
+    std::mt19937 rng(73U);
+    auto const& curriculum=base.training.curriculum;
+    double worst=0;
+    for(std::size_t level=0;level<curriculum.levels;++level)
+    {
+        double difficulty=0;
+        if(curriculum.levels>1)
+            difficulty=static_cast<double>(level)/static_cast<double>(curriculum.levels-1);
+        for(int corner=0;corner<8;++corner)
+        {
+            auto c=base;
+            bool const far=corner&1;
+            c.training.curriculum.firstDistanceMeters=Corner(base.training.curriculum.firstDistanceMeters,far);
+            c.initial.distanceMeters=Corner(base.initial.distanceMeters,far);
+            c.initial.bearingDegrees=Corner(base.initial.bearingDegrees,corner&2);
+            c.initial.headingOffsetDegrees=Corner(base.initial.headingOffsetDegrees,corner&4);
+            for(auto const side : {ApproachSide::Left,ApproachSide::Right})
+            {
+                auto const aircraft=SampleApproachStart(c,c.runway,side,difficulty,rng);
+                worst=std::max(worst,MeasureCorner(c,scenario,"approach level "+std::to_string(level),
+                    Flying(),aircraft,failures));
+            }
+        }
+    }
+    std::cout<<"[FEASIBILITY] "<<scenario<<" approach levels worst_threshold_cross_m="<<worst<<"\n";
+}
+
+/** @brief Corners of one stage envelope: distance or start position, bearing or offset, heading. */
+void StageCorners(Config const& c,char const* scenario,StageSettings const& stage,std::size_t& failures)
+{
+    std::mt19937 rng(79U);
+    double worst=0;
+    for(int corner=0;corner<8;++corner)
+    {
+        auto reduced=stage;
+        reduced.distanceMeters=Corner(stage.distanceMeters,corner&1);
+        reduced.startAlongMeters=Corner(stage.startAlongMeters,corner&1);
+        reduced.bearingDegrees=Corner(stage.bearingDegrees,corner&2);
+        reduced.lateralMeters=Corner(stage.lateralMeters,corner&2);
+        reduced.headingOffsetDegrees=Corner(stage.headingOffsetDegrees,corner&4);
+        reduced.heightMeters=Corner(stage.heightMeters,false);
+        for(auto const side : {ApproachSide::Left,ApproachSide::Right})
+        {
+            auto const start=SampleStageStart(c,c.runway,reduced,side,rng);
+            auto mission=Flying();
+            mission.route=start.route;
+            worst=std::max(worst,MeasureCorner(c,scenario,stage.name,mission,start.aircraft,failures));
+        }
+    }
+    std::cout<<"[FEASIBILITY] "<<scenario<<" "<<stage.name<<" worst_threshold_cross_m="<<worst<<"\n";
+}
+
+/**
+ * @brief Every curriculum level is landable: each corner of its start envelope, flown along the
+ *        command at a FeasibilityBankDegrees bank, crosses the threshold within the Landable
+ *        tolerances. An infeasible corner caps the stop rate below the promotion threshold and
+ *        teaches the policy to give up instead of turning toward the runway.
+ */
+void CurriculumFeasibility()
+{
+    std::size_t failures=0;
+    for(auto const& [scenario,path] : {std::pair<char const*,char const*>{"t6",PPO_FLIGHT_CONFIG},
+        std::pair<char const*,char const*>{"pc7",PPO_FLIGHT_PC7_CONFIG}})
+    {
+        auto c=LoadConfig(std::filesystem::path(path));
+        c.runway.origin={0,0,15};c.runway.headingDegrees=0;
+        ApproachLevelCorners(c,scenario,failures);
+        for(auto const& stage : c.training.curriculum.stages)
+            StageCorners(c,scenario,stage,failures);
+    }
+    Check(failures==0,"every curriculum start corner crosses the threshold aligned enough to land");
 }
 
 /** @brief Evaluation campaigns mix rolling starts with stratified approaches up to the curriculum frontier. */
@@ -1169,6 +1343,7 @@ int main()
         CurriculumSpawns();
         CurriculumScale();
         StageStarts();
+        CurriculumFeasibility();
         EvaluationStratification();
         DisplayReferences();
     }

@@ -188,7 +188,7 @@ La section `training.curriculum` règle une difficulté de départ adaptative :
 |---|---|---|
 | `firstDistanceMeters` | 1 500–3 000 m | départs du niveau 0 : finale courte, sur l'axe et le plan, cap aligné |
 | `levels` | 6 | niveaux d'approche ; le dernier est l'enveloppe complète (`initial`) |
-| `promotionSuccessRate` | 0,85 | taux d'arrêts sur la fenêtre qui fait passer au niveau suivant ; proche de l'exigence de la validation (92 %) pour qu'aucune étape ne soit franchie avec une approche imprécise |
+| `promotionSuccessRate` | 0,92 | taux d'arrêts sur la fenêtre qui fait passer au niveau suivant, aligné sur le seuil du BEST ; soit au moins 28 arrêts sur 30 épisodes en vol |
 | `windowEpisodes` | 30 | épisodes en vol par décision |
 | `rolloutStartShare` | 0,15 | part des départs déjà posés, pour apprendre le freinage |
 | `stages` | 6 étapes | niveaux suivants, un par étape (offset, high-far, downwind, holding, swell, moving-deck) ; la dernière est la tâche complète |
@@ -213,6 +213,9 @@ tire sa difficulté entre 0 et le niveau courant, avec une densité croissante
 vers ce niveau : la frontière est la plus pratiquée, et les cas faciles restent
 révisés. Le niveau est enregistré avec `latest` (`latest/curriculum_level.txt`)
 et restauré à la reprise.
+Le nouveau seuil s'applique aux promotions futures : il ne rétrograde pas un niveau
+déjà sauvegardé. Le taux d'entraînement et celui de validation sont mesurés sur
+des épisodes distincts ; atteindre un niveau ne garantit donc pas un BEST.
 
 Les validations suivent le même mélange que l'entraînement au niveau courant.
 Une campagne de `evaluation.episodes` épisodes commence par la part

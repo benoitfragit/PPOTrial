@@ -279,6 +279,39 @@ void CurriculumProgression()
     Rejects([&] { LoadCurriculumLevel(path); },"a malformed level file fails closed");
 }
 
+/** @brief The T-6 promotion and BEST thresholds reject the nearest lower stop counts. */
+void T6PromotionAndBestThresholds()
+{
+    auto const config = LoadConfig(PPO_FLIGHT_CONFIG);
+    auto const& settings = config.training.curriculum;
+    Check(settings.windowEpisodes == 30 && Near(settings.promotionSuccessRate, 0.92)
+        && config.evaluation.episodes == 20 && Near(config.evaluation.minimumSuccessRate, 0.92),
+        "the T-6 curriculum and BEST use their configured 92 percent thresholds");
+
+    FlightCurriculum curriculum(settings);
+    for (int episode = 0; episode < 30; ++episode)
+    {
+        Check(!curriculum.Record(episode < 27), "27 stops out of 30 cannot promote the curriculum");
+    }
+    Check(curriculum.Level() == 0, "a failed window leaves the level unchanged");
+    for (int episode = 0; episode < 29; ++episode)
+    {
+        Check(!curriculum.Record(episode < 28), "promotion waits for the complete window");
+    }
+    Check(curriculum.Record(false) && curriculum.Level() == 1,
+        "28 stops out of 30 promote the curriculum");
+
+    auto metrics = Successful(config, 0);
+    metrics.stops = 18;
+    metrics.touchdowns = 18;
+    metrics.crashes = 2;
+    Check(!Validated(config, metrics), "18 stops out of 20 do not qualify as BEST");
+    metrics.stops = 19;
+    metrics.touchdowns = 19;
+    metrics.crashes = 1;
+    Check(Validated(config, metrics), "19 stops out of 20 qualify as BEST");
+}
+
 /** @brief The level is saved with latest and restored only when training resumes it. */
 void CurriculumPersistence()
 {
@@ -312,6 +345,7 @@ int main()
         RewardTuning();
         CrashRenderingSnapshot();
         CurriculumProgression();
+        T6PromotionAndBestThresholds();
         CurriculumPersistence();
     }
     catch(std::exception const& e) { std::cerr<<e.what()<<'\n';return 1; }
