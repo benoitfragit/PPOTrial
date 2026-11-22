@@ -56,7 +56,10 @@ L'altitude initiale suit le plan de 3° qui passe à 15 m au-dessus du seuil, av
 une variation de ±60 m. Un curriculum adaptatif commence par des finales courtes
 alignées et élargit les départs à mesure que les arrêts réussissent ; les
 validations jouent le même mélange (roulages, finales courtes à très déportées)
-jusqu'au niveau courant, et seule la tâche complète peut valider la CI. Le train reste verrouillé
+jusqu'au niveau courant, et seule la tâche complète peut valider la CI. Pour le T-6,
+une promotion demande au moins 28 arrêts sur 30 épisodes d'entraînement en vol ;
+un BEST demande au moins 19 arrêts sur 20 épisodes de validation. Le niveau déjà
+sauvegardé reste acquis. Le train reste verrouillé
 sorti une fois commandé. La piste est fixe pendant un épisode, sauf dans les deux
 dernières étapes : `swell` fait pilonner le pont dans une houle (±0,6 m, période 9 s)
 et `moving-deck` le fait en plus avancer à 6 m/s ; ces constantes se règlent dans

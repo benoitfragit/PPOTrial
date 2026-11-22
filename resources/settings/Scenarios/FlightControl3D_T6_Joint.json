@@ -136,7 +136,7 @@
         3000.0
       ],
       "levels": 6,
-      "promotionSuccessRate": 0.6,
+      "promotionSuccessRate": 0.92,
       "rolloutStartShare": 0.15,
       "stages": [
         {
