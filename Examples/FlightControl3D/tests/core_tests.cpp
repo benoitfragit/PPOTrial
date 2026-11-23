@@ -395,6 +395,42 @@ void RouteGuidance()
     Check(Guide(c,Flying(Phase::Rollout),aircraft).targetSlope==0,"the route never applies on the ground");
 }
 
+/** @brief Regression: route turn and downwind commands are invariant under runway rotation. */
+void RouteGuidanceUsesRunwayAxes()
+{
+    auto c = T6Config();
+    c.runway.origin = {150, -200, 25};
+    double const lead = MaximumGateLeadDegrees * DegreesToRadians;
+    for (double const heading : {0.0, 90.0, 123.0, 270.0})
+    {
+        c.runway.headingDegrees = heading;
+        for (double const side : {-1.0, 1.0})
+        {
+            auto mission = Flying();
+            mission.route.start = {-11000.0, 0.0, 600.0};
+            mission.route.gates[0] = {-11000.0, side * 1100.0, 600.0};
+            mission.route.count = 1;
+
+            auto aircraft = Approach(c, -11000.0);
+            aircraft.position = FromRunway(c.runway, -11000.0, 0.0, 600.0);
+            aircraft.velocity = Scale(RunwayForward(c.runway), c.mission.approachSpeed);
+            auto const turn = RunwayAxes(c.runway, Guide(c, mission, aircraft).targetDirection);
+            Check(Near(turn.north, std::cos(lead), 1e-9)
+                && Near(turn.east, side * std::sin(lead), 1e-9)
+                && Near(turn.up, 0.0, 1e-9),
+                "a route turn leads the runway-relative track by 10 degrees on the gate side");
+
+            mission.route.gates[0] = {-12000.0, 0.0, 600.0};
+            aircraft.velocity = Scale(RunwayForward(c.runway), -c.mission.approachSpeed);
+            auto const downwind = RunwayAxes(c.runway, Guide(c, mission, aircraft).targetDirection);
+            Check(Near(downwind.north, -1.0, 1e-9)
+                && Near(downwind.east, 0.0, 1e-9)
+                && Near(downwind.up, 0.0, 1e-9),
+                "a downwind route follows the reverse runway axis at every runway heading");
+        }
+    }
+}
+
 /** @brief Gates advance in the mission; touching down before the last gate is a crash. */
 void RouteMission()
 {
@@ -1325,6 +1361,7 @@ int main()
         CentrelineInterceptTrajectory();
         GatePassage();
         RouteGuidance();
+        RouteGuidanceUsesRunwayAxes();
         RouteMission();
         RouteTurnsAtBank();
         MovingDeckPose();
