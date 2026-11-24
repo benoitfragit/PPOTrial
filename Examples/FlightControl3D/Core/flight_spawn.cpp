@@ -217,10 +217,6 @@ StageStart SamplePatternStage(Config const& config, Runway const& runway, StageS
     return start;
 }
 
-/** @brief Number of equal angular intervals sampling each semicircular holding turn. */
-constexpr std::size_t HoldingTurnSegments = 4;
-static_assert(2 * HoldingTurnSegments + 3 <= MaximumGates, "Holding route exceeds gate capacity");
-
 /**
  * @brief Append a semicircle between the parallel holding legs.
  * @param route Route whose last point is the tangent entry of the turn.
@@ -258,6 +254,7 @@ StageStart SampleHoldingStage(Config const& config, Runway const& runway, StageS
     StageStart start{};
     start.route.start = {alongMeters, crossMeters, heightMeters};
     // The two straight legs are joined by semicircles tangent at their endpoints.
+    start.route.holding = true;
     start.route.gates[start.route.count++] = {fix, 0.0, heightMeters};
     AppendHoldingTurn(start.route, {fix, width, heightMeters}, 1.0);
     start.route.gates[start.route.count++] = {outboundEnd, width, heightMeters};

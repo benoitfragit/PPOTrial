@@ -26,7 +26,7 @@ namespace {
 using Json = nlohmann::json;
 
 /** @brief Version of the observation, action, guidance, reward and spawn semantics stored in checkpoints. */
-constexpr int ContractVersion = 7;
+constexpr int ContractVersion = 8;
 /** @brief Accepted value of the scenario "formatVersion" field. */
 constexpr int ConfigurationFormatVersion = 2;
 /**

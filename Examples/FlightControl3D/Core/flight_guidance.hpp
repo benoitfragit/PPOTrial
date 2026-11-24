@@ -15,9 +15,10 @@
  * point; within CentrelineLookaheadMeters of it the target slides along the centreline.
  * The vertical command follows the glide plane. Below the flare height the descent blends
  * into a gentle contact sink. An episode may first fly a route of gates (a downwind, a
- * holding lap): the command then points at the next gate, or leads the track toward it by
- * MaximumGateLeadDegrees during a turn, and climbs or descends toward its height; the
- * approach above starts once the last gate is passed. On a moving deck every velocity is
+ * holding lap): holding uses the tangent of the active straight or circular leg plus
+ * geometric position-error capture. Other routes point at the next gate or lead the track
+ * by MaximumGateLeadDegrees during a turn. The approach starts once the last gate is passed.
+ * On a moving deck every velocity is
  * deck-relative. All lengths are in metres, speeds in m/s and angles in radians.
  *
  * Not here: no controller. Guidance never commands a surface; it only defines the
@@ -55,7 +56,7 @@ inline constexpr double MaximumInterceptAngleDegrees = 30.0;
 /**
  * @brief Largest horizontal angle between a gate command and the current track, in degrees.
  *
- * Toward a gate behind or abeam (the turns of a pattern or a holding lap) the command
+ * Toward a gate behind or abeam (the turns of a pattern) the command
  * leads the deck-relative track by at most this angle on the side of the gate, instead of
  * jumping by up to 180 degrees. Any turn rate then keeps the Direction cost below
  * weight * (1 - cos 10 deg) / 2 per second. With the T-6 scenario (Direction weight 2,
@@ -124,7 +125,8 @@ struct ApproachReference final
  * @param config Episode configuration and runway pose.
  * @param mission Current phase.
  * @param aircraft Current aircraft state.
- * @return While route gates remain, toward the next gate and its height; then toward the
+ * @return While holding gates remain, tangent/capture direction on the active leg; for other
+ *     routes, toward the next gate and its height; then toward the
  *     extended centreline far out, toward the aim point on short final, along the centreline
  *     near and past it, descending on the glide plane, with a gentle flare sink below the
  *     flare height and a level direction while rolling.

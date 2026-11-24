@@ -246,6 +246,11 @@ inline constexpr std::array<char const*, RewardCount> RewardNames{
 
 /** @brief Largest number of gates of one episode route (a holding lap and its joining legs). */
 inline constexpr std::size_t MaximumGates = 11;
+/** @brief Number of equal angular intervals in each semicircular holding turn. */
+inline constexpr std::size_t HoldingTurnSegments = 4;
+/** @brief Inbound, two semicircles, outbound and final inbound. */
+inline constexpr std::size_t HoldingRouteGateCount = 2 * HoldingTurnSegments + 3;
+static_assert(HoldingRouteGateCount <= MaximumGates, "Holding route exceeds gate capacity");
 
 /** @brief Point of a route, in runway axes: along past the threshold, cross right of the centreline, up. */
 struct Gate final
@@ -268,6 +273,8 @@ struct Route final
     std::size_t count{};
     /** @brief Horizontal start of the route, in runway axes (heightMeters unused). */
     Gate start{};
+    /** @brief True for the two tangent semicircles and straight legs of a holding lap. */
+    bool holding{};
 };
 
 /**

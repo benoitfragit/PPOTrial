@@ -141,6 +141,9 @@ void SignatureCompatibility()
         changed=signature;changed["mission"][field]=changed["mission"][field].get<double>()+1.0;
         Check(!CompatibleTrainingSignature(changed.dump(),c.checkpointSignature),"mission changes are incompatible");
     }
+    changed=signature;changed["contractVersion"]=7;
+    Check(!CompatibleTrainingSignature(changed.dump(),c.checkpointSignature),
+        "the previous holding guidance contract is incompatible");
     changed=signature;changed["contractVersion"]=0;
     Check(!CompatibleTrainingSignature(changed.dump(),c.checkpointSignature),"another contract version is incompatible");
     Check(!CompatibleTrainingSignature("broken",c.checkpointSignature),"malformed signatures are incompatible");
@@ -431,6 +434,88 @@ void RouteGuidanceUsesRunwayAxes()
     }
 }
 
+/** @brief Holding follows geometric tangents, captures errors, and is independent of track and runway heading. */
+void HoldingGuidance()
+{
+    auto c = T6Config();
+    c.runway.origin = {150, -200, 25};
+    for (auto const& stage : c.training.curriculum.stages)
+    {
+        if (stage.kind != StageKind::Holding)
+        {
+            continue;
+        }
+        for (double const heading : {0.0, 90.0, 123.0, 270.0})
+        {
+            c.runway.headingDegrees = heading;
+            for (auto const side : {ApproachSide::Left, ApproachSide::Right})
+            {
+                std::mt19937 rng(91U);
+                auto const start = SampleStageStart(c, c.runway, stage, side, rng);
+                auto mission = Flying();
+                mission.route = start.route;
+                Check(mission.route.holding && mission.route.count == HoldingRouteGateCount,
+                    "holding spawn selects the geometric guidance");
+                double const sideSign = side == ApproachSide::Left ? -1.0 : 1.0;
+                double const radius = stage.holdingWidthMeters / 2.0;
+                double const centreCross = sideSign * radius;
+                double const height = mission.route.gates[0].heightMeters;
+                auto aircraft = start.aircraft;
+
+                // Check every arc, on both sides, at its midpoint and at the junction with the next leg.
+                for (bool const first : {true, false})
+                {
+                    std::size_t const entry = first ? 0 : HoldingTurnSegments + 1;
+                    double const centreAlong = mission.route.gates[entry].alongMeters;
+                    double const alongSign = first ? 1.0 : -1.0;
+                    double const crossSign = first ? sideSign : -sideSign;
+                    for (std::size_t segment = 1; segment <= HoldingTurnSegments; ++segment)
+                    {
+                        mission.nextGate = entry + segment;
+                        double const angle = (static_cast<double>(segment) - 0.5) * Pi
+                            / static_cast<double>(HoldingTurnSegments);
+                        Vec3 const radial{alongSign * std::sin(angle), -crossSign * std::cos(angle), 0.0};
+                        Vec3 const tangent{alongSign * std::cos(angle), crossSign * std::sin(angle), 0.0};
+                        aircraft.position = FromRunway(c.runway, centreAlong + radius * radial.north,
+                            centreCross + radius * radial.east, height);
+                        aircraft.velocity = Scale(RunwayForward(c.runway), c.mission.approachSpeed);
+                        auto const aligned = Guide(c, mission, aircraft);
+                        auto const command = RunwayAxes(c.runway, aligned.targetDirection);
+                        aircraft.velocity = Scale(RunwayForward(c.runway), -c.mission.approachSpeed);
+                        auto const reversed = Guide(c, mission, aircraft);
+                        Check(Near(Dot(command, tangent), 1.0, 1e-9) && Near(aligned.targetSlope, 0.0, 1e-9)
+                            && Near(Length(Subtract(aligned.targetDirection, reversed.targetDirection)), 0.0, 1e-9),
+                            "the exact holding tangent does not depend on current aircraft track");
+
+                        aircraft.position = FromRunway(c.runway, centreAlong + (radius + 100.0) * radial.north,
+                            centreCross + (radius + 100.0) * radial.east, height + 100.0);
+                        auto const capture = Guide(c, mission, aircraft);
+                        auto const direction = RunwayAxes(c.runway, capture.targetDirection);
+                        Check(Dot(direction, radial) < 0.0 && Dot(direction, tangent) > 0.0
+                            && capture.targetSlope < 0.0 && Near(Length(direction), 1.0, 1e-9),
+                            "holding capture steers inward and down toward the nominal route");
+
+                        auto const& gate = mission.route.gates[mission.nextGate];
+                        aircraft.position = FromRunway(c.runway, gate.alongMeters, gate.crossMeters, gate.heightMeters);
+                        auto const before = Guide(c, mission, aircraft);
+                        ++mission.nextGate;
+                        auto const after = Guide(c, mission, aircraft);
+                        Check(Near(Dot(before.targetDirection, after.targetDirection), 1.0, 1e-9),
+                            "the holding direction is continuous across arc and straight junctions");
+                    }
+                }
+
+                mission.nextGate = mission.route.count;
+                auto const after = Guide(c, mission, aircraft);
+                auto const direct = Guide(c, Flying(), aircraft);
+                Check(Near(Length(Subtract(after.targetDirection, direct.targetDirection)), 0.0, 1e-12)
+                    && after.targetSlope == direct.targetSlope,
+                    "holding completion uses the unchanged final approach");
+            }
+        }
+    }
+}
+
 /** @brief Gates advance in the mission; touching down before the last gate is a crash. */
 void RouteMission()
 {
@@ -455,8 +540,8 @@ void RouteMission()
 /**
  * @brief Largest heading error of a 30-degree bank follower in the route turns, in degrees.
  *
- * Measured: the command leads the track by at most MaximumGateLeadDegrees in every turn of
- * the patterns and of the holding lap.
+ * Patterns retain the bounded track lead; holding uses the independent geometric field.
+ * This test checks both with a turn-rate-limited kinematic follower.
  */
 constexpr double MaximumRouteTurnErrorDegrees = 40.0;
 
@@ -1382,6 +1467,7 @@ int main()
         GatePassage();
         RouteGuidance();
         RouteGuidanceUsesRunwayAxes();
+        HoldingGuidance();
         RouteMission();
         RouteTurnsAtBank();
         MovingDeckPose();
