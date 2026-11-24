@@ -34,6 +34,15 @@ FlightControl3D utilise le scénario d'atterrissage T-6 configuré dans
 reprend `latest` depuis `resources/model/FlightControl3D/t6texan2_joint_v5`,
 avec les poids, les états Adam et le générateur aléatoire du checkpoint. Le
 modèle est distinct du BEST d'atterrissage qualifié requis par le mode inférence.
+Le dépôt fournit les deux états issus du [run CI 52](https://github.com/benoitfragit/PPOTrial/actions/runs/45436602242)
+(commit `f98e0276aac8f77e0bbd5cae4919312a5b927ee2`) : `latest` reprend à
+l'update 340 et au niveau de curriculum 11 ; `best/current.json` désigne la
+génération validée à cet update (19 arrêts sur 20, difficulté 1, graines
+4342–4361). Les entraînements ultérieurs modifient `latest` et peuvent promouvoir
+un nouveau BEST ; utiliser une copie du répertoire pour préserver cet état initial.
+Les checkpoints sont conservés sans conversion de fins de ligne, nécessaire à la
+vérification de leur empreinte sous Linux comme sous Windows. La validation CI
+ne remplace pas une évaluation supplémentaire sur d'autres graines.
 
 Un second avion, le Pilatus PC-7 JSBSim, a son propre scénario
 (`FlightControl3D_PC7_Joint.json`, modèle `resources/model/FlightControl3D/pc7_joint_v1`)
