@@ -550,8 +550,14 @@ void StageEpisodes()
         EpisodeStart start{};start.difficulty=StageDifficulty(c,holding);
         env.Reset(seed,start);
         auto const& mission=env.Mission();
-        Check(last.kind==StageKind::Holding && mission.route.count==5 && mission.nextGate==0,
-            "the holding stage flies its holding lap");
+        constexpr std::size_t HoldingGateCount = 11;
+        Check(last.kind==StageKind::Holding && mission.route.count==HoldingGateCount && mission.nextGate==0,
+            "the holding stage starts its complete semicircular holding route");
+        auto const& firstGate=mission.route.gates.front();
+        auto const& lastGate=mission.route.gates[HoldingGateCount-1];
+        Check(firstGate.alongMeters==last.fixAlongMeters && firstGate.crossMeters==0.0
+            && lastGate.alongMeters==firstGate.alongMeters && lastGate.crossMeters==firstGate.crossMeters,
+            "the holding route returns to the fix before final approach");
         Check(mission.gearDownCommanded==(env.Aircraft().gearPosition>0.5),"the gear position matches its latch");
         gearUp+=mission.gearDownCommanded ? 0 : 1;
         // Level flight needs more power than the 3-degree descent of the action reference.

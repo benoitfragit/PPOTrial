@@ -217,6 +217,29 @@ StageStart SamplePatternStage(Config const& config, Runway const& runway, StageS
     return start;
 }
 
+/**
+ * @brief Append a semicircle between the parallel holding legs.
+ * @param route Route whose last point is the tangent entry of the turn.
+ * @param exit Tangent exit at the same along coordinate and opposite lateral edge.
+ * @param alongSign +1 for the turn beyond the fix, -1 for the far turn.
+ *
+ * The radius is half the separation of the legs. Intermediate gates sample
+ * the circle every 45 degrees; the endpoint is kept exact.
+ */
+void AppendHoldingTurn(Route& route, Gate const& exit, double alongSign) noexcept
+{
+    Gate const entry = route.gates[route.count - 1];
+    double const halfCross = (exit.crossMeters - entry.crossMeters) / 2.0;
+    double const radius = std::abs(halfCross);
+    for (std::size_t segment = 1; segment < HoldingTurnSegments; ++segment)
+    {
+        double const angle = Pi * static_cast<double>(segment) / static_cast<double>(HoldingTurnSegments);
+        route.gates[route.count++] = {entry.alongMeters + alongSign * radius * std::sin(angle),
+            entry.crossMeters + halfCross * (1.0 - std::cos(angle)), entry.heightMeters};
+    }
+    route.gates[route.count++] = exit;
+}
+
 /** @brief Inbound start toward the fix, one racetrack lap on the given side, back over the fix. */
 StageStart SampleHoldingStage(Config const& config, Runway const& runway, StageSettings const& stage,
     double sideSign, std::mt19937& rng)
@@ -230,13 +253,13 @@ StageStart SampleHoldingStage(Config const& config, Runway const& runway, StageS
     double const width = sideSign * stage.holdingWidthMeters;
     StageStart start{};
     start.route.start = {alongMeters, crossMeters, heightMeters};
-    // Over the fix, turn to the outbound leg, fly it, turn back inbound and cross the fix again.
-    start.route.gates[0] = {fix, 0.0, heightMeters};
-    start.route.gates[1] = {fix, width, heightMeters};
-    start.route.gates[2] = {outboundEnd, width, heightMeters};
-    start.route.gates[3] = {outboundEnd, 0.0, heightMeters};
-    start.route.gates[4] = {fix, 0.0, heightMeters};
-    start.route.count = 5;
+    // The two straight legs are joined by semicircles tangent at their endpoints.
+    start.route.holding = true;
+    start.route.gates[start.route.count++] = {fix, 0.0, heightMeters};
+    AppendHoldingTurn(start.route, {fix, width, heightMeters}, 1.0);
+    start.route.gates[start.route.count++] = {outboundEnd, width, heightMeters};
+    AppendHoldingTurn(start.route, {outboundEnd, 0.0, heightMeters}, -1.0);
+    start.route.gates[start.route.count++] = {fix, 0.0, heightMeters};
     start.aircraft = LevelStart(config, runway, start.route.start, runway.headingDegrees + headingOffsetDegrees,
         rng);
     return start;
