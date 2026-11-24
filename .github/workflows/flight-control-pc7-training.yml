@@ -1,0 +1,143 @@
+name: FlightControl3D PC-7 Landing Training
+
+on:
+  # A new workflow on a feature branch cannot be manually dispatched until it
+  # exists on the default branch. These dedicated PR labels enable branch tests.
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      additional_updates:
+        description: "PPO updates per independent validation"
+        required: true
+        type: number
+        default: 10
+      max_additional_updates:
+        description: "Maximum additional PPO updates in this CI run"
+        required: true
+        type: number
+        default: 1000
+      resume_run_id:
+        description: "Optional previous PC-7 training run ID (not a T-6 run)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: flight-control-pc7-training-${{ github.head_ref || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  train:
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+          (github.event.pull_request.head.repo.full_name == github.repository &&
+           (github.event.label.name == 'flight-pc7-curriculum' ||
+            startsWith(github.event.label.name, 'flight-pc7-resume-'))) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Resolve PC-7 training parameters
+        id: parameters
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          LABEL: ${{ github.event.label.name }}
+          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
+          ADDITIONAL_UPDATES: ${{ inputs.additional_updates }}
+          MAX_ADDITIONAL_UPDATES: ${{ inputs.max_additional_updates }}
+        run: |
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            ADDITIONAL_UPDATES=10
+            MAX_ADDITIONAL_UPDATES=1000
+            RESUME_RUN_ID=""
+            if [[ "$LABEL" != "flight-pc7-curriculum" ]]; then
+              if [[ "$LABEL" =~ ^flight-pc7-resume-([0-9]+)$ ]]; then
+                RESUME_RUN_ID="${BASH_REMATCH[1]}"
+              else
+                echo "::error::Invalid PC-7 resume label"
+                exit 1
+              fi
+            fi
+          fi
+          if [[ -n "$RESUME_RUN_ID" && ! "$RESUME_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::resume_run_id must be a positive GitHub Actions run ID"
+            exit 1
+          fi
+          if [[ ! "$ADDITIONAL_UPDATES" =~ ^[1-9][0-9]*$ || ! "$MAX_ADDITIONAL_UPDATES" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::Update budgets must be positive integers"
+            exit 1
+          fi
+          {
+            echo "resume_run_id=$RESUME_RUN_ID"
+            echo "additional_updates=$ADDITIONAL_UPDATES"
+            echo "max_additional_updates=$MAX_ADDITIONAL_UPDATES"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout exact PC-7 training sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Configure Release headless runtime
+        run: >-
+          cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release
+          -DPPO_BUILD_DESKTOP=OFF -DPPO_BUILD_CORE_TESTS=ON
+          -DPPO_BUILD_CHECKPOINT_TESTS=OFF -DPPO_BUILD_FLIGHT_CONTROL=ON
+
+      - name: Build headless runtime and simulator tests
+        run: >-
+          cmake --build build/release --config Release
+          --target FlightControlHeadless FlightControl_simulator_tests --parallel 2
+
+      - name: Validate simulator before training
+        run: >-
+          ctest --test-dir build/release -C Release
+          -R '^FlightControl_simulator_tests$' --output-on-failure --no-tests=error
+
+      - name: Restore previous PC-7 training artifact
+        if: ${{ steps.parameters.outputs.resume_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: flight-control-pc7-training
+          run-id: ${{ steps.parameters.outputs.resume_run_id }}
+          github-token: ${{ github.token }}
+          path: build/flight-pc7-training
+
+      - name: Train PC-7 until validated or bounded
+        shell: bash
+        env:
+          ADDITIONAL_UPDATES: ${{ steps.parameters.outputs.additional_updates }}
+          MAX_ADDITIONAL_UPDATES: ${{ steps.parameters.outputs.max_additional_updates }}
+        run: >-
+          python3 tools/flight/curriculum_ci.py
+          --executable build/release/Examples/FlightControl3D/FlightControlHeadless
+          --config resources/settings/Scenarios/FlightControl3D_PC7_Joint.json
+          --output build/flight-pc7-training
+          --require-release
+          --updates-per-evaluation "$ADDITIONAL_UPDATES"
+          --max-additional-updates "$MAX_ADDITIONAL_UPDATES"
+          --runtime-seconds 16800
+
+      - name: Publish PC-7 resumable checkpoint and telemetry
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flight-control-pc7-training
+          path: |
+            build/flight-pc7-training/latest/flight_policy.txt
+            build/flight-pc7-training/latest/flight_policy.txt.previous
+            build/flight-pc7-training/latest/curriculum_level.txt
+            build/flight-pc7-training/best/**
+            build/flight-pc7-training/training.csv
+            build/flight-pc7-training/training_*.csv
+            build/flight-pc7-training/diagnostics.csv
+            build/flight-pc7-training/training_status.txt
+            build/flight-pc7-training/block_*.log
+          if-no-files-found: warn
+          retention-days: 30
