@@ -245,7 +245,7 @@ inline constexpr std::array<char const*, RewardCount> RewardNames{
     "Path", "Direction", "VerticalSpeed", "Speed", "Touchdown", "Stop", "Crash"};
 
 /** @brief Largest number of gates of one episode route (a holding lap and its joining legs). */
-inline constexpr std::size_t MaximumGates = 8;
+inline constexpr std::size_t MaximumGates = 11;
 
 /** @brief Point of a route, in runway axes: along past the threshold, cross right of the centreline, up. */
 struct Gate final

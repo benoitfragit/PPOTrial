@@ -131,7 +131,7 @@ HorizontalDirection LeadTrack(Runway const& runway, AircraftState const& aircraf
 {
     HorizontalDirection const towardGate{gateForward, gateRight};
     // Gate bearings are in runway axes; the deck-relative track must use the same frame.
-    auto const velocity = RunwayAxes(runway, DeckRelativeVelocity(runway, aircraft.velocity));
+    auto const velocity = DeckRelativeVelocity(runway, aircraft.velocity);
     if (std::hypot(velocity.north, velocity.east) < MinimumTrackSpeedMps)
     {
         return towardGate;

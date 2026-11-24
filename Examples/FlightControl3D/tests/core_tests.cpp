@@ -1113,10 +1113,30 @@ void StageStarts()
             }
             else
             {
-                Check(start.route.count==5 && start.route.gates[0].alongMeters==stage.fixAlongMeters
-                    && start.route.gates[4].alongMeters==stage.fixAlongMeters
-                    && start.route.gates[2].crossMeters==sideSign*stage.holdingWidthMeters,
-                    "a holding lap leaves the fix to its side and comes back over it");
+                auto const& gates = start.route.gates;
+                double const fix = stage.fixAlongMeters;
+                double const far = fix - stage.outboundMeters;
+                double const width = sideSign * stage.holdingWidthMeters;
+                double const radius = stage.holdingWidthMeters / 2.0;
+                Check(start.route.count == 11 && gates[0].alongMeters == fix
+                    && gates[10].alongMeters == fix && gates[10].crossMeters == 0.0
+                    && gates[4].alongMeters == fix && gates[4].crossMeters == width
+                    && gates[5].alongMeters == far && gates[5].crossMeters == width
+                    && gates[9].alongMeters == far && gates[9].crossMeters == 0.0,
+                    "holding straight legs meet both semicircles at their tangent endpoints");
+                for (std::size_t segment = 0; segment <= 4; ++segment)
+                {
+                    double const angle = Pi * static_cast<double>(segment) / 4.0;
+                    auto const& first = gates[segment];
+                    auto const& second = gates[5 + segment];
+                    Check(Near(first.alongMeters, fix + radius * std::sin(angle), 1e-8)
+                        && Near(first.crossMeters, width * (1.0 - std::cos(angle)) / 2.0, 1e-8)
+                        && Near(second.alongMeters, far - radius * std::sin(angle), 1e-8)
+                        && Near(second.crossMeters, width * (1.0 + std::cos(angle)) / 2.0, 1e-8)
+                        && Near(first.heightMeters, local.up, 1e-8)
+                        && Near(second.heightMeters, local.up, 1e-8),
+                        "holding gates sample both constant-height semicircles on the selected side");
+                }
             }
             if(sample<4)
             {

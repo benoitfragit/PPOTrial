@@ -641,11 +641,13 @@ void ValidateStage(Config const& config, StageSettings const& stage)
             && -PatternFinalAlongMeters < mission.maxDistanceMeters, "pattern stage geometry");
         return;
     }
-    // A holding start is inbound to the fix, before it.
+    // A holding start is inbound to the fix. The semicircles extend beyond both leg ends.
+    double const radius = stage.holdingWidthMeters / 2.0;
     Require(stage.startAlongMeters.maximum <= stage.fixAlongMeters - MinimumGateSpacingMeters
         && stage.fixAlongMeters <= -MinimumGateSpacingMeters
+        && stage.fixAlongMeters + radius < 0.0
         && stage.outboundMeters >= MinimumGateSpacingMeters && stage.holdingWidthMeters >= MinimumGateSpacingMeters
-        && std::hypot(stage.fixAlongMeters - stage.outboundMeters, stage.holdingWidthMeters)
+        && std::hypot(stage.fixAlongMeters - stage.outboundMeters - radius, stage.holdingWidthMeters)
         < mission.maxDistanceMeters
         && stage.holdingWidthMeters < MaximumStageCrossMeters, "holding stage geometry");
 }
