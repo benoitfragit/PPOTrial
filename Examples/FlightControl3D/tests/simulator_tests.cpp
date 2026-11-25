@@ -139,11 +139,26 @@ void TrainingStartsAndRudderAuthority()
         sawRolling=true;
     }
     Check(sawRolling && sawAirborne,"training mixes rolling and airborne starts");
+    // The seeded default selects the curriculum frontier, not the initial approach envelope.
+    // Gate 13 starts closer to the runway than the previous moving-deck frontier.
+    auto const& frontier=c.training.curriculum.stages.back();
+    Check(frontier.name=="runway-heading-offset" && frontier.kind==StageKind::Approach,
+        "the current curriculum frontier is the heading-offset approach");
     environment.Reset(4342U);
-    Check(environment.StartedAirborne() && environment.CurrentGuidance().distance>=c.initial.distanceMeters.minimum-1,
-        "a seeded episode defaults to the full task whatever the curriculum level");
+    auto const fullTask=environment.CurrentGuidance();
+    Check(environment.StartedAirborne() && fullTask.distance>=frontier.distanceMeters.minimum-1
+        && fullTask.distance<=frontier.distanceMeters.maximum+1 && std::abs(fullTask.cross)<1
+        && environment.Mission().route.count==0 && environment.Mission().gearDownCommanded
+        && !environment.CurrentDeck().motion.Moving(),
+        "the seeded default selects the aligned static heading-offset stage at training difficulty zero");
     // Seeded evaluation episodes follow their explicit start, independently of the training stream.
     environment.SetDifficulty(1);
+    environment.Reset(4342U,EpisodeStart{false,1.0});
+    auto const explicitFullTask=environment.CurrentGuidance();
+    Check(environment.StartedAirborne() && Near(explicitFullTask.along,fullTask.along,1e-9)
+        && Near(explicitFullTask.cross,fullTask.cross,1e-9)
+        && environment.Mission().gearDownCommanded && !environment.CurrentDeck().motion.Moving(),
+        "the same seed at explicit full difficulty reproduces the default start");
     environment.Reset(4342U,EpisodeStart{false,0.0});
     auto const shortFinal=environment.CurrentGuidance();
     Check(environment.StartedAirborne() && shortFinal.distance>=first.minimum-1 && shortFinal.distance<=first.maximum+1
@@ -535,7 +550,7 @@ void GearUpTouchdownCrashes()
     Check(gear.failed || structure.failed,"the crash names the retracted gear or the belly contact");
 }
 
-/** @brief Seeded episodes resolve the curriculum: full task is the last stage, with its route, gear draw and trim. */
+/** @brief Seeded episodes at the holding stage resolve its route, gear draw and trim. */
 void StageEpisodes()
 {
     auto const c=T6Config();
