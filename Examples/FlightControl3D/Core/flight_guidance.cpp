@@ -7,8 +7,8 @@
  *   tangent vector and position-error correction; other routes retain the gate lead law;
  *   vertical guidance is bounded to +/- tan(6 degrees); the rules below then apply;
  * - horizontal direction: toward the extended centreline a look-ahead L ahead,
- *   L = clamp(aim along - along, 300 m, 2 km), at most 30 degrees off the runway axis.
- *   Far out the aircraft intercepts the centreline 2 km ahead and is established on it
+ *   L = clamp(aim along - along, 300 m, 1.2 km), at most 30 degrees off the runway axis.
+ *   Far out the aircraft intercepts the centreline 1.2 km ahead and is established on it
  *   well before the threshold; on short final it heads for the aim point; near and past
  *   the aim point the target slides 300 m ahead;
  * - vertical gradient toward the glide target on the deck (the aim point, or a point
@@ -351,7 +351,7 @@ ApproachReference ResolveApproachReference(Config const& config, MissionState co
     auto const local = DeckCoordinates(runway, aircraft.position);
     double const aimAlong = AimPointAlongMeters(config);
     // Horizontal reference: a point of the extended centreline a look-ahead
-    // ahead. The look-ahead shrinks from 2 km far out to the aim point on short
+    // ahead. The look-ahead shrinks from 1.2 km far out to the aim point on short
     // final, then to 300 m near and past it, so a lateral offset decays well
     // before the threshold instead of being flown straight to the aim point.
     double const lookahead = std::clamp(aimAlong - local.north, CentrelineLookaheadMeters,

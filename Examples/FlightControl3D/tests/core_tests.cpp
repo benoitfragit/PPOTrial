@@ -279,7 +279,7 @@ void CentrelineIntercept()
     auto const onAxis=Guide(c,Flying(),Approach(c,along));
     Check(Near(CommandTrackDegrees(c,onAxis),0,1e-9)
         && Near(Length(Subtract(onAxis.target,FromRunway(c.runway,along+InterceptLookaheadMeters,0,0))),0,1e-6),
-        "on the extended centreline the command follows the runway axis toward a point 2 km ahead");
+        "on the extended centreline the command follows the runway axis toward a point at the intercept look-ahead");
     for(double cross : {-2900.0,-250.0,-5.0,5.0,250.0,2900.0})
     {
         auto const aircraft=Approach(c,along,cross);
@@ -294,7 +294,10 @@ void CentrelineIntercept()
         Check(Near(guidance.targetSlope,-std::atan(height/std::hypot(aimAlong-along,cross)),1e-9),
             "the commanded slope still descends toward the aim point on the glide plane");
     }
-    // The look-ahead switches from 2 km to the aim point without a jump in the command.
+    auto const moderateOffset=Guide(c,Flying(),Approach(c,along,200));
+    Check(Near(CommandTrackDegrees(c,moderateOffset),-std::atan2(200.0,1200.0)/DegreesToRadians,1e-9),
+        "a 200 m lateral offset commands the earlier 1.2 km capture");
+    // The look-ahead switches from its maximum to the aim point without a jump in the command.
     double const switchAlong=aimAlong-InterceptLookaheadMeters;
     auto const before=Guide(c,Flying(),Approach(c,switchAlong-0.01,300));
     auto const after=Guide(c,Flying(),Approach(c,switchAlong+0.01,300));
@@ -692,13 +695,16 @@ void DeckMotionStages()
 {
     auto const c=T6Config();
     auto const& stages=c.training.curriculum.stages;
-    Check(stages.size()>=6 && stages[stages.size()-2].name=="swell" && stages.back().name=="moving-deck",
-        "the curriculum ends with the swell and moving-deck stages");
-    Check(!stages[stages.size()-2].deckMotion.speedMps && stages[stages.size()-2].deckMotion.swellAmplitudeMeters>0
-        && stages.back().deckMotion.speedMps>0 && stages.back().deckMotion.swellAmplitudeMeters>0,
-        "the swell stage heaves a stationary deck, the last stage also moves it forward");
-    for(std::size_t stage=0;stage+2<stages.size();++stage)
-        Check(!stages[stage].deckMotion.Moving(),"the earlier stages keep a static deck");
+    constexpr std::size_t SwellStage = 4;
+    constexpr std::size_t MovingDeckStage = 5;
+    Check(stages.size()==7 && stages[SwellStage].name=="swell" && stages[MovingDeckStage].name=="moving-deck",
+        "the swell and moving-deck stages retain their original curriculum indices");
+    Check(!stages[SwellStage].deckMotion.speedMps && stages[SwellStage].deckMotion.swellAmplitudeMeters>0
+        && stages[MovingDeckStage].deckMotion.speedMps>0 && stages[MovingDeckStage].deckMotion.swellAmplitudeMeters>0,
+        "the swell stage heaves a stationary deck, the moving-deck stage also moves it forward");
+    for(std::size_t stage=0;stage<stages.size();++stage)
+        if(stage!=SwellStage && stage!=MovingDeckStage)
+            Check(!stages[stage].deckMotion.Moving(),"the other stages keep a static deck");
     std::ifstream source(PPO_FLIGHT_CONFIG);nlohmann::json json;source>>json;
     // The deck motion lives in the training curriculum, outside the checkpoint signature.
     auto withoutMotion=json;
@@ -707,12 +713,12 @@ void DeckMotionStages()
     auto const path=directory.path/"scenario.json";
     {std::ofstream output(path);output<<withoutMotion;}
     auto const staticDeck=LoadConfig(path);
-    Check(staticDeck.checkpointSignature==c.checkpointSignature && !staticDeck.training.curriculum.stages.back().deckMotion.Moving(),
+    Check(staticDeck.checkpointSignature==c.checkpointSignature && !staticDeck.training.curriculum.stages[MovingDeckStage].deckMotion.Moving(),
         "a stage without deckMotion is static and the motion does not change the checkpoint contract");
     auto const reject=[&](char const* key,double value,char const* message)
     {
         auto invalid=json;
-        invalid["training"]["curriculum"]["stages"].back()["deckMotion"][key]=value;
+        invalid["training"]["curriculum"]["stages"][MovingDeckStage]["deckMotion"][key]=value;
         {std::ofstream output(path);output<<invalid;}
         Rejects([&] { LoadConfig(path); },message);
     };
@@ -722,9 +728,50 @@ void DeckMotionStages()
     reject("swellAmplitudeMeters",14.5,"a swell that sinks the deck below the sea is rejected");
     reject("swellPeriodSeconds",0.5,"a swell period below the physical range is rejected");
     auto unknown=json;
-    unknown["training"]["curriculum"]["stages"].back()["deckMotion"]["pitchDegrees"]=1.0;
+    unknown["training"]["curriculum"]["stages"][MovingDeckStage]["deckMotion"]["pitchDegrees"]=1.0;
     {std::ofstream output(path);output<<unknown;}
     Rejects([&] { LoadConfig(path); },"unknown deck motion fields are rejected");
+}
+
+/** @brief The appended direct approach starts on the runway axis with a signed track offset. */
+void RunwayHeadingOffsetStage()
+{
+    for(auto const* path : {PPO_FLIGHT_CONFIG,PPO_FLIGHT_PC7_CONFIG})
+    {
+        auto c=LoadConfig(std::filesystem::path(path));
+        auto const& curriculum=c.training.curriculum;
+        Check(CurriculumLevels(curriculum)==13 && curriculum.stages.back().name=="runway-heading-offset",
+            "the heading-offset stage is gate 13, after all existing gates");
+        auto const& stage=curriculum.stages.back();
+        Check(stage.kind==StageKind::Approach && Near(stage.headingOffsetDegrees.minimum,0)
+            && Near(stage.headingOffsetDegrees.maximum,10) && !stage.deckMotion.Moving(),
+            "the new stage is a static direct approach with a 0 to 10 degree offset");
+        c.runway.origin={150,-200,15};
+        for(double const runwayHeading : {0.0,123.0,355.0})
+        {
+            c.runway.headingDegrees=runwayHeading;
+            for(auto const side : {ApproachSide::Left,ApproachSide::Right})
+            {
+                double const sign=side==ApproachSide::Left ? 1.0 : -1.0;
+                for(double const angle : {0.0,5.0,10.0})
+                {
+                    auto fixed=stage;
+                    fixed.headingOffsetDegrees={angle,angle};
+                    std::mt19937 rng(91U);
+                    auto const start=SampleStageStart(c,c.runway,fixed,side,rng);
+                    auto const local=DeckCoordinates(c.runway,start.aircraft.position);
+                    auto const velocity=DeckRelativeVelocity(c.runway,start.aircraft.velocity);
+                    double const track=std::atan2(velocity.east,velocity.north)/DegreesToRadians;
+                    Check(start.route.count==0 && Near(local.east,0,1e-9) && velocity.north>0
+                        && Near(track,sign*angle,1e-9),
+                        "the actual velocity is offset on either side of the runway axis");
+                    auto const guidance=Guide(c,Flying(),start.aircraft);
+                    Check(Near(CommandTrackDegrees(c,guidance),0,1e-9),
+                        "the unchanged guidance commands the runway axis, not the initial track");
+                }
+            }
+        }
+    }
 }
 
 /** @brief Following the commanded direction from short final flares onto the runway past the aim point. */
@@ -1474,6 +1521,7 @@ int main()
         MovingDeckMission();
         PreviousPotentials();
         DeckMotionStages();
+        RunwayHeadingOffsetStage();
         FlareTrajectory();
         LandingQuality();
         CrashDiagnostics();

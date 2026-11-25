@@ -174,9 +174,11 @@ Le plan d'évaluation est stratifié : les `round(rolloutStartShare × N)` premi
 - Le niveau est sauvegardé dans `latest/curriculum_level.txt` à côté du checkpoint.
 - Seule une validation à difficulté 1 peut passer la porte `[FLIGHT_GATE]`.
 - `curriculum.stages` prolonge l'échelle après les niveaux d'approche (un niveau par
-  étape) : `offset`, `high-far`, `downwind`, `holding`, puis `swell` et `moving-deck`.
+  étape) : `offset`, `high-far`, `downwind`, `holding`, puis `swell`, `moving-deck` et `runway-heading-offset`.
   Ajouter des étapes en fin de liste garde la signification d'un `curriculum_level.txt`
   existant ; `training` n'entre pas dans la signature, un checkpoint reste donc reprenable.
+- `runway-heading-offset` (gate 13) : départ sur l'axe prolongé à 3–7 km, sur le plan de descente,
+  avec un écart initial de route de 0 à 10° de part et d'autre de l'axe. Le guidage reste celui de la piste.
 - Chaque étape peut porter un objet optionnel `deckMotion` : `speedMps` (avance du pont
   le long de son cap, ≤ 15 m/s), `swellAmplitudeMeters` et `swellPeriodSeconds`
   (pilonnement sinusoïdal, creux toujours au-dessus de la mer, période de 4 à 30 s). Le
@@ -221,7 +223,7 @@ Les valeurs ci-dessous sont dans le code ; le scénario JSON fournit le reste.
 | `ObservationSize` | 35 | — | Core/flight_types.hpp | Nombre de slots `ObservationIndex` (contrat) |
 | `ContinuousActions` | 5 | — | Core/flight_types.hpp | Profondeur, ailerons, direction, gaz, frein |
 | `CentrelineLookaheadMeters` | 300 | m | Core/flight_guidance.hpp | Convergence douce vers l'axe près du point d'aboutissement |
-| `InterceptLookaheadMeters` | 2000 | m | Core/flight_guidance.hpp | Interception de l'axe prolongé loin de la piste |
+| `InterceptLookaheadMeters` | 1200 | m | Core/flight_guidance.hpp | Interception de l'axe prolongé loin de la piste |
 | `MaximumInterceptAngleDegrees` | 30 | ° | Core/flight_guidance.hpp | Angle maximal entre la route commandée et l'axe |
 | `GateRadiusMeters` | 300 | m | Core/flight_guidance.hpp | Rayon de passage d'une gate de route |
 | `GateCorridorMeters` | 600 | m | Core/flight_guidance.hpp | Demi-largeur du couloir de passage au-delà du plan d'une gate |

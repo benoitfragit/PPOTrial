@@ -277,6 +277,27 @@
           ],
           "kind": "approach",
           "name": "moving-deck"
+        },
+        {
+          "bearingDegrees": [
+            0.0,
+            0.0
+          ],
+          "distanceMeters": [
+            3000.0,
+            7000.0
+          ],
+          "gearUpShare": 0.0,
+          "headingOffsetDegrees": [
+            0.0,
+            10.0
+          ],
+          "heightAboveGlideMeters": [
+            0.0,
+            0.0
+          ],
+          "kind": "approach",
+          "name": "runway-heading-offset"
         }
       ],
       "windowEpisodes": 30
