@@ -392,7 +392,7 @@ resources/model/BluePatrol/latest/*.txt.bak
 !/resources/model/FlightControl3D/t6texan2_joint_v3/best/current.json
 !/resources/model/FlightControl3D/t6texan2_joint_v3/best/flight_710_b8db07606953e196.txt
 
-# Run 52 seed: retain the resumable state and the validated BEST generation.
+# Run 53 seed: retain the resumable state and the validated BEST generation.
 !/resources/model/FlightControl3D/t6texan2_joint_v5/
 /resources/model/FlightControl3D/t6texan2_joint_v5/*
 !/resources/model/FlightControl3D/t6texan2_joint_v5/latest/
@@ -402,4 +402,4 @@ resources/model/BluePatrol/latest/*.txt.bak
 !/resources/model/FlightControl3D/t6texan2_joint_v5/best/
 /resources/model/FlightControl3D/t6texan2_joint_v5/best/*
 !/resources/model/FlightControl3D/t6texan2_joint_v5/best/current.json
-!/resources/model/FlightControl3D/t6texan2_joint_v5/best/flight_340_cb1fafc6dac5c8e5.txt
+!/resources/model/FlightControl3D/t6texan2_joint_v5/best/flight_870_092d842f035af06e.txt
