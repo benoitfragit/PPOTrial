@@ -34,9 +34,9 @@ FlightControl3D utilise le scénario d'atterrissage T-6 configuré dans
 reprend `latest` depuis `resources/model/FlightControl3D/t6texan2_joint_v5`,
 avec les poids, les états Adam et le générateur aléatoire du checkpoint. Le
 modèle est distinct du BEST d'atterrissage qualifié requis par le mode inférence.
-Le dépôt fournit les deux états issus du [run CI 52](https://github.com/benoitfragit/PPOTrial/actions/runs/45436602242)
-(commit `f98e0276aac8f77e0bbd5cae4919312a5b927ee2`) : `latest` reprend à
-l'update 340 et au niveau de curriculum 11 ; `best/current.json` désigne la
+Le dépôt fournit les deux états issus du [run CI 53](https://github.com/benoitfragit/PPOTrial/actions/runs/45572775396)
+(commit `d16cb00afb58a3bff8645d6a67824b3c09beac3a`) : `latest` reprend à
+l'update 870 et au niveau de curriculum 12 ; `best/current.json` désigne la
 génération validée à cet update (19 arrêts sur 20, difficulté 1, graines
 4342–4361). Les entraînements ultérieurs modifient `latest` et peuvent promouvoir
 un nouveau BEST ; utiliser une copie du répertoire pour préserver cet état initial.

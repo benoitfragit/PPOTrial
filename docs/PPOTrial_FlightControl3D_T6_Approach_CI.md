@@ -40,7 +40,7 @@ le guidage, l'observation, le potentiel `Path` et la vue de profil utilisent cet
 même géométrie.
 
 La direction commandée horizontale vise un point de l'axe prolongé situé
-`L = clamp(aboutissement − along, 300 m, 2 km)` devant l'avion, à au plus 30° de
+`L = clamp(aboutissement − along, 300 m, 1,2 km)` devant l'avion, à au plus 30° de
 l'axe : loin de la piste, l'avion intercepte l'axe puis s'y réaligne bien avant le
 seuil ; en finale courte, il vise le point d'aboutissement ; plus près, puis
 au-dessus de la piste, la cible glisse sur l'axe 300 m devant l'avion, sans jamais
@@ -191,7 +191,7 @@ La section `training.curriculum` règle une difficulté de départ adaptative :
 | `promotionSuccessRate` | 0,92 | taux d'arrêts sur la fenêtre qui fait passer au niveau suivant, aligné sur le seuil du BEST ; soit au moins 28 arrêts sur 30 épisodes en vol |
 | `windowEpisodes` | 30 | épisodes en vol par décision |
 | `rolloutStartShare` | 0,15 | part des départs déjà posés, pour apprendre le freinage |
-| `stages` | 6 étapes | niveaux suivants, un par étape (offset, high-far, downwind, holding, swell, moving-deck) ; la dernière est la tâche complète |
+| `stages` | 7 étapes | niveaux suivants, un par étape (offset, high-far, downwind, holding, swell, moving-deck, runway-heading-offset) ; la dernière est la frontière du curriculum |
 
 Les étapes (`stages`) prolongent l'échelle après les niveaux d'approche :
 
@@ -201,6 +201,9 @@ Les étapes (`stages`) prolongent l'échelle après les niveaux d'approche :
 | `high-far` | `approach` | 12–17 km, gisement ≤ 12°, cap ±45°, 150–500 m au-dessus du plan | aucune | 50 % |
 | `downwind` | `pattern` | par le travers, 2–3 km de l'axe, cap opposé ±15°, 250–350 m | fin de vent arrière (−3 km), base (−6 km), finale sur l'axe (−7 km) | 50 % |
 | `holding` | `holding` | 12,5–14,5 km, en rapprochement, 550–650 m | point d'attente à −10 km, un tour (branche de 3,4 km, largeur 1,1 km), retour au point | 50 % |
+| `swell` | `approach` | 7–9 km, pont fixe en translation avec houle | aucune | 50 % |
+| `moving-deck` | `approach` | 7–9 km, pont avançant à 6 m/s avec houle | aucune | 50 % |
+| `runway-heading-offset` | `approach` | 3–7 km, sur l'axe et le plan, route initiale décalée de 0 à 10° à gauche ou à droite | aucune, guidage piste inchangé | 0 % |
 
 La difficulté reste un scalaire dans [0, 1] partout (session, BEST, CI) : ses
 `levels − 1` premiers pas interpolent l'approche, chaque pas suivant est une étape

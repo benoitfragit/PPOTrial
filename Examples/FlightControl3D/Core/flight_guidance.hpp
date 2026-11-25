@@ -48,7 +48,7 @@ inline constexpr double CentrelineLookaheadMeters = 300.0;
  * exp(-distance flown / look-ahead), so an aircraft started off the axis is
  * established on it long before the threshold.
  */
-inline constexpr double InterceptLookaheadMeters = 2000.0;
+inline constexpr double InterceptLookaheadMeters = 1200.0;
 
 /** @brief Largest angle between the commanded horizontal track and the runway axis, in degrees. */
 inline constexpr double MaximumInterceptAngleDegrees = 30.0;
