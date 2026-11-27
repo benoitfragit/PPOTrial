@@ -161,35 +161,72 @@ bool IsFile(std::filesystem::path const& path)
     return std::filesystem::is_regular_file(path, error);
 }
 
+/** @brief Existing file expressed as an absolute normalized path, or an empty path. */
+std::filesystem::path AbsoluteFile(std::filesystem::path const& path)
+{
+    if (!IsFile(path))
+    {
+        return {};
+    }
+    std::error_code error;
+    std::filesystem::path const absolute = std::filesystem::absolute(path, error);
+    return error ? std::filesystem::path{} : absolute.lexically_normal();
+}
+
+/** @brief Adds an existing candidate unless it would make the lookup ambiguous. */
+bool AddUniqueCandidate(std::filesystem::path const& candidate, std::filesystem::path& selected)
+{
+    std::filesystem::path const absolute = AbsoluteFile(candidate);
+    if (absolute.empty())
+    {
+        return true;
+    }
+    if (selected.empty())
+    {
+        selected = absolute;
+        return true;
+    }
+    std::error_code error;
+    return std::filesystem::equivalent(selected, absolute, error) && !error;
+}
+
 /** @brief The executable in one of the PATH folders, empty when it is in none. */
 std::filesystem::path FindOnPath(std::filesystem::path const& executable)
 {
+#if defined(_WIN32)
+    wchar_t const* const variable = _wgetenv(L"PATH");
+    if (variable == nullptr)
+    {
+        return {};
+    }
+    constexpr wchar_t Separator = L';';
+    std::wstring_view folders = variable;
+#else
     char const* const variable = std::getenv("PATH");
     if (variable == nullptr)
     {
         return {};
     }
-#if defined(_WIN32)
-    constexpr char Separator = ';';
-#else
     constexpr char Separator = ':';
-#endif
     std::string_view folders = variable;
+#endif
+    std::filesystem::path selected;
     while (!folders.empty())
     {
         std::size_t const end = folders.find(Separator);
-        std::string_view const folder = folders.substr(0, end);
-        if (!folder.empty() && IsFile(std::filesystem::path(std::string(folder)) / executable))
+        auto const folder = folders.substr(0, end);
+        if (!folder.empty()
+            && !AddUniqueCandidate(std::filesystem::path(folder) / executable, selected))
         {
-            return std::filesystem::path(std::string(folder)) / executable;
+            return {};
         }
-        if (end == std::string_view::npos)
+        if (end == decltype(folders)::npos)
         {
             break;
         }
         folders.remove_prefix(end + 1);
     }
-    return {};
+    return selected;
 }
 
 } // namespace
@@ -404,7 +441,7 @@ std::optional<std::vector<std::string>> CommandArguments(Project const& project,
     {
         return std::nullopt;
     }
-    std::string const folder = (project.manifestName.empty() ? project.root : project.Manifest()).string();
+    std::string const folder = (project.manifestName.empty() ? project.root : project.Manifest()).u8string();
     std::vector<std::string> replaced;
     for (std::string const& argument : line->arguments)
     {
@@ -476,20 +513,29 @@ std::filesystem::path FindProgram(Project const& project, ProjectCommand command
     std::filesystem::path const executable = ExecutableName(name);
     if (executable.is_absolute())
     {
-        return IsFile(executable) ? executable : std::filesystem::path{};
+        return AbsoluteFile(executable);
     }
-    if (IsFile(project.root / executable))
+    std::filesystem::path const local = AbsoluteFile(project.root / executable);
+    if (!local.empty())
     {
-        return project.root / executable;
+        return local;
     }
+    // A path with a directory is an explicit project-relative selection. Never
+    // substitute a registered binary which happens to share its file name.
+    if (executable.has_parent_path())
+    {
+        return {};
+    }
+    std::filesystem::path selected;
     for (std::filesystem::path const& known : knownPrograms)
     {
-        if (known.filename() == executable.filename() && IsFile(known))
+        if (known.filename() == executable.filename()
+            && !AddUniqueCandidate(known, selected))
         {
-            return known;
+            return {};
         }
     }
-    return executable.has_parent_path() ? std::filesystem::path{} : FindOnPath(executable);
+    return selected.empty() ? FindOnPath(executable) : selected;
 }
 
 namespace {
@@ -513,20 +559,26 @@ std::filesystem::path FindLibrary(Project const& project, std::string const& nam
     std::filesystem::path const written(name);
     if (written.is_absolute())
     {
-        return IsFile(written) ? written : std::filesystem::path{};
+        return AbsoluteFile(written);
     }
-    if (IsFile(project.root / written))
+    std::filesystem::path const local = AbsoluteFile(project.root / written);
+    if (!local.empty())
     {
-        return project.root / written;
+        return local;
     }
+    if (written.has_parent_path())
+    {
+        return {};
+    }
+    std::filesystem::path selected;
     for (std::filesystem::path const& known : knownPrograms)
     {
-        if (LibraryName(known) == name && IsFile(known))
+        if (LibraryName(known) == name && !AddUniqueCandidate(known, selected))
         {
-            return known;
+            return {};
         }
     }
-    return {};
+    return selected;
 }
 
 std::vector<std::filesystem::path> ReadProgramRegistry(std::filesystem::path const& registry)
@@ -542,7 +594,12 @@ std::vector<std::filesystem::path> ReadProgramRegistry(std::filesystem::path con
         }
         if (!line.empty())
         {
-            programs.emplace_back(line);
+            std::filesystem::path path = std::filesystem::u8path(line);
+            if (path.is_relative())
+            {
+                path = registry.parent_path() / path;
+            }
+            programs.push_back(path.lexically_normal());
         }
     }
     return programs;

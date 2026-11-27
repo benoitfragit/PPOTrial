@@ -130,9 +130,23 @@ int main()
     auto const known = schema::ReadProgramRegistry(root / "registry.txt");
     Check(known.size() == 2, "the registry lists one program per line");
     Check(schema::FindProgram(loaded, schema::ProjectCommand::Train, known) == registered, "a registered program is found by name");
+    std::filesystem::path const duplicate = root / "old-build" / ProgramName;
+    WriteText(duplicate, "");
+    auto ambiguous = known;
+    ambiguous.push_back(duplicate);
+    Check(schema::FindProgram(loaded, schema::ProjectCommand::Train, ambiguous).empty(),
+        "two registered programs with the same name are rejected as ambiguous");
+    schema::Project explicitProgram = loaded;
+    explicitProgram.program.executable = std::string("missing/") + ProgramName;
+    Check(schema::FindProgram(explicitProgram, schema::ProjectCommand::Train, known).empty(),
+        "an explicit missing program path never falls back to a registered binary");
     WriteText(folder / ProgramName, "");
     Check(schema::FindProgram(loaded, schema::ProjectCommand::Train, known) == folder / ProgramName, "a program in the project folder comes first");
     Check(schema::ReadProgramRegistry(root / "missing.txt").empty(), "no registry, no program");
+    WriteText(root / "relative-registry.txt", std::string("build/") + ProgramName + "\n");
+    auto const relativeRegistry = schema::ReadProgramRegistry(root / "relative-registry.txt");
+    Check(relativeRegistry.size() == 1 && relativeRegistry.front() == registered,
+        "relative registry entries resolve beside the registry");
 
     auto const remarks = schema::CheckProject(loaded);
     Check(remarks.size() == 4, "missing task, network, training and evaluation are reported");

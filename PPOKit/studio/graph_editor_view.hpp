@@ -82,8 +82,10 @@ public:
      * @param reason Shown in place of the palette, e.g. "FlightControl3D compiles this network".
      */
     void SetReadOnly(std::string reason) { readOnlyReason_ = std::move(reason); }
-    /** @brief The network cannot be changed here. */
-    bool ReadOnly() const noexcept { return !readOnlyReason_.empty(); }
+    /** @brief Temporarily allows or blocks graph changes while a run owns the configuration. */
+    void SetEditingAllowed(bool allowed) noexcept { editingAllowed_ = allowed; }
+    /** @brief The network cannot be changed here, permanently or during an active run. */
+    bool ReadOnly() const noexcept { return !readOnlyReason_.empty() || !editingAllowed_; }
 
     /** @brief Zoom of the network shown (1 = 100 %). */
     float Zoom() const noexcept;
@@ -209,6 +211,7 @@ private:
     std::string message_;
     /** @brief Why the network cannot be changed; empty when it can. */
     std::string readOnlyReason_;
+    bool editingAllowed_ = true;
     bool dirty_ = false;
     std::vector<editor::ComponentLibrary> libraries_;
     std::vector<std::string> librariesFor_;

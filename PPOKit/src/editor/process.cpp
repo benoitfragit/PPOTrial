@@ -44,6 +44,22 @@ bool NeedsQuotes(std::string const& argument)
     return argument.empty() || argument.find_first_of(" \t\"") != std::string::npos;
 }
 
+/** @brief Resolves a launch path before creating the child process. */
+std::filesystem::path AbsoluteLaunchPath(std::filesystem::path const& path)
+{
+    if (path.empty())
+    {
+        return {};
+    }
+    std::error_code error;
+    std::filesystem::path const absolute = std::filesystem::absolute(path, error);
+    if (error)
+    {
+        throw std::runtime_error("cannot resolve launch path: " + path.u8string());
+    }
+    return absolute.lexically_normal();
+}
+
 /**
  * @brief `argument` quoted for a Windows command line (the rules CommandLineToArgvW reads
  *        back): backslashes before a quote are doubled, quotes are escaped.
@@ -226,6 +242,20 @@ struct Process::State final
             ::close(output);
             output = -1;
         }
+        if (pid > 0)
+        {
+            int status = 0;
+            pid_t const child = pid;
+            pid_t const reaped = ::waitpid(child, &status, WNOHANG);
+            if (reaped == 0)
+            {
+                // An uninterruptible child must not freeze Studio shutdown or become a zombie later.
+                std::thread([child] {
+                    int childStatus = 0;
+                    while (::waitpid(child, &childStatus, 0) < 0 && errno == EINTR) {}
+                }).detach();
+            }
+        }
         pid = -1;
 #endif
     }
@@ -252,10 +282,65 @@ std::wstring Wide(std::string const& text)
     {
         return {};
     }
-    int const size = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+    int const size = MultiByteToWideChar(
+        CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0);
+    if (size <= 0)
+    {
+        throw std::runtime_error("a process argument is not valid UTF-8");
+    }
     std::wstring wide(static_cast<std::size_t>(size), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide.data(), size);
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()),
+            wide.data(), size) != size)
+    {
+        throw std::runtime_error("cannot convert a process argument to UTF-16");
+    }
     return wide;
+}
+
+bool NeedsQuotes(std::wstring const& argument)
+{
+    return argument.empty() || argument.find_first_of(L" \t\"") != std::wstring::npos;
+}
+
+/** @brief Quotes one UTF-16 argument according to CommandLineToArgvW rules. */
+std::wstring QuoteWideArgument(std::wstring const& argument)
+{
+    if (!NeedsQuotes(argument))
+    {
+        return argument;
+    }
+    std::wstring quoted = L"\"";
+    std::size_t backslashes = 0;
+    for (wchar_t const character : argument)
+    {
+        if (character == L'\\')
+        {
+            ++backslashes;
+            continue;
+        }
+        quoted.append(backslashes * (character == L'"' ? 2 : 1), L'\\');
+        if (character == L'"')
+        {
+            quoted += L'\\';
+        }
+        backslashes = 0;
+        quoted += character;
+    }
+    quoted.append(backslashes * 2, L'\\');
+    quoted += L'"';
+    return quoted;
+}
+
+/** @brief Builds the exact UTF-16 command line passed to CreateProcessW. */
+std::wstring WideCommandLine(std::filesystem::path const& program, std::vector<std::string> const& arguments)
+{
+    std::wstring command = QuoteWideArgument(program.wstring());
+    for (std::string const& argument : arguments)
+    {
+        command += L' ';
+        command += QuoteWideArgument(Wide(argument));
+    }
+    return command;
 }
 
 } // namespace
@@ -269,22 +354,24 @@ void Process::Start(std::filesystem::path const& program, std::vector<std::strin
     }
     state_->Finish();
     state_ = std::make_unique<State>();
-    commandLine_ = QuoteCommandLine(program, arguments);
+    std::filesystem::path const resolvedProgram = AbsoluteLaunchPath(program);
+    std::filesystem::path const resolvedFolder = AbsoluteLaunchPath(folder);
+    commandLine_ = QuoteCommandLine(resolvedProgram, arguments);
 
     // A handle list prevents one concurrent launch from inheriting another launch's writer.
     SIZE_T attributeSize = 0;
     InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeSize);
     std::vector<unsigned char> attributeStorage(attributeSize);
     auto* attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributeStorage.data());
-    std::wstring command = Wide(commandLine_);
-    std::wstring const workingFolder = folder.wstring();
-    std::wstring const executable = program.wstring();
+    std::wstring command = WideCommandLine(resolvedProgram, arguments);
+    std::wstring const workingFolder = resolvedFolder.wstring();
+    std::wstring const executable = resolvedProgram.wstring();
     SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
     HANDLE readEnd = nullptr;
     HANDLE writeEnd = nullptr;
     if (!CreatePipe(&readEnd, &writeEnd, &security, 0))
     {
-        throw std::runtime_error("cannot create the output pipe of " + program.string());
+        throw std::runtime_error("cannot create the output pipe of " + resolvedProgram.u8string());
     }
     HANDLE input = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &security,
         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -325,7 +412,7 @@ void Process::Start(std::filesystem::path const& program, std::vector<std::strin
     {
         CloseHandle(job);
         CloseHandle(readEnd);
-        throw std::runtime_error("cannot start " + program.string() + " (Windows error "
+        throw std::runtime_error("cannot start " + resolvedProgram.u8string() + " (Windows error "
                                  + std::to_string(createError) + ")");
     }
     if (!AssignProcessToJobObject(job, information.hProcess) || ResumeThread(information.hThread) == DWORD(-1))
@@ -378,7 +465,7 @@ void Process::Kill()
         return;
     }
     TerminateJobObject(state_->job, 1);
-    WaitForSingleObject(state_->process, 1000);
+    // Never wait on the GUI thread. A following Running/Poll observes completion.
     Running();
 }
 
@@ -393,11 +480,13 @@ void Process::Start(std::filesystem::path const& program, std::vector<std::strin
     }
     state_->Finish();
     state_ = std::make_unique<State>();
-    commandLine_ = QuoteCommandLine(program, arguments);
+    std::filesystem::path const resolvedProgram = AbsoluteLaunchPath(program);
+    std::filesystem::path const resolvedFolder = AbsoluteLaunchPath(folder);
+    commandLine_ = QuoteCommandLine(resolvedProgram, arguments);
 
     // Everything the child needs is prepared before fork: it only calls async-signal-safe functions.
-    std::string const executable = program.string();
-    std::string const workingFolder = folder.string();
+    std::string const executable = resolvedProgram.string();
+    std::string const workingFolder = resolvedFolder.string();
     std::vector<std::string> words{executable};
     words.insert(words.end(), arguments.begin(), arguments.end());
     std::vector<char*> argv;
@@ -413,7 +502,7 @@ void Process::Start(std::filesystem::path const& program, std::vector<std::strin
     if (::pipe(pipeEnds) != 0)
 #endif
     {
-        throw std::runtime_error("cannot create the output pipe of " + program.string());
+        throw std::runtime_error("cannot create the output pipe of " + resolvedProgram.u8string());
     }
 #if defined(__linux__)
     pid_t const parent = ::getpid();
@@ -504,12 +593,8 @@ void Process::Kill()
     }
     ::kill(-state_->pid, SIGKILL);
     ::kill(state_->pid, SIGKILL);
-    // Reap the direct child; keep the UI wait bounded, even for an uninterruptible child.
-    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
-    while (Running() && std::chrono::steady_clock::now() < deadline)
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+    // Never wait on the GUI thread. A following Running/Poll reaps the direct child.
+    Running();
 }
 
 #endif
@@ -531,7 +616,7 @@ std::vector<std::string> Process::TakeLines()
 
 std::string QuoteCommandLine(std::filesystem::path const& program, std::vector<std::string> const& arguments)
 {
-    std::string line = QuoteArgument(program.string());
+    std::string line = QuoteArgument(program.u8string());
     for (std::string const& argument : arguments)
     {
         line += ' ';

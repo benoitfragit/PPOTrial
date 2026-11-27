@@ -8,15 +8,18 @@
 #include "ppokit/eval/best_store.hpp"
 #include "ppokit/schema/task_schema.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <iterator>
 #include <limits>
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <thread>
 
 namespace {
 
@@ -258,6 +261,39 @@ void FormerManifest(fs::path const& root, EvaluationSuite const& suite)
         "and a better campaign replaces it by a ppokit.best/2 manifest");
 }
 
+/** @brief Concurrent rank decisions cannot let a slower, worse candidate replace the winner. */
+void ConcurrentPromotion(fs::path const& root, EvaluationSuite const& suite)
+{
+    fs::path const checkpoints = root / "concurrent";
+    fs::create_directories(checkpoints);
+    fs::path const betterPolicy = checkpoints / "better.ppokit";
+    fs::path const worsePolicy = checkpoints / "worse.ppokit";
+    Write(betterPolicy, "better weights");
+    Write(worsePolicy, "worse weights\n" + std::string(8 * 1024 * 1024, 'w'));
+    EvaluationReport const better = Campaign(suite, 4, betterPolicy);
+    EvaluationReport const worse = Campaign(suite, 2, worsePolicy);
+    std::atomic<bool> start{false};
+    std::atomic<int> errors{0};
+    auto offer = [&](fs::path const& policy, EvaluationReport const& report) {
+        while (!start.load(std::memory_order_acquire)) std::this_thread::yield();
+        try
+        {
+            (void)ppokit::eval::OfferBest(checkpoints, suite, 10, policy, report);
+        }
+        catch (std::exception const&)
+        {
+            errors.fetch_add(1, std::memory_order_relaxed);
+        }
+    };
+    std::thread worseThread(offer, std::cref(worsePolicy), std::cref(worse));
+    std::thread betterThread(offer, std::cref(betterPolicy), std::cref(better));
+    start.store(true, std::memory_order_release);
+    worseThread.join();
+    betterThread.join();
+    Check(errors.load(std::memory_order_relaxed) == 0, "concurrent BEST offers complete without errors");
+    Check(BestWeights(checkpoints) == "better weights", "concurrent promotion keeps the highest-ranked campaign");
+}
+
 } // namespace
 
 int main()
@@ -273,6 +309,7 @@ int main()
         DamagedBest(root, suite);
         FailedPromotion(root, suite);
         FormerManifest(root, suite);
+        ConcurrentPromotion(root, suite);
     }
     catch (std::exception const& error)
     {

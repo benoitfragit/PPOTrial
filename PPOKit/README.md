@@ -7,9 +7,12 @@ Il héberge trois démonstrateurs : RLMission (PPO 2D), Blue MAPPO
 (MA-PPO 2D) et FlightControl3D (PPO 3D). RLSNA est un exemple PPO 2D
 complémentaire du monde Airspace.
 
-> En cours de construction. Conception :
+> Conception :
 > [`docs/architecture/ppokit-framework-design.md`](../docs/architecture/ppokit-framework-design.md).
-> Avancement et reprise : [`PROGRESS.md`](PROGRESS.md).
+> Les constats de migration et leurs validations sont conservés dans
+> [`docs/audits/ppokit-integration/`](../docs/audits/ppokit-integration/README.md).
+> La phase corrective courante est consignée dans
+> [`docs/audits/ppokit-stabilization-2026-11-27.md`](../docs/audits/ppokit-stabilization-2026-11-27.md).
 
 ## Disponible aujourd'hui
 

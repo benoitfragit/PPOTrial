@@ -8,8 +8,10 @@
  */
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <stdexcept>
 
 namespace ppokit::runtime {
 
@@ -24,7 +26,7 @@ constexpr Scalar AdvantageEpsilon = Scalar(1e-8);
  * @return Number of learnable rows (nothing changes when it is zero).
  */
 template<typename Row>
-std::size_t NormalizeLearnableAdvantages(Row* rows, std::size_t count) noexcept
+std::size_t NormalizeLearnableAdvantages(Row* rows, std::size_t count)
 {
     using Scalar = typename Row::ScalarType;
     std::size_t learnable = 0;
@@ -33,6 +35,10 @@ std::size_t NormalizeLearnableAdvantages(Row* rows, std::size_t count) noexcept
     {
         if (rows[index].learnable)
         {
+            if (!std::isfinite(rows[index].advantage))
+            {
+                throw std::invalid_argument("PPOKit update: non-finite advantage");
+            }
             mean += rows[index].advantage;
             ++learnable;
         }
@@ -43,22 +49,63 @@ std::size_t NormalizeLearnableAdvantages(Row* rows, std::size_t count) noexcept
     }
     mean /= static_cast<Scalar>(learnable);
     Scalar variance{};
-    for (std::size_t index = 0; index < count; ++index)
+    if (std::isfinite(mean))
     {
-        if (rows[index].learnable)
+        for (std::size_t index = 0; index < count; ++index)
         {
-            Scalar const centered = rows[index].advantage - mean;
-            variance += centered * centered;
+            if (rows[index].learnable)
+            {
+                Scalar const centered = rows[index].advantage - mean;
+                variance += centered * centered;
+            }
         }
     }
-    Scalar const scale = Scalar(1) / std::sqrt(variance / static_cast<Scalar>(learnable) + AdvantageEpsilon<Scalar>);
+    Scalar const scale = Scalar(1) /
+        std::sqrt(variance / static_cast<Scalar>(learnable) + AdvantageEpsilon<Scalar>);
+    if (std::isfinite(mean) && std::isfinite(variance) && std::isfinite(scale))
+    {
+        // Preserve the historical arithmetic exactly on the nominal finite path.
+        for (std::size_t index = 0; index < count; ++index)
+        {
+            if (rows[index].learnable)
+            {
+                rows[index].advantage = (rows[index].advantage - mean) * scale;
+            }
+        }
+        return learnable;
+    }
+
+    // Scale before summing or squaring. This fallback avoids overflow without changing
+    // any nominal result above; every normalized operand remains in [-1, 1].
+    Scalar maximum{};
+    for (std::size_t index = 0; index < count; ++index)
+        if (rows[index].learnable) maximum = std::max(maximum, std::abs(rows[index].advantage));
+    if (maximum == Scalar(0)) return learnable;
+    Scalar normalizedMean{};
+    for (std::size_t index = 0; index < count; ++index)
+        if (rows[index].learnable) normalizedMean += rows[index].advantage / maximum;
+    normalizedMean /= static_cast<Scalar>(learnable);
+    Scalar normalizedVariance{};
     for (std::size_t index = 0; index < count; ++index)
     {
-        if (rows[index].learnable)
-        {
-            rows[index].advantage = (rows[index].advantage - mean) * scale;
-        }
+        if (!rows[index].learnable) continue;
+        Scalar const centered = rows[index].advantage / maximum - normalizedMean;
+        normalizedVariance += centered * centered;
     }
+    normalizedVariance /= static_cast<Scalar>(learnable);
+    if (normalizedVariance == Scalar(0))
+    {
+        for (std::size_t index = 0; index < count; ++index)
+            if (rows[index].learnable) rows[index].advantage = Scalar(0);
+        return learnable;
+    }
+    Scalar const normalizedEpsilon = AdvantageEpsilon<Scalar> / maximum / maximum;
+    Scalar const normalizedScale = Scalar(1) / std::sqrt(normalizedVariance + normalizedEpsilon);
+    if (!std::isfinite(normalizedScale))
+        throw std::runtime_error("PPOKit update: advantage normalization overflowed");
+    for (std::size_t index = 0; index < count; ++index)
+        if (rows[index].learnable)
+            rows[index].advantage = (rows[index].advantage / maximum - normalizedMean) * normalizedScale;
     return learnable;
 }
 

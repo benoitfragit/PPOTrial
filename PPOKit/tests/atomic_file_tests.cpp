@@ -4,6 +4,8 @@
  */
 #include "ppokit/artifacts/atomic_file.hpp"
 
+#include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -12,6 +14,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace {
 
@@ -119,25 +123,82 @@ void FailingWriterLeavesArtifactUntouched()
     Check(!std::filesystem::exists(path.string() + ".tmp"), "a failed write removes its temporary");
 }
 
-void UnwritableTemporaryKeepsArtifact()
+void NestedWritesUseDistinctTemporaries()
 {
-    ScratchDirectory scratch("failing_commit");
+    ScratchDirectory scratch("nested_writes");
+    auto const path = scratch.Path() / "model.txt";
+    WriteFileAtomically(path, [&](std::ostream& outer) {
+        outer << "outer generation";
+        WriteText(path, "inner generation", AtomicWriteOptions{});
+    }, AtomicWriteOptions{}, "outer test artifact");
+    Check(ReadAll(path) == "outer generation", "nested writes never share or truncate a temporary file");
+}
+
+void ConcurrentWritesCommitOnlyCompleteGenerations()
+{
+    ScratchDirectory scratch("concurrent_writes");
+    auto const path = scratch.Path() / "model.txt";
+    constexpr std::size_t WriterCount = 6;
+    constexpr std::size_t WritesPerThread = 4;
+    std::vector<std::string> payloads;
+    for (std::size_t index = 0; index < WriterCount; ++index)
+    {
+        payloads.push_back("generation-" + std::to_string(index) + "\n"
+            + std::string(64 * 1024, static_cast<char>('A' + index)));
+    }
+    std::atomic<bool> start{false};
+    std::atomic<int> writeFailures{0};
+    std::vector<std::thread> writers;
+    for (std::size_t index = 0; index < WriterCount; ++index)
+    {
+        writers.emplace_back([&, index] {
+            while (!start.load(std::memory_order_acquire)) std::this_thread::yield();
+            try
+            {
+                for (std::size_t write = 0; write < WritesPerThread; ++write)
+                    WriteText(path, payloads[index], AtomicWriteOptions::Binary());
+            }
+            catch (std::exception const&)
+            {
+                writeFailures.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+    start.store(true, std::memory_order_release);
+    for (auto& writer : writers) writer.join();
+    std::string const committed = ReadAll(path);
+    Check(writeFailures.load(std::memory_order_relaxed) == 0, "concurrent writers all complete successfully");
+    Check(std::find(payloads.begin(), payloads.end(), committed) != payloads.end(),
+        "the final file is one complete concurrent generation");
+}
+
+void UnicodePathRoundTrips()
+{
+    ScratchDirectory scratch("unicode");
+    auto const path = scratch.Path() / std::filesystem::path(u8"données_日本")
+        / std::filesystem::path(u8"modèle é.txt");
+    WriteText(path, "unicode path payload", AtomicWriteOptions{});
+    Check(ReadAll(path) == "unicode path payload", "UTF-8 and UTF-16 path components round-trip");
+}
+
+void InvalidTemporarySuffixKeepsArtifact()
+{
+    ScratchDirectory scratch("invalid_suffix");
     auto const path = scratch.Path() / "model.txt";
     WriteText(path, "valid", AtomicWriteOptions{});
-    // A non-empty directory squatting the temporary path makes the write fail
-    // before any rename, on every platform.
-    std::filesystem::create_directories(scratch.Path() / "model.txt.tmp" / "occupied");
+    AtomicWriteOptions options;
+    options.temporarySuffix = "";
     bool thrown = false;
     try
     {
-        WriteText(path, "lost", AtomicWriteOptions{});
+        WriteText(path, "lost", options);
     }
     catch (ArtifactWriteError const& error)
     {
-        thrown = std::string(error.what()).find("test artifact") != std::string::npos;
+        thrown = std::string(error.what()).find("suffix") != std::string::npos;
     }
-    Check(thrown, "I/O failure raises ArtifactWriteError naming its owner");
-    Check(ReadAll(path) == "valid", "the artifact survives a failed replacement");
+    Check(thrown, "an invalid temporary suffix is reported");
+    Check(ReadAll(path) == "valid", "invalid temporary configuration keeps the previous artifact");
 }
 
 void BlockedBackupKeepsArtifact()
@@ -145,8 +206,7 @@ void BlockedBackupKeepsArtifact()
     ScratchDirectory scratch("blocked_backup");
     auto const path = scratch.Path() / "model.txt";
     WriteText(path, "valid", AtomicWriteOptions{});
-    // A non-empty directory squatting the backup path makes the commit fail
-    // when the previous generation is moved aside.
+    // A non-empty directory squatting the backup path makes checked cleanup fail.
     std::filesystem::create_directories(scratch.Path() / "model.txt.bak" / "occupied");
     bool thrown = false;
     try
@@ -155,7 +215,7 @@ void BlockedBackupKeepsArtifact()
     }
     catch (ArtifactWriteError const& error)
     {
-        thrown = std::string(error.what()).find("cannot replace") != std::string::npos;
+        thrown = std::string(error.what()).find("remove stale backup") != std::string::npos;
     }
     Check(thrown, "a failed commit raises ArtifactWriteError");
     Check(ReadAll(path) == "valid", "a failed commit keeps the previous artifact");
@@ -178,7 +238,10 @@ int main()
     RemovesBackupByDefault();
     KeepsPreviousGenerationWhenRequested();
     FailingWriterLeavesArtifactUntouched();
-    UnwritableTemporaryKeepsArtifact();
+    NestedWritesUseDistinctTemporaries();
+    ConcurrentWritesCommitOnlyCompleteGenerations();
+    UnicodePathRoundTrips();
+    InvalidTemporarySuffixKeepsArtifact();
     BlockedBackupKeepsArtifact();
     HonoursBinaryMode();
     if (failures != 0)

@@ -1074,8 +1074,8 @@ sont reprises de `flight_types.hpp` et `flight_policy.hpp` lors de l'étape 3.
 
 ## 16. Plan de migration
 
-Chaque étape fait l'objet d'une PR séparée. L'avancement réel est suivi dans
-[`PPOKit/PROGRESS.md`](../../PPOKit/PROGRESS.md).
+Les constats de migration et leurs validations sont conservés dans
+[`docs/audits/ppokit-integration/`](../audits/ppokit-integration/README.md).
 
 | # | Étape | Critère d'acceptation |
 |---|---|---|

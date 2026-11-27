@@ -85,7 +85,7 @@ void RemoveQuietly(std::filesystem::path const& path) noexcept
  * @brief Makes `generation` a copy of `policyFile` whose digest is `digest`.
  * @details An existing generation of the same name must hold the same bytes. A new one is
  * copied to a temporary, checked against the digest (the policy file changed during the copy,
- * or the copy is damaged) and only then renamed: a generation is complete or absent.
+ * or the copy is damaged) and only then atomically installed: a generation is complete or absent.
  * @throws std::runtime_error when an existing generation differs or the copy does not match.
  */
 void WriteGeneration(std::filesystem::path const& policyFile, std::string const& digest,
@@ -100,8 +100,9 @@ void WriteGeneration(std::filesystem::path const& policyFile, std::string const&
         }
         return;
     }
-    std::filesystem::path const temporary = artifacts::SuffixedPath(generation, ".partial");
-    RemoveQuietly(temporary);
+    // Clean the fixed temporary name used by best/2 before unique temporaries were introduced.
+    RemoveQuietly(artifacts::SuffixedPath(generation, ".partial"));
+    std::filesystem::path const temporary = artifacts::detail::UniqueTemporaryPath(generation, ".partial");
     try
     {
         std::filesystem::copy_file(policyFile, temporary);
@@ -109,7 +110,8 @@ void WriteGeneration(std::filesystem::path const& policyFile, std::string const&
         {
             throw std::runtime_error("the copy of " + policyFile.string() + " differs from the policy evaluated");
         }
-        std::filesystem::rename(temporary, generation);
+        artifacts::CommitTemporaryFile(
+            temporary, generation, artifacts::AtomicWriteOptions::Binary(), "BEST policy generation");
     }
     catch (...)
     {
@@ -220,6 +222,9 @@ bool OfferBest(std::filesystem::path const& checkpoints, EvaluationSuite const& 
     std::filesystem::path const& policyFile, EvaluationReport const& report,
     std::optional<std::string> const& environmentState, std::vector<double> const& rewardWeights)
 {
+    // Serialize the rank decision as well as the manifest commit. Immutable generation
+    // files and the atomic manifest keep lock-free readers stable.
+    artifacts::detail::ScopedPathLock const lock(checkpoints, "BEST publication");
     if (report.suite != suite.name)
         throw std::invalid_argument("cannot promote a report from another evaluation suite");
     if (!report.Passed())

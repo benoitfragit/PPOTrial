@@ -162,6 +162,25 @@ void PersistsStageByName()
     Curriculum restored = SampleCurriculum();
     Check(ppokit::runtime::LoadCurriculumStage(path, restored) && restored.StageName() == "windy",
         "stage restored by name");
+    Curriculum partial = SampleCurriculum();
+    ScenarioDraw const calm{0, false};
+    partial.Record(calm, true);
+    partial.Record(calm, false);
+    partial.Record(calm, true);
+    ppokit::runtime::SaveCurriculumStage(path, partial);
+    Curriculum continued = SampleCurriculum();
+    Check(ppokit::runtime::LoadCurriculumStage(path, continued)
+            && continued.WindowEpisodes() == 3 && continued.WindowSuccesses() == 2
+            && continued.Record(calm, true) && continued.StageName() == "windy",
+        "an interrupted promotion window continues exactly after resume");
+    {
+        std::ofstream stream(path, std::ios::trunc);
+        stream << "windy\n";
+    }
+    Curriculum legacy = SampleCurriculum();
+    Check(ppokit::runtime::LoadCurriculumStage(path, legacy) && legacy.StageName() == "windy"
+            && legacy.WindowEpisodes() == 0,
+        "legacy stage-only curriculum state remains readable");
     {
         std::ofstream stream(path, std::ios::trunc);
         stream << "unknown\n";

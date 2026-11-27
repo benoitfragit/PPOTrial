@@ -87,6 +87,12 @@ EvaluationView::EvaluationView(std::filesystem::path folder, std::filesystem::pa
 
 bool EvaluationView::Save()
 {
+    if (!editingAllowed_)
+    {
+        status_ = "Stop the active run before saving evaluation suites.";
+        statusIsError_ = true;
+        return false;
+    }
     std::string error;
     bool const saved = document_.Save(error);
     statusIsError_ = !saved;
@@ -96,6 +102,12 @@ bool EvaluationView::Save()
 
 void EvaluationView::Revert()
 {
+    if (!editingAllowed_)
+    {
+        status_ = "Stop the active run before reverting evaluation suites.";
+        statusIsError_ = true;
+        return;
+    }
     document_.Revert();
     RefreshResults();
     selected_ = std::min(selected_, document_.Suites().empty() ? 0 : document_.Suites().size() - 1);
@@ -126,7 +138,9 @@ void EvaluationView::Draw(runtime::RunLog const* journal)
     {
         selected_ = std::min(selected_, document_.Suites().size() - 1);
         editor::EditableSuite& suite = document_.Suite(selected_);
+        ImGui::BeginDisabled(!editingAllowed_);
         DrawSuite(suite);
+        ImGui::EndDisabled();
         DrawResults(suite, journal);
     }
     ImGui::EndChild();
@@ -138,7 +152,7 @@ void EvaluationView::DrawToolbar()
     ImGui::SameLine();
     ImGui::TextDisabled("eval/<suite>.json");
     MutedWrapped("Select a suite on the left to edit it. Save changes before running Evaluate.");
-    ImGui::BeginDisabled(!document_.Dirty());
+    ImGui::BeginDisabled(!document_.Dirty() || !editingAllowed_);
     if (ImGui::Button("Save##suites"))
     {
         Save();
@@ -173,6 +187,7 @@ void EvaluationView::DrawSuiteList()
         }
     }
     ImGui::Separator();
+    ImGui::BeginDisabled(!editingAllowed_);
     if (ImGui::Button("Add"))
     {
         selected_ = document_.Add();
@@ -190,6 +205,7 @@ void EvaluationView::DrawSuiteList()
         document_.Remove(selected_);
         selected_ = selected_ == 0 ? 0 : selected_ - 1;
     }
+    ImGui::EndDisabled();
     ImGui::EndDisabled();
     ImGui::EndChild();
 }

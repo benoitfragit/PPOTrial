@@ -20,7 +20,7 @@ std::filesystem::path DefaultRecentProjectsFile();
 /** @brief The remembered folders that still exist, most recent first (none when the file is missing). */
 std::vector<std::filesystem::path> LoadRecentProjects(std::filesystem::path const& file);
 
-/** @brief Puts `folder` first (once), keeps MaximumRecentProjects, writes the file. Best effort: errors are ignored. */
+/** @brief Puts `folder` first (once) and atomically keeps MaximumRecentProjects. Best-effort errors preserve the old file. */
 void RememberProject(std::filesystem::path const& file, std::filesystem::path const& folder);
 
 /** @brief Forgets `folder`. Best effort. */

@@ -107,6 +107,16 @@ Outcome Run(std::string const& arguments)
     return outcome;
 }
 
+void CliNumbersAreStrict()
+{
+    for (std::string const value : {"0.1junk", "nan", "inf", " 0.1"})
+    {
+        Outcome const outcome = Run("play --project missing --step-seconds \"" + value + "\"");
+        Check(outcome.code == 2 && Contains(outcome.output, "--step-seconds requires one finite number"),
+            "malformed --step-seconds is a usage error with complete consumption: " + value + " / " + outcome.output);
+    }
+}
+
 /** @brief Pump the supervisor with a deadline while the real runner is executing in another process. */
 template<class Done>
 bool PollUntil(ppokit::ipc::Supervisor& supervisor, Done done, std::chrono::seconds timeout = std::chrono::seconds(6))
@@ -845,6 +855,7 @@ int main()
     fs::remove_all(root, ignored);
     try
     {
+        CliNumbersAreStrict();
         fs::path const project = MakeProject(root / "reach", 100.0);
         std::string const at = " --project \"" + project.string() + "\"";
 

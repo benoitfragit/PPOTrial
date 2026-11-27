@@ -1,6 +1,5 @@
 # PPOKit: framework shared by the PPOTrial examples.
 # Design and migration plan: docs/architecture/ppokit-framework-design.md
-# Progress journal for resuming the work: PPOKit/PROGRESS.md
 #
 # The public headers live under include/ppokit and never expose a backend
 # (rl_tools), a simulator or a GUI library.
@@ -150,7 +149,7 @@ target_link_libraries(ppokit_artifacts PRIVATE nlohmann_json::nlohmann_json)
 
 if (PPO_BUILD_CORE_TESTS)
     add_executable(PPOKitAtomicFileTests tests/atomic_file_tests.cpp)
-    target_link_libraries(PPOKitAtomicFileTests PRIVATE PPOKit::Artifacts)
+    target_link_libraries(PPOKitAtomicFileTests PRIVATE PPOKit::Artifacts Threads::Threads)
     add_test(NAME PPOKitAtomicFileTests COMMAND PPOKitAtomicFileTests)
 
     add_executable(PPOKitGaeTests tests/gae_tests.cpp)
@@ -200,7 +199,7 @@ if (PPO_BUILD_CORE_TESTS)
     add_test(NAME PPOKitEvaluationTests COMMAND PPOKitEvaluationTests)
 
     add_executable(PPOKitBestStoreTests tests/best_store_tests.cpp)
-    target_link_libraries(PPOKitBestStoreTests PRIVATE PPOKit::Evaluation PPOKit::Artifacts)
+    target_link_libraries(PPOKitBestStoreTests PRIVATE PPOKit::Evaluation PPOKit::Artifacts Threads::Threads)
     add_test(NAME PPOKitBestStoreTests COMMAND PPOKitBestStoreTests)
 
     add_executable(PPOKitBackendLearnerTests tests/backend_learner_tests.cpp)
@@ -227,7 +226,7 @@ if (PPO_BUILD_CORE_TESTS)
     add_test(NAME PPOKitCurriculumTests COMMAND PPOKitCurriculumTests)
 
     add_executable(PPOKitPublicationTests tests/publication_tests.cpp)
-    target_link_libraries(PPOKitPublicationTests PRIVATE PPOKit::Training)
+    target_link_libraries(PPOKitPublicationTests PRIVATE PPOKit::Training Threads::Threads)
     add_test(NAME PPOKitPublicationTests COMMAND PPOKitPublicationTests)
 
     add_executable(PPOKitRunLogTests tests/run_log_tests.cpp)

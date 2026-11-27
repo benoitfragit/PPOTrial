@@ -31,7 +31,9 @@ public:
     Process& operator=(Process const&) = delete;
 
     /**
-     * @brief Starts `program` with `arguments` in `folder`.
+     * @brief Starts `program` with UTF-8 `arguments` in `folder`.
+     * @details Program and working-directory paths are resolved absolutely before launch;
+     *          Windows passes paths and arguments to CreateProcessW as UTF-16.
      * @throws std::runtime_error when a program already runs or it cannot be started.
      */
     void Start(std::filesystem::path const& program, std::vector<std::string> const& arguments,

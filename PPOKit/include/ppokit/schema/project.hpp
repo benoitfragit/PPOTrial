@@ -194,21 +194,23 @@ char const* CommandName(ProjectCommand command) noexcept;
 std::string CommandExecutable(Project const& project, ProjectCommand command);
 
 /**
- * @brief Where the executable of `command` runs from: in the project folder, then among
- *        `knownPrograms` (matched by file name, ".exe" added on Windows), then on the PATH.
- *        Empty when it is nowhere.
+ * @brief Resolves the executable of `command` to an absolute path.
+ * @details Explicit paths are only resolved from the project. Bare names are searched in
+ *          the project, then the registry, then PATH. An ambiguous registry or PATH lookup
+ *          is rejected instead of selecting an arbitrary old binary.
+ * @return Absolute executable path, or an empty path when absent or ambiguous.
  */
 std::filesystem::path FindProgram(Project const& project, ProjectCommand command,
     std::vector<std::filesystem::path> const& knownPrograms);
 
-/** @brief Program paths of a registry file written by the build, one per line (none when missing). */
+/** @brief Program paths of a registry file, relative entries resolved beside it. */
 std::vector<std::filesystem::path> ReadProgramRegistry(std::filesystem::path const& registry);
 
 /**
  * @brief The file of a library named in project.json: a path, a file of the project folder,
  *        or a library the build registered whose name is `name` (prefix "lib" and extension
  *        ignored).
- * @return Empty when none is found.
+ * @return Absolute path, or empty when none is found or a bare name is ambiguous.
  */
 std::filesystem::path FindLibrary(Project const& project, std::string const& name,
     std::vector<std::filesystem::path> const& knownPrograms);

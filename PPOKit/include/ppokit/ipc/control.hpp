@@ -27,7 +27,25 @@ enum class State : std::uint8_t
     Paused,
     Stopping,
     Saving,
-    Stopped
+    Stopped,
+    Error
+};
+
+/** @brief Observable lifecycle of one correlated command. */
+enum class CommandState : std::uint8_t
+{
+    Pending,
+    Received,
+    Applied,
+    Rejected,
+    Indeterminate
+};
+
+struct CommandResult final
+{
+    Command command = Command::Pause;
+    CommandState state = CommandState::Pending;
+    std::string message;
 };
 
 /** @brief Human-readable last state acknowledged by the worker. */
@@ -49,6 +67,8 @@ class Supervisor final
     bool Request(Command command);
     bool SetRewards(runtime::WeightRequest const &request);
     std::optional<runtime::WeightAnswer> TakeAnswer();
+    /** @brief Latest command outcome, including receipt and indeterminate application. */
+    std::optional<CommandResult> LastCommandResult() const;
     State LastState() const noexcept;
     bool Connected() const noexcept;
     /** @brief Last terminal payload from the worker, independent of process exit. */

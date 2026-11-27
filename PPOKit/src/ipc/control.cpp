@@ -206,6 +206,8 @@ char const *Name(State state) noexcept
         return "saving";
     case State::Stopped:
         return "stopped";
+    case State::Error:
+        return "error";
     }
     return "unknown";
 }
@@ -218,10 +220,12 @@ struct Supervisor::Impl
     std::uint64_t sequence = 0, lastStatus = 0;
     State state = State::Starting;
     std::string error;
-    bool stop = false, accepted = false;
+    bool stop = false, accepted = false, deadlineReported = false;
     std::optional<Frame> pending;
     std::optional<std::uint64_t> weightsId;
     std::optional<runtime::WeightAnswer> answer;
+    std::optional<CommandResult> result;
+    std::uint64_t resultCorrelation = 0;
     Clock::time_point seen{}, sent{}, issued{};
 
     Impl()
@@ -231,7 +235,7 @@ struct Supervisor::Impl
         for (auto &value : session)
             value = static_cast<std::uint8_t>(byte(random));
     }
-    bool Queue(Type type, std::string payload)
+    bool Queue(Type type, Command command, std::string payload)
     {
         if (type == Type::Stop && stop)
             return true;
@@ -246,47 +250,71 @@ struct Supervisor::Impl
         }
         pending = Frame{type, ++sequence, 0, std::move(payload)};
         accepted = false;
+        deadlineReported = false;
         issued = Clock::now();
         sent = {};
+        result = CommandResult{command, CommandState::Pending, {}};
+        resultCorrelation = pending->sequence;
         return true;
     }
     void Read(std::uint16_t from, Frame const &frame)
     {
-        if (peer && peer != from)
-            return;
+        Clock::time_point const now = Clock::now();
         if (frame.type == Type::Hello && frame.payload.empty())
         {
+            if (peer && peer != from && now - seen < Silence)
+                return;
+            if (peer != from)
+                lastStatus = 0;
             peer = from;
+            seen = now;
             socket.Send(peer, session, {Type::HelloAck, ++sequence, frame.sequence, {}});
         }
-        if (!peer)
+        if (!peer || peer != from)
             return;
-        seen = Clock::now();
+        seen = now;
         if (frame.type == Type::Error && frame.sequence > lastStatus && !frame.payload.empty())
         {
             error = frame.payload;
+            state = State::Error;
             lastStatus = frame.sequence;
         }
         if ((frame.type == Type::Status || frame.type == Type::Stopped) && frame.sequence > lastStatus &&
             frame.payload.size() == 1 &&
-            static_cast<unsigned char>(frame.payload[0]) <= static_cast<unsigned>(State::Stopped))
+            static_cast<unsigned char>(frame.payload[0]) <= static_cast<unsigned>(State::Error))
         {
             state = static_cast<State>(frame.payload[0]);
             lastStatus = frame.sequence;
         }
-        if (!pending || frame.correlation != pending->sequence)
-            return;
         if (frame.type != Type::Ack && frame.type != Type::Nack)
+            return;
+        bool const current = pending && frame.correlation == pending->sequence;
+        bool const late = result && result->state == CommandState::Indeterminate
+            && frame.correlation == resultCorrelation;
+        if (!current && !late)
             return;
         if (frame.type == Type::Ack && frame.payload == "received")
         {
-            accepted = true;
+            if (current)
+            {
+                accepted = true;
+                if (!deadlineReported)
+                {
+                    result->state = CommandState::Received;
+                    result->message = "Received; awaiting application";
+                }
+            }
             return;
         }
-        if (weightsId)
+        if (current && weightsId)
             answer = runtime::WeightAnswer{*weightsId, frame.type == Type::Ack, frame.payload};
-        weightsId.reset();
-        pending.reset();
+        if (current)
+        {
+            weightsId.reset();
+            pending.reset();
+        }
+        result->state = frame.type == Type::Ack ? CommandState::Applied : CommandState::Rejected;
+        result->message = frame.payload;
     }
 };
 
@@ -310,12 +338,20 @@ void Supervisor::Tick()
     auto &s = *impl_;
     s.socket.Drain(s.session, [&](std::uint16_t from, Frame const &f) { s.Read(from, f); });
     auto const now = Clock::now();
-    if (s.pending && now - s.issued >= CommandDeadline && !s.stop && (!s.accepted || !Connected()))
+    if (s.pending && now - s.issued >= CommandDeadline && !s.deadlineReported)
     {
+        s.deadlineReported = true;
+        s.result->state = CommandState::Indeterminate;
+        s.result->message = s.accepted
+            ? "Command received but its application was not confirmed"
+            : "Command delivery was not confirmed";
         if (s.weightsId)
-            s.answer = runtime::WeightAnswer{*s.weightsId, false, "No final acknowledgement received"};
-        s.weightsId.reset();
-        s.pending.reset();
+            s.answer = runtime::WeightAnswer{*s.weightsId, false, s.result->message};
+        if (!s.stop)
+        {
+            s.weightsId.reset();
+            s.pending.reset();
+        }
     }
     if (s.peer && now - s.sent >= (s.pending ? Retry : Heartbeat))
     {
@@ -330,11 +366,11 @@ bool Supervisor::Request(Command command)
 {
     if (command == Command::SetRewards)
         return false;
-    return impl_->Queue(static_cast<Type>(command), {});
+    return impl_->Queue(static_cast<Type>(command), command, {});
 }
 bool Supervisor::SetRewards(runtime::WeightRequest const &request)
 {
-    if (!impl_->Queue(Type::SetRewards, nlohmann::json(request.weights).dump()))
+    if (!impl_->Queue(Type::SetRewards, Command::SetRewards, nlohmann::json(request.weights).dump()))
         return false;
     impl_->weightsId = request.id;
     return true;
@@ -344,6 +380,10 @@ std::optional<runtime::WeightAnswer> Supervisor::TakeAnswer()
     auto answer = std::move(impl_->answer);
     impl_->answer.reset();
     return answer;
+}
+std::optional<CommandResult> Supervisor::LastCommandResult() const
+{
+    return impl_->result;
 }
 State Supervisor::LastState() const noexcept
 {

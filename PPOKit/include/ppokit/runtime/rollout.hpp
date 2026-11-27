@@ -58,7 +58,7 @@ constexpr bool EndsEpisode(StepEnd end) noexcept
  */
 template<typename Row>
 std::size_t ComputeTrajectoryAdvantages(Row* rows, std::size_t steps, std::size_t streams,
-    typename Row::ScalarType gamma, typename Row::ScalarType lambda) noexcept
+    typename Row::ScalarType gamma, typename Row::ScalarType lambda)
 {
     using Scalar = typename Row::ScalarType;
     std::size_t learnable = 0;
@@ -71,6 +71,10 @@ std::size_t ComputeTrajectoryAdvantages(Row* rows, std::size_t steps, std::size_
             row.advantage = core::GaeStep(row.reward, row.value, row.nextValue, followingAdvantage, gamma,
                 lambda, row.end == StepEnd::Terminated, row.end == StepEnd::Truncated);
             row.valueTarget = row.value + row.advantage;
+            if (!std::isfinite(row.advantage) || !std::isfinite(row.valueTarget))
+            {
+                throw std::invalid_argument("PPOKit rollout: non-finite advantage or value target");
+            }
             followingAdvantage = row.advantage;
             learnable += row.learnable ? 1 : 0;
         }
@@ -220,6 +224,15 @@ public:
         {
             throw std::invalid_argument("PPOKit rollout: transition dimensions differ from the buffer");
         }
+        auto const finite = [](auto const& values) {
+            for (auto const value : values)
+                if (!std::isfinite(value)) return false;
+            return true;
+        };
+        if (!finite(row.observation) || !finite(row.action))
+        {
+            throw std::invalid_argument("PPOKit rollout: non-finite observation or action");
+        }
         destination = row;
         rows_.Commit();
     }
@@ -231,7 +244,7 @@ public:
      * is a one-step estimate bootstrapped on its nextValue.
      * @return Number of rows eligible to train the actor.
      */
-    std::size_t ComputeAdvantages(Scalar gamma, Scalar lambda) noexcept
+    std::size_t ComputeAdvantages(Scalar gamma, Scalar lambda)
     {
         return ComputeTrajectoryAdvantages(rows_.Data(), Size(), 1, gamma, lambda);
     }
@@ -241,7 +254,7 @@ public:
      * @details Uses the population variance; rows that are not learnable keep their value.
      * Normalizing makes the actor step size independent of the reward scale.
      */
-    void NormalizeAdvantages() noexcept
+    void NormalizeAdvantages()
     {
         NormalizeLearnableAdvantages(rows_.Data(), Size());
     }

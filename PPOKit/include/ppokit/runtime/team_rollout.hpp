@@ -106,6 +106,16 @@ public:
                 throw std::invalid_argument("PPOKit team rollout: non-finite reward or log-probability for agent "
                     + std::to_string(agent));
             }
+            auto const finite = [](std::vector<float> const& values) {
+                for (float const value : values)
+                    if (!std::isfinite(value)) return false;
+                return true;
+            };
+            if (row.member && (!finite(row.observation) || !finite(row.action)))
+            {
+                throw std::invalid_argument("PPOKit team rollout: non-finite observation or action for agent "
+                    + std::to_string(agent));
+            }
         }
         rows_.Commit();
     }
@@ -129,7 +139,7 @@ public:
     }
 
     /** @brief Zero mean, unit variance over the learnable rows; returns their number. */
-    std::size_t NormalizeAdvantages() noexcept { return NormalizeLearnableAdvantages(rows_.Data(), Size()); }
+    std::size_t NormalizeAdvantages() { return NormalizeLearnableAdvantages(rows_.Data(), Size()); }
 
     /**
      * @brief Lists the member rows of the full rollout, in step-major order (see Member).

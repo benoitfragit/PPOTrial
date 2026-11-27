@@ -1,11 +1,12 @@
 /**
  * @file PPOKit/include/ppokit/artifacts/atomic_file.hpp
  * @brief Transactional replacement of a file: write a temporary, then commit it.
- * @details A reader never observes a partially written artifact. While the
- * replacement is committed, the previous file is moved to a backup path and
- * restored if the final rename fails. Callers choose whether that backup is
- * kept afterwards, because some workflows archive it (FlightControl3D CI
- * uploads `*.previous`) while others only need the rollback.
+ * @details A reader never observes a missing or partially written artifact.
+ * The replacement uses the native atomic-replace primitive of the host OS.
+ * Callers choose whether the previous generation is copied to a backup path,
+ * because some workflows archive it (FlightControl3D CI uploads
+ * `*.previous`). Writers targeting the same file are serialized across
+ * processes and always use distinct temporary paths.
  */
 #pragma once
 
@@ -13,16 +14,56 @@
 #include <filesystem>
 #include <fstream>
 #include <ios>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
 namespace ppokit::artifacts {
 
+namespace detail {
+
+/**
+ * @brief Bounded cross-process exclusion associated with one normalized path.
+ * @details This internal primitive lets multi-file transactions serialize
+ * their preparation while each individual member still uses atomic replace.
+ */
+class ScopedPathLock final
+{
+public:
+    /** @brief Acquires the path lock or throws after the bounded wait. */
+    ScopedPathLock(std::filesystem::path const& path, char const* context);
+    ~ScopedPathLock();
+    ScopedPathLock(ScopedPathLock const&) = delete;
+    ScopedPathLock& operator=(ScopedPathLock const&) = delete;
+
+private:
+    struct Handle;
+    std::unique_ptr<Handle> handle_;
+};
+
+/**
+ * @brief Returns a process-unique temporary path beside `path`.
+ * @param path Final artifact path.
+ * @param suffix Human-readable temporary suffix.
+ * @return A path on the same filesystem as the final artifact.
+ */
+std::filesystem::path UniqueTemporaryPath(std::filesystem::path const& path, char const* suffix);
+
+/**
+ * @brief Flushes a closed file through the operating-system cache.
+ * @param path File whose bytes must reach stable storage.
+ * @param context Short owner name used in error messages.
+ * @throws ArtifactWriteError when the file cannot be opened or synchronized.
+ */
+void SynchronizeFile(std::filesystem::path const& path, char const* context);
+
+} // namespace detail
+
 /** @brief What happens to the previous file once the new one is committed. */
 enum class BackupPolicy : std::uint8_t
 {
-    /** The backup only protects the commit and is deleted after success. */
+    /** No previous generation is kept; a stale backup is removed before commit. */
     RemoveAfterCommit,
     /** The backup stays on disk as the previous generation of the artifact. */
     KeepPrevious,
@@ -73,7 +114,7 @@ std::filesystem::path SuffixedPath(std::filesystem::path const& path, char const
 /**
  * @brief Replaces `path` by an already written `temporary` file.
  * @param context Short owner name used in error messages, e.g. "FlightControl3D checkpoint".
- * @throws ArtifactWriteError when the commit fails; the previous file is then restored.
+ * @throws ArtifactWriteError when synchronization or the atomic replacement fails.
  */
 void CommitTemporaryFile(std::filesystem::path const& temporary, std::filesystem::path const& path,
     AtomicWriteOptions const& options, char const* context);
@@ -93,21 +134,34 @@ void WriteFileAtomically(std::filesystem::path const& path, Writer&& writer,
 {
     if (options.createParentDirectories && path.has_parent_path())
     {
-        std::filesystem::create_directories(path.parent_path());
+        try
+        {
+            std::filesystem::create_directories(path.parent_path());
+        }
+        catch (std::filesystem::filesystem_error const& error)
+        {
+            throw ArtifactWriteError(std::string(context) + ": cannot create parent directories for '"
+                + path.u8string() + "' (" + error.what() + ")");
+        }
     }
-    auto const temporary = SuffixedPath(path, options.temporarySuffix);
+    auto const temporary = detail::UniqueTemporaryPath(path, options.temporarySuffix);
     try
     {
         std::ofstream stream(temporary, options.mode | std::ios::out | std::ios::trunc);
         if (!stream)
         {
-            throw ArtifactWriteError(std::string(context) + ": cannot create '" + temporary.string() + "'");
+            throw ArtifactWriteError(std::string(context) + ": cannot create '" + temporary.u8string() + "'");
         }
         std::forward<Writer>(writer)(static_cast<std::ostream&>(stream));
         stream.flush();
         if (!stream)
         {
-            throw ArtifactWriteError(std::string(context) + ": cannot write '" + temporary.string() + "'");
+            throw ArtifactWriteError(std::string(context) + ": cannot write '" + temporary.u8string() + "'");
+        }
+        stream.close();
+        if (!stream)
+        {
+            throw ArtifactWriteError(std::string(context) + ": cannot close '" + temporary.u8string() + "'");
         }
     }
     catch (...)

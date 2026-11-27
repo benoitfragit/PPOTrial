@@ -79,6 +79,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <cctype>
 #include <optional>
 #include <random>
 #include <stdexcept>
@@ -144,6 +145,30 @@ std::uint64_t ReadCount(std::string const& option, std::string const& text)
     return count;
 }
 
+double ReadDouble(std::string const& option, std::string const& text)
+{
+    if (text.empty() || std::isspace(static_cast<unsigned char>(text.front()))
+        || std::isspace(static_cast<unsigned char>(text.back())))
+    {
+        throw UsageError(option + " requires one finite number: '" + text + "'");
+    }
+    std::size_t consumed = 0;
+    double value = 0.0;
+    try
+    {
+        value = std::stod(text, &consumed);
+    }
+    catch (std::exception const&)
+    {
+        throw UsageError(option + " requires one finite number: '" + text + "'");
+    }
+    if (consumed != text.size() || !std::isfinite(value))
+    {
+        throw UsageError(option + " requires one finite number: '" + text + "'");
+    }
+    return value;
+}
+
 Options ParseOptions(int argc, char** argv)
 {
     if (argc < 2)
@@ -203,7 +228,7 @@ Options ParseOptions(int argc, char** argv)
         }
         else if (argument == "--step-seconds")
         {
-            options.stepSeconds = std::stod(argv[++index]);
+            options.stepSeconds = ReadDouble(argument, argv[++index]);
         }
         else if (argument == "--until-passed")
         {

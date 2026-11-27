@@ -95,6 +95,7 @@ void KillAndRestart()
     }
     Check(refused, "a second Start while one runs is refused");
     process.Kill();
+    WaitForExit(process);
     Check(!process.Running() && process.ExitCode().has_value(), "Kill ends the program");
     process.Start(PPOKIT_ECHO_PROGRAM, {"again"}, {});
     Check(Has(WaitForExit(process), "arg: again") && process.ExitCode() == 0, "the process can start again");
@@ -115,6 +116,32 @@ void MissingProgram()
         failed = true;
     }
     Check(failed, "a missing program fails, at start or with a non-zero exit code");
+}
+
+/** @brief Executable and working-directory paths with spaces and Unicode survive launch. */
+void UnicodePaths()
+{
+    std::filesystem::path const root = std::filesystem::temp_directory_path()
+        / std::filesystem::u8path(u8"ppokit processus été") / std::filesystem::u8path(u8"répertoire 测试");
+    std::error_code error;
+    std::filesystem::remove_all(root.parent_path(), error);
+    error.clear();
+    std::filesystem::create_directories(root, error);
+    Check(!error, "the Unicode process test folder is created");
+    std::filesystem::path const source(PPOKIT_ECHO_PROGRAM);
+    std::filesystem::path copyName = std::filesystem::u8path(u8"écho 测试");
+    copyName += source.extension();
+    std::filesystem::path const copy = root / copyName;
+    std::filesystem::copy_file(source, copy, std::filesystem::copy_options::overwrite_existing, error);
+    Check(!error, "the executable is copied to a Unicode path");
+    if (!error)
+    {
+        editor::Process process;
+        process.Start(copy, {"unicode-path"}, root);
+        Check(Has(WaitForExit(process), "arg: unicode-path") && process.ExitCode() == 0,
+            "a program starts from Unicode executable and working-directory paths");
+    }
+    std::filesystem::remove_all(root.parent_path(), error);
 }
 
 /** @brief A descendant holding stdout cannot delay completion or the next launch. */
@@ -144,6 +171,7 @@ int main()
     KillAndRestart();
     InheritedPipe();
     MissingProgram();
+    UnicodePaths();
     Quoting();
     if (failures != 0)
     {

@@ -126,6 +126,13 @@ private:
     void Follow(OverviewTarget target);
     /** @brief New console lines, and the end of the program. */
     void Poll();
+    /** @brief Whether a local or attached active run owns the persisted configuration. */
+    bool ConfigurationLocked() const noexcept;
+    /** @brief Propagates the current configuration lock to every persistent editor. */
+    void ApplyEditingPolicy() noexcept;
+    /** @brief Refuses a selected graph artifact incompatible with the current semantic graph. */
+    void VerifyLaunchCompatibility(schema::ProjectCommand command,
+        std::vector<std::string> const& arguments) const;
     OverviewModel Model() const;
     void Report(std::string message, bool error);
     /**
@@ -149,6 +156,7 @@ private:
     OverviewView overview_;
     std::unique_ptr<ipc::Supervisor> control_;
     std::chrono::steady_clock::time_point stopAt_{};
+    std::optional<std::chrono::steady_clock::time_point> savingAt_;
     int stopTimeoutSeconds_ = 30;
     bool viewerForRun_ = false;
     std::unique_ptr<ipc::Supervisor> viewerControl_;

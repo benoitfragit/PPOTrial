@@ -22,9 +22,9 @@ void Check(bool ok, char const *why)
 }
 
 /** @brief Poll until the observable protocol event arrives at a bounded deadline. */
-template <class Done> void Await(ipc::Supervisor &host, Done done)
+template <class Done> void Await(ipc::Supervisor &host, Done done, std::chrono::seconds timeout = 4s)
 {
-    auto const deadline = std::chrono::steady_clock::now() + 4s;
+    auto const deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline)
     {
         host.Tick();
@@ -33,6 +33,12 @@ template <class Done> void Await(ipc::Supervisor &host, Done done)
         std::this_thread::sleep_for(2ms);
     }
     throw std::runtime_error("control event deadline");
+}
+
+bool CommandIs(ipc::Supervisor const &host, ipc::Command command, ipc::CommandState state)
+{
+    auto const result = host.LastCommandResult();
+    return result && result->command == command && result->state == state;
 }
 
 /** @brief Independent HELLO fixture, in network byte order with sequence 1. */
@@ -91,6 +97,7 @@ void CheckRetries()
               request = worker.TakeWeights();
               return request.has_value();
           });
+    Await(host, [&] { return CommandIs(host, ipc::Command::SetRewards, ipc::CommandState::Received); });
     Check(request->weights.size() == 2 && request->weights[1].second == -1.5, "reward payload changed");
     // Withhold the application ACK for several retry periods, like a long optimizer update.
     auto const delay = std::chrono::steady_clock::now() + 450ms;
@@ -105,11 +112,60 @@ void CheckRetries()
               return answer.has_value();
           });
     Check(answer->applied && answer->id == 42, "final reward ACK not correlated");
+    Check(CommandIs(host, ipc::Command::SetRewards, ipc::CommandState::Applied),
+          "application ACK was not distinguished from receipt");
     host.Request(ipc::Command::Stop);
     Await(host, [&] { return worker.Stopping(); });
     Check(!worker.Continue() && other.Continue(), "stop escaped its session");
+    Await(host, [&] { return CommandIs(host, ipc::Command::Stop, ipc::CommandState::Applied); });
     Check(!host.Request(ipc::Command::Resume), "resume cleared a latched stop");
     worker.Saving();
+    worker.Finish();
+}
+
+
+/** @brief A received command has a bounded indeterminate result, then accepts a correlated late answer. */
+void CheckIndeterminateAndLateAnswer()
+{
+    ipc::Supervisor host;
+    ipc::Worker worker(host.Endpoint(), true);
+    Await(host, [&] { return host.Connected(); });
+    Check(host.SetRewards({7, {{0, 2.0}}}), "indeterminate reward request was refused");
+    std::optional<runtime::WeightRequest> request;
+    Await(host, [&] {
+        request = worker.TakeWeights();
+        return request.has_value() && CommandIs(host, ipc::Command::SetRewards, ipc::CommandState::Received);
+    });
+    Await(host, [&] { return CommandIs(host, ipc::Command::SetRewards, ipc::CommandState::Indeterminate); }, 12s);
+    auto answer = host.TakeAnswer();
+    Check(answer && !answer->applied && answer->id == 7
+            && answer->message.find("not confirmed") != std::string::npos,
+        "missing application ACK was not exposed as indeterminate");
+    worker.Answer({request->id, true, "Applied late"});
+    Await(host, [&] { return CommandIs(host, ipc::Command::SetRewards, ipc::CommandState::Applied); });
+    worker.Finish();
+}
+
+/** @brief Pause and Saving survive supervisor silence and reconnect without remaining stuck. */
+void CheckReconnectDuringStates()
+{
+    ipc::Supervisor host;
+    ipc::Worker worker(host.Endpoint(), false);
+    Await(host, [&] { return host.Connected(); });
+    Check(host.Request(ipc::Command::Pause), "pause request was refused");
+    Await(host, [&] { return CommandIs(host, ipc::Command::Pause, ipc::CommandState::Received); });
+    auto continuation = std::async(std::launch::async, [&] { return worker.Continue(); });
+    Await(host, [&] { return host.LastState() == ipc::State::Paused
+                            && CommandIs(host, ipc::Command::Pause, ipc::CommandState::Applied); });
+    // Without supervisor heartbeats, the worker must release Pause autonomously.
+    std::this_thread::sleep_for(3200ms);
+    Check(continuation.wait_for(1s) == std::future_status::ready && continuation.get(),
+        "lost supervisor left the worker paused indefinitely");
+    Await(host, [&] { return host.Connected() && host.LastState() == ipc::State::Running; });
+    worker.Saving();
+    Await(host, [&] { return host.LastState() == ipc::State::Saving; });
+    std::this_thread::sleep_for(3200ms);
+    Await(host, [&] { return host.Connected() && host.LastState() == ipc::State::Saving; });
     worker.Finish();
 }
 void CheckTerminalError()
@@ -130,6 +186,8 @@ int main()
     {
         CheckWire();
         CheckRetries();
+        CheckIndeterminateAndLateAnswer();
+        CheckReconnectDuringStates();
         CheckTerminalError();
     }
     catch (std::exception const &error)

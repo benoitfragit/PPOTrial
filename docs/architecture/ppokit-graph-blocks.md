@@ -1,7 +1,6 @@
 # PPOKit — graphes de blocs (encodeurs, attention, pooling)
 
-> Statut : conception validée par l'utilisateur, implémentation en cours (voir
-> `PPOKit/PROGRESS.md`, étape 9).
+> Statut : conception validée et implémentée.
 > Complète la §5.2 de [`ppokit-framework-design.md`](ppokit-framework-design.md).
 
 ## Pourquoi

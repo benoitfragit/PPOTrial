@@ -3,6 +3,7 @@
  * @brief The recent project list, one folder per line.
  */
 #include "ppokit/editor/recent_projects.hpp"
+#include "ppokit/artifacts/atomic_file.hpp"
 
 #include <cstdlib>
 #include <fstream>
@@ -33,13 +34,9 @@ std::vector<std::filesystem::path> ReadLines(std::filesystem::path const& file)
 
 void WriteLines(std::filesystem::path const& file, std::vector<std::filesystem::path> const& folders)
 {
-    std::error_code error;
-    std::filesystem::create_directories(file.parent_path(), error);
-    std::ofstream stream(file, std::ios::binary | std::ios::trunc);
-    for (std::filesystem::path const& folder : folders)
-    {
-        stream << folder.u8string() << '\n';
-    }
+    artifacts::WriteFileAtomically(file, [&folders](std::ostream& stream) {
+        for (std::filesystem::path const& folder : folders) stream << folder.u8string() << '\n';
+    }, artifacts::AtomicWriteOptions{}, "PPOKit recent projects");
 }
 
 /** @brief `folder` made absolute and normal, so that one folder is remembered once. */
@@ -61,8 +58,8 @@ std::filesystem::path Normal(std::filesystem::path const& folder)
 std::filesystem::path DefaultRecentProjectsFile()
 {
 #if defined(_WIN32)
-    char const* const appData = std::getenv("APPDATA");
-    std::filesystem::path const base = appData != nullptr ? std::filesystem::u8path(appData) : std::filesystem::path(".");
+    wchar_t const* const appData = _wgetenv(L"APPDATA");
+    std::filesystem::path const base = appData != nullptr ? std::filesystem::path(appData) : std::filesystem::path(".");
     return base / "PPOKit" / "recent_projects.txt";
 #else
     char const* const config = std::getenv("XDG_CONFIG_HOME");
@@ -96,30 +93,38 @@ std::vector<std::filesystem::path> LoadRecentProjects(std::filesystem::path cons
 
 void RememberProject(std::filesystem::path const& file, std::filesystem::path const& folder)
 {
-    std::filesystem::path const remembered = Normal(folder);
-    std::vector<std::filesystem::path> folders{remembered};
-    for (std::filesystem::path const& other : ReadLines(file))
+    try
     {
-        if (Normal(other) != remembered && folders.size() < MaximumRecentProjects)
+        std::filesystem::path const remembered = Normal(folder);
+        std::vector<std::filesystem::path> folders{remembered};
+        for (std::filesystem::path const& other : ReadLines(file))
         {
-            folders.push_back(other);
+            if (Normal(other) != remembered && folders.size() < MaximumRecentProjects)
+            {
+                folders.push_back(other);
+            }
         }
+        WriteLines(file, folders);
     }
-    WriteLines(file, folders);
+    catch (std::exception const&) {}
 }
 
 void ForgetProject(std::filesystem::path const& file, std::filesystem::path const& folder)
 {
-    std::filesystem::path const forgotten = Normal(folder);
-    std::vector<std::filesystem::path> kept;
-    for (std::filesystem::path const& other : ReadLines(file))
+    try
     {
-        if (Normal(other) != forgotten)
+        std::filesystem::path const forgotten = Normal(folder);
+        std::vector<std::filesystem::path> kept;
+        for (std::filesystem::path const& other : ReadLines(file))
         {
-            kept.push_back(other);
+            if (Normal(other) != forgotten)
+            {
+                kept.push_back(other);
+            }
         }
+        WriteLines(file, kept);
     }
-    WriteLines(file, kept);
+    catch (std::exception const&) {}
 }
 
 } // namespace ppokit::editor

@@ -252,10 +252,14 @@ void SupervisedProject(std::filesystem::path const& folder)
         "Stop remains inside a compact window");
     Check(inference.Running(), "long inference is still running before the click");
     auto const trainingBefore = ReadOrderedJson(project.Training());
+    auto const evaluationBefore = ReadOrderedJson(project.Evaluations() / "smoke.json");
     inference.Training()->Document().Set(core::PpoParameter::Epochs, 3.0);
+    inference.Evaluation()->Document().Suite(0).episodesPerSeed += 1;
     Check(inference.Unsaved() && !inference.SaveAll() && !inference.Training()->Save()
-            && ReadOrderedJson(project.Training()) == trainingBefore,
-        "active inference protects the saved configuration even from direct save calls");
+            && !inference.Network()->Save() && !inference.Evaluation()->Save()
+            && ReadOrderedJson(project.Training()) == trainingBefore
+            && ReadOrderedJson(project.Evaluations() / "smoke.json") == evaluationBefore,
+        "active inference protects every saved configuration even from direct save calls");
     Click(inference, button);
     WaitForProgram(inference);
     Check(!inference.Running() && inference.Status() == "Inference finished.",

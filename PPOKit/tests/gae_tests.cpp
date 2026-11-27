@@ -3,6 +3,8 @@
  * @brief Semantics and bit-exactness of the shared GAE helpers.
  */
 #include "ppokit/core/gae.hpp"
+#include "ppokit/runtime/advantages.hpp"
+#include "ppokit/runtime/rollout.hpp"
 
 #include <array>
 #include <cmath>
@@ -10,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <random>
 
 namespace {
@@ -73,6 +76,33 @@ void EpisodeEndSemantics()
     Check(std::isfinite(isolated), "next-episode advantage cannot cross a truncation");
 }
 
+void ExtremeAdvantageNormalization()
+{
+    struct Row final
+    {
+        using ScalarType = float;
+        float advantage{};
+        float value{};
+        float valueTarget{};
+        bool learnable = true;
+    };
+    float const huge = std::numeric_limits<float>::max() / 2.F;
+    std::array<Row, 4> rows{{{huge}, {huge}, {-huge}, {-huge}}};
+    Check(ppokit::runtime::NormalizeLearnableAdvantages(rows.data(), rows.size()) == rows.size()
+            && std::isfinite(rows[0].advantage) && std::isfinite(rows[3].advantage)
+            && rows[0].advantage > 0.F && rows[3].advantage < 0.F,
+        "advantage normalization survives overflowing sum and squares");
+
+    ppokit::runtime::DynamicRolloutBuffer rollout(1, 2, 1);
+    ppokit::runtime::DynamicTransition transition;
+    transition.observation = {0.F, std::numeric_limits<float>::quiet_NaN()};
+    transition.action = {0.F};
+    bool refused = false;
+    try { rollout.Append(transition); }
+    catch (std::invalid_argument const&) { refused = true; }
+    Check(refused, "a non-finite observation is refused before GAE");
+}
+
 template<typename Scalar, typename Reference>
 void MatchesReferenceBitForBit(Reference reference, char const* description)
 {
@@ -116,6 +146,7 @@ void MatchesReferenceBitForBit(Reference reference, char const* description)
 int main()
 {
     EpisodeEndSemantics();
+    ExtremeAdvantageNormalization();
     MatchesReferenceBitForBit<float>(BlueReference, "GaeStep<float> reproduces the BlueDefense formula bit for bit");
     MatchesReferenceBitForBit<double>(FlightReference, "GaeStep<double> reproduces the FlightControl3D formula bit for bit");
     if (failures != 0)

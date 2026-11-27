@@ -48,6 +48,8 @@ public:
 
     editor::EvaluationDocument& Document() noexcept { return document_; }
     bool Dirty() const { return document_.Dirty(); }
+    /** @brief Temporarily blocks suite mutations and persistence while a run is active. */
+    void SetEditingAllowed(bool allowed) noexcept { editingAllowed_ = allowed; }
     /** @brief Writes the suites; on failure the message is shown and false returned. */
     bool Save();
     void Revert();
@@ -82,6 +84,7 @@ private:
     std::size_t selected_ = 0;
     std::string status_;
     bool statusIsError_ = false;
+    bool editingAllowed_ = true;
     /** @brief The BEST manifest last read, its suite and its date: not reread every frame. */
     std::string bestSuite_;
     std::filesystem::file_time_type bestTime_{};

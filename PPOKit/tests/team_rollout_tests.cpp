@@ -312,6 +312,18 @@ void Errors()
     }
     Check(refused, "a NaN reward is refused with the agent named");
     rollout.Current(0).reward = 0.F;
+    rollout.Current(0).observation[0] = std::numeric_limits<float>::infinity();
+    refused = false;
+    try
+    {
+        rollout.EndTeamStep();
+    }
+    catch (std::invalid_argument const& error)
+    {
+        refused = std::string(error.what()).find("observation or action") != std::string::npos;
+    }
+    Check(refused, "a non-finite team observation is refused");
+    rollout.Current(0).observation[0] = 0.F;
     rollout.EndTeamStep();
     refused = false;
     try

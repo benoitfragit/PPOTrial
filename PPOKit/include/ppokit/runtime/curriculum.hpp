@@ -50,6 +50,7 @@ public:
     std::string const& StageName() const noexcept { return plan_.stages[stage_].name; }
     bool AtFinalStage() const noexcept { return stage_ + 1 == plan_.stages.size(); }
     std::size_t WindowEpisodes() const noexcept { return window_.Episodes(); }
+    std::size_t WindowSuccesses() const noexcept { return window_.Successes(); }
 
     /**
      * @brief Draws the scenario of the next episode.
@@ -82,6 +83,9 @@ public:
 
     /** @brief Restores a stage (e.g. after resuming training), with an empty window; clamped to the last stage. */
     void Restore(std::size_t stage) noexcept;
+
+    /** @brief Restores an exact stage and its incomplete promotion window. */
+    void Restore(std::size_t stage, std::size_t episodes, std::size_t successes);
 
     /** @brief Index of a stage by name. @return Nothing for an unknown name. */
     std::optional<std::size_t> StageIndex(std::string const& name) const;
@@ -128,13 +132,15 @@ private:
 };
 
 /**
- * @brief Saves the current stage by name (robust to stages added later), atomically.
- * @details Store it beside the training checkpoint so that a resumed run continues at the same stage.
+ * @brief Saves the stage name and incomplete promotion window atomically.
+ * @details Stage names remain robust to stages added later. Sampling owns no RNG; its caller's
+ *          checkpointed engine is the random state required for exact continuation.
  */
 void SaveCurriculumStage(std::filesystem::path const& path, Curriculum const& curriculum);
 
 /**
- * @brief Restores the stage saved by SaveCurriculumStage.
+ * @brief Restores the stage and promotion window saved by SaveCurriculumStage.
+ * @details Historical files containing only a stage name remain accepted with an empty window.
  * @return False when the file does not exist (a new run starts at the first stage).
  * @throws std::runtime_error when the saved stage is not a stage of this curriculum.
  */

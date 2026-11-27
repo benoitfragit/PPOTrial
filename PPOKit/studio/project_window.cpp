@@ -8,6 +8,8 @@
 #include "studio_theme.hpp"
 
 #include "ppokit/editor/run_health.hpp"
+#include "ppokit/artifacts/artifact.hpp"
+#include "ppokit/eval/best_store.hpp"
 #include "ppokit/schema/block_graph_schema.hpp"
 #include "ppokit/schema/task_schema.hpp"
 
@@ -196,7 +198,7 @@ bool ProjectWindow::Unsaved() const noexcept
 
 bool ProjectWindow::SaveAll()
 {
-    if (process_.Running())
+    if (ConfigurationLocked())
     {
         Report("Stop the running process before saving project changes.", true);
         return false;
@@ -224,6 +226,70 @@ bool ProjectWindow::SaveAll()
     return true;
 }
 
+bool ProjectWindow::ConfigurationLocked() const noexcept
+{
+    if (running_)
+    {
+        return true;
+    }
+    if (!control_ || !control_->Connected())
+    {
+        return false;
+    }
+    ipc::State const state = control_->LastState();
+    return state != ipc::State::Stopped && state != ipc::State::Error;
+}
+
+void ProjectWindow::ApplyEditingPolicy() noexcept
+{
+    bool const allowed = !ConfigurationLocked();
+    scenario_.SetEditingAllowed(allowed);
+    if (network_) network_->SetEditingAllowed(allowed);
+    if (training_) training_->SetEditingAllowed(allowed);
+    if (evaluation_) evaluation_->SetEditingAllowed(allowed);
+}
+
+void ProjectWindow::VerifyLaunchCompatibility(schema::ProjectCommand command,
+    std::vector<std::string> const& arguments) const
+{
+    if (!task_ || !std::filesystem::is_regular_file(project_.Network())) return;
+    auto has = [&arguments](std::string const& flag) {
+        return std::find(arguments.begin(), arguments.end(), flag) != arguments.end();
+    };
+    auto value = [&arguments](std::string const& flag) -> std::string {
+        auto const found = std::find(arguments.begin(), arguments.end(), flag);
+        return found != arguments.end() && std::next(found) != arguments.end() ? *std::next(found) : std::string();
+    };
+    std::filesystem::path artifact;
+    if (command == schema::ProjectCommand::Train)
+    {
+        if (!has("--fresh")) artifact = project_.LatestCheckpoint();
+    }
+    else if (!value("--policy").empty()) artifact = project_.root / value("--policy");
+    else
+    {
+        std::string const role = value("--model");
+        if (role == "LATEST") artifact = project_.TrainingPolicy();
+        else if (!role.empty() && role != "BEST")
+        {
+            for (auto const& reference : references_)
+                if (reference.role == role) artifact = reference.file;
+        }
+        else if (role != "BEST" && !has("--best")) artifact = project_.Policy();
+    }
+    if (artifact.empty() || !std::filesystem::is_regular_file(artifact)) return;
+    std::ifstream stream(artifact, std::ios::binary);
+    std::string line;
+    if (!std::getline(stream, line)) return;
+    nlohmann::json const json = nlohmann::json::parse(line, nullptr, false);
+    if (!json.is_object() || json.value("schema", std::string()) != "ppokit.artifact/1") return;
+    artifacts::ArtifactHeader const header = artifacts::ReadArtifactHeader(artifact);
+    if (header.identity.backend != "graph") return;
+    auto const graphs = schema::LoadBlockGraph(project_.Network(), *task_);
+    artifacts::RequireCompatible(header.identity,
+        schema::ArtifactIdentityOf(*task_, graphs, header.identity.backend), artifact.filename().u8string());
+}
+
 void ProjectWindow::Report(std::string message, bool error)
 {
     status_ = std::move(message);
@@ -238,7 +304,7 @@ bool ProjectWindow::Running() noexcept
 bool ProjectWindow::Launch(schema::ProjectCommand command)
 {
     Poll();
-    if (process_.Running())
+    if (ConfigurationLocked())
     {
         Report("A program is already running: stop it first.", true);
         return false;
@@ -263,8 +329,7 @@ bool ProjectWindow::Launch(schema::ProjectCommand command)
             true);
         return false;
     }
-    scenario_.SetEditingAllowed(true);
-    if (training_) training_->SetEditingAllowed(true);
+    ApplyEditingPolicy();
     bool const unsaved = Unsaved();
     if (!SaveAll())
     {
@@ -275,6 +340,7 @@ bool ProjectWindow::Launch(schema::ProjectCommand command)
     {
         auto launchArguments = *arguments;
         if (program.stem() == "ppokit-run") launchArguments = launchSettings_.Arguments(command, std::move(launchArguments));
+        if (program.stem() == "ppokit-run") VerifyLaunchCompatibility(command, launchArguments);
         publicCommand = editor::QuoteCommandLine(program, launchArguments);
         std::unique_ptr<ipc::Supervisor> session;
         if (program.stem() == "ppokit-run" || project_.controlProtocol == "udp/1")
@@ -292,10 +358,10 @@ bool ProjectWindow::Launch(schema::ProjectCommand command)
         return false;
     }
     running_ = command;
-    scenario_.SetEditingAllowed(false);
-    if (training_) training_->SetEditingAllowed(false);
+    ApplyEditingPolicy();
     started_ = std::chrono::steady_clock::now();
     stopRequested_ = false;
+    savingAt_.reset();
     escalated_ = false;
     console_.push_back("> " + publicCommand);
     Report(std::string(Verb(command)) + (unsaved ? " (changes saved first)." : "."), false);
@@ -349,6 +415,7 @@ void ProjectWindow::RequestStop()
     else { Kill(); return; }
     stopRequested_ = true;
     stopAt_ = std::chrono::steady_clock::now();
+    savingAt_.reset();
     if (viewerForRun_) RequestViewerStop();
     Report(running_ == schema::ProjectCommand::Train
         ? "Stop requested: waiting for a complete update and checkpoint."
@@ -378,8 +445,15 @@ void ProjectWindow::Poll()
     if (!viewer_.Running()) { viewerControl_.reset(); viewerStopAt_.reset(); }
     auto const timeout = running_ == schema::ProjectCommand::Train
         ? std::chrono::seconds(stopTimeoutSeconds_) : InteractiveStopTimeout;
+    if (stopRequested_ && control_ && control_->LastState() == ipc::State::Saving && !savingAt_)
+    {
+        // A save is forward progress, not a hung stop. Give this bounded phase its
+        // own deadline so a large durable checkpoint is not killed at the old edge.
+        savingAt_ = std::chrono::steady_clock::now();
+    }
+    auto const stopPhaseStarted = savingAt_.value_or(stopAt_);
     if (stopRequested_ && process_.Running()
-        && std::chrono::steady_clock::now() - stopAt_ >= timeout)
+        && std::chrono::steady_clock::now() - stopPhaseStarted >= timeout)
     {
         escalated_ = true;
         process_.Kill();
@@ -404,8 +478,6 @@ void ProjectWindow::Poll()
         Report(code == 0 ? what + " finished." : what + " ended with exit code " + std::to_string(code) + ": see the Console.",
             code != 0);
         if (escalated_) Report(what + " exceeded its stop timeout and was terminated.", true);
-        scenario_.SetEditingAllowed(true);
-        if (training_) training_->SetEditingAllowed(true);
         if (viewerForRun_) RequestViewerStop();
         viewerForRun_ = false;
         dashboard_->SetSupervisor(nullptr);
@@ -413,7 +485,9 @@ void ProjectWindow::Poll()
         if (evaluation_ && *running_ != schema::ProjectCommand::Inference) evaluation_->RefreshResults();
         running_.reset();
         stopRequested_ = false;
+        savingAt_.reset();
     }
+    ApplyEditingPolicy();
 }
 
 OverviewModel ProjectWindow::Model() const
@@ -478,6 +552,13 @@ void ProjectWindow::DrawRunBar()
     {
         ImGui::Text("Control  %s", control_->Connected() ? ipc::Name(control_->LastState()) : "waiting for peer");
         if (!control_->LastError().empty()) ImGui::TextWrapped("%s", control_->LastError().c_str());
+        auto const command = control_->LastCommandResult();
+        if (command && command->state == ipc::CommandState::Indeterminate)
+        {
+            ImGui::SameLine();
+            ImGui::TextColored(HealthColor(editor::Health::Watch), "Command result indeterminate: %s",
+                command->message.c_str());
+        }
         if (!stopRequested_ && control_->Connected())
         {
             ImGui::SameLine();
@@ -519,7 +600,7 @@ void ProjectWindow::DrawActions()
     for (CommandButton const& button : CommandButtons)
         width += IconLabelButtonWidth(schema::CommandName(button.command)) + style.ItemSpacing.x;
     bool const compact = ImGui::GetContentRegionAvail().x < width;
-    bool const running = process_.Running();
+    bool const running = ConfigurationLocked();
     for (CommandButton const& button : CommandButtons)
     {
         bool const offered = schema::CommandArguments(project_, button.command).has_value();
@@ -732,9 +813,7 @@ bool ProjectWindow::SectionUnsaved(Section section) const
 
 void ProjectWindow::DrawSection()
 {
-    bool const running = process_.Running();
-    scenario_.SetEditingAllowed(!running);
-    if (training_) training_->SetEditingAllowed(!running);
+    ApplyEditingPolicy();
     switch (section_)
     {
     case Section::Overview:

@@ -468,7 +468,9 @@ void GraphEditorView::DrawPalette()
         IconText(StudioIcon::Warning, HealthColor(editor::Health::Watch));
         ImGui::SameLine();
         ImGui::TextColored(HealthColor(editor::Health::Watch), "Read only");
-        MutedWrapped(readOnlyReason_.c_str());
+        MutedWrapped(readOnlyReason_.empty()
+            ? "An active run owns this configuration. Stop it before changing the network."
+            : readOnlyReason_.c_str());
         ImGui::Spacing();
         MutedWrapped("Hover a block for its role; select it to see its settings. Wheel to zoom, middle button to "
                      "move.");
@@ -1224,16 +1226,23 @@ void GraphEditorView::HandleShortcuts()
 
 bool GraphEditorView::Save()
 {
+    if (ReadOnly())
+    {
+        message_ = "Save refused: stop the active run before changing network.json.";
+        return false;
+    }
     try
     {
         std::string const graph = document_.GraphJson();
         std::string const layout = document_.LayoutJson();
-        artifacts::WriteFileAtomically(
-            files_.graph, [&graph](std::ostream& out) { out << graph; }, artifacts::AtomicWriteOptions{},
-            "PPOKit studio graph");
+        // Commit the graphical sidecar first. If the semantic graph write fails, training
+        // still sees its previous compatible graph; a newer layout is harmless.
         artifacts::WriteFileAtomically(
             files_.layout, [&layout](std::ostream& out) { out << layout; }, artifacts::AtomicWriteOptions{},
             "PPOKit studio layout");
+        artifacts::WriteFileAtomically(
+            files_.graph, [&graph](std::ostream& out) { out << graph; }, artifacts::AtomicWriteOptions{},
+            "PPOKit studio graph");
         dirty_ = false;
         message_ = "Saved " + files_.graph.filename().string()
             + (validation_.valid ? "" : " (not valid yet: training will refuse it)");
