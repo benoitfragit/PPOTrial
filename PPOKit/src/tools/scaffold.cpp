@@ -38,6 +38,9 @@ constexpr char TaskJson[] = R"({
     "Time": { "label": "Time spent", "weight": 1.0 },
     "Goal": { "label": "Target reached", "weight": 1.0 }
   },
+  "metrics": {
+    "success": { "kind": "flag" }
+  },
   "scenario": {
     "start_distance": { "type": "float", "range": [0.2, 1.5], "default": 0.5 }
   }
@@ -80,16 +83,25 @@ constexpr char TrainingJson[] = R"({
     "target_kl": 0.02,
     "seed": 1
   },
-  "probes": { "every": 10 },
-  "curriculum": {
-    "window": 50,
-    "promote_at": 0.8,
-    "rehearse": 0.1,
-    "stages": [
-      { "name": "near", "sample": { "start_distance": { "uniform": [0.2, 0.5] } } },
-      { "name": "far", "sample": { "start_distance": { "uniform": [0.5, 1.5] } } }
-    ]
-  }
+  "probes": { "every": 10 }
+}
+)";
+
+constexpr char CurriculumJson[] = R"({
+  "schema": "ppokit.curriculum/1",
+  "id": "@NAME@-distance",
+  "stages": [
+    {
+      "name": "near",
+      "payload": { "start_distance": [0.2, 0.5] },
+      "promotion": { "source": "episode", "metric": "success", "window": 50, "threshold": 0.8 }
+    },
+    {
+      "name": "far",
+      "payload": { "start_distance": [0.5, 1.5] },
+      "promotion": { "source": "episode", "metric": "success", "window": 50, "threshold": 0.8 }
+    }
+  ]
 }
 )";
 
@@ -276,32 +288,104 @@ inline @TYPE@Task MakeTask(std::uint32_t seed)
 } // namespace @NAME@_example
 )";
 
-constexpr char MainCpp[] = R"(/**
- * @file main.cpp
- * @brief Program of the @NAME@ project: check, train, eval, play (run with "help").
+constexpr char EnvironmentCpp[] = R"(/**
+ * @file environment.cpp
+ * @brief @NAME@ simulation adapter for the common ppokit-run learner.
  */
-
 #include "task.hpp"
 
-#include "ppokit/tools/command_line.hpp"
+#include "ppokit/environment/sdk.hpp"
 
-int main(int argc, char** argv)
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <filesystem>
+#include <random>
+#include <vector>
+
+namespace {
+using namespace @NAME@_example;
+
+class @TYPE@Environment final
 {
-    using namespace @NAME@_example;
-    // PPOKIT_EXAMPLE_DIR (set by CMakeLists.txt) is this project folder; the studio passes
-    // --project to work on another copy.
-    return ppokit::tools::RunCommandLine<ObservationSize, ActionSize>(argc, argv, MakeTask, PPOKIT_EXAMPLE_DIR);
-}
+public:
+    static constexpr std::size_t MetricCount = 1;
+
+    @TYPE@Environment(std::filesystem::path const& /*project*/, std::uint64_t seed)
+        : task_(static_cast<std::uint32_t>(seed)), scenarioRng_(static_cast<std::uint32_t>(seed ^ 0x9e3779b9U))
+    {
+    }
+
+    /** @brief Start an episode and publish its first observation. */
+    void Reset(float* observation, float* /*world*/)
+    {
+        task_.Configure({std::uniform_real_distribution<double>(minimumDistance_, maximumDistance_)(scenarioRng_)});
+        Observation const value = task_.Reset();
+        std::copy(value.begin(), value.end(), observation);
+    }
+
+    /** @brief Report the stage promotion metric declared by task.json. */
+    void EpisodeMetrics(double* metrics) const { metrics[0] = task_.Succeeded() ? 1.0 : 0.0; }
+
+    /** @brief Apply the distance range selected by PPOKit's common curriculum. */
+    void ApplyCurriculumStage(std::string const& name, std::string const& payload)
+    {
+        auto const stage = nlohmann::json::parse(payload);
+        if (!stage.contains("start_distance") || !stage.at("start_distance").is_array()
+            || stage.at("start_distance").size() != 2)
+            throw std::invalid_argument("curriculum stage '" + name + "' requires start_distance [min,max]");
+        double const minimum = stage.at("start_distance").at(0).get<double>();
+        double const maximum = stage.at("start_distance").at(1).get<double>();
+        if (!std::isfinite(minimum) || !std::isfinite(maximum) || minimum <= 0.0 || minimum > maximum)
+            throw std::invalid_argument("curriculum stage '" + name + "' has an invalid distance range");
+        minimumDistance_ = minimum;
+        maximumDistance_ = maximum;
+    }
+
+    /** @brief Apply one action through the task without owning any PPO logic. */
+    ppokit::runtime::StepEnd Step(float const* action, float* observation, float* /*world*/,
+        double* rewardChannels)
+    {
+        Action applied{};
+        std::copy_n(action, applied.size(), applied.begin());
+        Observation next{};
+        auto const outcome = task_.Step(applied, next);
+        std::copy(next.begin(), next.end(), observation);
+        std::copy_n(task_.LastRewardChannels(), Layout::Reward::Count, rewardChannels);
+        return outcome.end;
+    }
+
+    /** @brief Apply task.json reward-channel weights. */
+    void SetWeights(double const* weights)
+    {
+        task_.SetRewardWeights(std::vector<double>(weights, weights + Layout::Reward::Count));
+    }
+
+    /** @brief Return task.json reward-channel weights. */
+    void Weights(double* weights) const
+    {
+        std::vector<double> const values = task_.RewardWeights();
+        std::copy(values.begin(), values.end(), weights);
+    }
+
+private:
+    @TYPE@Task task_;
+    std::mt19937 scenarioRng_;
+    double minimumDistance_ = @TYPE@Task::DefaultStartDistance;
+    double maximumDistance_ = @TYPE@Task::DefaultStartDistance;
+};
+} // namespace
+
+PPOKIT_ENVIRONMENT(@TYPE@Environment, "@NAME@", ObservationSize, ActionSize, Layout::Reward::Count, 0)
 )";
 
-constexpr char CMakeListsTxt[] = R"(# The @NAME@ project: add this folder with add_subdirectory() in a build that has PPOKit.
-add_executable(ppokit_@NAME@ main.cpp)
-target_link_libraries(ppokit_@NAME@ PRIVATE PPOKit::Core PPOKit::Schema PPOKit::Training PPOKit::Live)
-target_compile_definitions(ppokit_@NAME@ PRIVATE PPOKIT_EXAMPLE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+constexpr char CMakeListsTxt[] = R"(# The @NAME@ project: its DLL contains the simulation only; ppokit-run owns PPO.
+add_library(@NAME@_environment SHARED environment.cpp)
+target_link_libraries(@NAME@_environment PRIVATE PPOKit::Core nlohmann_json::nlohmann_json)
+set_target_properties(@NAME@_environment PROPERTIES CXX_VISIBILITY_PRESET hidden PREFIX "")
 # Sizes, channel and scenario names of task.json, regenerated whenever task.json changes.
-ppokit_generate_task_layout(TARGET ppokit_@NAME@ TASK task.json HEADER @NAME@_layout.hpp)
-# ppokit-studio finds the program here to train, evaluate and play the project.
-ppokit_register_program(ppokit_@NAME@)
+ppokit_bind_task_contract(TARGET @NAME@_environment TASK task.json HEADER @NAME@_layout.hpp)
+ppokit_register_program(@NAME@_environment)
 )";
 
 constexpr char ReadmeMd[] = R"(# @NAME@
@@ -313,15 +397,14 @@ already trains: a point in a plane moves to a target. Change it into your own ta
 
 Open this folder in `ppokit-studio`: the overview shows the observation, the actor and
 the critic, GAE and the PPO update; click a box to edit it. Train, Evaluate and Inference
-start the program `ppokit_@NAME@` (build it once) and show its console and curves live.
+starts `ppokit-run` with `@NAME@_environment` and shows its console and curves live.
 
 The same from a terminal:
 
 ```
-ppokit_@NAME@ check          # validates every file, says what is wrong in plain words
-ppokit_@NAME@ train          # 100 updates; run it again to continue where it stopped
-ppokit_@NAME@ eval           # plays the policy on the seeds of eval/smoke.json
-ppokit_@NAME@ play           # plays a few episodes and prints them
+ppokit-run train --project . # 100 updates; run it again to continue where it stopped
+ppokit-run eval --project .  # evaluates on the seeds of eval/smoke.json
+ppokit-run play --project .  # plays a few episodes
 ```
 
 ## The project folder
@@ -332,10 +415,12 @@ ppokit_@NAME@ play           # plays a few episodes and prints them
 | `task.json` | observation, actions, reward channels, scenario parameters |
 | `network.json` | actor and critic (`network.layout.json`: where the blocks are drawn) |
 | `training.json` | PPO and GAE parameters, probes, curriculum |
+| `curriculum.json` | common stages, promotion criteria and environment payloads |
 | `eval/smoke.json` | evaluation seeds and pass gates |
 | `components/` | component DLLs the network uses |
 | `checkpoints/` | `latest.ppokit` (resume), `policy.ppokit` (evaluate), `metrics.jsonl` (journal) |
 | `task.hpp` | the task in C++: physics, observation, rewards |
+| `environment.cpp` | thin simulation adapter used by the common runtime |
 
 `task.json` and `task.hpp` go together: the layout header `@NAME@_layout.hpp` is generated
 from `task.json` at build time, so a field added there is a named offset in C++.
@@ -356,11 +441,17 @@ constexpr char ProjectJson[] = R"({
   "name": "@NAME@",
   "controlProtocol": "udp/1",
   "program": {
-    "executable": "ppokit_@NAME@",
+    "executable": "ppokit-run",
     "train": ["train", "--project", "{project}"],
     "evaluate": ["eval", "--project", "{project}"],
     "inference": ["play", "--project", "{project}"]
-  }
+  },
+  "libraries": {
+    "environment": "@NAME@_environment",
+    "network": "ppokit_graph_network"
+  },
+  "externalCurriculum": "curriculum.json",
+  "externalCurriculumProgress": "checkpoints/curriculum-status.json"
 }
 )";
 
@@ -380,10 +471,11 @@ constexpr TemplateFile Templates[] = {
     {"task.json", TaskJson},
     {"network.json", NetworkJson},
     {"training.json", TrainingJson},
+    {"curriculum.json", CurriculumJson},
     {"eval/smoke.json", SmokeJson},
     {"components/README.md", ComponentsReadme},
     {"task.hpp", TaskHpp},
-    {"main.cpp", MainCpp},
+    {"environment.cpp", EnvironmentCpp},
     {"CMakeLists.txt", CMakeListsTxt},
     {"README.md", ReadmeMd},
     {".gitignore", GitIgnore},

@@ -287,15 +287,10 @@ public:
      *        an evaluation episode is set by reset_evaluation.
      */
     BlueEnvironment(std::filesystem::path const& project, std::uint64_t /*seed*/)
+        : project_(project)
     {
         ppo::examples::airspace::RegisterAirspaceMeta();
-        std::filesystem::path const scenario = ScenarioOf(project);
-        controller_ = ppo::examples::bluedefense::LoadExternalScenario(scenario, world_);
-        if (!controller_)
-        {
-            throw std::runtime_error(scenario.string() + ": not a valid BlueDefense scenario (see the messages above)");
-        }
-        blues_ = controller_->Counts().blueMobiles;
+        LoadScenario(ScenarioOf(project_));
     }
 
     void Reset(float* observations, std::uint8_t* available, float* world)
@@ -309,7 +304,7 @@ public:
     {
         controller_->StartExternalEvaluationCase(defenders::GeneralizedEvaluationCaseOf(seed, episode), episode);
         // The case's overrides apply when the world re-initializes its entities.
-        world_.RequestReinitialization();
+        world_->RequestReinitialization();
         StartEpisode(observations, available, world);
     }
 
@@ -328,7 +323,7 @@ public:
         }
         // A world re-initialization asked by another agent (a red) is taken at the next
         // begin_step: the blue team's episode ends only by its own outcome.
-        world_.EndStep();
+        world_->EndStep();
         episodeOpen_ = true;
         WriteTeam(exchange.next, exchange.nextAvailable, blues_, observations, available);
         WriteRewards(exchange, rewards, rewardChannels);
@@ -368,7 +363,8 @@ public:
     void SetWeights(double const* weights)
     {
         defenders::GeneralizedRewardValues values{};
-        std::copy(weights, weights + Channels, values.begin());
+        std::transform(weights, weights + Channels, values.begin(),
+            [](double value) { return static_cast<float>(value); });
         controller_->SetRewardWeights(values);
     }
 
@@ -378,13 +374,70 @@ public:
         std::copy(values.begin(), values.end(), weights);
     }
 
+    /** @brief Apply the common engine's Blue team/red team/scenario payload without editing project files. */
+    void ApplyCurriculumStage(std::string const& name, std::string const& payload)
+    {
+        auto const stage = nlohmann::json::parse(payload);
+        if (!stage.is_object() || !stage.contains("blue") || !stage.contains("red")
+            || !stage.contains("hostileZones") || !stage.at("blue").is_number_unsigned()
+            || !stage.at("red").is_number_unsigned() || !stage.at("hostileZones").is_boolean())
+        {
+            throw std::invalid_argument("BlueDefense curriculum stage '" + name
+                + "' requires blue, red and hostileZones");
+        }
+        auto scenario = nlohmann::json::parse(std::ifstream(ScenarioOf(project_)));
+        auto& settings = scenario.at("blueDefense");
+        settings.at("blueTeam")["activeCount"] = stage.at("blue");
+        settings.at("redTeam")["activeCount"] = stage.at("red");
+        settings.at("restrictedZones")["enabled"] = stage.at("hostileZones");
+        if (!stage.at("hostileZones").get<bool>())
+        {
+            settings.at("restrictedZoneSpawn")["enabledProbability"] = 0.0;
+        }
+        if (stage.contains("objectiveLayout"))
+        {
+            settings.at("objectiveSpawn")["mode"] = stage.at("objectiveLayout");
+        }
+        auto stageFolder = std::make_unique<ScenarioValidationFolder>();
+        auto const source = ScenarioOf(project_);
+        auto const& folder = stageFolder->Path();
+        auto const profiles = std::filesystem::path(scenario.at("agentProfiles").get<std::string>());
+        scenario["agentProfiles"] = std::filesystem::absolute(source.parent_path() / profiles).generic_string();
+        std::filesystem::path const staged = folder / "scenario.json";
+        {
+            std::ofstream output(staged);
+            output.exceptions(std::ios::badbit | std::ios::failbit);
+            output << scenario.dump(2) << '\n';
+        }
+        std::filesystem::copy_file(project_ / "blue_patrol_training.json", folder / "blue_patrol_training.json",
+            std::filesystem::copy_options::overwrite_existing);
+        std::optional<defenders::GeneralizedRewardValues> weights;
+        if (controller_) weights = controller_->RewardWeights();
+        LoadScenario(staged);
+        if (weights) controller_->SetRewardWeights(*weights);
+        stageFolder_ = std::move(stageFolder);
+    }
+
 private:
+    /** @brief Rebuild the ECS world at a safe update boundary for a selected curriculum stage. */
+    void LoadScenario(std::filesystem::path const& scenario)
+    {
+        auto world = std::make_unique<ppo::model::Environment>();
+        auto controller = ppo::examples::bluedefense::LoadExternalScenario(scenario, *world);
+        if (!controller)
+            throw std::runtime_error(scenario.string() + ": not a valid BlueDefense scenario (see the messages above)");
+        world_ = std::move(world);
+        controller_ = std::move(controller);
+        blues_ = controller_->Counts().blueMobiles;
+        episodeOpen_ = false;
+    }
+
     /** @brief Starts an episode: a re-initialization when one is still running, then its first step begins. */
     void StartEpisode(float* observations, std::uint8_t* available, float* world)
     {
         if (episodeOpen_)
         {
-            world_.RequestReinitialization();
+            world_->RequestReinitialization();
             episodeOpen_ = false;
         }
         PrepareStep(observations, available, world);
@@ -393,7 +446,7 @@ private:
     /** @brief The world begins its step; the blue controller publishes what the team acts on. */
     void PrepareStep(float* observations, std::uint8_t* available, float* world)
     {
-        world_.BeginStep();
+        world_->BeginStep();
         controller_->PrepareExternalStep();
         defenders::GeneralizedTeamExchange const& exchange = controller_->Exchange();
         WriteTeam(exchange.observations, exchange.available, blues_, observations, available);
@@ -417,7 +470,9 @@ private:
         }
     }
 
-    ppo::model::Environment world_;
+    std::filesystem::path project_;
+    std::unique_ptr<ScenarioValidationFolder> stageFolder_;
+    std::unique_ptr<ppo::model::Environment> world_;
     std::shared_ptr<defenders::GeneralizedPatrolMappoAgent> controller_;
     std::size_t blues_ = 0;
     /** @brief A step was taken since the episode started and did not end it. */

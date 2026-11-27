@@ -35,5 +35,5 @@
     "policy": "../../models/RLMission/eval/policy.ppokit"
   },
   "journal": "../../models/RLMission/metrics.jsonl",
-  "networkEditable": false
+  "networkEditable": true
 }

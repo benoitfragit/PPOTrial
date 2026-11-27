@@ -106,7 +106,7 @@ studio_manual_checks() {
             -DPPOKIT_REACH_ENVIRONMENT="\"$root/build/release/PPOKit/reach_environment.so\"" \
             -DPPOKIT_REACH_NETWORK="\"$root/build/release/PPOKit/reach_network.so\"" \
             -DPPOKIT_RUN_PROGRAM="\"$root/build/release/PPOKit/ppokit-run\"" \
-            -DPPOKIT_REACH_PROGRAM="\"$root/build/release/PPOKit/examples/reach/ppokit_reach\"" \
+            -DPPOKIT_REACH_PROGRAM="\"$root/build/release/PPOKit/ppokit-run\"" \
             "${views[@]}" "PPOKit/studio/tests/${view}_tests.cpp" "${objects[@]}" "${libraries[@]}" \
             -o "$out/${view}_tests" 2> "$out/$view.build.log" \
             || { cat "$out/$view.build.log"; echo "FAILED: studio $view tests do not build"; exit 1; }

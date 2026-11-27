@@ -14,7 +14,6 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
-#include <fstream>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -37,35 +36,6 @@ public:
     ReachEnvironment(std::filesystem::path const& project, std::uint64_t seed)
         : task_(static_cast<std::uint32_t>(seed)), deferClock_(std::filesystem::exists(project / "defer-clock.fixture"))
     {
-        if (std::filesystem::exists(project / "progress.fixture"))
-        {
-            progressLog_ = project / "progress.log";
-        }
-    }
-
-    /** @brief With progress.fixture, one line per progress call in progress.log, for the run tests. */
-    bool TrainingProgress(std::uint64_t updates, char const* campaign)
-    {
-        if (progressLog_.empty())
-        {
-            return false;
-        }
-        std::ofstream log(progressLog_, std::ios::app);
-        log << "update " << updates;
-        if (campaign != nullptr)
-        {
-            log << " campaign " << campaign;
-        }
-        log << '\n';
-        // Return true only on the first campaign, so a subsequent false cannot erase the decision.
-        if (campaign != nullptr && !campaignFinished_
-            && std::filesystem::exists(progressLog_.parent_path() / "finish-on-campaign.fixture"))
-        {
-            campaignFinished_ = true;
-            return true;
-        }
-        // The other fixture ends training before the campaigns, after update 3.
-        return updates == 3 && std::filesystem::exists(progressLog_.parent_path() / "finish-at-3.fixture");
     }
 
     void Reset(float* observation, float* world)
@@ -113,13 +83,12 @@ public:
     /** @brief The episodes trained since the run started. */
     std::string TrainingState() const
     {
-        return std::to_string(trainedEpisodes_) + (campaignFinished_ ? ":campaign-finished" : "");
+        return std::to_string(trainedEpisodes_);
     }
 
     void RestoreTrainingState(std::string const& state)
     {
         trainedEpisodes_ = state.empty() ? 0 : std::stoull(state);
-        campaignFinished_ = state.find(":campaign-finished") != std::string::npos;
     }
 
     void EpisodeMetrics(double* metrics) const
@@ -139,7 +108,6 @@ public:
 private:
     bool learning_ = true;
     unsigned long long trainedEpisodes_ = 0;
-    bool campaignFinished_ = false;
     /** @brief The target's offset is the observation's first two values; the agent is at the origin of it. */
     static void WriteWorld(reach_example::Observation const& observation, float* world) noexcept
     {
@@ -155,7 +123,6 @@ private:
 
     ReachTask task_;
     bool const deferClock_;
-    std::filesystem::path progressLog_;
     std::optional<float> pendingClock_;
     bool reached_ = false;
     double distance_ = 0.0;

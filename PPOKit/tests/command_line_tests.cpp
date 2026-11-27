@@ -125,7 +125,7 @@ void CheckFiles()
 {
     Result const result = Run({"check"});
     Check(result.code == 0 && Contains(result.output, "All files are valid: task 'reach'")
-            && Contains(result.output, "2 curriculum stages") && Contains(result.output, "'reach_smoke'"),
+            && Contains(result.output, "no curriculum") && Contains(result.output, "'reach_smoke'"),
         "check validates the example's files: " + result.output + result.errors);
 }
 
@@ -350,6 +350,23 @@ std::filesystem::path CopyProject(std::filesystem::path const& into)
     {
         std::filesystem::copy_file(source / file, into / file, std::filesystem::copy_options::overwrite_existing);
     }
+    // Keep the retired in-process command line as a compatibility oracle. Production
+    // projects use curriculum.json through ppokit-run and must not duplicate this plan.
+    std::ifstream input(into / "training.json");
+    std::string training((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    std::size_t const closingBrace = training.rfind('}');
+    if (closingBrace == std::string::npos) throw std::runtime_error("invalid copied training.json");
+    training.insert(closingBrace, R"(,
+  "curriculum": {
+    "window": 50,
+    "promote_at": 0.8,
+    "stages": [
+      { "name": "near", "sample": { "start_distance": { "uniform": [0.2, 0.5] } } },
+      { "name": "far", "sample": { "start_distance": { "uniform": [0.5, 1.5] } } }
+    ]
+  }
+)");
+    WriteText(into / "training.json", training);
     return into;
 }
 

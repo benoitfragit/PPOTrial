@@ -7,8 +7,7 @@
       "train",
       "--project",
       "{project}",
-      "--updates",
-      "100"
+      "--until-curriculum"
     ],
     "evaluate": [
       "eval",
@@ -32,7 +31,7 @@
   },
   "settings": "scenario.json",
   "externalCurriculum": "../../../../tools/ci/adaptive_curriculum/gates.json",
-  "externalCurriculumProgress": "checkpoints/adaptive-curriculum-progress.json",
+  "externalCurriculumProgress": "checkpoints/shared/curriculum-status.json",
   "libraries": {
     "environment": "blue_environment",
     "network": "ppokit_graph_network"

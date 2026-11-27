@@ -12,6 +12,7 @@
  */
 #include "ppokit/artifacts/artifact.hpp"
 #include "ppokit/component/native_module.hpp"
+#include "ppokit/editor/graph_document.hpp"
 #include "ppokit/eval/evaluation.hpp"
 #include "ppokit/schema/block_graph_schema.hpp"
 #include "ppokit/schema/project.hpp"
@@ -128,8 +129,8 @@ void CheckBluePatrol(schema::Project const& project)
             && project.networkEditable && project.SettingsFile(),
         "BluePatrol uses its editable shared graph and its environment settings");
     Check(project.Checkpoints() == project.root / "checkpoints/shared", "shared run state is isolated");
-    Check(project.externalCurriculumProgress == "checkpoints/adaptive-curriculum-progress.json",
-        "the external curriculum references the CI launcher's progress file");
+    Check(project.externalCurriculumProgress == "checkpoints/shared/curriculum-status.json",
+        "the external curriculum publishes the common engine's Studio status file");
     schema::Project const legacy = schema::LoadProject(project.root / "project.legacy.json");
     Check(legacy.networkLibrary == "blue_network" && !legacy.networkEditable
             && legacy.Checkpoints() == project.root / "checkpoints"
@@ -145,9 +146,10 @@ void CheckBluePatrol(schema::Project const& project)
     nlohmann::json const& evaluation = settings.at("evaluation");
     std::optional<schema::ProjectCommandLine> const& train = project.program.train;
     Check(project.program.executable == "ppokit-run" && train && train->executable.empty()
-            && train->arguments.size() >= 2 && train->arguments.front() == "train"
-            && train->arguments[train->arguments.size() - 2] == "--updates" && train->arguments.back() == "100",
-        "BluePatrol can continue from its converted checkpoint with an additional budget");
+            && !train->arguments.empty() && train->arguments.front() == "train"
+            && std::find(train->arguments.begin(), train->arguments.end(), "--until-curriculum")
+                != train->arguments.end(),
+        "BluePatrol continues from its converted checkpoint through the common curriculum");
     std::optional<schema::ProjectCommandLine> const& inference = project.program.inference;
     auto const argument = [&inference](std::string const& value) {
         return inference
@@ -296,11 +298,71 @@ void CheckAirspace(std::filesystem::path const& airspace, std::string const& fam
 #else
     schema::Project const project = schema::LoadProject(folder);
 #endif
-    Check(project.environmentLibrary == libraries + "_environment" && project.networkLibrary == "ppokit_graph_network",
-        family + " runs on " + libraries + "_environment and ppokit_graph_network");
+    Check(project.environmentLibrary == libraries + "_environment" && project.networkLibrary == "ppokit_graph_network"
+            && project.networkEditable,
+        family + " runs on its environment and the editable common graph network");
     Check(ReadFile(project.Task()) == ReadFile(airspace / "Agents" / agent / "task.json"),
         family + "/task.json is the task the " + agent + " agent is compiled with");
     CheckVisualiser(project, "airspace_visualiser", "airspace_watch@1");
+
+    schema::TaskSchema const task = schema::LoadTaskSchema(project.Task());
+    ppokit::editor::GraphDocument document = ppokit::editor::GraphDocument::Open(ReadFile(project.Network()));
+    Check(document.Validate(task).valid, family + " opens as a valid actor/critic graph in the Studio editor");
+    schema::BlockGraphSchema const original = schema::LoadBlockGraph(project.Network(), task);
+    schema::BlockGraphSchema const saved = schema::ParseBlockGraph(document.GraphJson(), project.Network().string(), task);
+    auto const originalIdentity = schema::ArtifactIdentityOf(task, original);
+    auto const savedIdentity = schema::ArtifactIdentityOf(task, saved);
+    Check(originalIdentity.graphHash == savedIdentity.graphHash,
+        family + " keeps checkpoint identity after an untouched editor round trip");
+    auto const policy = airspace / "models" / family / "prod" / "policy.ppokit";
+    ppokit::artifacts::ArtifactHeader const header = ppokit::artifacts::ReadArtifactHeader(policy);
+    bool compatible = true;
+    try { ppokit::artifacts::RequireCompatible(header.identity, savedIdentity, policy.string()); }
+    catch (std::exception const&) { compatible = false; }
+    Check(compatible, family + " keeps its historical production checkpoint compatible");
+
+    auto const& actor = document.At(ppokit::editor::Network::Actor);
+    auto const structural = std::find_if(actor.nodes.begin(), actor.nodes.end(), [](auto const& node) {
+        return node.parameters.contains("width") && node.parameters.at("width").is_number_integer();
+    });
+    Check(structural != actor.nodes.end(), family + " has an editable structural width");
+    if (structural != actor.nodes.end())
+    {
+        int const width = structural->parameters.at("width").get<int>();
+        document.SetParameter(ppokit::editor::Network::Actor, structural->name, "width", width + 1);
+        auto const changed = schema::ParseBlockGraph(document.GraphJson(), project.Network().string(), task);
+        bool refused = false;
+        try { ppokit::artifacts::RequireCompatible(header.identity, schema::ArtifactIdentityOf(task, changed), policy.string()); }
+        catch (ppokit::artifacts::ArtifactMismatch const& error)
+        {
+            refused = std::string(error.what()).find("trained for another network") != std::string::npos;
+        }
+        Check(refused, family + " explicitly refuses its checkpoint after a structural edit");
+        std::filesystem::path const savedGraph = std::filesystem::temp_directory_path()
+            / ("ppokit_" + family + "_edited_network.json");
+        {
+            std::ofstream output(savedGraph, std::ios::binary);
+            output << document.GraphJson();
+        }
+        ppokit::editor::GraphDocument const reloaded = ppokit::editor::GraphDocument::Open(ReadFile(savedGraph));
+        Check(reloaded.Validate(task).valid
+                && schema::ArtifactIdentityOf(task, schema::ParseBlockGraph(
+                    reloaded.GraphJson(), savedGraph.string(), task)).graphHash
+                    == schema::ArtifactIdentityOf(task, changed).graphHash,
+            family + " saves and reloads its structural graph edit");
+        std::error_code ignored;
+        std::filesystem::remove(savedGraph, ignored);
+        document.Undo();
+        auto const restored = schema::ParseBlockGraph(document.GraphJson(), project.Network().string(), task);
+        Check(schema::ArtifactIdentityOf(task, restored).graphHash == originalIdentity.graphHash,
+            family + " Undo restores the historical checkpoint contract");
+        document.Redo();
+        auto const redone = schema::ParseBlockGraph(document.GraphJson(), project.Network().string(), task);
+        Check(schema::ArtifactIdentityOf(task, redone).graphHash
+                == schema::ArtifactIdentityOf(task, changed).graphHash,
+            family + " Redo restores the structural edit");
+        document.Undo();
+    }
 }
 
 } // namespace

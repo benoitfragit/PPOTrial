@@ -148,7 +148,7 @@ class InferenceValidationTests(unittest.TestCase):
             def evaluate(command, **_):
                 # ppokit-run eval writes its report next to the checkpoints.
                 self.assertEqual(command[1:3], ["eval", "--project"])
-                self.assertEqual(command[3], str(project / "project.legacy.json"))
+                self.assertEqual(command[3], str(project / "project.json"))
                 self.assertIn("--policy", command)
                 report_file.write_text(json.dumps(make_report(episodes=20)))
                 return subprocess.CompletedProcess(args=command, returncode=0, stdout="ok", stderr="")

@@ -1,43 +1,22 @@
-name: Restart Progressive Blue Defense (checkpoint)
+name: Resume Progressive Blue Defense (common engine)
 
 on:
   pull_request:
-    # The pull-request job lints both MAPPO workflows and runs the gate regressions.
     paths:
       - .github/workflows/mappo-restart-progressive.yml
       - .github/workflows/mappo-training-windows.yml
       - tools/ci/**
   workflow_dispatch:
     inputs:
-      max_team_size:
-        description: "Maximum team size: 2, 3 or 4 (2v2 legacy by default)"
-        required: true
-        type: choice
-        default: "2"
-        options:
-          - "2"
-          - "3"
-          - "4"
-      scenario_variant:
-        description: "Objective layout and zones: 4 combinations, all gates/replays"
-        required: true
-        type: choice
-        default: fixed_no_zones
-        options:
-          - fixed_no_zones
-          - fixed_zones
-          - randomized_no_zones
-          - randomized_zones
       source_run_id:
-        description: "Source selector: enter branch for committed LATEST training + PROD actor, or a completed run ID"
-        required: false
+        description: "Successful progressive run whose complete PPOKit generation must resume"
+        required: true
         type: string
-        default: "41865674608"
-      start_gate:
-        description: "First gate of the new cycle (limited by max_team_size)"
+      progressive_gate:
+        description: "Expected current stage (the persisted common state remains authoritative)"
         required: true
         type: choice
-        default: "2v2"
+        default: "1v0"
         options:
           - 1v0
           - 2v0
@@ -53,14 +32,28 @@ on:
           - 4v2
           - 4v3
           - 4v4
-      retrain_selected_gate:
-        description: "Train for the full budget after BEST passes, preserving the chosen gate-rehearsal profile"
+      max_team_size:
+        description: "Maximum team size used by the persisted curriculum plan"
         required: true
-        type: boolean
-        default: false
+        type: choice
+        default: "2"
+        options:
+          - "2"
+          - "3"
+          - "4"
+      scenario_variant:
+        description: "Scenario variant used by the persisted curriculum plan"
+        required: true
+        type: choice
+        default: fixed_no_zones
+        options:
+          - fixed_no_zones
+          - fixed_zones
+          - randomized_no_zones
+          - randomized_zones
       rehearsal_profile:
-        description: "Training replay profile for the new cycle (legacy = historical behavior)"
-        required: false
+        description: "Rehearsal profile used by the persisted curriculum plan"
+        required: true
         type: choice
         default: legacy
         options:
@@ -69,22 +62,22 @@ on:
           - patrol_focus_v1
           - combat_focus_v1
       success_percent:
-        description: "Evaluated mission-success threshold (first gate, or ALL gates when switch is on)"
+        description: "Threshold used by the persisted curriculum plan"
         required: true
         type: number
         default: 92
       same_threshold_all_gates:
-        description: "Use same success threshold for all gates (not only the first)"
+        description: "Use success_percent for every stage"
         required: true
         type: boolean
         default: true
       max_seconds:
-        description: "Training time budget for the first gate, in seconds"
+        description: "Additional wall-clock budget for this resumed client run"
         required: true
         type: number
         default: 14400
       auto_advance:
-        description: "After a passing gate, dispatch the next existing progressive run"
+        description: "Continue subsequent stages inside the common engine"
         required: true
         type: boolean
         default: true
@@ -93,43 +86,41 @@ permissions:
   contents: read
   actions: read
 
-concurrency:
-  group: mappo-restart-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   validate_workflow:
-    name: Lint GitHub Actions YAML and embedded scripts
+    name: Lint common-engine workflow clients
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v4
       - name: Verify workflow with actionlint
-        shell: bash
         run: |
-          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -color .github/workflows/mappo-restart-progressive.yml .github/workflows/mappo-training-windows.yml
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -color \
+            .github/workflows/mappo-restart-progressive.yml \
+            .github/workflows/mappo-training-windows.yml
+      - name: Verify common plan translation
+        run: python -m unittest discover -s tools/ci/adaptive_curriculum -p "test_common_plan.py" -v
 
-      - name: Test MAPPO gate dispatch and restart regressions
-        run: python -m unittest discover -s tools/ci/adaptive_curriculum -p "test_*.py" -v
-
-  bootstrap:
-    # A rerun must not overwrite the original bootstrap artifact.
+  resume:
+    name: Resume the persisted common curriculum generation
     if: github.event_name == 'workflow_dispatch' && github.run_attempt == 1
-    name: Create a fresh curriculum cycle from a verified training checkpoint
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: write
     steps:
-      - name: Checkout current training contract
-        uses: actions/checkout@v4
-
-      - name: Validate source run provenance and completion
-        if: ${{ inputs.source_run_id != 'branch' }}
+      - name: Validate source generation and dispatch the common client
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
-        shell: bash
+          PROGRESSIVE_GATE: ${{ inputs.progressive_gate }}
+          MAX_TEAM_SIZE: ${{ inputs.max_team_size }}
+          SCENARIO_VARIANT: ${{ inputs.scenario_variant }}
+          REHEARSAL_PROFILE: ${{ inputs.rehearsal_profile }}
+          SUCCESS_PERCENT: ${{ inputs.success_percent }}
+          SAME_THRESHOLD: ${{ inputs.same_threshold_all_gates }}
+          MAX_SECONDS: ${{ inputs.max_seconds }}
+          AUTO_ADVANCE: ${{ inputs.auto_advance }}
         run: |
           if [[ ! "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
             echo 'source_run_id must be a positive GitHub run ID' >&2
@@ -141,374 +132,15 @@ jobs:
                 and .conclusion == "success"
                 and .repository.full_name == $repo
                 and (.path | startswith(".github/workflows/mappo-training-windows.yml"))
-              ' >/dev/null || { echo 'Source run must be a successful progressive training run in this repository' >&2; exit 1; }
-
-      - name: Clear only transient workspace Blue checkpoints
-        if: ${{ inputs.source_run_id != 'branch' }}
-        shell: bash
-        run: |
-          rm -rf Examples/BlueDefense/projects/BluePatrol/checkpoints/latest Examples/BlueDefense/projects/BluePatrol/checkpoints/prod
-          rm -f Examples/BlueDefense/projects/BluePatrol/checkpoints/adaptive-curriculum-progress.json
-
-      - name: Restore source actor, critic, Adam and RNG
-        if: ${{ inputs.source_run_id != 'branch' }}
-        uses: actions/download-artifact@v4
-        with:
-          name: blue-mappo-checkpoints
-          repository: ${{ github.repository }}
-          run-id: ${{ inputs.source_run_id }}
-          github-token: ${{ github.token }}
-          path: Examples/BlueDefense/projects/BluePatrol/checkpoints
-
-      - name: Verify full checkpoint and reset only curriculum progression
-        env:
-          GH_TOKEN: ${{ github.token }}
-          START_GATE: ${{ inputs.start_gate }}
-          MAX_TEAM_SIZE: ${{ inputs.max_team_size }}
-          SCENARIO_VARIANT: ${{ inputs.scenario_variant }}
-          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
-          SUCCESS_PERCENT: ${{ inputs.success_percent }}
-          SAME_THRESHOLD: ${{ inputs.same_threshold_all_gates }}
-          REHEARSAL_PROFILE: ${{ inputs.rehearsal_profile }}
-          AUTO_ADVANCE: ${{ inputs.auto_advance }}
-          RETRAIN_SELECTED_GATE: ${{ inputs.retrain_selected_gate }}
-        shell: bash
-        run: |
-          python - <<'PY'
-          import base64
-          import hashlib
-          import json
-          import os
-          import subprocess
-          from pathlib import Path
-          from tools.ci.adaptive_curriculum.progressive_gate import (
-              validate_gates, select_curriculum, validate_source_gate_fingerprint,
-              validated_rehearsal_history)
-          from tools.ci.adaptive_curriculum import champion_checkpoints as champion
-          from tools.ci.adaptive_curriculum import branch_checkpoint_seed as branch_seed
-          from tools.ci.adaptive_curriculum.rehearsal_profiles import (
-              PROFILES, effective_profile)
-          from tools.ci import blue_checkpoint
-          from tools.ci import mappo_curriculum
-
-          root = Path('Examples/BlueDefense/projects/BluePatrol/checkpoints')
-          use_branch = os.environ.get('SOURCE_RUN_ID', '').strip().lower() == 'branch'
-          if not use_branch:
-              # Artifacts of earlier runs hold the former V10/V7 names; the
-              # loaders read either format by content, under the new names.
-              for former, current in blue_checkpoint.adopt_former_names(root):
-                  print(f'[RESTART] restored {former.name} as {current}')
-          actor = root / 'latest' / blue_checkpoint.POLICY_NAME
-          training = root / 'latest' / blue_checkpoint.TRAINING_NAME
-          progress_path = root / 'adaptive-curriculum-progress.json'
-          required_paths = ((actor, training) if use_branch
-                            else (actor, training, progress_path))
-          for path in required_paths:
-              if not path.is_file() or path.stat().st_size == 0:
-                  raise RuntimeError(f'Missing or empty source artifact: {path}')
-
-          try:
-              blue_checkpoint.read(actor, 'policy')
-              blue_checkpoint.read(training, 'training')
-          except ValueError as error:
-              raise RuntimeError(
-                  f'Incompatible actor or full optimizer semantic contract: {error}') from None
-
-          gates_bytes = Path('tools/ci/adaptive_curriculum/gates.json').read_bytes()
-          stages = select_curriculum(
-              json.loads(gates_bytes), int(os.environ.get('MAX_TEAM_SIZE') or '2'))
-          stage_names = [stage['id'] for stage in stages]
-          start_gate = os.environ['START_GATE']
-          rehearsal_profile = os.environ['REHEARSAL_PROFILE'] or 'legacy'
-          if rehearsal_profile not in PROFILES:
-              raise RuntimeError('Unknown rehearsal profile')
-          effective = effective_profile(
-              rehearsal_profile, int(os.environ.get('MAX_TEAM_SIZE') or '2'))
-          if effective != rehearsal_profile:
-              print('[RESTART] Automatic 3vX/4vX balanced rehearsals: '
-                    f'{rehearsal_profile} -> {effective}', flush=True)
-          rehearsal_profile = effective
-          if start_gate not in stage_names:
-              raise RuntimeError('Unknown target gate')
-
-          source = (None if use_branch else
-                    json.loads(progress_path.read_text(encoding='utf-8')))
-          variants = {
-              'fixed_no_zones': ('fixed', False),
-              'fixed_zones': ('fixed', True),
-              'randomized_no_zones': ('randomized', False),
-              'randomized_zones': ('randomized', True),
-          }
-          selection = os.environ.get('SCENARIO_VARIANT') or 'fixed_no_zones'
-          if selection not in variants:
-              raise RuntimeError('Invalid scenario variant')
-          objective_layout, hostile_zones = variants[selection]
-          best_root = root / 'best'
-          destination_best_root = champion.variant_root(
-              hostile_zones, objective_layout, best_root)
-          cross_variant = False
-          if not use_branch:
-              source_zones = source.get('hostileZones', False)
-              source_layout = source.get('objectiveLayout', 'fixed')
-              if (type(source_zones) is not bool
-                      or source_layout not in ('fixed', 'randomized')):
-                  raise RuntimeError('Invalid source scenario variant')
-              cross_variant = (source_zones != hostile_zones
-                               or source_layout != objective_layout)
-          # The evaluated pair belongs to the original scenario namespace.
-          champion.ROOT = (champion.variant_root(
-              source_zones, source_layout, best_root)
-              if not use_branch else destination_best_root)
-          threshold = float(os.environ["SUCCESS_PERCENT"])
-          if not 0 < threshold <= 100:
-              raise RuntimeError("success_percent must be in (0, 100]")
-          same_threshold = os.environ["SAME_THRESHOLD"].lower() == "true"
-          auto_advance = os.environ["AUTO_ADVANCE"].lower() == "true"
-          if use_branch:
-              # Only committed branch files are used. A PROD actor may be
-              # older than LATEST; the V7 optimizer always seeds from LATEST.
-              checked = branch_seed.validate_branch_checkpoints(root)
-              updates = checked['updates']
-              source_best = None
-              source_validated = []
-              source_provenance = branch_seed.branch_source_provenance(
-                  int(os.environ['GITHUB_RUN_ID']), os.environ['GITHUB_SHA'],
-                  checked['sha256'])
-              # Ignore any tracked historical BEST files; no gate is certified
-              # by a branch actor or by a PROD .score without a new evaluation.
-              import shutil
-              shutil.rmtree(root / 'best', ignore_errors=True)
-              print('[RESTART] Branch V10/V7 warm start at update='
-                    f'{updates}; no certified gates; '
-                    f'latest/prod equal='
-                    f'{checked["sha256"]["latestActor"] == checked["sha256"]["prodActor"]}')
-          else:
-              # Check the source run's OWN immutable commit, rather than assuming
-              # its gate schedule matches the new curriculum. The source may use a
-              # different historical schedule (such as run 62) but must be authentic.
-              source_run_id = os.environ['SOURCE_RUN_ID']
-              repository = os.environ['GITHUB_REPOSITORY']
-              run_metadata = json.loads(subprocess.check_output(
-                  ['gh', 'api', f'repos/{repository}/actions/runs/{source_run_id}'],
-                  text=True))
-              source_sha = run_metadata.get('head_sha')
-              if not isinstance(source_sha, str) or len(source_sha) != 40:
-                  raise RuntimeError('Source run has no valid commit SHA')
-              source_config_payload = json.loads(subprocess.check_output(
-                  ['gh', 'api', f'repos/{repository}/contents/'
-                   f'tools/ci/adaptive_curriculum/gates.json?ref={source_sha}'],
-                  text=True))
-              if source_config_payload.get('encoding') != 'base64':
-                  raise RuntimeError('Source gate configuration cannot be decoded')
-              source_gates_bytes = base64.b64decode(source_config_payload['content'])
-              if source.get('formatVersion') != 1:
-                  raise RuntimeError('Invalid source curriculum state')
-              source_gate = source.get('gate')
-              source_stages = validate_source_gate_fingerprint(
-                  source_gates_bytes, source.get('gateConfigSha256'), source_gate)
-              updates = mappo_curriculum.read_updates(training)
-              saved_updates = source.get('lastCheckpointUpdates')
-              if (type(saved_updates) is not int or updates < saved_updates or updates <= 0):
-                  raise RuntimeError('Source optimizer checkpoint/update counter is invalid')
-
-              # A new curriculum cycle starts from the matching evaluated FULL
-              # champion pair whenever the source run provides one. Legacy artifacts
-              # without such a pair remain usable as an explicit unverified warm start,
-              # never represented as a certified winning checkpoint.
-              # A historical source gate remains readable as a BEST pair.
-              # Active training gates are defined exclusively by the new schedule.
-              source_best = champion.read(source_gate)
-              if cross_variant and (
-                      source_best is None or not source_best['evaluatedForGate']):
-                  raise RuntimeError(
-                      'Cross-variant restart requires an evaluated source BEST pair')
-              if source_run_id == '41865674608' and (
-                      source_gate != '4v1' or source_best is None
-                      or not source_best['evaluatedForGate']):
-                  raise RuntimeError('Run 62 requires its evaluated 4v1 BEST pair')
-              if source.get('championRequired', False) and source_best is None:
-                  raise RuntimeError('Mandatory source champion pair is missing')
-              if source_best is not None:
-                  updates = champion.restore_latest(source_gate)
-                  if cross_variant:
-                      # Retain source BEST archives, including when the target
-                      # namespace is their parent (e.g. randomized -> fixed).
-                      # Only clear destination gates, never other variants.
-                      import shutil
-                      champion.ROOT = destination_best_root
-                      for gate_name in stage_names:
-                          shutil.rmtree(champion.ROOT / gate_name,
-                                      ignore_errors=True)
-                      champion.seed(start_gate, None)
-                      print('[RESTART] Evaluated source BEST restored; new '
-                            'variant seeded without historical certification')
-                  elif start_gate != source_gate:
-                      destination = champion.ROOT / start_gate
-                      if destination.exists():
-                          import shutil
-                          history = (champion.ROOT / 'history' /
-                                     os.environ['GITHUB_RUN_ID'] / start_gate)
-                          history.parent.mkdir(parents=True, exist_ok=True)
-                          shutil.copytree(destination, history)
-                      champion.seed(start_gate, source_gate)
-                  print(f'[RESTART] restored BEST V7 pair from {source_gate}'
-                        f' at update={updates}')
-              else:
-                  print('[RESTART] LEGACY source: no evaluated BEST pair in '
-                        'artifact. Continuing from LATEST V7; a new evaluation '
-                        'must establish the first champion.')
-
-              # Preserve the historical previously validated gates for rehearsal.
-              # Eight-case legacy certifications are NOT new 20-case gate proofs.
-              source_validated = source.get('validatedGates', [])
-              source_names = [stage['id'] for stage in source_stages]
-              if (not isinstance(source_validated, list)
-                      or any(type(gate_id) is not str
-                             or gate_id not in source_names
-                             or source_names.index(gate_id) > source_names.index(source_gate)
-                             for gate_id in source_validated)
-                      or (source_gate in source_validated) != source.get('passed')):
-                  raise RuntimeError('Inconsistent source gate validation history')
-              if cross_variant:
-                  # Scores from fixed, randomized, zones-on and zones-off
-                  # cannot certify one another, including future campaigns.
-                  source_validated = []
-              source_provenance = {
-                  'sourceRunId': int(os.environ['SOURCE_RUN_ID'])
+              ' >/dev/null || {
+                echo 'Source must be a successful common progressive-training run' >&2
+                exit 1
               }
-
-          rehearsal_history = validated_rehearsal_history(
-              stages, start_gate, source_validated)
-
-          # Keep the matched BEST weights, critic, Adam and RNG.
-          # The target gate is still unvalidated.
-          fresh = dict(
-              formatVersion=1,
-              gateConfigSha256=hashlib.sha256(gates_bytes).hexdigest(),
-              gateIndex=stage_names.index(start_gate),
-              gate=start_gate,
-              passed=False,
-              elapsedSeconds=0.0,
-              bestSuccessPercent=0.0,
-              lastSuccessPercent=None,
-              blockIndex=0,
-              lastCheckpointUpdates=updates,
-              validatedGates=rehearsal_history,
-              rehearsalProfile=rehearsal_profile,
-              championRequired=source_best is not None,
-              restartCycle=dict(
-                  schemaVersion=1,
-                  bootstrapRunId=int(os.environ["GITHUB_RUN_ID"]),
-                  **source_provenance,
-                  sameThresholdAllGates=same_threshold,
-                  rehearsalProfile=rehearsal_profile,
-                  successPercent=threshold,
-                  autoAdvance=auto_advance,
-                  startGate=start_gate,
-                  retrainSelectedGate=os.environ["RETRAIN_SELECTED_GATE"].lower() == "true",
-              ),
-          )
-          if int(os.environ.get('MAX_TEAM_SIZE') or '2') != 2:
-              fresh['maxTeamSize'] = int(os.environ.get('MAX_TEAM_SIZE') or '2')
-          if hostile_zones:
-              fresh['hostileZones'] = True
-              fresh['restartCycle']['hostileZones'] = True
-          if objective_layout != 'fixed':
-              fresh['objectiveLayout'] = objective_layout
-              fresh['restartCycle']['objectiveLayout'] = objective_layout
-          progress_path.write_text(json.dumps(fresh, indent=2) + '\n', encoding='utf-8')
-          source_label = ('branch ' + os.environ['GITHUB_SHA'] if use_branch
-                          else 'run ' + os.environ['SOURCE_RUN_ID'])
-          seed_description = ('branch LATEST V7 + PROD V10; unverified gates'
-                              if use_branch else
-                              'BEST evaluated pair' if source_best else
-                              'LEGACY latest warm start')
-          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
-              summary.write(
-                  f'### New progressive Blue Defense cycle\n'
-                  f'- Seed source: {source_label}\n'
-                  f'- Retained PPO updates: {updates}\n'
-                  f'- New first gate: {start_gate}\n'
-                  '- LATEST actor and full V7 optimizer preserved; PROD remains separate\n'
-                  f'- Source: {seed_description}\n'
-                  f'- Earlier gates eligible for rehearsal: {rehearsal_history}\n'
-                  f'- Same success threshold on every gate: {same_threshold}\n'
-                  f'- Training rehearsal profile: {rehearsal_profile}\n'
-                  f'- Requested success threshold: {threshold:g}%\n'
-                  '- No training, compilation, or production promotion in this bootstrap job\n'
-              )
-          print(f'[RESTART] Source {source_label}; update={updates}; gate={start_gate}')
-          PY
-
-      - name: Publish bootstrapped checkpoint for the EXISTING training workflow
-        uses: actions/upload-artifact@v4
-        with:
-          name: blue-mappo-checkpoints
-          path: |
-            Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/policy.ppokit
-            Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/latest.ppokit
-            Examples/BlueDefense/projects/BluePatrol/checkpoints/prod/policy.ppokit
-            Examples/BlueDefense/projects/BluePatrol/checkpoints/prod/policy.ppokit.score
-            Examples/BlueDefense/projects/BluePatrol/checkpoints/best/**
-            Examples/BlueDefense/projects/BluePatrol/checkpoints/adaptive-curriculum-progress.json
-          if-no-files-found: error
-          retention-days: 30
-
-  start_training:
-    name: Dispatch the existing progressive training workflow (cached Release runtime)
-    needs: bootstrap
-    # Never re-dispatch the same first gate on a manual workflow rerun.
-    if: github.event_name == 'workflow_dispatch' && github.run_attempt == 1
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: write
-    steps:
-      - name: Dispatch first gate of new cycle
-        env:
-          GH_TOKEN: ${{ github.token }}
-          START_GATE: ${{ inputs.start_gate }}
-          MAX_TEAM_SIZE: ${{ inputs.max_team_size }}
-          SCENARIO_VARIANT: ${{ inputs.scenario_variant }}
-          SUCCESS_PERCENT: ${{ inputs.success_percent }}
-          MAX_SECONDS: ${{ inputs.max_seconds }}
-          AUTO_ADVANCE: ${{ inputs.auto_advance }}
-          SAME_THRESHOLD: ${{ inputs.same_threshold_all_gates }}
-          REHEARSAL_PROFILE: ${{ inputs.rehearsal_profile }}
-        shell: bash
-        run: |
-          REHEARSAL_PROFILE="${REHEARSAL_PROFILE:-legacy}"
-          MAX_TEAM_SIZE="${MAX_TEAM_SIZE:-2}"
-          if [[ "$MAX_TEAM_SIZE" != 2 && "$REHEARSAL_PROFILE" == legacy ]]; then
-            REHEARSAL_PROFILE=balanced_v1
-            echo '[RESTART] Automatically selected balanced_v1 for 3vX/4vX'
-          fi
-          SCENARIO_VARIANT="${SCENARIO_VARIANT:-fixed_no_zones}"
-          if [[ "$GITHUB_REF" != refs/heads/* ]]; then
-            echo 'Restart requires a branch ref' >&2
-            exit 1
-          fi
-          python - <<'PY'
-          import math
-          import os
-          threshold = float(os.environ['SUCCESS_PERCENT'])
-          seconds = float(os.environ['MAX_SECONDS'])
-          if (not math.isfinite(threshold) or not 0 < threshold <= 100
-                  or not math.isfinite(seconds) or not seconds.is_integer()
-                  or not 1 <= seconds <= 18000):
-              raise SystemExit('Invalid success_percent or max_seconds')
-          PY
-          # The restart-cycle dispatcher owns continuation in fixed mode;
-          # keep its single-dispatch contract (no duplicate advance).
-          TRAIN_AUTO_ADVANCE="$AUTO_ADVANCE"
-          if [[ "$SAME_THRESHOLD" == "true" ]]; then
-            TRAIN_AUTO_ADVANCE=false
-          fi
           gh api --method POST \
             "repos/${GITHUB_REPOSITORY}/actions/workflows/mappo-training-windows.yml/dispatches" \
             -f "ref=${GITHUB_REF_NAME}" \
-            -f "inputs[resume_run_id]=${GITHUB_RUN_ID}" \
-            -f "inputs[progressive_gate]=${START_GATE}" \
+            -f "inputs[resume_run_id]=${SOURCE_RUN_ID}" \
+            -f "inputs[progressive_gate]=${PROGRESSIVE_GATE}" \
             -f "inputs[max_team_size]=${MAX_TEAM_SIZE}" \
             -f "inputs[scenario_variant]=${SCENARIO_VARIANT}" \
             -f "inputs[rehearsal_profile]=${REHEARSAL_PROFILE}" \
@@ -516,13 +148,9 @@ jobs:
             -f "inputs[same_threshold_all_gates]=${SAME_THRESHOLD}" \
             -f "inputs[max_seconds]=${MAX_SECONDS}" \
             -f 'inputs[save_every_updates]=1' \
-            -f "inputs[auto_advance]=${TRAIN_AUTO_ADVANCE}"
+            -f "inputs[auto_advance]=${AUTO_ADVANCE}"
           {
-            echo '### Training dispatched'
-            echo "The existing Progressive Blue Defense workflow was dispatched from bootstrap run ${GITHUB_RUN_ID}."
-            echo "Gate: ${START_GATE}; threshold: ${SUCCESS_PERCENT}%; budget: ${MAX_SECONDS}s."
-            echo "Training rehearsal profile: ${REHEARSAL_PROFILE}."
-            echo "Same threshold for all gates: ${SAME_THRESHOLD}; automatic continuation requested: ${AUTO_ADVANCE}."
-            echo 'The normal training workflow handles Release-cache validation, compile fallback, checkpoint updates, evaluation, and subsequent gate dispatch.'
-            echo "[Open training runs](https://github.com/${GITHUB_REPOSITORY}/actions/workflows/mappo-training-windows.yml)"
+            echo '### Exact common-engine resume dispatched'
+            echo "Source run: ${SOURCE_RUN_ID}; expected stage: ${PROGRESSIVE_GATE}."
+            echo 'The PPOKit generation, environment state, curriculum state, learner and RNG are resumed together.'
           } >> "$GITHUB_STEP_SUMMARY"

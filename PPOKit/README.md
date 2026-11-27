@@ -13,6 +13,9 @@ complémentaire du monde Airspace.
 > [`docs/audits/ppokit-integration/`](../docs/audits/ppokit-integration/README.md).
 > La phase corrective courante est consignée dans
 > [`docs/audits/ppokit-stabilization-2026-11-27.md`](../docs/audits/ppokit-stabilization-2026-11-27.md).
+> La qualification finale de la mutualisation est décrite dans
+> [`docs/audits/ppokit-mutualization-final-2026-11-27.md`](../docs/audits/ppokit-mutualization-final-2026-11-27.md)
+> et son état synthétique dans [`PROGRESS.md`](PROGRESS.md).
 
 ## Disponible aujourd'hui
 
@@ -27,7 +30,8 @@ reach/
   project.json          nom du projet et programme qui l'exécute (train / eval / play)
   task.json             observation, actions, canaux de récompense, scénario
   network.json          acteur et critique (blocs et fils) ; network.layout.json : positions
-  training.json         réglages PPO et GAE, sondes, curriculum
+  training.json         réglages PPO et GAE, sondes
+  curriculum.json       stages, critères, évaluations et répétitions (facultatif)
   eval/*.json           évaluations sur seeds indépendants
   components/           DLL utilisateur (.dll / .so) offertes dans l'éditeur de réseau
   checkpoints/          latest.ppokit, policy, metrics.jsonl (ignoré par git)
@@ -55,7 +59,14 @@ Dans un projet :
 - **Run** : santé de l'entraînement et courbes, suivies en direct.
 - **Console** : la sortie du programme lancé.
 
-Les boutons **Train**, **Evaluate** et **Inference** enregistrent le projet puis démarrent la commande de `project.json`. Le Studio cherche l’exécutable dans le projet, dans le registre du build puis dans le PATH. Avec `ppokit-run`, **Pause**, **Resume** et **Stop** passent par une session UDP locale. L’entraînement termine l’update en cours et publie son checkpoint. En évaluation et en inférence, Stop prend effet au pas de simulation et une campagne inachevée ne publie aucun résultat. Le Studio observe la sortie réelle du processus, ferme le viewer qu’il a ouvert pour ce run et permet de régler le délai avant arrêt forcé (30 s par défaut). **Kill** termine immédiatement le processus.
+Les boutons **Train**, **Evaluate** et **Inference** enregistrent le projet puis démarrent la commande de `project.json`. Le Studio cherche l’exécutable dans le projet, dans le registre du build puis dans le PATH. Avec `ppokit-run`, **Pause**, **Resume** et **Stop** passent par une session UDP locale. L’entraînement termine l’update en cours et publie atomiquement le learner, la politique, l’état de l’environnement et l’état du curriculum. En évaluation et en inférence, Stop prend effet au pas de simulation et une campagne inachevée ne publie aucun résultat. Le Studio observe la sortie réelle du processus, ferme le viewer qu’il a ouvert pour ce run et permet de régler le délai avant arrêt forcé (30 s par défaut). **Kill** termine immédiatement le processus.
+
+Le curriculum affiché dans **Training** est celui du moteur commun : stage de
+promotion et stage actif de répétition, progression de la fenêtre ou du budget,
+critère, dernière évaluation indépendante et raison du maintien ou de la
+promotion. Les mêmes décisions sont prises depuis Studio, CLI et CI. `--fresh`
+repart du stage demandé ou du premier stage ; `--resume` restaure exactement la
+génération publiée et refuse une configuration de curriculum différente.
 
 Pour superviser une commande lancée dans un terminal, ouvrir **Run → Connect a command-line run**, copier l’argument privé `--control` et le joindre à la commande. Le terminal reste propriétaire du processus. Les projets générés par le SDK déclarent `"controlProtocol": "udp/1"`. Le runner d’exemple et FlightControlHeadless acceptent `--control`. Un client historique qui dépend des fichiers ou de l’annonce TCP peut activer `--legacy-control` en ligne de commande. Pour un ancien exécutable externe, la déclaration explicite `"controlProtocol": "legacy-files"` réactive le comportement antérieur du Studio.
 
@@ -98,10 +109,10 @@ Son projet principal utilise le réseau partagé éditable `ppokit_graph_network
 les checkpoints convertis dans `checkpoints/shared/`.
 
 Dans Studio, les réglages numériques et booléens de l'environnement Blue sont
-modifiables et validés par son chargeur avant sauvegarde. L'onglet Curriculum
-permet de modifier les paramètres du calendrier externe de la CI, dont la
-séquence triangulaire reste fixe. Ce calendrier n'est pas exécuté par le bouton
-Train de Studio ; une modification peut nécessiter un nouveau bootstrap CI.
+modifiables et validés par son chargeur avant sauvegarde. Son curriculum V3 et
+le calendrier progressif de la CI sont des configurations du même moteur
+`CurriculumEngine`. La CI ne décide plus des promotions : elle génère au besoin
+une configuration canonique puis appelle `ppokit-run`, comme le Studio et la CLI.
 
 BluePatrol s'entraîne et s'évalue avec `ppokit-run` : DLL d'environnement
 `blue_environment` (le monde de BlueDefense, P bleus contre N rouges), DLL réseau
@@ -119,8 +130,8 @@ Les sélecteurs **Evaluation policy** et **Inference policy** mémorisent chacun
 Le T-6 et le PC-7 (`Examples/FlightControl3D/projects/T6`, `PC7`) sont des projets
 `ppokit-run` : DLL d'environnement `flight_environment`, DLL réseau `ppokit_graph_network`,
 Visualiseur `flight_visualiser` (la scène 3D, le profil et les panneaux de
-FlightControl3D dans ppokit-viewer), suite `eval/validation.json` (validation, BEST et
-fin d'entraînement de FlightControlHeadless). Le projet T-6 embarque le BEST 870 de master `c8282b8` au niveau 12.
+FlightControl3D dans ppokit-viewer), suite `eval/validation.json` (validation et BEST).
+Le projet T-6 embarque le BEST 870 de master `c8282b8` au niveau 12.
 Son contrat `t6texan2@8-centreline1200` conserve le guidage de cette génération.
 Les scénarios historiques du T-6 340 et du PC-7 610 utilisent l'interception à 2 000 m et le
 niveau 11. L’entraînement du PC‑7 démarre vierge. Le Studio peut immédiatement jouer le BEST 610 issu du run 45460292649. Le fichier de référence pour le scénario actuel porte explicitement le contrat à 1 200 m. Les octets des tenseurs correspondent au paquet historique à 2 000 m.
@@ -164,35 +175,22 @@ ppokit-new lander --into Examples        # écrit Examples/lander/, qui s'entra�
 ```
 
 Ajouter `add_subdirectory(Examples/lander)` au build (le studio connaît alors
-le programme `ppokit_lander`), puis ouvrir `Examples/lander` dans le studio,
+sa DLL `lander_environment`), puis ouvrir `Examples/lander` dans le studio,
 ou en ligne de commande :
 
 ```
-ppokit_lander check --project Examples/lander   # valide task, network, training, eval/
-ppokit_lander train --project Examples/lander   # 100 updates ; relancer continue (--fresh repart)
-ppokit_lander eval  --project Examples/lander   # seeds indépendants, code 0 si les seuils tiennent
-ppokit_lander play  --project Examples/lander   # rejoue la politique et affiche chaque épisode
+ppokit-run check --project Examples/lander   # valide task, network, training, curriculum, eval/
+ppokit-run train --project Examples/lander   # 100 updates ; relancer continue (--fresh repart)
+ppokit-run eval  --project Examples/lander   # seeds indépendants, code 0 si les seuils tiennent
+ppokit-run play  --project Examples/lander   # rejoue la politique et affiche chaque épisode
 ```
 
-Sans `--project`, le programme prend le dossier de l'exemple.
-
-Le `main` d'un exemple est un seul appel :
-
-```cpp
-#include "ppokit/tools/command_line.hpp"
-int main(int argc, char** argv)
-{
-    return ppokit::tools::RunCommandLine<ObservationSize, ActionSize>(argc, argv, MakeTask, PPOKIT_EXAMPLE_DIR);
-}
-```
-
-`train` branche tout : réglages PPO, sondes, curriculum, journal, reprise
-exacte, et poids modifiés en direct depuis le studio. La tâche active un
-service en ayant le membre correspondant (tous facultatifs) :
-`Configure(scenario)` (curriculum), `Succeeded()` (promotion),
-`LastRewardChannels()` (courbes par canal), `RewardWeights()` +
-`SetRewardWeights(...)` (poids en direct). `PPOKit/examples/reach` est la
-sortie de `ppokit-new reach`, gardée identique par un test.
+Le projet généré fournit une petite DLL d'environnement conforme au SDK, un
+graphe acteur/critique éditable et un `curriculum.json`. Il ne crée aucun
+learner ou exécutable PPO parallèle : `ppokit-run` fournit entraînement,
+évaluation, inférence, journal, reprise exacte et contrôle Studio.
+`PPOKit/examples/reach` est la sortie de `ppokit-new reach`, gardée identique
+par un test.
 
 ### `PPOKit::Artifacts` — fichiers d'artefacts transactionnels
 

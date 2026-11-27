@@ -41,7 +41,7 @@ def read_rows(path: Path) -> List[Dict[str, float]]:
 
 
 def read_journal_rows(path: Path, from_line: int = 0) -> List[Dict[str, float]]:
-    """The telemetry rows of a ppokit-run journal (checkpoints/latest/metrics.jsonl).
+    """The telemetry rows of a ppokit-run journal (for example checkpoints/shared/metrics.jsonl).
 
     One row per PPO update (its rollout, wall time and mean episode return) and one
     per campaign of the suite (score, success), after the first `from_line` lines

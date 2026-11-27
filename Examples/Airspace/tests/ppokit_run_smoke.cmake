@@ -1,6 +1,9 @@
 # RLMission and RLSNA under ppokit-run (evaluation, play, training), on a copy of the Airspace folders (the projects keep
 # their checkpoints in ../../models: the repository's are never written).
 # Arguments: RUN (ppokit-run), SOURCE (repository root), WORK (scratch folder).
+if(DEFINED ENV{PPOKIT_RUN_TEST_EXECUTABLE})
+    set(RUN "$ENV{PPOKIT_RUN_TEST_EXECUTABLE}")
+endif()
 file(REMOVE_RECURSE "${WORK}")
 foreach(folder Examples/Airspace/projects Examples/Airspace/models Examples/Airspace/settings Examples/Shared/settings)
     get_filename_component(parent "${WORK}/${folder}" DIRECTORY)

@@ -255,6 +255,8 @@ public:
         state["schema"] = TrainingStateSchema;
         state["level"] = curriculum_.Level();
         state["window"] = {{"episodes", curriculum_.WindowEpisodes()}, {"stops", curriculum_.WindowStops()}};
+        state["curriculum_state"] = nlohmann::json::parse(curriculum_.StateJson());
+        state["curriculum_status"] = nlohmann::json::parse(curriculum_.StatusJson());
         state["next_side"] = SideName(stream.nextSide);
         state["random"] = ppokit::artifacts::StandardRandomText(stream.random);
         return state.dump();
@@ -703,8 +705,17 @@ private:
         stream.nextSide = ParseSide(state.at("next_side").get<std::string>());
         stream.random = ppokit::artifacts::ParseRandomText(
             state.at("random").get<std::string>(), "FlightControl3D training state");
-        curriculum_.Resume(state.at("level").get<std::size_t>(), state.at("window").at("episodes").get<std::size_t>(),
-            state.at("window").at("stops").get<std::size_t>());
+        std::size_t const level = state.at("level").get<std::size_t>();
+        std::size_t const episodes = state.at("window").at("episodes").get<std::size_t>();
+        std::size_t const stops = state.at("window").at("stops").get<std::size_t>();
+        curriculum_.Resume(level, episodes, stops);
+        if (state.contains("curriculum_state"))
+        {
+            curriculum_.RestoreJson(state.at("curriculum_state").dump());
+            if (curriculum_.Level() != level || curriculum_.WindowEpisodes() != episodes
+                || curriculum_.WindowStops() != stops)
+                throw std::runtime_error("FlightControl3D training state: inconsistent curriculum state");
+        }
         environment_.ResumeTrainingStream(stream);
     }
 

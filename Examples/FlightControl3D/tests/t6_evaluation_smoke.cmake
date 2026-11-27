@@ -2,6 +2,9 @@
 # record of the same checkpoint (update 870): 19 stops of 20, mean stop distance 546.87 m.
 # The T-6 policy copied into the PC-7 project by mistake is refused (another aircraft).
 # Arguments: RUN (ppokit-run), PROJECT (projects/T6), PC7 (projects/PC7), WORK (scratch folder).
+if(DEFINED ENV{PPOKIT_RUN_TEST_EXECUTABLE})
+    set(RUN "$ENV{PPOKIT_RUN_TEST_EXECUTABLE}")
+endif()
 file(REMOVE_RECURSE "${WORK}")
 file(COPY "${PROJECT}/" DESTINATION "${WORK}")
 execute_process(COMMAND "${RUN}" eval --model LATEST --project "${WORK}"

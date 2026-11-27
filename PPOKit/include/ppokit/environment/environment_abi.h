@@ -30,10 +30,9 @@
  * and gives the empty state to a run that starts afresh. An environment without such state
  * writes an empty state and accepts only the empty one.
  *
- * Curriculum: an environment that owns one (its stages in its settings, its place in the
- * training state) hears of the run's progress with ppokit_environment_training_progress:
- * after each update, and after each campaign run during training with the campaign's result,
- * so that a stage can be passed on an evaluation suite.
+ * Curriculum: the common runtime owns stages, promotion and persistence. The environment
+ * only applies the selected project-specific payload through
+ * ppokit_environment_apply_curriculum_stage.
  */
 #ifndef PPOKIT_ENVIRONMENT_ABI_H
 #define PPOKIT_ENVIRONMENT_ABI_H
@@ -48,7 +47,7 @@ extern "C" {
 #endif
 
 /** @brief ABI version; ppokit-run refuses a DLL of another one. */
-#define PPOKIT_ENVIRONMENT_ABI 6u
+#define PPOKIT_ENVIRONMENT_ABI 7u
 
 #if defined(_WIN32)
 #define PPOKIT_ENVIRONMENT_EXPORT __declspec(dllexport)
@@ -142,19 +141,13 @@ PPOKIT_ENVIRONMENT_EXPORT int ppokit_environment_training_state(const PpokitEnvi
 PPOKIT_ENVIRONMENT_EXPORT int ppokit_environment_restore_training_state(PpokitEnvironment* environment,
     const char* state, size_t size);
 /**
- * @brief Progress of the training run, for an environment that owns a curriculum: called
- *        after each update with `campaign` NULL, and after each campaign of a suite run during
- *        training with its result as JSON: {"suite", "update", "passed", "aggregates":
- *        {"<metric>.<statistic>": value...}}. An environment without a curriculum ignores it.
- * @param finished Receives 1 when the curriculum ends the training (its last stage passed,
- *        or a stage's budget spent), 0 otherwise. ppokit-run honors it after an update
- *        or campaign, finishes the scheduled campaigns of that update and stops without
- *        collecting another rollout. Each completed campaign's changed training state is
- *        published with the same learner and policy bytes. All campaigns of the update
- *        retain the original evaluation context.
+ * @brief Applies a stage selected by PPOKit's common curriculum engine.
+ * @param name Stable stage name.
+ * @param payload Project-specific JSON object from the common plan. Environments without
+ *        stage settings accept only the empty object.
  */
-PPOKIT_ENVIRONMENT_EXPORT int ppokit_environment_training_progress(PpokitEnvironment* environment, uint64_t updates,
-    const char* campaign, int* finished);
+PPOKIT_ENVIRONMENT_EXPORT int ppokit_environment_apply_curriculum_stage(PpokitEnvironment* environment,
+    const char* name, const char* payload);
 /** @brief Weights of the reward channels for the following steps. */
 PPOKIT_ENVIRONMENT_EXPORT int ppokit_environment_set_weights(PpokitEnvironment* environment, const double* weights);
 /** @brief Current weights (rewardChannels values). */

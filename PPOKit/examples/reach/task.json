@@ -14,6 +14,9 @@
     "Time": { "label": "Time spent", "weight": 1.0 },
     "Goal": { "label": "Target reached", "weight": 1.0 }
   },
+  "metrics": {
+    "success": { "kind": "flag" }
+  },
   "scenario": {
     "start_distance": { "type": "float", "range": [0.2, 1.5], "default": 0.5 }
   }

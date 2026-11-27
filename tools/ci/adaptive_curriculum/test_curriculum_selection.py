@@ -225,8 +225,7 @@ class CurriculumSelectionTests(unittest.TestCase):
     def test_four_blue_gates_and_runtime_scenario_variants(self):
         self.assert_scenario_contract(4)
 
-    def test_legacy_dispatches_default_to_two_teams_and_fixed_zones_off(self):
-        # Historical workflow_dispatch clients did not send either new input.
+    def test_workflow_clients_default_to_two_teams_and_fixed_zones_off(self):
         training = (ROOT / ".github/workflows/mappo-training-windows.yml"
                    ).read_text(encoding="utf-8")
         restart = (ROOT / ".github/workflows/mappo-restart-progressive.yml"
@@ -235,14 +234,14 @@ class CurriculumSelectionTests(unittest.TestCase):
             'if ([string]::IsNullOrWhiteSpace($teamSize)) { $teamSize = "2" }',
             training)
         self.assertIn('"--max-team-size", $teamSize', training)
-        self.assertIn("int(os.environ.get('MAX_TEAM_SIZE') or '2')", restart)
-        self.assertIn(
-            "os.environ.get('SCENARIO_VARIANT') or 'fixed_no_zones'",
-            restart)
-        self.assertIn('MAX_TEAM_SIZE="${MAX_TEAM_SIZE:-2}"', restart)
-        self.assertIn(
-            'SCENARIO_VARIANT="${SCENARIO_VARIANT:-fixed_no_zones}"',
-            restart)
+        size = restart.split("      max_team_size:\n", 1)[1].split(
+            "      scenario_variant:\n", 1)[0]
+        variant = restart.split("      scenario_variant:\n", 1)[1].split(
+            "      rehearsal_profile:\n", 1)[0]
+        self.assertIn('default: "2"', size)
+        self.assertIn("default: fixed_no_zones", variant)
+        self.assertIn('inputs[max_team_size]=${MAX_TEAM_SIZE}', restart)
+        self.assertIn('inputs[scenario_variant]=${SCENARIO_VARIANT}', restart)
 
     def test_gui_uses_same_selected_two_team_prefix(self):
         sys.path.insert(0, str(ROOT / "tools"))

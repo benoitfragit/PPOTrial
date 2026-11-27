@@ -80,9 +80,16 @@ struct Outcome final
     std::string output;
 };
 
+/** @brief Runner under test; an override lets qualification use a non-conflicting output path. */
+std::string Runner()
+{
+    char const* const overridePath = std::getenv("PPOKIT_RUN_TEST_EXECUTABLE");
+    return overridePath != nullptr && *overridePath != '\0' ? overridePath : PPOKIT_RUN;
+}
+
 Outcome Run(std::string const& arguments)
 {
-    std::string const command = "\"" + std::string(PPOKIT_RUN) + "\" " + arguments + " 2>&1";
+    std::string const command = "\"" + Runner() + "\" " + arguments + " 2>&1";
 #if defined(_WIN32)
     FILE* const pipe = _popen(("\"" + command + "\"").c_str(), "r");
 #else
@@ -188,6 +195,17 @@ void WriteSuite(fs::path const& project, std::string const& name, std::string co
     WriteJson(project / "eval" / (name + ".json"), suite);
 }
 
+/** @brief Attach a canonical common curriculum to a generated integration-test project. */
+void WriteCurriculum(fs::path const& project, Json const& stages)
+{
+    WriteJson(project / "curriculum.json",
+        Json{{"schema", "ppokit.curriculum/1"}, {"id", "reach-integration"}, {"stages", stages}});
+    Json manifest = ReadJson(project / "project.json");
+    manifest["externalCurriculum"] = "curriculum.json";
+    manifest["externalCurriculumProgress"] = "checkpoints/curriculum-status.json";
+    WriteJson(project / "project.json", manifest);
+}
+
 /** @brief Equivalent decision observations must produce the same complete PPO update across rollout boundaries. */
 void DecisionBootstrap(fs::path const& root)
 {
@@ -210,13 +228,13 @@ void DecisionBootstrap(fs::path const& root)
         "PPO bootstraps on the same decision clock whether Step or BeginStep supplies it");
 }
 
-/** @brief A curriculum that the environment owns ends the training: campaigns of that update, save, stop. */
+/** @brief An update-budget common curriculum ends training after that update's campaigns. */
 void CurriculumEndsTraining(fs::path const& root)
 {
     fs::path const project = MakeProject(root / "curriculum", 100.0);
     WriteSuite(project, "campaign", ">= 0", 3);
-    std::ofstream(project / "progress.fixture") << "on\n";
-    std::ofstream(project / "finish-at-3.fixture") << "on\n";
+    WriteCurriculum(project, Json::array({{{"name", "bounded"}, {"payload", Json::object()},
+        {"promotion", {{"source", "updates"}, {"updates", 3}}}}}));
     Outcome const finished = Run("train --updates 10 --fresh --project \"" + project.string() + "\"");
     Check(finished.code == 0 && Contains(finished.output, "curriculum ended the training at update 3")
             && Contains(finished.output, "evaluation 'campaign' at update 3") && !Contains(finished.output, "update 4/")
@@ -230,8 +248,9 @@ void CampaignEndsTraining(fs::path const& root)
     auto const project = MakeProject(root / "campaign-curriculum", 100.0);
     WriteSuite(project, "first", ">= 0", 2);
     WriteSuite(project, "second", ">= 0", 2);
-    std::ofstream(project / "progress.fixture") << "on\n";
-    std::ofstream(project / "finish-on-campaign.fixture") << "on\n";
+    WriteCurriculum(project, Json::array({{{"name", "evaluated"}, {"payload", Json::object()},
+        {"promotion", {{"source", "evaluation"}, {"suite", "first"},
+            {"metric", "reached.rate"}, {"threshold", 0.0}}}}}));
     auto const finished = Run("train --updates 10 --fresh --project \"" + project.string() + "\"");
     Check(finished.code == 0 && Contains(finished.output, "curriculum ended the training at update 2")
             && Contains(finished.output, "evaluation 'first' at update 2")
@@ -241,7 +260,8 @@ void CampaignEndsTraining(fs::path const& root)
     auto const checkpoints = project / "checkpoints";
     auto const generation = ReadJson(checkpoints / "generation.json");
     auto const state = generation.at("state").get<std::string>();
-    Check(generation.at("update") == 2 && Contains(state, ":campaign-finished")
+    Check(generation.at("update") == 2 && Contains(state, "ppokit.curriculum-state/2")
+            && Contains(state, "\\\"completed\\\":true")
             && ReadJson(checkpoints / "environment_state/2.json").at("state") == state,
         "the completed campaign's curriculum state is published at the same update");
     Check(ppokit::artifacts::ReadArtifactHeader(checkpoints / "latest.ppokit").updates == 2
@@ -263,7 +283,6 @@ void Evaluations(fs::path const& root)
     fs::path const project = MakeProject(root / "evaluated", 100.0);
     std::string const at = " --project \"" + project.string() + "\"";
     WriteSuite(project, "campaign", ">= 0", 2);
-    std::ofstream(project / "progress.fixture") << "on\n";
 
     Outcome const trained = Run("train --updates 4 --fresh" + at);
     Check(trained.code == 0 && Contains(trained.output, "evaluation 'campaign' at update 2: 6 episodes, passed")
@@ -279,19 +298,6 @@ void Evaluations(fs::path const& root)
         aggregates = aggregates || (name == "distance.mean" && value >= 0.0);
     }
     Check(aggregates, "the campaign reports the aggregates of the episode metrics");
-    // The training environment hears of each update, then of each campaign's result.
-    std::ifstream progressFile(project / "progress.log");
-    std::vector<std::string> progress;
-    for (std::string line; std::getline(progressFile, line);)
-    {
-        progress.push_back(line);
-    }
-    bool const progressOrder = progress.size() == 6 && progress[0] == "update 1" && progress[1] == "update 2"
-        && Contains(progress[2], "update 2 campaign {") && Contains(progress[2], "\"suite\":\"campaign\"")
-        && Contains(progress[2], "\"passed\":true") && Contains(progress[2], "\"distance.mean\":")
-        && progress[3] == "update 3" && progress[4] == "update 4" && Contains(progress[5], "update 4 campaign {");
-    Check(progressOrder, "the environment hears of every update and campaign, in order");
-    fs::remove(project / "progress.fixture");
     Json const best = ReadJson(project / "checkpoints" / "best" / "campaign.json");
     Check(best.at("report").at("policy_sha256") == best.at("sha256"),
         "the training campaign reports the digest of the actor promoted to BEST");
@@ -366,7 +372,11 @@ std::map<std::uint64_t, std::uint64_t> SavedStates(fs::path const& project)
     for (fs::directory_entry const& entry : fs::directory_iterator(folder))
     {
         Json const state = ReadJson(entry.path());
-        states[state.at("update").get<std::uint64_t>()] = std::stoull(state.at("state").get<std::string>());
+        std::string environment = state.at("state").get<std::string>();
+        Json const envelope = Json::parse(environment, nullptr, false);
+        if (envelope.is_object() && envelope.value("schema", std::string{}) == "ppokit.run-training-state/1")
+            environment = envelope.at("environment").get<std::string>();
+        states[state.at("update").get<std::uint64_t>()] = std::stoull(environment);
     }
     return states;
 }

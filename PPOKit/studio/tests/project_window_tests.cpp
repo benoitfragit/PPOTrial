@@ -21,6 +21,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -101,6 +102,27 @@ bool ConsoleHas(studio::ProjectWindow const& window, std::string const& part)
     return false;
 }
 
+/** @brief Joins the process console for an actionable integration-test failure. */
+std::string ConsoleText(studio::ProjectWindow const& window)
+{
+    std::string text;
+    for (std::string const& line : window.ConsoleLines())
+    {
+        if (!text.empty()) text += '\n';
+        text += line;
+    }
+    return text;
+}
+
+/** @brief Returns the common runner used by Studio integration tests. */
+std::filesystem::path RunnerProgram()
+{
+    char const* const overrideProgram = std::getenv("PPOKIT_STUDIO_TEST_RUNNER");
+    return overrideProgram != nullptr && overrideProgram[0] != '\0'
+        ? std::filesystem::path(overrideProgram)
+        : std::filesystem::path(PPOKIT_RUN_PROGRAM);
+}
+
 /** @brief Draws frames until the program ends (at most 60 s). */
 void WaitForProgram(studio::ProjectWindow& window)
 {
@@ -117,7 +139,7 @@ std::filesystem::path CopyReach(std::filesystem::path const& into)
 {
     std::filesystem::path const source = PPOKIT_REACH_PROJECT;
     std::filesystem::create_directories(into / "eval");
-    for (char const* file : {"task.json", "network.json", "training.json", "eval/smoke.json"})
+    for (char const* file : {"task.json", "network.json", "training.json", "curriculum.json", "eval/smoke.json"})
     {
         std::filesystem::copy_file(source / file, into / file, std::filesystem::copy_options::overwrite_existing);
     }
@@ -125,10 +147,13 @@ std::filesystem::path CopyReach(std::filesystem::path const& into)
     project.root = into;
     project.name = "reach";
     project.controlProtocol = "udp/1";
-    project.program.executable = "ppokit_reach";
+    project.program.executable = "ppokit-run";
     project.program.train = schema::ProjectCommandLine{{}, {"train", "--project", "{project}", "--updates", "3"}};
     project.program.evaluate = schema::ProjectCommandLine{{}, {"eval", "--project", "{project}"}};
     project.program.inference = schema::ProjectCommandLine{{}, {"play", "--project", "{project}", "--episodes", "2"}};
+    project.environmentLibrary = PPOKIT_REACH_ENVIRONMENT;
+    project.networkLibrary = PPOKIT_REACH_NETWORK;
+    project.externalCurriculum = "curriculum.json";
     schema::SaveProject(project);
     return into;
 }
@@ -214,23 +239,19 @@ void LaunchSettingsPanel(std::filesystem::path const& folder)
 void SupervisedProject(std::filesystem::path const& folder)
 {
     CopyReach(folder);
-    auto task = ReadOrderedJson(folder / "task.json");
-    task["world"] = {{"agent", {{"fields", {"agent_x", "agent_y"}}}}, {"target", {{"fields", {"target_x", "target_y"}}}}};
-    task["metrics"] = {{"reached", {{"kind", "flag"}}}, {"distance", {{"kind", "number"}}}};
-    WriteOrderedJson(folder / "task.json", task);
     auto project = schema::LoadProject(folder);
     project.environmentLibrary = PPOKIT_REACH_ENVIRONMENT;
     project.networkLibrary = PPOKIT_REACH_NETWORK;
     project.program.executable = "ppokit-run";
     project.program.train = schema::ProjectCommandLine{{}, {"train", "--project", "{project}", "--updates", "100000"}};
     schema::SaveProject(project);
-    studio::ProjectWindow window(folder, {PPOKIT_RUN_PROGRAM});
+    studio::ProjectWindow window(folder, {RunnerProgram()});
     Check(window.Launch(schema::ProjectCommand::Train), "Studio starts its UDP-supervised generic runner");
     Frame(window);
     Click(window, window.StopButtonCenter());
     WaitForProgram(window);
     Check(!window.Running() && ConsoleHas(window, "Stopped on request") && ConsoleHas(window, "< exit code 0"),
-        "UDP stop is confirmed by a successful process exit");
+        "UDP stop is confirmed by a successful process exit: " + ConsoleText(window));
     Check(!ConsoleHas(window, "--control") && !std::filesystem::exists(project.StopRequest()) &&
         !std::filesystem::exists(project.Checkpoints() / "live.json"),
         "launch and shutdown use a private session without control files");
@@ -239,7 +260,7 @@ void SupervisedProject(std::filesystem::path const& folder)
     project.program.inference = schema::ProjectCommandLine{{}, {"play", "--project", "{project}", "--episodes", "1000000",
         "--realtime", "--step-seconds", "0.1"}};
     schema::SaveProject(project);
-    studio::ProjectWindow inference(folder, {PPOKIT_RUN_PROGRAM});
+    studio::ProjectWindow inference(folder, {RunnerProgram()});
     Check(inference.Launch(schema::ProjectCommand::Train), "prepare a local actor for inference");
     WaitForProgram(inference);
     Check(inference.Launch(schema::ProjectCommand::Inference), "launch supervised inference");
@@ -263,7 +284,8 @@ void SupervisedProject(std::filesystem::path const& folder)
     Click(inference, button);
     WaitForProgram(inference);
     Check(!inference.Running() && inference.Status() == "Inference finished.",
-        "the real inference Stop button reaches successful OS process exit: " + inference.Status());
+        "the real inference Stop button reaches successful OS process exit: " + inference.Status() + '\n'
+            + ConsoleText(inference));
     Check(inference.SaveAll() && !inference.Unsaved(), "configuration saving is available after process exit");
     ImGui::GetIO().DisplaySize = previousSize;
 }
@@ -386,7 +408,7 @@ void Launches(studio::ProjectWindow& window)
 
     Check(window.Launch(schema::ProjectCommand::Inference), "Inference starts: " + window.Status());
     WaitForProgram(window);
-    Check(ConsoleHas(window, "episode seed 9001") && ConsoleHas(window, "episode seed 9002"),
+    Check(ConsoleHas(window, "episode 1:") && ConsoleHas(window, "episode 2:"),
         "inference prints its episodes in the console");
 
     Check(window.Launch(schema::ProjectCommand::Evaluate), "Evaluate starts: " + window.Status());
@@ -417,7 +439,7 @@ void MissingProgram(std::filesystem::path const& folder)
 {
     studio::ProjectWindow window(folder, {});
     schema::Project const& project = window.Project();
-    Check(project.program.executable == "ppokit_reach", "the copy names its program");
+    Check(project.program.executable == "ppokit-run", "the copy names the common runtime");
     if (schema::FindProgram(project, schema::ProjectCommand::Train, {}).empty())
     {
         Check(!window.Launch(schema::ProjectCommand::Train)
@@ -557,8 +579,8 @@ void ShippedProjectNavigation()
         else if (!project.externalCurriculum.empty())
             Check(rendered.find("Configured curriculum") != std::string::npos
                 && rendered.find(std::filesystem::path(project.externalCurriculum).filename().string()) != std::string::npos
-                && rendered.find("normal Train command does not execute") != std::string::npos,
-                project.name + ": existing external curriculum source is visible without implying it runs");
+                && rendered.find("Studio, CLI and CI execute this schedule") != std::string::npos,
+                project.name + ": common external curriculum source is visible and executable");
         else
             Check(rendered.find("No curriculum stages") != std::string::npos
                 || rendered.find("no native curriculum") != std::string::npos
@@ -658,15 +680,15 @@ void BlueTrainingOpensViewer(std::filesystem::path const& into)
     network["components"] = {PPOKIT_BLUE_VISUALISER};
     WriteOrderedJson(into / "network.json", network);
     auto project = schema::LoadProject(into);
-    project.program.executable = "ppokit_reach";
+    project.program.executable = "ppokit-run";
     project.program.train = schema::ProjectCommandLine{{}, {"help"}};
     schema::SaveProject(project);
 
     // A disposable executable with the viewer's name exercises process launch without a window.
     auto const fakeViewer = into / (std::string("ppokit-viewer")
-        + std::filesystem::path(PPOKIT_RUN_PROGRAM).extension().string());
-    std::filesystem::copy_file(PPOKIT_RUN_PROGRAM, fakeViewer, std::filesystem::copy_options::overwrite_existing);
-    studio::ProjectWindow window(into, {PPOKIT_REACH_PROGRAM, fakeViewer});
+        + RunnerProgram().extension().string());
+    std::filesystem::copy_file(RunnerProgram(), fakeViewer, std::filesystem::copy_options::overwrite_existing);
+    studio::ProjectWindow window(into, {RunnerProgram(), fakeViewer});
     Check(window.Launch(schema::ProjectCommand::Train), "Blue training starts");
     Check(window.Status().find("Viewer opened on 'watch'") != std::string::npos,
         "training automatically launches the configured Blue viewer: " + window.Status());
@@ -788,7 +810,7 @@ int Run()
     std::error_code removed;
     std::filesystem::remove_all(root, removed);
     std::filesystem::path const folder = CopyReach(root / "reach");
-    std::vector<std::filesystem::path> const programs{PPOKIT_REACH_PROGRAM};
+    std::vector<std::filesystem::path> const programs{RunnerProgram()};
     {
         studio::ProjectWindow window(folder, programs);
         Sections(window);

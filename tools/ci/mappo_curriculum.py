@@ -5,7 +5,7 @@ The generalized V6 checkpoint supports changing P/N between process launches.
 No C++ agent, simulator, optimizer or observation schema is modified here.
 
 Each block runs `ppokit-run train` on the BluePatrol project (blue_environment and
-blue_network). Its evaluations are the project's suite eval/validation.json, made
+ppokit_graph_network). Its evaluations are the project's suite eval/validation.json, made
 the campaign of the training file for the block (seeds, cases, cadence): they
 reach the run journal and the suite's BEST store. After each block the best campaign of the
 block is promoted to PROD as PPO.exe's Training mode promoted it (score above the
@@ -235,7 +235,7 @@ def run_stage(binary: Path, stage: dict, seconds: int, log_path: Path) -> str | 
     suite = suite_of_training(training)
     settings = training["training"]
     save_every = settings.get("saveEveryUpdates", settings["checkpointEvery"])
-    command = [str(binary.resolve()), "train", "--project", str((PROJECT / "project.legacy.json").resolve()),
+    command = [str(binary.resolve()), "train", "--project", str((PROJECT / "project.json").resolve()),
                "--until-update", str(settings["maxUpdates"]),
                "--save-every", str(save_every),
                "--max-seconds", str(seconds)]

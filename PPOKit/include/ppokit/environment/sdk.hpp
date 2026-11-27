@@ -186,32 +186,31 @@ void ApplyLearning(Environment& environment, bool learning)
     }
 }
 
-/**
- * @brief Whether Environment has `bool TrainingProgress(updates, campaign)` (a curriculum it
- *        owns; true when the curriculum ends the training).
- */
+/** @brief Whether Environment applies a project-specific payload selected by the common engine. */
 template<typename Environment, typename = void>
-struct HasTrainingProgress : std::false_type
+struct HasCurriculumStage : std::false_type
 {
 };
 template<typename Environment>
-struct HasTrainingProgress<Environment,
-    std::void_t<decltype(bool(std::declval<Environment&>().TrainingProgress(std::uint64_t{},
-        std::declval<char const*>())))>> : std::true_type
+struct HasCurriculumStage<Environment,
+    std::void_t<decltype(std::declval<Environment&>().ApplyCurriculumStage(
+        std::declval<std::string const&>(), std::declval<std::string const&>()))>> : std::true_type
 {
 };
 
-/** @brief Hands the run's progress to a class that owns a curriculum; others ignore it. */
+/** @brief Applies a stage when supported; a default empty payload is otherwise harmless. */
 template<typename Environment>
-bool ApplyTrainingProgress(Environment& environment, std::uint64_t updates, char const* campaign)
+void ApplyCurriculumStage(Environment& environment, char const* name, char const* payload)
 {
-    if constexpr (HasTrainingProgress<Environment>::value)
+    std::string const stageName = name == nullptr ? std::string{} : std::string(name);
+    std::string const stagePayload = payload == nullptr ? std::string("{}") : std::string(payload);
+    if constexpr (HasCurriculumStage<Environment>::value)
     {
-        return environment.TrainingProgress(updates, campaign);
+        environment.ApplyCurriculumStage(stageName, stagePayload);
     }
-    else
+    else if (stagePayload != "{}")
     {
-        return false;
+        throw std::invalid_argument("environment does not accept curriculum stage payloads");
     }
 }
 
@@ -512,12 +511,11 @@ void Destroy(PpokitEnvironment* opaque) noexcept
             ppokit::environment::sdk::RestoreTrainingStateOf(self, state, size);                                    \
         });                                                                                                         \
     }                                                                                                               \
-    extern "C" PPOKIT_ENVIRONMENT_EXPORT int ppokit_environment_training_progress(                                  \
-        PpokitEnvironment* environment, std::uint64_t updates, char const* campaign, int* finished)                 \
+    extern "C" PPOKIT_ENVIRONMENT_EXPORT int ppokit_environment_apply_curriculum_stage(                            \
+        PpokitEnvironment* environment, char const* name, char const* payload)                                      \
     {                                                                                                               \
         return ppokit::environment::sdk::Guarded<Class>(environment, [&](Class& self) {                            \
-            bool const ended = ppokit::environment::sdk::ApplyTrainingProgress(self, updates, campaign);           \
-            *finished = ended ? 1 : 0;                                                                              \
+            ppokit::environment::sdk::ApplyCurriculumStage(self, name, payload);                                   \
         });                                                                                                         \
     }                                                                                                               \
     extern "C" PPOKIT_ENVIRONMENT_EXPORT int ppokit_environment_set_weights(                                        \

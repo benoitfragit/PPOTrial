@@ -1,8 +1,7 @@
-# The reach project: add this folder with add_subdirectory() in a build that has PPOKit.
-add_executable(ppokit_reach main.cpp)
-target_link_libraries(ppokit_reach PRIVATE PPOKit::Core PPOKit::Schema PPOKit::Training PPOKit::Live)
-target_compile_definitions(ppokit_reach PRIVATE PPOKIT_EXAMPLE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+# The reach project: its DLL contains the simulation only; ppokit-run owns PPO.
+add_library(reach_environment SHARED environment.cpp)
+target_link_libraries(reach_environment PRIVATE PPOKit::Core nlohmann_json::nlohmann_json)
+set_target_properties(reach_environment PROPERTIES CXX_VISIBILITY_PRESET hidden PREFIX "")
 # Sizes, channel and scenario names of task.json, regenerated whenever task.json changes.
-ppokit_generate_task_layout(TARGET ppokit_reach TASK task.json HEADER reach_layout.hpp)
-# ppokit-studio finds the program here to train, evaluate and play the project.
-ppokit_register_program(ppokit_reach)
+ppokit_bind_task_contract(TARGET reach_environment TASK task.json HEADER reach_layout.hpp)
+ppokit_register_program(reach_environment)

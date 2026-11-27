@@ -4,7 +4,7 @@
  *        through the blue_environment DLL): it publishes the team's observations, applies
  *        the actions given to it and publishes the step's rewards, outcome and scene.
  * @details The learner, the production actor, the journal, the checkpoints and the
- * evaluation campaigns live outside the world (blue_network, ppokit-run).
+ * evaluation campaigns live outside the world (ppokit_graph_network and ppokit-run).
  */
 #pragma once
 

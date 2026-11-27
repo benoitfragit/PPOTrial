@@ -964,7 +964,8 @@ void CheckSharedBlocks(BlockGraphSchema const& graphs, ErrorReporter const& erro
         {
             errors.Fail(path, "actor block '" + block.share
                     + "' is not the same layer (a dense, mlp or entity_encoder block of the same type, sizes, "
-                      "activation and inputs)");
+                      "activation and inputs); actor output " + graph::Describe(actor->output)
+                    + ", critic output " + graph::Describe(block.output));
         }
     }
 }

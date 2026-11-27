@@ -199,6 +199,165 @@ void PersistsStageByName()
     Check(!ppokit::runtime::LoadCurriculumStage(path, restored), "no saved stage: start from the first one");
 }
 
+void CommonEngineDecisions()
+{
+    using namespace ppokit::runtime;
+    OrchestrationPlan plan;
+    plan.id = "deterministic";
+    plan.primaryUpdates = 3;
+    plan.priorUpdates = 1;
+    OrchestrationStage first;
+    first.name = "warmup";
+    first.payload = R"({"difficulty":0})";
+    first.promotion.source = PromotionSource::Updates;
+    first.promotion.updates = 4;
+    plan.stages.push_back(first);
+    OrchestrationStage gate;
+    gate.name = "gate";
+    gate.payload = R"({"difficulty":1})";
+    gate.promotion.source = PromotionSource::Evaluation;
+    gate.promotion.suite = "validation";
+    gate.promotion.metric = "success.rate";
+    gate.promotion.threshold = 0.75;
+    plan.stages.push_back(gate);
+
+    CurriculumEngine uninterrupted(plan);
+    Check(!uninterrupted.RecordUpdate(3).changed, "update stage remains before its exact quota");
+    auto const promoted = uninterrupted.RecordUpdate(4);
+    Check(promoted.changed && uninterrupted.StageName() == "gate", "update quota promotes through the common engine");
+    Check(uninterrupted.ActiveStage() == 1, "a new phase begins on its primary stage");
+    uninterrupted.RecordUpdate(7);
+    Check(uninterrupted.ActiveStage() == 0, "deterministic quota rehearsal selects a prior stage");
+    std::string const state = uninterrupted.StateJson();
+    CurriculumEngine resumed(plan);
+    resumed.RestoreJson(state);
+    Check(resumed.Stage() == uninterrupted.Stage() && resumed.ActiveStage() == uninterrupted.ActiveStage()
+            && resumed.StageStartUpdate() == uninterrupted.StageStartUpdate(),
+        "resume restores stage, update frontier and rehearsal exactly");
+    auto const kept = resumed.RecordEvaluation("validation", {{"success.rate", 0.70}}, false);
+    Check(!kept.changed && kept.reason.find("Maintained") != std::string::npos,
+        "frozen evaluation below threshold keeps the stage with a reason");
+    auto const completed = resumed.RecordEvaluation("validation", {{"success.rate", 0.75}}, true);
+    Check(completed.completed && resumed.Completed(), "frozen evaluation at threshold completes the final stage");
+    Check(resumed.StatusJson().find("last_evaluation") != std::string::npos,
+        "Studio status contains criteria, evaluation and decision reason");
+
+    OrchestrationPlan episodePlan;
+    episodePlan.id = "episodes";
+    OrchestrationStage episode;
+    episode.name = "landing";
+    episode.promotion.source = PromotionSource::Episode;
+    episode.promotion.window = 4;
+    episode.promotion.threshold = 0.75;
+    episodePlan.stages = {episode, OrchestrationStage{"full", "{}", episode.promotion}};
+    CurriculumEngine episodes(episodePlan);
+    episodes.RecordEpisode(true, true);
+    episodes.RecordEpisode(false, false);
+    episodes.RecordEpisode(true, false);
+    episodes.RecordEpisode(true, true);
+    std::string const interrupted = episodes.StateJson();
+    CurriculumEngine continued(episodePlan);
+    continued.RestoreJson(interrupted);
+    Check(continued.WindowEpisodes() == 3 && continued.WindowSuccesses() == 2,
+        "ignored episodes and an interrupted window resume exactly");
+    Check(continued.RecordEpisode(true, true).changed, "the resumed episode window makes the same promotion decision");
+
+    CurriculumEngine failedWindow(episodePlan);
+    failedWindow.RecordEpisode(true, false);
+    failedWindow.RecordEpisode(true, false);
+    failedWindow.RecordEpisode(true, true);
+    auto const maintained = failedWindow.RecordEpisode(true, true);
+    Check(!maintained.changed && maintained.reason.find("2/4") != std::string::npos,
+        "a failed complete window keeps its decision counters in the reason");
+
+    OrchestrationPlan manualPlan = episodePlan;
+    manualPlan.stages.front().autoAdvance = false;
+    CurriculumEngine manual(manualPlan);
+    for (int episodeIndex = 0; episodeIndex < 4; ++episodeIndex) manual.RecordEpisode(true, true);
+    Check(manual.Stage() == 0 && manual.LastReason().find("disabled") != std::string::npos,
+        "a stage with automatic promotion disabled remains selected");
+
+    OrchestrationPlan weightedPlan;
+    weightedPlan.id = "weighted-rehearsal";
+    weightedPlan.blockUpdates = 1;
+    OrchestrationStage prior;
+    prior.name = "prior";
+    prior.promotion.source = PromotionSource::Evaluation;
+    OrchestrationStage current = prior;
+    current.name = "current";
+    current.rehearsalWeights = {1, 2};
+    weightedPlan.stages = {prior, current};
+    CurriculumEngine weighted(weightedPlan);
+    weighted.Restore(1, 0, 0, 0, 0);
+    Check(weighted.ActiveStageName() == "current", "weighted rehearsal begins on the primary stage");
+    weighted.RecordUpdate(1);
+    Check(weighted.ActiveStageName() == "prior", "smooth weighted rehearsal selects the configured prior share");
+    weighted.RecordUpdate(2);
+    Check(weighted.ActiveStageName() == "current", "smooth weighted rehearsal returns to the primary share");
+
+    bool incompatiblePlanRejected = false;
+    try
+    {
+        OrchestrationPlan altered = weightedPlan;
+        altered.blockUpdates = 2;
+        CurriculumEngine incompatible(altered);
+        incompatible.RestoreJson(weighted.StateJson());
+    }
+    catch (std::invalid_argument const&)
+    {
+        incompatiblePlanRejected = true;
+    }
+    Check(incompatiblePlanRejected, "resume rejects a changed rehearsal schedule");
+
+    bool preciseThresholdRejected = false;
+    try
+    {
+        OrchestrationPlan precise = weightedPlan;
+        precise.stages[1].promotion.threshold = 0.12345671;
+        precise.stages[1].maximumSeconds = 12.5;
+        CurriculumEngine saved(precise);
+        saved.Restore(1, 0, 0, 0, 0);
+        Check(saved.MaximumSeconds() == 12.5, "the engine exposes the current stage time budget");
+        precise.stages[1].promotion.threshold = 0.12345672;
+        CurriculumEngine changed(precise);
+        changed.RestoreJson(saved.StateJson());
+    }
+    catch (std::invalid_argument const&)
+    {
+        preciseThresholdRejected = true;
+    }
+    Check(preciseThresholdRejected, "resume distinguishes close floating-point plan values");
+
+    bool inconsistentActiveStageRejected = false;
+    try
+    {
+        std::string corrupted = weighted.StateJson();
+        std::string const expected = "\"active_stage\":\"current\"";
+        std::size_t const active = corrupted.find(expected);
+        if (active == std::string::npos) throw std::runtime_error("test state has no active stage");
+        corrupted.replace(active, expected.size(), "\"active_stage\":\"prior\"");
+        CurriculumEngine inconsistent(weightedPlan);
+        inconsistent.RestoreJson(corrupted);
+    }
+    catch (std::invalid_argument const&)
+    {
+        inconsistentActiveStageRejected = true;
+    }
+    Check(inconsistentActiveStageRejected, "resume rejects an inconsistent active rehearsal stage");
+
+    bool completedWindowRejected = false;
+    try
+    {
+        CurriculumEngine invalidWindow(episodePlan);
+        invalidWindow.Restore(0, 4, 3);
+    }
+    catch (std::invalid_argument const&)
+    {
+        completedWindowRejected = true;
+    }
+    Check(completedWindowRejected, "resume rejects an episode window that already crossed its decision boundary");
+}
+
 using Scenario = ppokit::tests::sample::TaskLayout::Scenario;
 static_assert(Scenario::Count == 4);
 static_assert(static_cast<std::size_t>(Scenario::Start::Airborne) == 1);
@@ -223,6 +382,7 @@ int main()
         SamplesWithinRules();
         PromotesByWindow();
         PersistsStageByName();
+        CommonEngineDecisions();
         GeneratedScenarioIsTyped();
     }
     catch (std::exception const& error)

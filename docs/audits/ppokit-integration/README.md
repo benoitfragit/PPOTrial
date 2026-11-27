@@ -1,5 +1,9 @@
 # PPOKit — audit d’intégration du 25 novembre 2026
 
+> Cet audit conserve l’état et les limites observés le 25 novembre. L’inventaire
+> d’appelants et la finalisation architecturale du 27 novembre sont dans
+> [`ppokit-mutualization-final-2026-11-27.md`](../ppokit-mutualization-final-2026-11-27.md).
+
 L’inférence et les campagnes d’atterrissage ont été comparées sur les archives réelles du T‑6 et du PC‑7. La sauvegarde des tenseurs est exacte pour les trois checkpoints. La parité comportementale globale de la branche reste ouverte, en particulier pour les modèles Airspace et BlueDefense.
 
 ## Références

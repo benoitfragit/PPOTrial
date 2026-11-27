@@ -529,7 +529,7 @@ void GraphDocument::SetParameter(Network network, std::string const& name, std::
 
 void GraphDocument::SetParameters(Network network, std::string const& name, nlohmann::ordered_json const& changes)
 {
-    RequireNode(network, name);
+    EditorNode const& selected = RequireNode(network, name);
     if (!changes.is_object())
     {
         throw std::invalid_argument("PPOKit editor: parameter changes must be an object");
@@ -538,24 +538,42 @@ void GraphDocument::SetParameters(Network network, std::string const& name, nloh
     {
         throw std::invalid_argument("PPOKit editor: the type of a node is fixed, add another node instead");
     }
-    Record();
-    EditorNode& node = RequireNode(network, name);
-    for (auto const& [key, value] : changes.items())
+    Network ownerNetwork = network;
+    std::string ownerName = name;
+    if (network == Network::Critic && !changes.contains("share"))
     {
-        if (value.is_null())
+        auto const share = selected.parameters.find("share");
+        if (share != selected.parameters.end() && share->is_string())
         {
-            node.parameters.erase(key);
+            ownerNetwork = Network::Actor;
+            ownerName = share->get<std::string>();
+            RequireNode(ownerNetwork, ownerName);
         }
-        else
+    }
+    Record();
+    auto const apply = [&changes](EditorNode& node) {
+        for (auto const& [key, value] : changes.items())
         {
-            node.parameters[key] = value;
+            if (value.is_null()) node.parameters.erase(key);
+            else node.parameters[key] = value;
+        }
+    };
+    EditorNode& node = RequireNode(ownerNetwork, ownerName);
+    apply(node);
+    if (ownerNetwork == Network::Actor && !changes.contains("share"))
+    {
+        for (EditorNode& critic : critic_.nodes)
+        {
+            auto const share = critic.parameters.find("share");
+            if (share != critic.parameters.end() && share->is_string() && share->get<std::string>() == ownerName)
+                apply(critic);
         }
     }
     auto const keys = node.parameters.find("keys");
     bool const keysPort = keys != node.parameters.end() && keys->is_boolean() && keys->get<bool>();
     if (node.type == schema::BlockTypeName(schema::BlockType::MaskedAttention) && !keysPort)
     {
-        DropWire(Mutable(network), name, "keys");
+        DropWire(Mutable(ownerNetwork), ownerName, "keys");
     }
 }
 

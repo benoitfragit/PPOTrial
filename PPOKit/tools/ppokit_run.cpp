@@ -52,6 +52,7 @@
 #include "ppokit/ipc/control.hpp"
 #include "ppokit/network/network_library.hpp"
 #include "ppokit/runtime/observers.hpp"
+#include "ppokit/runtime/curriculum.hpp"
 #include "ppokit/runtime/reward_ledger.hpp"
 #include "ppokit/runtime/run_log.hpp"
 #include "ppokit/runtime/run_state.hpp"
@@ -127,6 +128,23 @@ struct Options final
     std::uint64_t evaluateEvery = 0;
     /** @brief Training time budget in seconds; 0 for none. */
     double maxSeconds = 0.0;
+    /** @brief Override the project's declared common curriculum (legacy Blue files are accepted). */
+    fs::path curriculum;
+    /** @brief Continue across stages until the common curriculum reports completion. */
+    bool untilCurriculum = false;
+    /** @brief Ignore the project curriculum for an explicitly single-scenario run. */
+    bool noCurriculum = false;
+    /** @brief Start a historical stage when no common state is present. */
+    std::string curriculumStage;
+    /** @brief Stop when the selected stage changes, for bounded CI clients. */
+    bool oneCurriculumStage = false;
+    /** @brief Optional last stage of a curriculum prefix. */
+    std::string curriculumLastStage;
+    /** @brief Optional evaluation threshold override in [0,1]. */
+    std::optional<double> curriculumThreshold;
+    /** @brief Optional Blue payload overrides used by CI scenario variants. */
+    std::optional<bool> curriculumHostileZones;
+    std::string curriculumObjectiveLayout;
     /** @brief transfer: the checkpoint of another environment to start from. */
     fs::path from;
 };
@@ -202,6 +220,26 @@ Options ParseOptions(int argc, char** argv)
         {
             options.best = true;
         }
+        else if (argument == "--until-curriculum")
+        {
+            options.untilCurriculum = true;
+        }
+        else if (argument == "--one-curriculum-stage")
+        {
+            options.oneCurriculumStage = true;
+        }
+        else if (argument == "--no-curriculum")
+        {
+            options.noCurriculum = true;
+        }
+        else if (argument == "--curriculum-hostile-zones")
+        {
+            options.curriculumHostileZones = true;
+        }
+        else if (argument == "--curriculum-no-hostile-zones")
+        {
+            options.curriculumHostileZones = false;
+        }
         else if (!hasValue)
         {
             throw UsageError("unknown argument or missing value: '" + argument + "'");
@@ -263,6 +301,26 @@ Options ParseOptions(int argc, char** argv)
         {
             options.maxSeconds = static_cast<double>(ReadCount(argument, argv[++index]));
         }
+        else if (argument == "--curriculum")
+        {
+            options.curriculum = argv[++index];
+        }
+        else if (argument == "--curriculum-stage")
+        {
+            options.curriculumStage = argv[++index];
+        }
+        else if (argument == "--curriculum-last-stage")
+        {
+            options.curriculumLastStage = argv[++index];
+        }
+        else if (argument == "--curriculum-threshold")
+        {
+            options.curriculumThreshold = ReadDouble(argument, argv[++index]);
+        }
+        else if (argument == "--curriculum-objective-layout")
+        {
+            options.curriculumObjectiveLayout = argv[++index];
+        }
         else if (argument == "--from")
         {
             options.from = argv[++index];
@@ -296,13 +354,26 @@ Options ParseOptions(int argc, char** argv)
     }
     if (!std::isfinite(options.stepSeconds) || options.stepSeconds <= 0.0 || options.stepSeconds > 86400.0)
         throw UsageError("--step-seconds must be finite and in (0, 86400]");
+    bool const curriculumOption = !options.curriculum.empty() || options.untilCurriculum || options.noCurriculum
+        || !options.curriculumStage.empty() || options.oneCurriculumStage || !options.curriculumLastStage.empty()
+        || options.curriculumThreshold || options.curriculumHostileZones
+        || !options.curriculumObjectiveLayout.empty();
+    if (curriculumOption && options.command != "train")
+        throw UsageError("curriculum options apply only to train");
+    if (options.noCurriculum && (!options.curriculum.empty() || options.untilCurriculum
+        || !options.curriculumStage.empty() || options.oneCurriculumStage || !options.curriculumLastStage.empty()))
+        throw UsageError("--no-curriculum cannot be combined with curriculum selection");
+    if (options.curriculumThreshold
+        && (*options.curriculumThreshold < 0.0 || *options.curriculumThreshold > 1.0))
+        throw UsageError("--curriculum-threshold must be in [0,1]");
     return options;
 }
 
 void PrintUsage(std::ostream& stream)
 {
     stream << "ppokit-run train --project DIR [--updates N | --until-update N] [--save-every N] [--fresh | --resume] [--until-passed SUITE]\n"
-              "                 [--evaluate-every N] [--max-seconds S]\n"
+              "                 [--evaluate-every N] [--max-seconds S] [--no-curriculum | --curriculum FILE]\n"
+              "                 [--until-curriculum | --curriculum-stage NAME --one-curriculum-stage]\n"
               "ppokit-run eval  --project DIR [--suite NAME] [--best | --model ROLE | --policy FILE] [--environment-state FILE]\n"
               "ppokit-run play  --project DIR [--episodes N] [--best [--suite NAME] | --model ROLE | --policy FILE]\n"
               "                 [--realtime [--step-seconds S]]\n"
@@ -545,7 +616,8 @@ struct StepSignals final
     /** @brief The step as the observers see it. */
     runtime::ObservedStep Observed() noexcept
     {
-        std::copy(channels.begin(), channels.end(), channelValues.begin());
+        std::transform(channels.begin(), channels.end(), channelValues.begin(),
+            [](double value) { return static_cast<float>(value); });
         runtime::ObservedStep step;
         step.agents = agents;
         step.observation = observation.data();
@@ -819,6 +891,43 @@ std::vector<double> EffectiveWeights(environment::Environment& environment, std:
     return weights;
 }
 
+/** @brief Transactional training state stored in one publication generation. */
+struct TrainingStateEnvelope final
+{
+    std::string environment;
+    std::optional<std::string> curriculum;
+};
+
+TrainingStateEnvelope DecodeTrainingState(std::string const& text)
+{
+    auto const document = nlohmann::json::parse(text, nullptr, false);
+    if (!document.is_object() || document.value("schema", std::string{}) != "ppokit.run-training-state/1")
+        return {text, std::nullopt};
+    if (!document.contains("environment") || !document.at("environment").is_string())
+        throw std::runtime_error("published run state has no environment state");
+    TrainingStateEnvelope state{document.at("environment").get<std::string>(), std::nullopt};
+    if (document.contains("curriculum"))
+    {
+        if (!document.at("curriculum").is_string())
+            throw std::runtime_error("published curriculum state is not text");
+        state.curriculum = document.at("curriculum").get<std::string>();
+    }
+    return state;
+}
+
+std::string EncodeTrainingState(std::string environment, runtime::CurriculumEngine const* curriculum)
+{
+    nlohmann::json state{{"schema", "ppokit.run-training-state/1"}, {"environment", std::move(environment)}};
+    if (curriculum != nullptr) state["curriculum"] = curriculum->StateJson();
+    return state.dump();
+}
+
+struct CurriculumEvaluationContext final
+{
+    std::string name;
+    std::string payload;
+};
+
 /**
  * @brief One campaign of `suite`: for each seed, an environment created with it; each episode
  *        starts with reset_evaluation (its place in the campaign) and reports its metrics.
@@ -827,7 +936,8 @@ std::vector<double> EffectiveWeights(environment::Environment& environment, std:
  */
 eval::EvaluationReport RunCampaign(RunSetup const& setup, eval::EvaluationSuite const& suite, Actor& actor,
     runtime::ObserverSet& observers, std::optional<std::string> const& trainingState,
-    std::vector<double> const& weights, ipc::Worker* control, nlohmann::json* context = nullptr)
+    std::vector<double> const& weights, ipc::Worker* control, nlohmann::json* context = nullptr,
+    CurriculumEvaluationContext const* curriculum = nullptr)
 {
     eval::EvaluationReport report;
     report.suite = suite.name;
@@ -843,7 +953,8 @@ eval::EvaluationReport RunCampaign(RunSetup const& setup, eval::EvaluationSuite 
         {
             instance = std::make_unique<environment::Environment>(setup.environment, setup.project.root, seed);
             instance->SetLearning(false);
-            if (trainingState) instance->RestoreTrainingState(*trainingState);
+            if (trainingState) instance->RestoreTrainingState(DecodeTrainingState(*trainingState).environment);
+            if (curriculum) instance->ApplyCurriculumStage(curriculum->name, curriculum->payload);
             auto const effective = EffectiveWeights(*instance, setup.task.rewards.size(), weights);
             if (context && index == 0)
             {
@@ -955,23 +1066,6 @@ bool AnyCampaignDue(std::vector<eval::EvaluationSuite> const& suites, std::uint6
     return false;
 }
 
-/** @brief A campaign's result for the training environment's curriculum (see the environment ABI). */
-std::string CampaignProgress(std::uint64_t updates, eval::EvaluationReport const& report)
-{
-    nlohmann::json aggregates = nlohmann::json::object();
-    for (std::string const& name : eval::BuiltInMetrics())
-    {
-        aggregates[name] = report.Metric(name);
-    }
-    for (eval::NamedValue const& aggregate : report.aggregates)
-    {
-        aggregates[aggregate.name] = aggregate.value;
-    }
-    nlohmann::json const progress{{"suite", report.suite}, {"update", updates}, {"passed", report.Passed()},
-        {"aggregates", aggregates}};
-    return progress.dump();
-}
-
 /** @brief Independent reasons to finish after the scheduled campaigns of an update. */
 struct CampaignOutcome final
 {
@@ -981,12 +1075,12 @@ struct CampaignOutcome final
 
 /**
  * @brief Evaluate the just-published generation with its own actor, environment state and weights,
- *        and tell the training environment each result (its curriculum may pass a stage on it).
- * @return Whether the requested suite or the environment's curriculum ended training.
+ *        and report each result to the common curriculum engine.
+ * @return Whether the requested suite or the common curriculum ended training.
  */
 CampaignOutcome RunDueCampaigns(RunSetup const& setup, Options const& options, std::uint64_t updates, bool last,
     environment::Environment& training, runtime::ObserverSet& observers, runtime::RunLogWriter& journal,
-    ipc::Worker* control)
+    ipc::Worker* control, runtime::CurriculumEngine* curriculum)
 {
     auto const generation = runtime::VerifyPublication(setup.project);
     if (!generation || generation->update != updates || !generation->rewardWeights)
@@ -994,6 +1088,11 @@ CampaignOutcome RunDueCampaigns(RunSetup const& setup, Options const& options, s
     auto const file = setup.project.TrainingPolicy();
     CampaignOutcome outcome;
     std::string publishedState = generation->state;
+    std::optional<CurriculumEvaluationContext> evaluationContext;
+    if (curriculum)
+    {
+        evaluationContext = CurriculumEvaluationContext{curriculum->StageName(), curriculum->Payload(curriculum->Stage())};
+    }
     for (eval::EvaluationSuite const& suite : setup.suites)
     {
         if (!CampaignDue(suite, updates, last))
@@ -1002,7 +1101,7 @@ CampaignOutcome RunDueCampaigns(RunSetup const& setup, Options const& options, s
         }
         auto const actor = OpenActor(setup, file, generation->policyDigest);
         auto report = RunCampaign(setup, suite, *actor, observers, generation->state,
-            *generation->rewardWeights, control);
+            *generation->rewardWeights, control, nullptr, evaluationContext ? &*evaluationContext : nullptr);
         report.policySha256 = generation->policyDigest;
         bool const promoted = !suite.best.empty()
             && eval::OfferBest(setup.project.Checkpoints(), suite, updates, file, report, generation->state,
@@ -1011,11 +1110,21 @@ CampaignOutcome RunDueCampaigns(RunSetup const& setup, Options const& options, s
         PrintCampaign(report, updates, promoted);
         // Every due suite observes the original evaluation context. The training state,
         // however, must include each completed campaign even if Stop interrupts a later one.
-        if (training.TrainingProgress(updates, CampaignProgress(updates, report)))
+        bool curriculumChanged = false;
+        if (curriculum)
         {
-            outcome.curriculumEnded = true;
+            std::vector<std::pair<std::string, double>> metrics;
+            for (std::string const& name : eval::BuiltInMetrics()) metrics.emplace_back(name, report.Metric(name));
+            for (eval::NamedValue const& aggregate : report.aggregates)
+                metrics.emplace_back(aggregate.name, aggregate.value);
+            runtime::CurriculumDecision const decision = curriculum->RecordEvaluation(report.suite, metrics, report.Passed());
+            std::cout << "curriculum: " << decision.reason << std::endl;
+            outcome.curriculumEnded = outcome.curriculumEnded || decision.completed;
+            curriculumChanged = decision.changed;
+            if (decision.changed)
+                training.ApplyCurriculumStage(curriculum->ActiveStageName(), curriculum->StagePayload());
         }
-        std::string const state = training.TrainingState();
+        std::string const state = EncodeTrainingState(training.TrainingState(), curriculum);
         if (state != publishedState)
         {
             // Reuse the published artifact bytes: a curriculum transition does not update weights.
@@ -1032,6 +1141,9 @@ CampaignOutcome RunDueCampaigns(RunSetup const& setup, Options const& options, s
             publishedState = state;
         }
         outcome.goalReached = outcome.goalReached || (suite.name == options.untilPassed && report.GoalReached());
+        // Every due campaign evaluated the stage captured before this loop. Once it
+        // promotes, another suite must wait for a publication under the new payload.
+        if (curriculumChanged) break;
     }
     return outcome;
 }
@@ -1214,6 +1326,8 @@ std::vector<fs::path> RunFiles(RunSetup const& setup)
         runtime::TrainingStateFolder(checkpoints), checkpoints / "generation.json"};
     auto const best = eval::BestRunFiles(checkpoints, setup.suites, project.TrainingPolicy());
     files.insert(files.end(), best.begin(), best.end());
+    if (!project.externalCurriculumProgress.empty())
+        files.push_back(project.root / project.externalCurriculumProgress);
     return files;
 }
 
@@ -1250,15 +1364,53 @@ void RestoreResumedEnvironment(environment::Environment& environment, fs::path c
             + " has no environment state of update " + std::to_string(updates)
             + ", the update of the checkpoint: the checkpoint and the states are of different runs");
     }
-    environment.RestoreTrainingState(*state);
+    environment.RestoreTrainingState(DecodeTrainingState(*state).environment);
 }
 
 /** @brief Stage both artifacts and publish them with the state of their update. */
 void SaveRun(Trainee& trainee, schema::Project const& project, environment::Environment const& environment,
-    std::vector<double> const& weights)
+    std::vector<double> const& weights, runtime::CurriculumEngine const* curriculum)
 {
-    runtime::PublishGeneration(project, trainee.Updates(), environment.TrainingState(), weights,
+    runtime::PublishGeneration(project, trainee.Updates(),
+        EncodeTrainingState(environment.TrainingState(), curriculum), weights,
         [&](fs::path const& training, fs::path const& policy) { trainee.Save(training, policy); });
+    if (curriculum != nullptr)
+    {
+        fs::path const status = project.externalCurriculumProgress.empty()
+            ? project.Checkpoints() / "curriculum-status.json"
+            : project.root / project.externalCurriculumProgress;
+        std::string const text = curriculum->StatusJson();
+        artifacts::WriteFileAtomically(status, [&text](std::ostream& output) { output << text; },
+            artifacts::AtomicWriteOptions{}, "curriculum status");
+    }
+}
+
+/** @brief Apply CI/client selections to configuration before the common engine owns it. */
+runtime::OrchestrationPlan SelectedCurriculumPlan(runtime::OrchestrationPlan plan, Options const& options)
+{
+    if (!options.curriculumLastStage.empty())
+    {
+        auto const last = std::find_if(plan.stages.begin(), plan.stages.end(), [&](auto const& stage) {
+            return stage.name == options.curriculumLastStage;
+        });
+        if (last == plan.stages.end())
+            throw UsageError("unknown --curriculum-last-stage '" + options.curriculumLastStage + "'");
+        plan.stages.erase(last + 1, plan.stages.end());
+    }
+    for (runtime::OrchestrationStage& stage : plan.stages)
+    {
+        if (options.curriculumThreshold && stage.promotion.source == runtime::PromotionSource::Evaluation)
+            stage.promotion.threshold = *options.curriculumThreshold;
+        if (options.curriculumHostileZones || !options.curriculumObjectiveLayout.empty())
+        {
+            nlohmann::json payload = nlohmann::json::parse(stage.payload);
+            if (options.curriculumHostileZones) payload["hostileZones"] = *options.curriculumHostileZones;
+            if (!options.curriculumObjectiveLayout.empty())
+                payload["objectiveLayout"] = options.curriculumObjectiveLayout;
+            stage.payload = payload.dump();
+        }
+    }
+    return plan;
 }
 
 int Train(RunSetup const& setup, Options const& options, ipc::Worker* control)
@@ -1295,14 +1447,62 @@ int Train(RunSetup const& setup, Options const& options, ipc::Worker* control)
                   << ".\n";
     }
     auto const startUpdate = trainee->Updates();
+    fs::path curriculumFile = options.curriculum;
+    if (!curriculumFile.empty() && curriculumFile.is_relative()) curriculumFile = project.root / curriculumFile;
+    if (!options.noCurriculum && curriculumFile.empty() && !project.externalCurriculum.empty())
+        curriculumFile = project.root / project.externalCurriculum;
+    std::optional<runtime::CurriculumEngine> curriculum;
+    if (!curriculumFile.empty())
+    {
+        curriculum.emplace(SelectedCurriculumPlan(runtime::LoadOrchestrationPlan(curriculumFile), options));
+        if (generation)
+        {
+            TrainingStateEnvelope const state = DecodeTrainingState(generation->state);
+            if (state.curriculum)
+            {
+                curriculum->RestoreJson(*state.curriculum);
+                if (!options.curriculumStage.empty() && curriculum->StageName() != options.curriculumStage)
+                    throw UsageError("--curriculum-stage '" + options.curriculumStage
+                        + "' differs from resumed stage '" + curriculum->StageName() + "'");
+            }
+            else
+            {
+                std::size_t const stage = options.curriculumStage.empty() ? 0
+                    : curriculum->StageIndex(options.curriculumStage).value_or(curriculum->Stages());
+                if (stage == curriculum->Stages())
+                    throw UsageError("unknown --curriculum-stage '" + options.curriculumStage + "'");
+                curriculum->Restore(stage, 0, 0, startUpdate, startUpdate);
+            }
+        }
+        else if (resume)
+        {
+            // Historical checkpoints predate the common state envelope. They are a baseline,
+            // not an in-flight common curriculum: attach the plan at its first stage now.
+            std::size_t const stage = options.curriculumStage.empty() ? 0
+                : curriculum->StageIndex(options.curriculumStage).value_or(curriculum->Stages());
+            if (stage == curriculum->Stages())
+                throw UsageError("unknown --curriculum-stage '" + options.curriculumStage + "'");
+            curriculum->Restore(stage, 0, 0, startUpdate, startUpdate);
+        }
+        else if (!options.curriculumStage.empty())
+        {
+            auto const stage = curriculum->StageIndex(options.curriculumStage);
+            if (!stage) throw UsageError("unknown --curriculum-stage '" + options.curriculumStage + "'");
+            curriculum->Restore(*stage, 0, 0, startUpdate, startUpdate);
+        }
+    }
+    if (options.untilCurriculum && !curriculum)
+        throw UsageError("--until-curriculum requires a declared or explicit curriculum");
     auto absoluteLimit = options.untilUpdate;
-    if (!absoluteLimit && !options.updates && setup.profile) absoluteLimit = setup.profile->maxUpdates;
+    if (!options.untilCurriculum && !absoluteLimit && !options.updates && setup.profile)
+        absoluteLimit = setup.profile->maxUpdates;
     constexpr std::uint64_t defaultAdditionalUpdates = 100;
     constexpr std::uint64_t defaultSaveInterval = 10;
     std::uint64_t const additional = options.updates.value_or(defaultAdditionalUpdates);
     if (!absoluteLimit && additional > std::numeric_limits<std::uint64_t>::max() - startUpdate)
         throw UsageError("requested training update would overflow");
-    std::uint64_t const target = absoluteLimit ? *absoluteLimit : startUpdate + additional;
+    std::uint64_t const target = options.untilCurriculum ? std::numeric_limits<std::uint64_t>::max()
+        : (absoluteLimit ? *absoluteLimit : startUpdate + additional);
     std::uint64_t const saveEvery = options.saveEvery.value_or(setup.profile ? setup.profile->checkpointEvery : defaultSaveInterval);
     std::uint64_t environmentSeed = setup.settings.seed + 1;
     if (setup.profile)
@@ -1313,14 +1513,17 @@ int Train(RunSetup const& setup, Options const& options, ipc::Worker* control)
     }
     environment::Environment environment(setup.environment, project.root, environmentSeed);
     environment.SetLearning(true);
-    if (generation) environment.RestoreTrainingState(generation->state);
+    if (generation) environment.RestoreTrainingState(DecodeTrainingState(generation->state).environment);
     else if (resume) RestoreResumedEnvironment(environment, checkpoints, startUpdate);
     else
     {
         // A fresh run: what the environment may have read of an earlier one (a curriculum) goes.
         environment.RestoreTrainingState({});
     }
+    if (curriculum)
+        environment.ApplyCurriculumStage(curriculum->ActiveStageName(), curriculum->StagePayload());
     std::uint64_t updates = trainee->Updates();
+    std::size_t const initialCurriculumStage = curriculum ? curriculum->Stage() : 0;
     std::size_t const channels = setup.task.rewards.size();
     std::vector<double> restoredWeights;
     if (generation && generation->rewardWeights) restoredWeights = *generation->rewardWeights;
@@ -1352,10 +1555,15 @@ int Train(RunSetup const& setup, Options const& options, ipc::Worker* control)
     std::optional<std::uint64_t> published;
     if (resume) published = startUpdate;
     auto const start = std::chrono::steady_clock::now();
+    auto curriculumStageStarted = start;
     std::cout << "Training environment seed " << environmentSeed << ", checkpoint every " << saveEvery
               << ", budget " << (absoluteLimit ? "absolute" : "additional") << ".\n";
-    std::cout << "Training '" << setup.task.name << "' up to update " << target << ".\n";
-    while (updates < target)
+    if (curriculum)
+        std::cout << "Curriculum stage " << curriculum->Stage() + 1 << "/" << curriculum->Stages()
+                  << " '" << curriculum->StageName() << "'.\n";
+    if (options.untilCurriculum) std::cout << "Training '" << setup.task.name << "' until the curriculum completes.\n";
+    else std::cout << "Training '" << setup.task.name << "' up to update " << target << ".\n";
+    while (updates < target && (!curriculum || !curriculum->Completed()))
     {
         if (control && !control->Continue())
         {
@@ -1363,7 +1571,7 @@ int Train(RunSetup const& setup, Options const& options, ipc::Worker* control)
             if (published != updates)
             {
                 control->Saving();
-                SaveRun(*trainee, project, environment, ledger.Weights());
+                SaveRun(*trainee, project, environment, ledger.Weights(), curriculum ? &*curriculum : nullptr);
             }
             std::cout << "Stopped on request at update " << updates << "." << std::endl;
             return 0;
@@ -1374,14 +1582,52 @@ int Train(RunSetup const& setup, Options const& options, ipc::Worker* control)
             auto const end = trainee->Collect(environment, signals, observers);
             needsReset = runtime::EndsEpisode(end);
             RecordStep(ledger, signals, acted, needsReset);
+            if (needsReset && curriculum && curriculum->Criterion().source == runtime::PromotionSource::Episode)
+            {
+                std::vector<double> metrics(setup.task.metrics.size());
+                if (!metrics.empty()) environment.EpisodeMetrics(metrics.data());
+                std::string metric = curriculum->Criterion().metric;
+                if (metric.size() > 5 && metric.compare(metric.size() - 5, 5, ".rate") == 0)
+                    metric.resize(metric.size() - 5);
+                auto const found = std::find_if(setup.task.metrics.begin(), setup.task.metrics.end(),
+                    [&](schema::EpisodeMetric const& candidate) { return candidate.name == metric; });
+                if (found == setup.task.metrics.end())
+                    throw std::runtime_error("curriculum episode metric '" + metric + "' is absent from task.json");
+                if (found->kind != schema::MetricKind::Flag)
+                    throw std::runtime_error("curriculum episode metric '" + metric + "' must be a task flag");
+                std::size_t const index = static_cast<std::size_t>(found - setup.task.metrics.begin());
+                bool const eligible = std::isfinite(metrics[index]);
+                runtime::CurriculumDecision const decision = curriculum->RecordEpisode(eligible,
+                    eligible && metrics[index] >= 0.5);
+                if (decision.changed)
+                {
+                    environment.ApplyCurriculumStage(curriculum->ActiveStageName(), curriculum->StagePayload());
+                    curriculumStageStarted = std::chrono::steady_clock::now();
+                    std::cout << "curriculum: " << decision.reason << std::endl;
+                }
+            }
             if (!needsReset) signals.Advance();
             // Stop is latched. Publish only after all collected transitions have been optimized.
             if (control) (void)control->Continue();
         }
         PpokitUpdateStatistics const statistics = trainee->Update();
         updates = statistics.updates;
-        // Before the save of this update: a curriculum the environment owns moves with it.
-        bool const curriculumEnded = environment.TrainingProgress(updates, {});
+        // Before the save of this update: the common engine owns promotion and rehearsal.
+        bool curriculumEnded = false;
+        if (curriculum)
+        {
+            std::size_t const active = curriculum->ActiveStage();
+            runtime::CurriculumDecision const decision = curriculum->RecordUpdate(updates);
+            curriculumEnded = decision.completed;
+            if (decision.changed || curriculum->ActiveStage() != active)
+            {
+                environment.ApplyCurriculumStage(curriculum->ActiveStageName(), curriculum->StagePayload());
+                if (decision.changed) curriculumStageStarted = std::chrono::steady_clock::now();
+                needsReset = true;
+                std::cout << "curriculum: " << decision.reason << " Active stage '"
+                          << curriculum->ActiveStageName() << "'." << std::endl;
+            }
+        }
         double const elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         runtime::RewardSummary const rewards = ledger.Summarize();
         journal.WriteUpdate({updates, elapsed, trainee->UpdateMetrics(statistics), rewards});
@@ -1399,13 +1645,18 @@ int Train(RunSetup const& setup, Options const& options, ipc::Worker* control)
                 control->Answer(ApplyWeights(*request, environment, ledger, journal, updates + 1));
         }
         bool const stop = control && control->Stopping();
-        bool const outOfTime = options.maxSeconds > 0.0 && elapsed >= options.maxSeconds;
+        bool const globalOutOfTime = options.maxSeconds > 0.0 && elapsed >= options.maxSeconds;
+        double const stageElapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - curriculumStageStarted).count();
+        double const stageLimit = curriculum ? curriculum->MaximumSeconds() : 0.0;
+        bool stageOutOfTime = stageLimit > 0.0 && stageElapsed >= stageLimit;
+        bool outOfTime = globalOutOfTime || stageOutOfTime;
         bool const last = updates == target || outOfTime || curriculumEnded;
         bool const campaigns = !stop && AnyCampaignDue(setup.suites, updates, last);
         if (updates % saveEvery == 0 || last || stop || campaigns)
         {
             if (stop) control->Saving();
-            SaveRun(*trainee, project, environment, ledger.Weights());
+            SaveRun(*trainee, project, environment, ledger.Weights(), curriculum ? &*curriculum : nullptr);
             published = updates;
         }
         if (stop || (control && control->Stopping()))
@@ -1414,7 +1665,7 @@ int Train(RunSetup const& setup, Options const& options, ipc::Worker* control)
             if (published != updates)
             {
                 control->Saving();
-                SaveRun(*trainee, project, environment, ledger.Weights());
+                SaveRun(*trainee, project, environment, ledger.Weights(), curriculum ? &*curriculum : nullptr);
             }
             std::cout << "Stopped on request at update " << updates << ", checkpoint saved." << std::endl;
             return 0;
@@ -1422,7 +1673,15 @@ int Train(RunSetup const& setup, Options const& options, ipc::Worker* control)
         CampaignOutcome campaignOutcome;
         if (campaigns)
         {
-            campaignOutcome = RunDueCampaigns(setup, options, updates, last, environment, observers, journal, control);
+            std::size_t const stageBeforeCampaign = curriculum ? curriculum->Stage() : 0;
+            campaignOutcome = RunDueCampaigns(setup, options, updates, last, environment, observers, journal, control,
+                curriculum ? &*curriculum : nullptr);
+            if (curriculum && curriculum->Stage() != stageBeforeCampaign)
+            {
+                curriculumStageStarted = std::chrono::steady_clock::now();
+                stageOutOfTime = false;
+                outOfTime = globalOutOfTime;
+            }
         }
         if (campaignOutcome.goalReached)
         {
@@ -1432,14 +1691,20 @@ int Train(RunSetup const& setup, Options const& options, ipc::Worker* control)
         }
         if (outOfTime)
         {
-            std::cout << "Time budget of " << options.maxSeconds << " s spent at update " << updates
+            double const spentLimit = globalOutOfTime ? options.maxSeconds : stageLimit;
+            std::cout << "Time budget of " << spentLimit << " s spent at update " << updates
                       << ", checkpoint saved." << std::endl;
             break;
         }
         if (curriculumEnded || campaignOutcome.curriculumEnded)
         {
-            std::cout << "The environment's curriculum ended the training at update " << updates
+            std::cout << "The curriculum ended the training at update " << updates
                       << ", checkpoint saved." << std::endl;
+            break;
+        }
+        if (options.oneCurriculumStage && curriculum && curriculum->Stage() != initialCurriculumStage)
+        {
+            std::cout << "The selected curriculum stage passed at update " << updates << "." << std::endl;
             break;
         }
     }
@@ -1652,7 +1917,7 @@ int Play(RunSetup const& setup, Options const& options, ipc::Worker* control)
     environment.SetLearning(false);
     if (selected.state)
     {
-        environment.RestoreTrainingState(*selected.state);
+        environment.RestoreTrainingState(DecodeTrainingState(*selected.state).environment);
     }
     (void)EffectiveWeights(environment, setup.task.rewards.size(), selected.weights);
     runtime::ObserverSet observers(

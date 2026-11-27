@@ -130,10 +130,13 @@ fs::path CopyProject(fs::path const& root, std::string const& family, Libraries 
 /** @brief Runs ppokit-run with `arguments` (its output discarded); returns its exit code. */
 int RunPpokit(std::string const& arguments)
 {
+    char const* const overrideProgram = std::getenv("PPOKIT_RUN_TEST_EXECUTABLE");
+    std::string const program = overrideProgram != nullptr && overrideProgram[0] != '\0'
+        ? overrideProgram : PPOKIT_RUN;
 #if defined(_WIN32)
-    std::string const command = "\"\"" + std::string(PPOKIT_RUN) + "\" " + arguments + " > NUL 2>&1\"";
+    std::string const command = "\"\"" + program + "\" " + arguments + " > NUL 2>&1\"";
 #else
-    std::string const command = "\"" + std::string(PPOKIT_RUN) + "\" " + arguments + " > /dev/null 2>&1";
+    std::string const command = "\"" + program + "\" " + arguments + " > /dev/null 2>&1";
 #endif
     int const status = std::system(command.c_str());
 #if defined(_WIN32)

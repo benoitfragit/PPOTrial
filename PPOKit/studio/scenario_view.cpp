@@ -336,7 +336,7 @@ bool ScenarioView::SaveExternal()
             artifacts::AtomicWriteOptions{}, "external curriculum");
         savedExternalCurriculum_ = externalCurriculum_;
         externalDirty_ = false;
-        status_ = "External curriculum saved; existing CI progress may require a fresh bootstrap.";
+        status_ = "Curriculum saved; resume will refuse state from the previous plan, so start a fresh run.";
         return true;
     }
     catch (std::exception const& error)
@@ -438,6 +438,16 @@ void ScenarioView::ReloadPublishedState()
             // The environment ABI also permits plain text.
             publishedState_ = Json::parse(generation->state, nullptr, false);
             if (publishedState_.is_discarded()) publishedState_ = generation->state;
+            else if (publishedState_.is_object()
+                && publishedState_.value("schema", std::string{}) == "ppokit.run-training-state/1")
+            {
+                for (char const* field : {"environment", "curriculum"})
+                {
+                    if (!publishedState_.contains(field) || !publishedState_.at(field).is_string()) continue;
+                    Json const nested = Json::parse(publishedState_.at(field).get<std::string>(), nullptr, false);
+                    if (!nested.is_discarded()) publishedState_[field] = nested;
+                }
+            }
         }
     }
     catch (std::exception const& error) { stateError_ = error.what(); }
@@ -473,8 +483,17 @@ std::vector<std::string> ScenarioView::CurriculumSummary() const
     if (!project_.externalCurriculum.empty())
     {
         if (!externalCurriculumError_.empty()) return {externalCurriculumError_};
-        return {"External curriculum", std::filesystem::path(project_.externalCurriculum).filename().string(),
-            "Managed by existing launcher"};
+        std::vector<std::string> lines{"Common curriculum",
+            std::filesystem::path(project_.externalCurriculum).filename().string(), "Executed by ppokit-run"};
+        if (externalProgress_.is_object()
+            && externalProgress_.value("schema", std::string{}) == "ppokit.curriculum-status/1")
+        {
+            lines.push_back("Stage " + std::to_string(externalProgress_.value("index", std::size_t{}) + 1)
+                + "/" + std::to_string(externalProgress_.value("count", std::size_t{})) + " "
+                + externalProgress_.value("stage", std::string{}));
+            lines.push_back(externalProgress_.value("reason", std::string{}));
+        }
+        return lines;
     }
     if (project_.curriculumPointer.empty()) return {};
     if (!curriculumError_.empty()) return {curriculumError_};
@@ -495,17 +514,17 @@ void ScenarioView::DrawCurriculum()
 {
     if (!project_.externalCurriculum.empty())
     {
-        Heading("Curriculum", "Existing external curriculum source and progress.");
+        Heading("Curriculum", "Common curriculum source, validation criteria and persisted progress.");
         if (ImGui::Button("Refresh curriculum")) Reload();
         auto const source = project_.root / project_.externalCurriculum;
         ImGui::SameLine();
         if (ImGui::Button("Copy curriculum path"))
             ImGui::SetClipboardText(source.lexically_normal().string().c_str());
         ImGui::SeparatorText("Configured curriculum");
-        MutedWrapped("CI uses this shared schedule. A normal Train command does not execute its stages. "
-            "Changing it can require a fresh CI bootstrap because progress records its fingerprint.");
+        MutedWrapped("Studio, CLI and CI execute this schedule through ppokit-run. Progress belongs to the "
+            "same published generation as learner and environment state; a changed plan is refused on resume.");
         MutedWrapped("Thresholds, durations, zone and advance options, and rehearsal period are editable. "
-            "Gate order and team sizes follow the fixed CI contract.");
+            "Gate order and team sizes follow the project contract.");
         ImGui::PushID("external-curriculum");
         if (!externalCurriculumError_.empty()) DrawSource(source, externalCurriculum_, externalCurriculumError_);
         else
@@ -527,7 +546,7 @@ void ScenarioView::DrawCurriculum()
         if (!status_.empty()) ImGui::TextWrapped("%s", status_.c_str());
         if (!project_.externalCurriculumProgress.empty())
         {
-            ImGui::SeparatorText("External curriculum progress");
+            ImGui::SeparatorText("Curriculum progress and last decision");
             if (externalProgress_.is_null() && externalProgressError_.empty())
                 MutedWrapped("No progress file has been published.");
             else

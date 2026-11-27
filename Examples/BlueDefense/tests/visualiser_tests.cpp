@@ -112,6 +112,9 @@ fs::path CopyProject(fs::path const& folder, int port)
     WriteJson(folder / "network.json", network);
     Json project = ReadJson(original / "project.json");
     project["libraries"] = {{"environment", BLUE_ENVIRONMENT_LIBRARY}, {"network", BLUE_NETWORK_LIBRARY}};
+    fs::path const curriculum = (original / project.at("externalCurriculum").get<std::string>()).lexically_normal();
+    fs::copy_file(curriculum, folder / "curriculum.json", fs::copy_options::overwrite_existing);
+    project["externalCurriculum"] = "curriculum.json";
     WriteJson(folder / "project.json", project);
     return folder;
 }
@@ -119,10 +122,13 @@ fs::path CopyProject(fs::path const& folder, int port)
 /** @brief Runs ppokit-run with `arguments` (its output discarded); returns its exit code. */
 int RunPpokit(std::string const& arguments)
 {
+    char const* const overrideProgram = std::getenv("PPOKIT_RUN_TEST_EXECUTABLE");
+    std::string const program = overrideProgram != nullptr && overrideProgram[0] != '\0'
+        ? overrideProgram : PPOKIT_RUN;
 #if defined(_WIN32)
-    std::string const command = "\"\"" + std::string(PPOKIT_RUN) + "\" " + arguments + " > NUL 2>&1\"";
+    std::string const command = "\"\"" + program + "\" " + arguments + "\"";
 #else
-    std::string const command = "\"" + std::string(PPOKIT_RUN) + "\" " + arguments + " > /dev/null 2>&1";
+    std::string const command = "\"" + program + "\" " + arguments;
 #endif
     int const status = std::system(command.c_str());
 #if defined(_WIN32)

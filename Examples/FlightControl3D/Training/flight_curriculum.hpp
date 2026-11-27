@@ -21,7 +21,7 @@
 
 #include "flight_config.hpp"
 
-#include "ppokit/runtime/promotion_window.hpp"
+#include "ppokit/runtime/curriculum.hpp"
 
 #include <filesystem>
 #include <optional>
@@ -42,11 +42,11 @@ namespace ppo::examples::flight {
 class FlightCurriculum final
 {
 public:
-    explicit FlightCurriculum(CurriculumSettings const& settings) noexcept;
+    explicit FlightCurriculum(CurriculumSettings const& settings);
     /** @brief Current level, from 0 to Levels() - 1. */
     std::size_t Level() const noexcept
     {
-        return level_;
+        return engine_.Stage();
     }
     /** @brief Number of levels: the approach levels, then one level per stage. */
     std::size_t Levels() const noexcept
@@ -58,19 +58,28 @@ public:
     /** @brief Stops recorded in the current window. */
     std::size_t WindowStops() const noexcept
     {
-        return window_.Successes();
+        return engine_.WindowSuccesses();
     }
     /** @brief Airborne episodes recorded in the current window. */
     std::size_t WindowEpisodes() const noexcept
     {
-        return window_.Episodes();
+        return engine_.WindowEpisodes();
     }
     /**
      * @brief Records the outcome of an airborne training episode.
      * @param stopped True when the episode ended with a confirmed stop.
      * @return True when this episode completes a window that promotes the level.
      */
-    bool Record(bool stopped) noexcept;
+    bool Record(bool stopped);
+    /** @brief Common status snapshot shown by the Studio. */
+    std::string StatusJson() const { return engine_.StatusJson(); }
+    /** @brief Exact common-engine state embedded in the environment checkpoint. */
+    std::string StateJson() const { return engine_.StateJson(); }
+    /**
+     * @brief Restores and validates an exact common-engine state.
+     * @param state Versioned state produced by StateJson().
+     */
+    void RestoreJson(std::string const& state) { engine_.RestoreJson(state); }
     /** @brief Restores a saved level, clamped to the configured levels, with an empty window. */
     void Restore(std::size_t level) noexcept;
     /**
@@ -82,9 +91,8 @@ public:
 
 private:
     CurriculumSettings settings_;
-    std::size_t level_{};
-    /** @brief Episodes of the current level and their stops (PPOKit's promotion rule). */
-    ppokit::runtime::PromotionWindow window_;
+    /** @brief The single PPOKit engine; this class only maps Flight level names and outcomes. */
+    ppokit::runtime::CurriculumEngine engine_;
 };
 
 /**

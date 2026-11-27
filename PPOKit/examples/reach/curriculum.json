@@ -1,0 +1,16 @@
+{
+  "schema": "ppokit.curriculum/1",
+  "id": "reach-distance",
+  "stages": [
+    {
+      "name": "near",
+      "payload": { "start_distance": [0.2, 0.5] },
+      "promotion": { "source": "episode", "metric": "success", "window": 50, "threshold": 0.8 }
+    },
+    {
+      "name": "far",
+      "payload": { "start_distance": [0.5, 1.5] },
+      "promotion": { "source": "episode", "metric": "success", "window": 50, "threshold": 0.8 }
+    }
+  ]
+}

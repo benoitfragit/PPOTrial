@@ -51,23 +51,28 @@ target_include_directories(FlightControlSimulator PUBLIC "${CMAKE_CURRENT_SOURCE
 target_compile_definitions(FlightControlSimulator PRIVATE PPO_JSBSIM_DATA_ROOT="${PPO_JSBSIM_DATA_ROOT}")
 target_link_libraries(FlightControlSimulator PUBLIC FlightControlCore PRIVATE libJSBSim)
 
-add_library(FlightControlLearner STATIC Training/flight_learner.cpp Training/flight_model_store.cpp
-    Training/flight_curriculum.cpp)
+add_library(FlightControlCurriculum STATIC Training/flight_curriculum.cpp Runtime/flight_reward_tuning.cpp)
+target_include_directories(FlightControlCurriculum PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/Training" "${CMAKE_CURRENT_SOURCE_DIR}/Runtime")
+target_link_libraries(FlightControlCurriculum PUBLIC FlightControlCore PPOKit::Core PRIVATE PPOKit::Artifacts)
+
+# Historical learner retained for converters and numerical qualification only.
+add_library(FlightControlLearner STATIC EXCLUDE_FROM_ALL Training/flight_learner.cpp Training/flight_model_store.cpp)
 target_link_libraries(FlightControlLearner PUBLIC FlightControlCore PPOKit::Core PRIVATE RLtools::Core PPOKit::Artifacts)
 # Actor and critic types come from graph.json (PPOKit code generation).
 ppokit_generate_networks(TARGET FlightControlLearner TASK task.json GRAPH graph.json HEADER flight_networks.hpp)
 
-add_library(FlightControlRuntime STATIC Runtime/flight_session.cpp Runtime/flight_reward_tuning.cpp)
+add_library(FlightControlRuntime STATIC EXCLUDE_FROM_ALL Runtime/flight_session.cpp)
 target_include_directories(FlightControlRuntime PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Runtime")
-target_link_libraries(FlightControlRuntime PUBLIC FlightControlSimulator FlightControlLearner PPOKit::Training)
+target_link_libraries(FlightControlRuntime PUBLIC FlightControlSimulator FlightControlCurriculum FlightControlLearner PPOKit::Training)
 # Reward channel labels of the run journal come from the task file.
 ppokit_generate_task_layout(TARGET FlightControlRuntime TASK task.json HEADER flight_task_layout.hpp)
-add_executable(FlightControlHeadless Runtime/flight_headless.cpp)
+add_executable(FlightControlHeadless EXCLUDE_FROM_ALL Runtime/flight_headless.cpp)
 target_link_libraries(FlightControlHeadless PRIVATE FlightControlRuntime PPOKit::Live)
 
 # The example provides the simulation; ppokit_graph_network reads the project topology.
 add_library(flight_environment SHARED Environment/flight_environment_library.cpp)
-target_link_libraries(flight_environment PRIVATE FlightControlRuntime)
+target_link_libraries(flight_environment PRIVATE FlightControlSimulator FlightControlCurriculum PPOKit::Training)
 set_target_properties(flight_environment PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON PREFIX "")
 ppokit_bind_task_contract(TARGET flight_environment TASK task.json)
 ppokit_register_program(flight_environment)
@@ -78,7 +83,7 @@ target_link_libraries(flight_visualiser PRIVATE FlightControlCore PPOKit::Core P
 set_target_properties(flight_visualiser PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON PREFIX "")
 ppokit_register_program(flight_visualiser)
 # Offline V3 migration. Both aircraft use the same tensor mapping and distinct scenario contracts.
-add_executable(flight_checkpoint_import Tools/flight_checkpoint_import.cpp)
+add_executable(flight_checkpoint_import EXCLUDE_FROM_ALL Tools/flight_checkpoint_import.cpp)
 target_link_libraries(flight_checkpoint_import PRIVATE FlightControlRuntime PPOKit::Schema)
 target_compile_definitions(flight_checkpoint_import PRIVATE
     PPOKIT_PROGRAM_REGISTRY="${CMAKE_BINARY_DIR}/ppokit_programs_$<CONFIG>.txt")
@@ -96,8 +101,6 @@ if (TARGET PPOKitPublishedModelsTests)
     add_test(NAME PPOKitPublishedModels_PC7 COMMAND PPOKitPublishedModelsTests
         "${CMAKE_CURRENT_SOURCE_DIR}/projects/PC7" "${CMAKE_CURRENT_BINARY_DIR}/published_models_PC7" scratch)
 endif()
-# The studio launches it for the FlightControl3D projects (Examples/FlightControl3D/projects/*).
-ppokit_register_program(FlightControlHeadless)
 target_compile_definitions(FlightControlHeadless PRIVATE
     PPO_FLIGHT_BUILD_CONFIGURATION="$<CONFIG>"
     PPO_FLIGHT_CONFIG="${CMAKE_SOURCE_DIR}/Examples/FlightControl3D/projects/T6/scenario.json")

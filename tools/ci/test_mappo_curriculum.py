@@ -882,7 +882,7 @@ class PpokitRunStageTests(unittest.TestCase):
     def test_command_trains_to_the_target_with_the_save_rhythm(self) -> None:
         command = self.run_block()
         self.assertEqual(command[1:], [
-            "train", "--project", str((curriculum.PROJECT / "project.legacy.json").resolve()),
+            "train", "--project", str((curriculum.PROJECT / "project.json").resolve()),
             "--until-update", "120", "--save-every", "1", "--max-seconds", "600"])
         self.assertEqual(command[0], str(self.binary.resolve()))
         del self.training["training"]["saveEveryUpdates"]

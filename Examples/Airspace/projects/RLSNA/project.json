@@ -35,5 +35,5 @@
     "policy": "../../models/RLSNA/eval/policy.ppokit"
   },
   "journal": "../../models/RLSNA/metrics.jsonl",
-  "networkEditable": false
+  "networkEditable": true
 }

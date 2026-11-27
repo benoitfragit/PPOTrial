@@ -1036,6 +1036,7 @@ void GraphEditorView::DrawParameters(editor::EditorNode const& node)
         }
         HelpMarker("tanh: bounded, smooth. relu: unbounded, sparse. identity: linear.");
     }
+    DrawMaskParameters(node, info->type);
     if (info->type == schema::BlockType::MaskedPool)
     {
         std::string const mode = node.parameters.value("mode", "mean");
@@ -1045,7 +1046,12 @@ void GraphEditorView::DrawParameters(editor::EditorNode const& node)
             {
                 if (ImGui::Selectable(choice, mode == choice))
                 {
-                    setParameter("mode", choice);
+                    nlohmann::ordered_json changes{{"mode", choice}};
+                    if (std::string_view(choice) != "max")
+                    {
+                        changes["mask_fill"] = nullptr;
+                    }
+                    Apply([&]() { document_.SetParameters(network_, name, changes); });
                 }
             }
             ImGui::EndCombo();
@@ -1085,6 +1091,54 @@ void GraphEditorView::DrawParameters(editor::EditorNode const& node)
     if (network_ == Network::Critic && hasWidth)
     {
         DrawShare(node);
+    }
+}
+
+void GraphEditorView::DrawMaskParameters(editor::EditorNode const& node, schema::BlockType type)
+{
+    std::string const name = node.name;
+    if (type == schema::BlockType::EntityEncoder)
+    {
+        bool encodeAbsent = FlagParameter(node, "encode_absent");
+        if (ImGui::Checkbox("Encode absent entities", &encodeAbsent))
+        {
+            nlohmann::ordered_json const value = encodeAbsent ? nlohmann::ordered_json(true)
+                                                               : nlohmann::ordered_json();
+            Apply([&]() { document_.SetParameter(network_, name, "encode_absent", value); });
+        }
+        HelpMarker("When enabled, padded entities pass through the encoder before their mask is applied. "
+                   "Keep this enabled for the historical RLMission graph.");
+        return;
+    }
+    bool const supportsFill = type == schema::BlockType::MaskedAttention
+        || (type == schema::BlockType::MaskedPool && node.parameters.value("mode", "mean") == "max");
+    if (!supportsFill)
+    {
+        return;
+    }
+    bool custom = node.parameters.contains("mask_fill");
+    if (ImGui::Checkbox("Custom mask fill", &custom))
+    {
+        nlohmann::ordered_json const value = custom ? nlohmann::ordered_json(-1.0e9)
+                                                     : nlohmann::ordered_json();
+        Apply([&]() { document_.SetParameter(network_, name, "mask_fill", value); });
+    }
+    HelpMarker("Finite value substituted for an absent entity before max pooling or attention. "
+               "RLMission historically uses -1e9; changing it changes the network contract.");
+    if (custom)
+    {
+        double fill = node.parameters.value("mask_fill", -1.0e9);
+        if (ImGui::InputDouble("Mask fill", &fill, 0.0, 0.0, "%.10g", ImGuiInputTextFlags_EnterReturnsTrue))
+        {
+            if (std::isfinite(fill))
+            {
+                Apply([&]() { document_.SetParameter(network_, name, "mask_fill", fill); });
+            }
+            else
+            {
+                message_ = "Mask fill must be finite.";
+            }
+        }
     }
 }
 

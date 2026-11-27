@@ -249,7 +249,7 @@ if (PPO_BUILD_CORE_TESTS)
     # The repository's projects (FlightControl3D, BluePatrol) when PPOKit is built inside PPOTrial.
     if (EXISTS "${CMAKE_SOURCE_DIR}/Examples/FlightControl3D/projects")
         add_executable(PPOKitRepositoryProjectsTests tests/repository_projects_tests.cpp)
-        target_link_libraries(PPOKitRepositoryProjectsTests PRIVATE PPOKit::Schema nlohmann_json::nlohmann_json)
+        target_link_libraries(PPOKitRepositoryProjectsTests PRIVATE PPOKit::Editor nlohmann_json::nlohmann_json)
         target_compile_definitions(PPOKitRepositoryProjectsTests PRIVATE PPOTRIAL_REPOSITORY="${CMAKE_SOURCE_DIR}"
             PPOKIT_PROGRAM_REGISTRY="${CMAKE_BINARY_DIR}/ppokit_programs_$<CONFIG>.txt")
         add_test(NAME PPOKitRepositoryProjectsTests COMMAND PPOKitRepositoryProjectsTests)
@@ -387,9 +387,6 @@ if (PPO_BUILD_CORE_TESTS)
         COMMAND "${CMAKE_COMMAND}" -DGENERATOR=$<TARGET_FILE:ppokit-new>
             -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/scaffold -DEXPECTED=${_ppokit_reach}
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompareScaffold.cmake")
-    add_test(NAME PPOKitReachCheck COMMAND ppokit_reach check)
-    set_tests_properties(PPOKitReachCheck PROPERTIES PASS_REGULAR_EXPRESSION "All files are valid")
-
     # check, train, resume, live weights, curriculum stage and eval, in process.
     add_executable(PPOKitCommandLineTests tests/command_line_tests.cpp)
     target_link_libraries(PPOKitCommandLineTests PRIVATE PPOKit::Core PPOKit::Schema PPOKit::Training PPOKit::Live)
@@ -432,11 +429,11 @@ if (PPO_BUILD_CORE_TESTS)
     add_test(NAME PPOKitTeamGraphLearnerTests COMMAND PPOKitTeamGraphLearnerTests)
 
     # ppokit-run on the reach environment DLL and network DLL, with an observer.
-    add_library(reach_environment SHARED tests/environments/reach_environment.cpp)
-    target_include_directories(reach_environment PRIVATE "${_ppokit_reach}")
-    target_link_libraries(reach_environment PRIVATE PPOKit::Core)
-    ppokit_bind_task_contract(TARGET reach_environment TASK "${_ppokit_reach}/task.json" HEADER reach_layout.hpp)
-    set_target_properties(reach_environment PROPERTIES CXX_VISIBILITY_PRESET hidden PREFIX "")
+    add_library(reach_test_environment SHARED tests/environments/reach_environment.cpp)
+    target_include_directories(reach_test_environment PRIVATE "${_ppokit_reach}")
+    target_link_libraries(reach_test_environment PRIVATE PPOKit::Core)
+    ppokit_bind_task_contract(TARGET reach_test_environment TASK "${_ppokit_reach}/task.json" HEADER reach_layout.hpp)
+    set_target_properties(reach_test_environment PROPERTIES CXX_VISIBILITY_PRESET hidden PREFIX "")
     # A team environment (three agent rows, two agents present) for ppokit-run's team loop.
     add_library(team_line_environment SHARED tests/environments/team_line_environment.cpp)
     target_link_libraries(team_line_environment PRIVATE PPOKit::Core)
@@ -447,13 +444,13 @@ if (PPO_BUILD_CORE_TESTS)
     add_test(NAME PPOKitSessionControlTests COMMAND PPOKitSessionControlTests)
     add_executable(PPOKitRunTests tests/ppokit_run_tests.cpp)
     target_link_libraries(PPOKitRunTests PRIVATE PPOKit::Live nlohmann_json::nlohmann_json)
-    add_dependencies(PPOKitRunTests ppokit-run reach_environment ppokit_graph_network ppokit_test_components
+    add_dependencies(PPOKitRunTests ppokit-run reach_test_environment ppokit_graph_network ppokit_test_components
         team_line_environment team_line_network)
     target_compile_definitions(PPOKitRunTests PRIVATE
         PPOKIT_RUN="$<TARGET_FILE:ppokit-run>"
         PPOKIT_TEAM_LINE_TASK="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/team_line_task.json"
         PPOKIT_REACH_DIR="${_ppokit_reach}"
-        PPOKIT_REACH_ENVIRONMENT="$<TARGET_FILE:reach_environment>"
+        PPOKIT_REACH_ENVIRONMENT="$<TARGET_FILE:reach_test_environment>"
         PPOKIT_REACH_NETWORK="$<TARGET_FILE:ppokit_graph_network>"
         PPOKIT_TEAM_LINE_ENVIRONMENT="$<TARGET_FILE:team_line_environment>"
         PPOKIT_TEAM_LINE_NETWORK="$<TARGET_FILE:team_line_network>"

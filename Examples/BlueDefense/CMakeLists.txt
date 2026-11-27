@@ -37,13 +37,14 @@ set_target_properties(blue_environment PROPERTIES CXX_VISIBILITY_PRESET hidden V
     PREFIX "")
 ppokit_bind_task_contract(TARGET blue_environment TASK Agents/BluePatrol/task.json)
 ppokit_register_program(blue_environment)
-add_library(blue_network SHARED Network/blue_network.cpp)
+# Historical V7/V10 numerical oracle. Production projects use ppokit_graph_network;
+# build this adapter only when a converter or qualification target requests it.
+add_library(blue_network SHARED EXCLUDE_FROM_ALL Network/blue_network.cpp)
 target_include_directories(blue_network PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Scenario")
 target_link_libraries(blue_network PRIVATE BlueDefenseDefenderBackend PPOBlueDefenseSpawn PPOLayout
     PPOKit::Schema nlohmann_json::nlohmann_json)
 set_target_properties(blue_network PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON PREFIX "")
 ppokit_bind_task_contract(TARGET blue_network TASK Agents/BluePatrol/task.json)
-ppokit_register_program(blue_network)
 
 # Former V7/V10 checkpoints -> PPOKit artifacts, checked by an identical round trip.
 add_executable(blue_checkpoint_import Tools/blue_checkpoint_import.cpp)
@@ -69,7 +70,7 @@ if (TARGET PPOKitRepositoryProjectsTests)
 endif()
 
 if (TARGET PPOKitPublishedModelsTests)
-    add_dependencies(PPOKitPublishedModelsTests blue_environment blue_network blue_visualiser)
+    add_dependencies(PPOKitPublishedModelsTests blue_environment blue_visualiser ppokit_graph_network)
     add_test(NAME PPOKitPublishedModels_BluePatrol COMMAND PPOKitPublishedModelsTests
         "${CMAKE_CURRENT_SOURCE_DIR}/projects/BluePatrol" "${CMAKE_CURRENT_BINARY_DIR}/published_models_BluePatrol" resume)
 endif()

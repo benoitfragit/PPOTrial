@@ -95,7 +95,7 @@ jobs:
           $usable = "${{ steps.runtime_cache.outputs.cache-hit }}" -eq "true"
           foreach ($file in @("build/release/PPOKit/Release/ppokit-run.exe",
                               "build/release/Examples/BlueDefense/Release/blue_environment.dll",
-                              "build/release/Examples/BlueDefense/Release/blue_network.dll",
+                              "build/release/PPOKit/Release/ppokit_graph_network.dll",
                               "build/release/Examples/BlueDefense/Release/blue_visualiser.dll",
                               "build/release/ppokit_programs_Release.txt")) {
             if (-not (Test-Path $file -PathType Leaf)) { $usable = $false }
@@ -118,7 +118,7 @@ jobs:
         if: steps.runtime_probe.outputs.usable != 'true'
         run: |
           cmake --build build/release --config Release --parallel 2 `
-            --target ppokit-run blue_environment blue_network blue_visualiser
+            --target ppokit-run blue_environment ppokit_graph_network blue_visualiser
           if ($LASTEXITCODE -ne 0) { throw "Release build failed" }
 
       - name: Verify Blue Defense runtime and dependencies
@@ -131,7 +131,7 @@ jobs:
           cmd /c "git show HEAD:Examples/BlueDefense/projects/BluePatrol/checkpoints/prod/policy.ppokit > `"$actor`""
           if ($LASTEXITCODE -ne 0) { throw "Cannot extract the committed production actor" }
           & build/release/PPOKit/Release/ppokit-run.exe play --episodes 1 `
-            --project Examples/BlueDefense/projects/BluePatrol/project.legacy.json --policy $actor
+            --project Examples/BlueDefense/projects/BluePatrol/project.json --policy $actor
           if ($LASTEXITCODE -ne 0) { throw "ppokit-run runtime validation failed" }
 
       - name: Cache validated Release binaries
@@ -149,7 +149,7 @@ jobs:
           python -m unittest discover -s tools/ci -p "test_mappo_metrics.py" -v
           if ($LASTEXITCODE -ne 0) { throw "MAPPO telemetry tests failed" }
 
-      - name: Validate MAPPO curriculum configuration and orchestrator
+      - name: Validate common curriculum clients and historical qualification oracles
         run: |
           python -m unittest discover -s tools/ci -p "test_mappo_curriculum.py" -v
           if ($LASTEXITCODE -ne 0) { throw "MAPPO curriculum tests failed" }
@@ -172,7 +172,7 @@ jobs:
           $config | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $path -Encoding utf8
           Write-Host "Checkpoint every $value update(s); evaluation cadence unchanged."
           # Each run reports its own telemetry: the journal lines of the resumed runs are skipped.
-          $journal = "Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/metrics.jsonl"
+          $journal = "Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/metrics.jsonl"
           $lines = 0
           if (Test-Path -LiteralPath $journal -PathType Leaf) {
             $lines = @(Get-Content -LiteralPath $journal).Count
@@ -192,9 +192,9 @@ jobs:
           if (-not [int]::TryParse($env:MAX_SECONDS, [ref]$seconds) -or $seconds -lt 1 -or $seconds -gt 18000) {
             throw "max_seconds must be an integer in [1, 18000]"
           }
-          # PPO.exe's Training mode on the scenario as it is, under ppokit-run: up to
-          # maxUpdates, its campaigns every checkpointEvery updates, PROD promotion.
-          python -u tools/ci/mappo_curriculum.py --single-stage --max-seconds $seconds
+          & build/release/PPOKit/Release/ppokit-run.exe train `
+            --project Examples/BlueDefense/projects/BluePatrol/project.json `
+            --no-curriculum --max-seconds $seconds
           if ($LASTEXITCODE -ne 0) { throw "Headless training exited with code $LASTEXITCODE" }
 
       - name: Train staged MAPPO curriculum without recompiling between levels
@@ -210,25 +210,25 @@ jobs:
             throw "max_seconds must be an integer in [1, 18000]"
           }
           $fresh = @()
-          $warm = @()
           if ($env:WARM_START -eq "true") {
             if ($env:CURRICULUM_VERSION -ne "v3" -or
                 [string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) {
               throw "V3 warm start requires curriculum_version=v3 and resume_run_id"
             }
-            $warm = @("--warm-start")
           }
           if ([string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) {
-            # Fresh start only resets progress in this runner checkout.
-            Remove-Item "Examples/BlueDefense/projects/BluePatrol/checkpoints/curriculum-progress.json" -Force -ErrorAction SilentlyContinue
-            $fresh = @("--fresh-start")
+            $fresh = @("--fresh")
+          } else {
+            $fresh = @("--resume")
           }
           if ($env:CURRICULUM_VERSION -ne "v3") {
             throw "Only curriculum_version=v3 remains (V1 and V2 were removed)"
           }
           $curriculumConfig = "Examples/BlueDefense/curricula/BluePatrolCurriculumV3.json"
           Write-Host "Curriculum version=$env:CURRICULUM_VERSION config=$curriculumConfig"
-          python -u tools/ci/mappo_curriculum.py --curriculum $curriculumConfig --max-seconds $seconds @fresh @warm
+          & build/release/PPOKit/Release/ppokit-run.exe train `
+            --project Examples/BlueDefense/projects/BluePatrol/project.json `
+            --curriculum $curriculumConfig --until-curriculum --max-seconds $seconds @fresh
           if ($LASTEXITCODE -ne 0) { throw "MAPPO curriculum failed with code $LASTEXITCODE" }
 
       - name: Validate resumable checkpoint
@@ -236,7 +236,7 @@ jobs:
           SCENARIO: blue-defense
           RESUME_RUN_ID: ${{ inputs.resume_run_id }}
         run: |
-          $root = "Examples/BlueDefense/projects/BluePatrol/checkpoints/latest"
+          $root = "Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/latest"
           $training = Join-Path $root "latest.ppokit"
           $actor = Join-Path $root "policy.ppokit"
           $start = (Get-Item ".mappo-training-start").LastWriteTimeUtc
@@ -269,7 +269,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               throw "Progressive checkpoint is not a unified-guidance actor with full optimizer"
             }
-            $progressPath = "Examples/BlueDefense/projects/BluePatrol/checkpoints/adaptive-curriculum-progress.json"
+            $progressPath = "Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/curriculum-status.json"
             if (-not (Test-Path $progressPath -PathType Leaf)) {
               throw "Progressive checkpoint is missing its gate state"
             }
@@ -281,13 +281,14 @@ jobs:
         with:
           name: blue-mappo-checkpoints
           path: |
-            Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/policy.ppokit
-            Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/latest.ppokit
-            Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/metrics.jsonl
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/latest/policy.ppokit
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/latest/latest.ppokit
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/metrics.jsonl
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/generation.json
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/environment_state/**
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/curriculum-status.json
             Examples/BlueDefense/projects/BluePatrol/checkpoints/prod/policy.ppokit
             Examples/BlueDefense/projects/BluePatrol/checkpoints/prod/policy.ppokit.score
-            Examples/BlueDefense/projects/BluePatrol/checkpoints/curriculum-progress.json
-            Examples/BlueDefense/projects/BluePatrol/checkpoints/adaptive-curriculum-progress.json
           if-no-files-found: warn
           retention-days: 30
 
@@ -312,7 +313,7 @@ jobs:
             $from = 0
             if (Test-Path ".mappo-journal-start") { $from = [int](Get-Content ".mappo-journal-start" -TotalCount 1) }
             python tools/ci/mappo_metrics.py `
-              --journal Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/metrics.jsonl `
+              --journal Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/metrics.jsonl `
               --journal-from-line $from `
               --log $log `
               --out build/mappo-telemetry `
@@ -374,7 +375,7 @@ jobs:
         with:
           name: blue-mappo-telemetry
           path: |
-            Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/metrics.jsonl
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/metrics.jsonl
             build/mappo-telemetry/mappo-summary.md
             build/mappo-telemetry/mappo-progress.svg
             build/mappo-telemetry/mappo-losses.csv

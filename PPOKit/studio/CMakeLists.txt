@@ -47,11 +47,11 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         PPOKIT_STUDIO_REGISTRY="${CMAKE_BINARY_DIR}/ppokit_programs_$<CONFIG>.txt"
         PPOKIT_REACH_PROJECT="${CMAKE_SOURCE_DIR}/PPOKit/examples/reach"
         PPOKIT_FLIGHT_PC7_PROJECT="${CMAKE_SOURCE_DIR}/Examples/FlightControl3D/projects/PC7"
-        PPOKIT_REACH_PROGRAM="$<TARGET_FILE:ppokit_reach>"
+        PPOKIT_REACH_PROGRAM="$<TARGET_FILE:ppokit-run>"
         PPOKIT_REACH_ENVIRONMENT="$<TARGET_FILE:reach_environment>"
         PPOKIT_REACH_NETWORK="$<TARGET_FILE:reach_network>"
         PPOKIT_RUN_PROGRAM="$<TARGET_FILE:ppokit-run>")
-    add_dependencies(PPOKitStudioProjectTests ppokit_reach ppokit-run reach_environment reach_network)
+    add_dependencies(PPOKitStudioProjectTests ppokit-run reach_environment reach_network)
     if (TARGET flight_environment)
         target_compile_definitions(PPOKitStudioProjectTests PRIVATE PPOKIT_FLIGHT_ENVIRONMENT="$<TARGET_FILE:flight_environment>")
         add_dependencies(PPOKitStudioProjectTests flight_environment)

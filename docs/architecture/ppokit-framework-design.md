@@ -1,5 +1,17 @@
 # PPOKit — framework commun PPO/MAPPO, backends rl_tools et libtorch, codegen et studio
 
+> **État réalisé au 27 novembre 2026.** La partie ci-dessous est le document de
+> conception historique. L’architecture de production actuelle possède un seul
+> backend learner dynamique (`ppokit_graph_network`), un seul runner
+> (`ppokit-run`), un seul Studio et un seul moteur de curriculum
+> (`CurriculumEngine`). Chaque projet fournit un environnement, un contrat de
+> tâche et un graphe ; l’orchestration ne réside ni dans l’environnement ni dans
+> les workflows. RLMission, RLSNA, BluePatrol, T6 et PC7 suivent ce chemin.
+> Les anciens learners Blue/Flight sont isolés en `EXCLUDE_FROM_ALL` pour la
+> conversion et les parités numériques. Voir
+> [`ppokit-mutualization-final-2026-11-27.md`](../audits/ppokit-mutualization-final-2026-11-27.md)
+> pour l’inventaire des appelants et suppressions.
+
 > **LibTorch removed (November 2026).** The red agents' production weights are now
 > `policy.txt` (converted from `model.pt`, same actions, `AirspacePolicies`) and their
 > training uses PPOKit graph learners (`Examples/Airspace/Agents/Bindings`). The LibTorch classes

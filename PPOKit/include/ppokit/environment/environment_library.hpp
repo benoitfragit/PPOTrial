@@ -31,7 +31,7 @@ struct EnvironmentFunctions final
     decltype(&ppokit_environment_set_learning) setLearning = nullptr;
     decltype(&ppokit_environment_training_state) trainingState = nullptr;
     decltype(&ppokit_environment_restore_training_state) restoreTrainingState = nullptr;
-    decltype(&ppokit_environment_training_progress) trainingProgress = nullptr;
+    decltype(&ppokit_environment_apply_curriculum_stage) applyCurriculumStage = nullptr;
     decltype(&ppokit_environment_set_weights) setWeights = nullptr;
     decltype(&ppokit_environment_weights) weights = nullptr;
     decltype(&ppokit_environment_error) error = nullptr;
@@ -116,12 +116,8 @@ public:
     std::string TrainingState() const;
     /** @brief Restores a state of TrainingState; the empty state starts a fresh run. */
     void RestoreTrainingState(std::string const& state);
-    /**
-     * @brief The run's progress for a curriculum the environment owns (see the ABI).
-     * @param campaign A campaign's result as JSON, or empty after an update.
-     * @return True when the environment's curriculum ends the training.
-     */
-    bool TrainingProgress(std::uint64_t updates, std::string const& campaign);
+    /** @brief Applies the payload selected by the common curriculum engine. */
+    void ApplyCurriculumStage(std::string const& name, std::string const& payload);
     PpokitEnvironmentInfo const& Info() const noexcept { return library_->Info(); }
 
 private:

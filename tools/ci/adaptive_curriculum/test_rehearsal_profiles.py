@@ -250,9 +250,7 @@ class RehearsalProfileTests(unittest.TestCase):
             self.assertIn("        default: legacy", workflow)
             for profile in profiles.PROFILES:
                 self.assertIn("          - " + profile, workflow)
-        self.assertIn(
-            '$pythonArgs += @("--rehearsal-profile", $env:REHEARSAL_PROFILE)',
-            progressive)
+        self.assertIn('"--profile", $env:REHEARSAL_PROFILE', progressive)
         self.assertIn(
             'inputs[rehearsal_profile]=${REHEARSAL_PROFILE}', restart)
 

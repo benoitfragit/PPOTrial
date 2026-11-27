@@ -131,6 +131,8 @@ private:
     void DrawNode(std::size_t index);
     void DrawInspector();
     void DrawParameters(editor::EditorNode const& node);
+    /** @brief Historical entity-mask semantics used by Airspace encoders, pools and attention. */
+    void DrawMaskParameters(editor::EditorNode const& node, schema::BlockType type);
     /** @brief "Separate keys" of a masked attention: adds or removes its keys port. */
     void DrawAttentionKeys(editor::EditorNode const& node);
     /** @brief Log-std of a Gaussian head: a learned parameter, or a clamped dense layer (state). */

@@ -3,7 +3,7 @@
 
 Operates only on the current CI checkout. It never calls a trainer and never
 uploads, modifies, or promotes model checkpoints. Each gate is a ppokit-run
-evaluation of the promoted actor (blue_environment, blue_network): the gate's
+evaluation of the promoted actor (blue_environment, ppokit_graph_network): the gate's
 P/N in scenario.json and a generated suite eval/inference.json whose seeds are
 the holdout seeds, one case each (the cases of PPO.exe's campaign for those
 seeds). Results are read from the suite's JSON report.
@@ -195,7 +195,7 @@ def run(args: argparse.Namespace) -> int:
             print(f"[INFERENCE] Evaluating gate {name}, {args.episodes} cases", flush=True)
             try:
                 completed = subprocess.run(
-                    [str(runner), "eval", "--project", str(PROJECT / "project.legacy.json"),
+                    [str(runner), "eval", "--project", str(PROJECT / "project.json"),
                      "--suite", SUITE_NAME, "--policy", ACTOR.as_posix()],
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     encoding="utf-8", errors="replace", timeout=args.timeout_seconds,

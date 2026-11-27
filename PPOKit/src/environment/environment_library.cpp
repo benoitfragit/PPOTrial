@@ -59,7 +59,7 @@ std::shared_ptr<EnvironmentLibrary const> EnvironmentLibrary::Open(std::string c
     Bind(module, "ppokit_environment_set_learning", f.setLearning, path);
     Bind(module, "ppokit_environment_training_state", f.trainingState, path);
     Bind(module, "ppokit_environment_restore_training_state", f.restoreTrainingState, path);
-    Bind(module, "ppokit_environment_training_progress", f.trainingProgress, path);
+    Bind(module, "ppokit_environment_apply_curriculum_stage", f.applyCurriculumStage, path);
     Bind(module, "ppokit_environment_set_weights", f.setWeights, path);
     Bind(module, "ppokit_environment_weights", f.weights, path);
     Bind(module, "ppokit_environment_error", f.error, path);
@@ -236,12 +236,10 @@ void Environment::RestoreTrainingState(std::string const& state)
         "restore_training_state");
 }
 
-bool Environment::TrainingProgress(std::uint64_t updates, std::string const& campaign)
+void Environment::ApplyCurriculumStage(std::string const& name, std::string const& payload)
 {
-    int finished = 0;
-    char const* const text = campaign.empty() ? nullptr : campaign.c_str();
-    Require(library_->Functions().trainingProgress(environment_, updates, text, &finished), "training_progress");
-    return finished != 0;
+    Require(library_->Functions().applyCurriculumStage(environment_, name.c_str(), payload.c_str()),
+        "apply_curriculum_stage");
 }
 
 } // namespace ppokit::environment

@@ -2,7 +2,7 @@
 """Blue MAPPO checkpoints of BluePatrol: their file names and their header checks.
 
 The checkpoints are PPOKit artifacts (``.ppokit``), as written by ppokit-run and
-the blue_network DLL::
+the common ``ppokit_graph_network`` DLL::
 
     {"schema":"ppokit.artifact/1","kind":"training"|"policy","identity":{...},"updates":N,...}
     contract 10 <observation version> 295 156 2 128 3 470 256 3 UNIFIED_PHYSICAL_GUIDANCE_V1

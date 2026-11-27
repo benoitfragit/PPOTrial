@@ -213,7 +213,7 @@ jobs:
           $usable = "${{ steps.runtime_cache.outputs.cache-hit }}" -eq "true"
           foreach ($file in @("build/release/PPOKit/Release/ppokit-run.exe",
                               "build/release/Examples/BlueDefense/Release/blue_environment.dll",
-                              "build/release/Examples/BlueDefense/Release/blue_network.dll",
+                              "build/release/PPOKit/Release/ppokit_graph_network.dll",
                               "build/release/Examples/BlueDefense/Release/blue_visualiser.dll",
                               "build/release/ppokit_programs_Release.txt")) {
             if (-not (Test-Path $file -PathType Leaf)) { $usable = $false }
@@ -236,7 +236,7 @@ jobs:
         if: steps.runtime_probe.outputs.usable != 'true'
         run: |
           cmake --build build/release --config Release --parallel 2 `
-            --target ppokit-run blue_environment blue_network blue_visualiser
+            --target ppokit-run blue_environment ppokit_graph_network blue_visualiser
           if ($LASTEXITCODE -ne 0) { throw "Release build failed" }
 
       - name: Cache validated Release binaries
