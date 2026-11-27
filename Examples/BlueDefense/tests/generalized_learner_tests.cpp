@@ -12,9 +12,11 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace blue = ppo::examples::bluedefense::defenders;
 namespace rlt = rl_tools;
@@ -87,8 +89,7 @@ std::string MakeV4TrainingFixture()
     Critic critic{};
     rlt::malloc(device, actor);
     rlt::malloc(device, critic);
-    auto rng = rlt::random::default_engine(
-        typename blue::Device::SPEC::RANDOM{}, 4455U);
+    auto rng = blue::MakePatrolEngine(4455U);
     rlt::init_weights(device, actor, rng);
     rlt::init_weights(device, critic, rng);
     typename blue::TrainingConfig::NN::ACTOR_OPTIMIZER actorOptimizer{};
@@ -376,11 +377,169 @@ bool VerifyTeamSize(blue::ActiveTeamCounts const counts)
         && std::isfinite(updatedLogStd) && updatedLogStd != initialLogStd;
 }
 
+/** @brief A checkpoint without its header line (which holds the writing date). */
+std::string ArtifactBody(std::filesystem::path const& path)
+{
+    std::ifstream stream(path);
+    std::string header;
+    std::getline(stream, header);
+    return std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+}
+
+/** @brief The whole text of a file. */
+std::string FileText(std::filesystem::path const& path)
+{
+    std::ifstream stream(path, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+}
+
+/**
+ * @brief A former V7/V10 pair converted to PPOKit artifacts loses nothing: the state read back
+ *        from the artifacts writes the same V7 and V10 files, byte for byte (parameters, both
+ *        Adams with settings, ages and moments, RNG, updates, P/N). The artifacts are refused
+ *        where they do not fit: a policy as a training state, another identity, another contract.
+ */
+bool VerifyLegacyConversionIsExact()
+{
+    blue::ActiveTeamCounts const counts{2U, 1U};
+    blue::GeneralizedPatrolLearner trained{counts, 77U, 1U};
+    auto observations = MakeObservations(counts);
+    blue::GeneralizedPatrolLearner::AvailabilityMask availability{};
+    availability[0] = true;
+    availability[1] = true;
+    blue::GeneralizedPatrolLearner::Rewards rewards{};
+    rewards[0] = 0.25F;
+    rewards[1] = -0.5F;
+    for (int step = 0; step < 3; ++step)
+    {
+        (void)trained.ChooseActions(observations, availability);
+        (void)trained.Observe(observations, rewards, availability, step == 2, false);
+    }
+    std::filesystem::path const directory = std::filesystem::temp_directory_path() / "ppo_blue_conversion";
+    std::filesystem::create_directories(directory);
+    std::filesystem::path const v7 = directory / "training_v7.txt";
+    std::filesystem::path const v10 = directory / "actor_v10.txt";
+    trained.SaveV7TrainingState(v7);
+    trained.SaveV10Actor(v10);
+
+    // Convert: read the former files, write the artifacts.
+    blue::GeneralizedPatrolLearner converter{counts, 5U, 1U};
+    converter.LoadTrainingState(v7);
+    std::filesystem::path const training = directory / "latest.ppokit";
+    std::filesystem::path const policy = directory / "policy.ppokit";
+    converter.SaveTrainingState(training);
+    blue::GeneralizedPatrolLearner actorConverter{counts, 5U, 1U};
+    actorConverter.LoadActor(v10);
+    actorConverter.SaveActor(policy);
+
+    // Read the artifacts back and write the former files again.
+    blue::GeneralizedPatrolLearner restored{counts, 9U, 1U};
+    restored.LoadTrainingState(training);
+    std::filesystem::path const v7Again = directory / "training_v7_again.txt";
+    restored.SaveV7TrainingState(v7Again);
+    auto const resumedArtifact = directory / "resumed.ppokit";
+    restored.SaveTrainingState(resumedArtifact);
+    auto const resumedHeader = ppokit::artifacts::ReadArtifactHeader(resumedArtifact);
+    if (resumedHeader.seed != ppokit::artifacts::ReadArtifactHeader(training).seed
+        || resumedHeader.updates != trained.StepCount())
+    {
+        return false;
+    }
+    blue::GeneralizedPatrolLearner restoredActor{counts, 9U, 1U};
+    restoredActor.LoadActor(policy);
+    std::filesystem::path const v10Again = directory / "actor_v10_again.txt";
+    restoredActor.SaveV10Actor(v10Again);
+    bool const exact = FileText(v7) == FileText(v7Again) && FileText(v10) == FileText(v10Again)
+        && restored.StepCount() == trained.StepCount();
+    if (!exact)
+    {
+        return false;
+    }
+
+    blue::GeneralizedPatrolLearner refusing{counts, 9U, 1U};
+    bool const policyRefused = ThrowsRuntimeError([&] { refusing.LoadTrainingState(policy); });
+    std::string text = FileText(training);
+    std::string const task = "\"task\":\"blue_patrol\"";
+    std::string foreign = text;
+    foreign.replace(foreign.find(task), task.size(), "\"task\":\"other_task\"");
+    std::filesystem::path const foreignPath = directory / "foreign.ppokit";
+    WriteText(foreignPath, foreign);
+    bool const identityRefused = ThrowsRuntimeError([&] { refusing.LoadTrainingState(foreignPath); });
+    std::string const guidance = blue::kGeneralizedUnifiedGuidanceSemanticVersion;
+    std::string otherContract = text;
+    otherContract.replace(otherContract.find(guidance), guidance.size(), "OTHER_GUIDANCE_V0");
+    std::filesystem::path const contractPath = directory / "contract.ppokit";
+    WriteText(contractPath, otherContract);
+    bool const contractRefused = ThrowsRuntimeError([&] { refusing.LoadTrainingState(contractPath); });
+    auto const trailingPath = directory / "trailing.ppokit";
+    WriteText(trailingPath, text + "\ntrailing-data\n");
+    bool const trailingRefused = ThrowsRuntimeError([&] { refusing.LoadTrainingState(trailingPath); });
+    std::error_code ignored;
+    std::filesystem::remove_all(directory, ignored);
+    return policyRefused && identityRefused && contractRefused && trailingRefused;
+}
+
 } // namespace
 
 /**
- * @brief Analyse les arguments, charge l'exemple demandé et lance la simulation graphique ou headless avec supervision et checkpoints.
+ * @brief Layer probes are read-only: a probed update gives the same actions and training
+ *        state as an unprobed one, and sees every actor block and critic layer.
  */
+bool VerifyProbesAreReadOnly()
+{
+    blue::ActiveTeamCounts const counts{2U, 2U};
+    auto const train = [&](bool const probed, std::filesystem::path const& state) {
+        blue::GeneralizedPatrolLearner learner{counts, 517U, 2U};
+        learner.ProbeLayers(probed);
+        auto observations = MakeObservations(counts);
+        blue::GeneralizedPatrolLearner::AvailabilityMask availability{};
+        availability[0] = true;
+        availability[1] = true;
+        blue::GeneralizedPatrolLearner::Rewards rewards{};
+        rewards[0] = 0.5F;
+        rewards[1] = -0.25F;
+        for (int step = 0; step < 4; ++step)
+        {
+            (void)learner.ChooseActions(observations, availability);
+            (void)learner.Observe(observations, rewards, availability, step % 2 == 1, false);
+        }
+        learner.SaveTrainingState(state);
+        auto const actions = learner.EvaluateActions(observations, availability);
+        return std::make_pair(actions, learner.LayerProbes());
+    };
+    std::filesystem::path const directory = std::filesystem::temp_directory_path();
+    auto const probedState = directory / "ppo_generalized_probed_state.txt";
+    auto const plainState = directory / "ppo_generalized_plain_state.txt";
+    auto const [probedActions, probes] = train(true, probedState);
+    auto const [plainActions, none] = train(false, plainState);
+    // The header line records the writing date: the saved state is the rest of the file.
+    std::string const probedBody = ArtifactBody(probedState);
+    if (probedActions != plainActions || probedBody.empty() || probedBody != ArtifactBody(plainState))
+        return false;
+    if (!none.actor.empty() || probes.actor.empty() || probes.critic.empty())
+        return false;
+    // These observations hold no track: set blocks may see no entity, the trunk always works.
+    bool trunkSeen = false;
+    for (auto const& block : probes.actor)
+    {
+        if (!std::isfinite(block.deviation) || !std::isfinite(block.gradientNorm))
+            return false;
+        if (block.block == "trunk")
+            trunkSeen = block.samples > 0U && block.gradientNorm > 0.0;
+    }
+    for (auto const& layer : probes.critic)
+    {
+        if (layer.samples == 0U || !(layer.gradientNorm > 0.0))
+            return false;
+    }
+    if (!trunkSeen)
+        return false;
+    std::error_code ignored;
+    std::filesystem::remove(probedState, ignored);
+    std::filesystem::remove(plainState, ignored);
+    return true;
+}
+
 int main()
 {
     if (!VerifyOptimizationFailureGuard())
@@ -544,5 +703,10 @@ int main()
     std::filesystem::remove(training, ignored);
     std::filesystem::remove(v4, ignored);
     std::filesystem::remove(badV4, ignored);
+    if (!VerifyLegacyConversionIsExact())
+        return 24;
+    // Last, so that its update logs only extend the recorded trace.
+    if (!VerifyProbesAreReadOnly())
+        return 22;
     return 0;
 }

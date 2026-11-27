@@ -21,6 +21,9 @@ namespace ppo::model {
 * platform-specific speed and acceleration ranges, and optionally randomizes
 * targets and SAM-related parameters.
 *
+* Its draws come from the world's initialization engine (InitializationEngine), so a
+* seeded world gives the same episodes.
+*
 * @param entity Entity to initialize.
 */
 void
@@ -30,8 +33,9 @@ RandomInitiliazerSystem::Init(Entity& entity)
     if (registry == nullptr
     || !entity.has<sEntityState>())
         return;
-        
-    RandomGenerator generator{};
+
+    std::mt19937_64& source{ InitializationEngine(*registry) };
+    RandomGenerator generator{ source };
 
     auto [state] = entity.get<sEntityState>();
 
@@ -46,7 +50,7 @@ RandomInitiliazerSystem::Init(Entity& entity)
         bool  onTheRIght{ false };
 
         // Choose whether the entity spawns in the left or right sector.
-        RandomGenerator leftRightGenerator{};
+        RandomGenerator leftRightGenerator{ source };
         leftRightGenerator.registerAttr(onTheRIght, 0.5F);
         leftRightGenerator.generate();
 
@@ -100,7 +104,7 @@ RandomInitiliazerSystem::Init(Entity& entity)
 
         bool selectThisTarget{ false };
 
-        RandomGenerator targetgenerator{};
+        RandomGenerator targetgenerator{ source };
 
         targetgenerator.registerAttr(selectThisTarget, 0.5F);
 

@@ -1,0 +1,20 @@
+{
+  "schema": "ppokit.graph/2",
+  "actor": {
+    "nodes": {
+      "state": { "type": "input", "from": "observation.state" },
+      "trunk": { "type": "mlp", "layers": 1, "width": 16, "activation": "tanh" },
+      "move":  { "type": "gaussian_head", "log_std": "state", "log_std_min": -5, "log_std_max": 1 },
+      "press": { "type": "bernoulli_head" }
+    },
+    "edges": [ ["state", "trunk"], ["trunk", "move"], ["trunk", "press"] ]
+  },
+  "critic": {
+    "nodes": {
+      "state": { "type": "input", "from": "observation.state" },
+      "trunk": { "type": "mlp", "layers": 1, "width": 16, "activation": "tanh", "share": "trunk" },
+      "value": { "type": "value" }
+    },
+    "edges": [ ["state", "trunk"], ["trunk", "value"] ]
+  }
+}

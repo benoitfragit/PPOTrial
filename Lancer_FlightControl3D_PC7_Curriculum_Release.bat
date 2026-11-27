@@ -1,21 +1,16 @@
 @echo off
+rem PC-7 landing (FlightControl3D) under PPOKit: the studio opens the PC7 project.
+rem Train, Evaluate and Inference run ppokit-run; View opens ppokit-viewer on the flight.
 setlocal
 cd /d "%~dp0"
-set "FLIGHT_EXECUTABLE=%~dp0build\release\Main\Release\FlightControl3D.exe"
-if not exist "%FLIGHT_EXECUTABLE%" (
-    echo FlightControl3D Release n'est pas encore compile.
-    echo Configurez build/release puis compilez la cible FlightControl3D en Release.
+set "STUDIO_EXECUTABLE=%~dp0build\release\PPOKitStudio\Release\ppokit-studio.exe"
+set "PC7_PROJECT=%~dp0Examples\FlightControl3D\projects\PC7"
+echo [PC7] Construction incrementale Release du studio, de ppokit-run et des bibliotheques FlightControl3D...
+cmake --build build/release --config Release --target ppokit-studio ppokit-run ppokit-viewer flight_environment ppokit_graph_network flight_visualiser
+if errorlevel 1 (
+    echo [PC7] Echec de la compilation. Configurez build/release puis relancez.
     pause
     exit /b 1
 )
-if not exist "%~dp0logs" mkdir "%~dp0logs"
-set "FLIGHT_LOG=%~dp0logs\FlightControl3D_PC7_Release.log"
-echo [%date% %time%] FlightControl3D PC7 Release >>"%FLIGHT_LOG%"
-"%FLIGHT_EXECUTABLE%" --auto-run --config "%~dp0resources\settings\Scenarios\FlightControl3D_PC7_Joint.json" %* >>"%FLIGHT_LOG%" 2>&1
-set "FLIGHT_EXIT_CODE=%errorlevel%"
-if not "%FLIGHT_EXIT_CODE%"=="0" (
-    type "%FLIGHT_LOG%"
-    echo Exit code %FLIGHT_EXIT_CODE%. Log: "%FLIGHT_LOG%"
-    pause
-)
-exit /b %FLIGHT_EXIT_CODE%
+start "" "%STUDIO_EXECUTABLE%" "%PC7_PROJECT%"
+exit /b 0

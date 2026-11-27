@@ -1,0 +1,20 @@
+{
+  "schema": "ppokit.models/1",
+  "policies": {
+    "HISTORICAL_BEST": {
+      "path": "references/t6_best_870.ppokit",
+      "sha256": "00d13803d680a3f36b2b620889bf15e87c6855524bd471ef96b083567024ade7",
+      "source": {
+        "commit": "b5ea31967f16d5fb2390268648715da5c6fe1b10",
+        "path": "resources/model/FlightControl3D/t6texan2_joint_v5/best/flight_870_092d842f035af06e.txt",
+        "sha256": "d7bff9e3249f03facc237d22f1b66d4bba62259210c0cbf640b1b80644f4a4e8",
+        "update": 870
+      },
+      "suite": "validation",
+      "environment_state": {
+        "schema": "flight.evaluation_level/1",
+        "level": 12
+      }
+    }
+  }
+}

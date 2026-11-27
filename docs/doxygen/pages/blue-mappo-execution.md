@@ -6,7 +6,7 @@
 
 `GeneralizedPatrolMappoAgent` représente **un contrôleur commun pour les Bleus** et implémente `IAgent`. `TeamCapacity` fixe **P=1..9** Bleus et **N=0..10** Rouges, avec tableaux de capacité fixe. Les Rouges instanciés portent chacun le contrôleur de production historique `RLMission`; la politique rouge n'est pas modifiée par l'apprentissage bleu.
 
-Deux modes utilisent la même scène `Scenarios/BlueDefense.json` (par défaut P=4, N=4) : `blue-defense` instancie le learner MAPPO, tandis que `blue-defense-inference` charge uniquement l'acteur de production déterministe, sans rollout, optimiseur ni évaluation périodique. `blue_template`, `red_template`, `blue_objective` et les zones fournissent les paramètres d'entités. `bluedefenseexample.cpp` choisit le mode et instancie les agents avec `BlueDefenseWorldRules`.
+L'entraînement et l'inférence utilisent la même scène, le `scenario.json` du projet BluePatrol (par défaut P=4, N=4) : `ppokit-run train` entraîne le learner MAPPO partagé de `ppokit_graph_network`, tandis que `ppokit-run play --model PROD` joue uniquement l'acteur de production déterministe, sans rollout, optimiseur ni évaluation périodique. `blue_template`, `red_template`, `blue_objective` et les zones fournissent les paramètres d'entités. Le contrôleur n'a pas de modes d'exécution : `LoadExternalScenario` (`bluedefenseexample.cpp`) instancie les agents avec `BlueDefenseWorldRules` pour la DLL `blue_environment`, qui pilote le contrôleur depuis l'extérieur du monde. Le backend `blue_network` reste utilisé par le projet historique de la CI.
 
 ## Reset et rôles de formation
 
@@ -25,11 +25,13 @@ Le tableau brut v10 et le compactage du réseau sont définis par les constantes
 
 ## Actions et boucle d'entraînement
 
-`ChooseAction` produit un lot synchronisé de **P commandes** (guidage). La physique ECS avance une fois, les règles de monde résolvent les pertes; ensuite `SetNewState` capture la transition et alimente `GeneralizedPatrolLearner::Observe`.
+`PrepareExternalStep` publie les P observations dans `Exchange()` ; le runner et `ppokit_graph_network` fournissent un lot synchronisé de **P actions**, que `ChooseAction` applique aux commandes (guidage). La physique ECS avance une fois, les règles de monde résolvent les pertes ; ensuite `SetNewState` publie les observations suivantes, les rewards et l'issue dans l'échange pour le learner partagé.
 
-`GeneralizedPatrolLearner` emploie l'acteur partagé et un critic centralisé. Les masques distinguent participation historique de l'épisode et disponibilité physique courante; les transitions des agents morts ne deviennent pas automatiquement des actions entraînables. `rolloutSteps` est exprimé en **pas d'équipe synchronisés**; la collecte s'achève sur une frontière d'optimisation. Une frontière PPO ne termine **pas nécessairement** un épisode ECS (important lorsque N=0 et qu'un épisode dépasse la taille du rollout).
+Le learner emploie l'acteur partagé et un critic centralisé. Les masques distinguent participation historique de l'épisode et disponibilité physique courante ; les transitions des agents morts ne deviennent pas automatiquement des actions entraînables. `rollout_steps` est exprimé en **pas d'équipe synchronisés** ; la collecte s'achève sur une frontière d'optimisation. Une frontière PPO ne termine **pas nécessairement** un épisode ECS (important lorsque N=0 et qu'un épisode dépasse la taille du rollout).
 
-`Training/generalized_advantage.hpp` et `Training/generalized_patrol_learner.hpp` portent la GAE, l'optimisation et les contrôles de buffers. `GeneralizedOptimizationGuard` arrête un optimiseur en état invalide et journalise fichier/ligne/phase.
+Le projet partagé utilise `PPOKit/include/ppokit/graph/team_graph_learner.hpp` et
+`PPOKit/include/ppokit/runtime/hosted_trainer.hpp`. Les implémentations Blue
+historiques restent utilisées par le backend de la CI et les tests de parité.
 
 ## Conditions de fin réellement codées
 
@@ -70,12 +72,12 @@ La responsabilité `lowSpeedRisk` ne doit pas être confondue avec l'éliminatio
 
 ## Évaluation et promotion
 
-`Evaluation/generalized_evaluation_campaign.hpp` ordonnance des cas déterministes en réutilisant les règles physiques ECS. Les graines, la direction de patrouille et la phase sont contrôlées; les sorties de l'acteur sont déterministes pendant la campagne, le rollout d'entraînement n'est pas alimenté par ces cas. `SetNewState` calcule les métriques d'évaluation; un score **strictement meilleur** permet de sauvegarder l'acteur de production. Les logs `[MAPPO_EVAL_LOSS]` et `[MAPPO_EVAL_EPISODE]` expliquent les pertes, le statut de l'objectif, le leader et les issues. L'évaluation partage le contrôleur ECS; ne pas déduire de cette page qu'un moteur d'évaluation indépendant existe.
+La suite `eval/validation.json` du projet est jouée par `ppokit-run` (pendant l'entraînement au rythme de `checkpointEvery`, ou par `ppokit-run eval`). Pour chaque épisode, `reset_evaluation` de `blue_environment` fixe le cas : `Evaluation/generalized_evaluation_case.hpp` (`GeneralizedEvaluationCaseOf`) en tire la graine, la direction de patrouille et la phase, et `StartExternalEvaluationCase` l'applique au prochain épisode ECS, avec les mêmes règles physiques. Les sorties de l'acteur sont déterministes pendant la campagne, le rollout d'entraînement n'est pas alimenté par ces cas. `SetNewState` calcule le score de l'épisode (`EvaluateGeneralizedEpisode`, `generalized_evaluation_metrics.hpp`) ; `ppokit-run` agrège les épisodes, et un score **strictement meilleur** que le BEST de la suite le remplace (`checkpoints/best/`). Les logs `[MAPPO_EVAL_LOSS]` et `[MAPPO_EVAL_EPISODE]` expliquent les pertes, le statut de l'objectif, le leader et les issues.
 
 ## Checkpoints et reprise
 
-`latest/blue_patrol_generalized_v10.txt` : poids acteur d'inférence.
-`latest/blue_patrol_generalized_training_v7.txt` : état d'entraînement complet (signature `BLUE_TEAM_TRAINING_V7` : acteur, critic, Adam, RNG, compteur). `prod/blue_patrol_generalized_v10.txt` : acteur promu si meilleur résultat. Le contenu du rollout incomplet n'est pas sérialisé. Les poids V9 du run 22 sont incompatibles avec la nouvelle sémantique de guidage et ne sont pas repris. Ne pas mélanger les checkpoints MAPPO et RLMission.
+`latest/policy.ppokit` : poids acteur d'inférence.
+`latest/latest.ppokit` : état d'entraînement complet (artefact PPOKit `training` : acteur, critic, Adam, RNG, compteur ; l'ancien format `BLUE_TEAM_TRAINING_V7` reste lisible). `prod/policy.ppokit` : acteur promu si meilleur résultat. Le contenu du rollout incomplet n'est pas sérialisé. Les poids V9 du run 22 sont incompatibles avec la nouvelle sémantique de guidage et ne sont pas repris. Ne pas mélanger les checkpoints MAPPO et RLMission.
 
 ## Diagnostic guidé par le code
 
@@ -86,5 +88,5 @@ La responsabilité `lowSpeedRisk` ne doit pas être confondue avec l'éliminatio
 | Faible vitesse / fuel | `flightmodelsystem.cpp` -> `bluedefenserules.cpp` -> logs `MAPPO_EVAL_LOSS` -> `lowSpeedRisk`. |
 | Dépassement frontière | `GeneralizedBoundaryRisk` -> `GeneralizedBlueTeamFailed` -> `BlueDefenseWorldRules`. |
 | « Invalid training buffer » | `GeneralizedPatrolLearner::Observe` et `GeneralizedOptimizationGuard`; vérifier P actions / P retours. |
-| Évaluation dégradée | `generalized_evaluation_metrics.hpp` -> `generalized_evaluation_campaign.hpp` -> `PromoteEvaluatedActor`. |
-| Modèle non repris | `generalized_training_checkpoint.hpp` -> `generalized_checkpoint.hpp` -> constructeur du contrôleur. |
+| Évaluation dégradée | `generalized_evaluation_metrics.hpp` -> `generalized_evaluation_case.hpp` -> `eval/validation.json` et rapport de `ppokit-run`. |
+| Modèle non repris | `generalized_training_checkpoint.hpp` -> `generalized_checkpoint.hpp` -> `blue_network.cpp` (chargement du learner ou de l'acteur). |

@@ -8,6 +8,7 @@
 */
 #pragma once
 
+#include <utility>
 #include <array>
 #include <memory>
 
@@ -109,8 +110,7 @@ public:
     auto const 
     get(void) const {
         assert(p_registry != nullptr);
-        auto& view = p_registry->view<Components...>();
-        return std::as_const<view>.get(m_entity);
+        return std::as_const(*p_registry).template view<Components...>().get(m_entity);
     };
 
     /** @brief Returns the underlying ECS entity id. */

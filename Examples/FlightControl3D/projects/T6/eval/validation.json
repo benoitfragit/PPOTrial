@@ -1,0 +1,20 @@
+{
+  "schema": "ppokit.eval/1",
+  "suite": "validation",
+  "seeds": { "first": 4342, "count": 20 },
+  "episodes": 1,
+  "environment_scope": "campaign",
+  "policy": "deterministic",
+  "gates": {
+    "stopped.rate": ">= 0.92"
+  },
+  "during_training": { "every_updates": 10 },
+  "goal": {
+    "difficulty.mean": ">= 1"
+  },
+  "best": [
+    { "metric": "difficulty.mean", "prefer": "higher" },
+    { "metric": "stopped.rate", "prefer": "higher" },
+    { "metric": "stop_m.mean", "prefer": "lower" }
+  ]
+}

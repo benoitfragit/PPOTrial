@@ -5,38 +5,52 @@ La configuration de l'application utilise **un seul contrat** : chaque JSON comm
 ## Organisation
 
 ~~~text
-resources/settings/
+Examples/Shared/settings/          couches communes à tous les exemples
 ├── AgentProfiles.json            profils logiques et modes d'agent
 ├── Environment.json              monde de simulation principal
-├── Renderer.json                 affichage et caméra
+└── Platforms/
+    ├── Mobile/                   paramètres des mobiles
+    └── RestrictedZone/           paramètres des zones fixes
+
+Examples/Airspace/settings/        réglages de l'exemple Airspace (agents rouges)
 ├── Training/
-│   ├── BluePatrol.json           MAPPO RLTools P/N partagé
-│   ├── RLMission.json            PPO, récompenses et version du modèle
+│   ├── RLMission.json            récompenses et taille du rollout
 │   └── RLSNA.json
 ├── Scenarios/
 │   ├── Playground.json           composition du monde principal
-│   ├── BlueDefense.json          défense MAPPO P/N (P=4, N=4 par défaut)
 │   └── Evaluation/
 │       ├── RLMission.json        composition et limites des tests
 │       └── RLSNA.json
-├── Platforms/
-│   ├── Mobile/                   paramètres des mobiles
-│   └── RestrictedZone/           paramètres des zones fixes
 └── Evaluation/
     ├── Cases/
     │   ├── RLMission.json        100 cas d'évaluation
     │   └── RLSNA.json            100 cas d'évaluation
     └── InitialStates.json        2 collections de 100 états initiaux nommés
+
+Examples/BlueDefense/projects/BluePatrol/   projet PPOKit de la défense MAPPO P/N
+├── scenario.json                 composition (P=4, N=4 par défaut)
+├── blue_patrol_training.json     géométrie et récompenses de l'environnement
+├── training.json                 PPO et rollout du learner partagé
+└── checkpoints/                  latest/, prod/, télémétrie
 ~~~
 
-Aucun doublon d'ancienne configuration n'est conservé, y compris parmi les fixtures de test.
+Le chargeur de scénario Airspace (`LoadExternalScenario`, utilisé par les DLL
+d'environnement `rlmission_environment` et `rlsna_environment` des projets
+`Examples/Airspace/projects/RLMission` et `RLSNA`) cherche un fichier de
+réglage d'abord dans `Examples/Airspace/settings`, puis dans
+`Examples/Shared/settings` (`Serializer::SetSearchPaths`).
+
+Les projets historiques et les fixtures de parité conservés pour la CI peuvent
+utiliser des configurations distinctes du projet principal.
 
 ## Démarrer avec trois fichiers
 
 1. **Scenarios/Playground.json** : qui est dans le monde, quelle équipe, quelle cible et quel agent pilote chaque entité.
 2. **AgentProfiles.json** : quel agent C++ est associé à chaque profil logique et à chaque mode.
 3. **Training/RLMission.json**, **Training/RLSNA.json** ou
-   **Training/BluePatrol.json** : réglages PPO et pondération des récompenses.
+   **blue_patrol_training.json** du projet BluePatrol : pondération des récompenses
+   et géométrie. Les hyperparamètres PPO et le rollout sont dans le `training.json`
+   de chaque projet PPOKit, notamment BluePatrol, RLMission et RLSNA.
 
 L'évaluation est indépendante : sa composition se trouve dans **Scenarios/Evaluation/**, ses scénarios de référence dans **Evaluation/Cases/**.
 
@@ -93,34 +107,13 @@ Pour ajouter un profil, déclarer le nouvel adaptateur C++ dans la couche applic
 
 ## Paramètres d'apprentissage
 
+`Examples/Airspace/settings/Training/RLMission.json` (et `RLSNA.json`) :
+
 ~~~json
 {
   "formatVersion": 2,
-  "patrol": {
-    "racetrack": {
-      "lengthMeters": { "min": 50000.0, "max": 60000.0 },
-      "widthMeters": { "min": 16000.0, "max": 20000.0 },
-      "headingDegrees": { "min": 80.0, "max": 100.0 }
-    },
-    "formation": {
-      "separationDistanceMeters": { "min": 6000.0, "max": 9000.0 },
-      "separationAngleDegrees": { "min": 10.0, "max": 25.0 }
-    },
-    "defense": {
-      "activationRisk": 0.25,
-      "deactivationRisk": 0.10,
-      "activationDistanceMeters": 90000.0,
-      "deactivationDistanceMeters": 110000.0,
-      "protectedRadiusMeters": 12000.0,
-      "timeToIntrusionSeconds": 300.0,
-      "teammateThreatDistanceMeters": 30000.0,
-      "teammateVulnerabilityWeight": 0.75
-    }
-  },
   "training": {
-    "rolloutSteps": 2021,
-    "checkpointEvery": 5,
-    "modelVersion": 125
+    "rolloutSteps": 2021
   },
   "rewards": {
     "clamp": 60,
@@ -128,17 +121,6 @@ Pour ajouter un profil, déclarer le nouvel adaptateur C++ dans la couche applic
       "Main target destruction": 1,
       "Secondary target destruction": 0.15
     }
-  },
-  "ppo": {
-    "gamma": 0.99,
-    "gaeLambda": 0.95,
-    "clipEpsilon": 0.2,
-    "valueCoefficient": 0.5,
-    "entropyCoefficient": 0.02,
-    "learningRate": 0.0003,
-    "epochs": 4,
-    "batchSize": 64,
-    "targetKL": 0.025999999
   }
 }
 ~~~
@@ -147,19 +129,41 @@ Cet exemple est **abrégé** : le fichier RLMission réel contient 12 récompens
 
 Le convertisseur typé de **Serialization/training_settings.cpp** reconstruit les coefficients dans l'ordre imposé par **Model::REWARDS**, quelle que soit la présentation des clés JSON. Une récompense absente ou inconnue est une erreur, pas un coefficient implicite.
 
-**checkpointEvery** mesure les mises à jour PPO entre deux demandes d'évaluation ; **rolloutSteps** mesure les pas d'apprentissage par rollout. Ils ne représentent ni des secondes, ni le nombre de cas d'évaluation. **modelVersion** est un état évoluant avec l'entraînement.
+**rolloutSteps** mesure les pas d'apprentissage par rollout ; sous `ppokit-run`, c'est aussi la limite de pas d'un épisode, qui tronque l'épisode (l'échec de mission du dernier pas, `IsLastStep()`, n'est pas payé). Ce n'est ni une durée en secondes, ni un nombre de cas d'évaluation. Les épisodes d'entraînement de RLMission (scénario `Playground.json`) et de RLSNA (scénario `RLSNATraining.json` : l'intercepteur en mode entraînement et sa cible) sont tirés de la graine que `ppokit-run` donne à l'environnement (`seed` de `training.json` du projet, plus 1 pour `train`) : un entraînement est reproductible. Le `TrainingAgent` ne lit de ce fichier que `rolloutSteps`, le clamp et les poids des récompenses : il n'a ni learner, ni sauvegarde de checkpoint, ni évaluateur. Les hyperparamètres PPO (section `ppo`) sont dans `Examples/Airspace/projects/RLMission/training.json` (et `RLSNA`), et la fréquence des évaluations pendant l'entraînement dans la suite du projet (`eval/campaign.json`, `during_training.every_updates` : 5 pour RLMission et RLSNA), jouée par `ppokit-run`.
 
 ### Patrouille bleue MAPPO/RLTools
 
-`Training/BluePatrol.json` possède un contrat volontairement plus petit que
-les profils LibTorch historiques :
+`blue_patrol_training.json` du projet BluePatrol
+(`Examples/BlueDefense/projects/BluePatrol/`) décrit aussi la géométrie de la
+patrouille (`patrol`) ; extrait :
 
 ~~~json
 {
   "formatVersion": 2,
+  "patrol": {
+    "racetrack": {
+      "lengthMeters": { "min": 40000.0, "max": 45000.0 },
+      "widthMeters": { "min": 16000.0, "max": 19000.0 },
+      "headingDegrees": { "min": 80.0, "max": 100.0 }
+    },
+    "formation": {
+      "separationDistanceMeters": { "min": 3000.0, "max": 3500.0 },
+      "separationAngleDegrees": { "min": 30.0, "max": 35.0 }
+    },
+    "defense": {
+      "activationRisk": 0.25,
+      "deactivationRisk": 0.10,
+      "activationDistanceMeters": 90000.0,
+      "deactivationDistanceMeters": 110000.0,
+      "protectedRadiusMeters": 10000.0,
+      "timeToIntrusionSeconds": 300.0,
+      "teammateThreatDistanceMeters": 30000.0,
+      "teammateVulnerabilityWeight": 0.75
+    }
+  },
   "training": {
     "rolloutSteps": 2048,
-    "maxUpdates": 300,
+    "maxUpdates": 4000,
     "checkpointEvery": 10,
     "seed": 42
   },
@@ -178,12 +182,12 @@ les profils LibTorch historiques :
     },
     "weights": {
       "Patrol tracking": 1.0,
-      "Formation safety": 1.0,
+      "Formation safety": 4.0,
       "Control effort": 1.0,
-      "Zone protection": 1.0,
-      "Interception": 1.0,
-      "Mission outcome": 1.0,
-      "Timeout": 1.0
+      "Zone protection": 2.0,
+      "Interception": 2.0,
+      "Mission outcome": 1.5,
+      "Timeout": 1.5
     }
   }
 }
@@ -192,7 +196,9 @@ les profils LibTorch historiques :
 Ici, `rolloutSteps` compte les pas ECS synchronisés de l'équipe :
 chaque pas produit P transitions, une par Bleu initialement présent.
 Les valeurs usuelles sont 512, 1024, 2048 et 4096.
-Les paramètres sont chargés depuis `Training/BluePatrol.json`.
+Les paramètres sont chargés depuis `blue_patrol_training.json` ; l'extrait omet
+les sections `rewards.generalized` et `rewards.shaping` et une partie de
+`patrol.racetrack` et de `rewards.noThreatPatrol`.
 `rallyEnterDistanceMeters` et `rallyExitDistanceMeters` définissent le couloir
 à hystérésis acquis avant de figer les dix waypoints. Un premier échantillon sous
 le seuil d'entrée arme l'acquisition ; l'observation suivante la confirme si
@@ -218,24 +224,27 @@ calcul du progrès causé par le mouvement Bleu ; les menaces
 influencent continûment la priorité patrouille/formation/défense.
 Cela n'établit pas, à lui seul, la convergence de la politique.
 
-`checkpointEvery` demande une campagne d'évaluation déterministe.
-Les checkpoints courants sont `blue_patrol_generalized_v10.txt` pour l'acteur
-et `blue_patrol_generalized_training_v7.txt` pour l'état complet, sous
-`resources/model/BluePatrol/latest/`. Les poids V9 ne sont pas repris : le
+`checkpointEvery` donne le rythme de la campagne d'évaluation déterministe : la suite
+`eval/validation.json` du projet, jouée par `ppokit-run` au même rythme
+(`during_training.every_updates`).
+Les checkpoints courants sont `policy.ppokit` pour l'acteur
+et `latest.ppokit` pour l'état complet (artefacts PPOKit), sous
+`Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/`. Les poids V9 ne sont pas repris : le
 guidage figé modifie la sémantique de l'observation de patrouille.
 
-Les deux modes lancés depuis l'IHM utilisent exactement la scène
-`Scenarios/BlueDefense.json` : `blue-defense` entraîne le MAPPO généralisé,
-tandis que `blue-defense-inference` exécute l'acteur de production de façon
-déterministe. Ce second mode ne possède ni rollout, ni optimiseur, ni campagne
-d'évaluation périodique. La progression, les commandes du panneau d'agent et
-les quinze rewards du mode entraînement sont publiés par l'API habituelle de
-snapshot ECS. Les tests de simulation et la CI Desktop doivent être validés
-avant fusion.
+`ppokit-run train` et `ppokit-run play` sur le projet BluePatrol utilisent
+exactement la scène `scenario.json` du projet : `train` entraîne le MAPPO
+généralisé, tandis que `play --policy checkpoints/prod/policy.ppokit` exécute
+l'acteur de production de façon déterministe. Ce second mode ne possède ni
+rollout, ni optimiseur, ni campagne d'évaluation périodique. La progression
+et les métriques vont au journal du run (`checkpoints/latest/metrics.jsonl`,
+suivi en direct par ppokit-studio) ; le monde et les quinze rewards du pas
+sont envoyés à ppokit-viewer par le Visualiseur `blue_visualiser`. Les tests
+de simulation et la CI Desktop doivent être validés avant fusion.
 
 ### Géométrie aléatoire P/N
 
-`Scenarios/BlueDefense.json` règle les conditions initiales sans modifier les
+`scenario.json` du projet BluePatrol règle les conditions initiales sans modifier les
 agents RLMission. `redSpawn.minimumWorldScale` et `maximumWorldScale` placent
 les attaquants au-delà de la limite rectangulaire ; cette limite reste un
 repère et ne bloque pas leur mouvement. Les angles, exprimés en degrés, sont
@@ -279,10 +288,12 @@ remplacée par la pénétration déterministe exacte pour les bleus.
 
 ### Équipes P/N — contrôleur MAPPO unique
 
-Les entrées IHM `blue-defense` et `blue-defense-inference` chargent toutes
-deux `Scenarios/BlueDefense.json`, avec P=4/N=4 par défaut. La première utilise
-le learner `GeneralizedPatrolMappoAgent`; la seconde utilise uniquement son
-acteur de production, sans capacité d'apprentissage. Les effectifs sont
+`ppokit-run train` et `ppokit-run play` chargent tous deux le `scenario.json`
+du projet BluePatrol, avec P=4/N=4 par défaut. Dans les deux cas,
+`GeneralizedPatrolMappoAgent` pilote les Bleus dans le monde depuis la DLL
+`blue_environment` ; le premier entraîne le learner MAPPO de `blue_network`,
+le second utilise uniquement son acteur de production, sans capacité
+d'apprentissage. Les effectifs sont
 déclarés sous `blueDefense` :
 
 ~~~json
@@ -313,17 +324,18 @@ Bleus n'est instancié ; les Rouges conservent leur RLMission d'origine.
 L'acteur commun lit les pistes masquées de 0 à 10 Rouges, les équipiers
 et les 61 rayons LiDAR ; les P actions sont exécutées de manière
 synchrone et les P transitions sont agrégées par le critic individualisé.
-Le snapshot de l'IHM expose **15 canaux de récompense**. Le mapping exact des
+Le runtime publie **15 canaux de récompense** (journal du run et port
+`rewards` du Visualiseur). Le mapping exact des
 sept clés JSON vers ces quinze canaux est décrit dans le
 [guide d'adaptation de l'agent Blue](adapter-agent-blue.md#mapping-du-json-vers-les-15-poids).
 
 Les checkpoints courants sont l'acteur V10 et l'état d'entraînement V7 dans
-`resources/model/BluePatrol/latest`. Les fichiers historiques archivés ne
+`Examples/BlueDefense/projects/BluePatrol/checkpoints/latest`. Les fichiers historiques archivés ne
 définissent pas un second chemin d'exécution et ne sont pas acceptés lorsque
 leur contrat d'observation est incompatible.
 
 Voir [BlueDefense — MAPPO P/N](blue-defense-example.md) pour le
-démarrage, les tests IHM et les commandes de compilation.
+démarrage, la visualisation et les commandes `ppokit-run`.
 
 ## Scénarios et cas d'évaluation
 
@@ -368,7 +380,7 @@ Les scènes de **Scenarios/Evaluation/RLMission.json** et **RLSNA.json** utilise
 
 Il s'agit d'un extrait de structure ; dans le vrai fichier, chaque test renseigne toutes les entités nécessaires. **Les 100 tests de chaque campagne sont conservés**, avec les mêmes états initiaux.
 
-Les modèles de réseau restent dans **resources/model/NOM_DE_PROFIL/**, dont les sous-dossiers **prod/** et **eval/**. Aucune migration des fichiers **model.pt** n'est effectuée.
+Les modèles des agents rouges sont dans **Examples/Airspace/models/NOM_DE_PROFIL/**, dont les sous-dossiers **prod/** et **eval/** (`policy.ppokit`, sinon `policy.txt`).
 
 ## Plateformes et états initiaux nommés
 
@@ -398,7 +410,7 @@ plateforme rouge `attacker_car`. La configuration d'entraînement actuelle fixe
 
 **Evaluation/InitialStates.json** contient des collections de points initiaux nommés, au format **presets.blueeval[]** et **presets.redeval[]**, avec les coordonnées et commandes dans des champs explicites **north**, **east**, **heading**, **speed**, **turnAcceleration**, **acceleration**. L'initialiseur C++ peut les utiliser comme auparavant, sans liste opaque de six nombres ni ancien chemin. Le champ **evaluationSettings** conserve les paramètres numériques associés à ces jeux d'initialisation.
 
-## Environnement et affichage
+## Environnement
 
 Ces réglages ont le même schéma V2 et le même style de nommage que les autres configurations :
 
@@ -413,39 +425,6 @@ Ces réglages ont le même schéma V2 et le même style de nommage que les autre
 }
 ~~~
 
-**Renderer.json** contient un objet **renderer**. L'ancien fichier V1 ne peut
-pas être copié tel quel : `schemaVersion: 1` devient `formatVersion: 2`,
-`Renderer` devient `renderer`, et les clés sont renommées en lowerCamelCase.
-
-| Ancienne clé V1 (dans `Renderer`) | Clé V2 (dans `renderer`) |
-| --- | --- |
-| `ScaleLevel`, `AutoAttachCamera` | `scaleLevel`, `autoAttachCamera` |
-| `ShowGrid`, `ShowDomains`, `ShowDestroyed` | `showGrid`, `showDomains`, `showDestroyed` |
-| `ShowPseudoLidar`, `FocusSelectionInMinimap` | `showPseudoLidar`, `focusSelectionInMinimap` |
-| `CameraDistance`, `CameraHeight`, `TrailDuration` | `cameraDistance`, `cameraHeight`, `trailDuration` |
-| `DomainHeight`, `MinimapZoom` | `domainHeight`, `minimapZoom` |
-| `Camera.Position`, `Camera.Target`, `Camera.Up`, `Camera.Fovy` | `camera.position`, `camera.target`, `camera.up`, `camera.fovy` |
-| `ShowMinimap`, `ShowEntities`, `ShowInspection`, `ShowSimulation` (si présents) | `showMinimap`, `showEntities`, `showInspection`, `showSimulation` |
-
-Les quatre derniers paramètres de panneaux ont été ajoutés avec l'interface
-d'apprentissage. Lorsqu'ils sont absents de l'ancien fichier, les valeurs par
-défaut du code sont `false`, `false`, `false` et `true`, respectivement.
-Le fichier V2 distribué les renseigne explicitement. Conserver les valeurs
-numériques (notamment celles de la caméra) lors de la conversion ; ne pas
-réinitialiser `renderer` aux valeurs d'exemple.
-
-`ShowMetaCatalog`/`showMetaCatalog` est une ancienne préférence désormais
-ignorée : le navigateur de méta-réflexion et le dump réflexif ont été retirés
-de l'IHM. Le panneau `showInspection` reste disponible sous le nom
-**Entity details** et présente directement les informations opérationnelles.
-
-**Fichiers versionnés :** `resources/settings/Renderer.json` est déjà au format V2
-dans le dépôt. Les valeurs du fichier historique (dont les coordonnées de caméra
-avec leur précision complète) y sont reprises et les quatre paramètres
-de panneaux ajoutés sur `master` sont explicitement renseignés. Aucune
-conversion ni action supplémentaire n'est nécessaire pour utiliser les
-configurations fournies sur cette branche.
-
 Les configurations personnelles qui ne sont pas présentes dans le dépôt ne
 peuvent pas être migrées automatiquement. Le runtime lit uniquement V2 ;
 les champs inconnus ne sont pas reconnus et doivent être examinés avant tout
@@ -453,16 +432,15 @@ remplacement.
 
 ## Sauvegarde et erreurs
 
-**Environment.json**, **Renderer.json** et **Training/*.json** sont chargés et sauvés par le Serializer. Chaque fichier doit porter **formatVersion = 2** : un document incorrect, manquant ou impossible à charger est **préservé sans écrasement** par des valeurs par défaut à l'arrêt de l'application. Éviter les modifications manuelles pendant l'exécution.
+**Environment.json** et **Training/*.json** sont chargés par le Serializer, qui ne fait que les lire (il n'a plus de sauvegarde). Chaque fichier doit porter **formatVersion = 2** : un document incorrect, manquant ou impossible à charger est signalé et ses fonctions de chargement ne sont pas appelées, sans valeurs implicites. Les programmes PPOKit actuels ne réécrivent pas ces fichiers, contrairement à l'ancien PPO.exe. Éviter les modifications manuelles pendant l'exécution.
 
 Les campagnes, les profils et les jeux de tests sont des données d'entrée. Les tailles des tableaux de récompenses, les valeurs de contrôle, les noms de profils et les références d'entités sont contrôlés au chargement par les composants concernés.
 
 ## Vérifications de non-régression
 
 - Les scénarios V2 contrôlent le nombre d'entités, les fabriques résolues, la composition des évaluations et le nombre de cas.
-- Les paramètres PPO V2 sont comparés à des constantes numériques de référence, notamment la cadence des checkpoints et l'ordre exact des récompenses.
-- La sérialisation assure un cycle lecture-écriture-lecture sans modification des paramètres et refuse les poids nommés invalides.
-- Les tests de sûreté vérifient qu'une configuration mal formée n'est pas écrasée.
+- Les paramètres d'entraînement V2 (rollout, clamp, poids) sont comparés à des constantes numériques de référence, dans l'ordre exact des récompenses ; les poids nommés invalides sont refusés.
+- Les tests du chargeur (`serializer_load_tests`) vérifient qu'un fichier qui ne se charge pas n'appelle pas ses fonctions de chargement, l'ordre des dossiers de recherche et `Unregister`.
 - Les builds et CTest Windows VS2022 Debug/Release, ainsi que les tests de simulation/évaluation et la lecture des modèles existants, doivent être validés avant fusion.
 
 Il n'y a **aucun lecteur V1 ni second format en production**. Une éventuelle conversion ponctuelle doit être exécutée hors application et ne fait pas partie du runtime.

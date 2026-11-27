@@ -1,8 +1,11 @@
 """Versioned, immutable-at-evaluation champion pairs for progressive MAPPO.
 
-Only completed deterministic evaluations may promote a pair. The V7 checkpoint
-is kept byte-for-byte (actor, critic, Adam, RNG, update counter). The global
-4v4 production checkpoint is not the curriculum's cross-gate handoff format.
+Only completed deterministic evaluations may promote a pair. The training
+checkpoint is kept byte-for-byte (actor, critic, Adam, RNG, update counter). The
+global 4v4 production checkpoint is not the curriculum's cross-gate handoff format.
+A pair is stored under the names of latest/ (policy.ppokit, latest.ppokit);
+champions of earlier runs keep their former V10/V7 names and formats, and are
+read, seeded and restored as they are.
 """
 from __future__ import annotations
 
@@ -14,6 +17,7 @@ import re
 import shutil
 from pathlib import Path
 
+import blue_checkpoint
 import mappo_curriculum as existing
 
 
@@ -46,22 +50,15 @@ def variant_namespace(hostile_zones: bool, objective_layout: str = "fixed"):
     finally:
         ROOT = previous
 
-LATEST_ACTOR = existing.MODEL_ROOT / "latest/blue_patrol_generalized_v10.txt"
-ACTOR_NAME = "blue_patrol_generalized_v10.txt"
-TRAINING_NAME = "blue_patrol_generalized_training_v7.txt"
+LATEST_ACTOR = existing.LATEST_ACTOR
+ACTOR_NAME = blue_checkpoint.POLICY_NAME
+TRAINING_NAME = blue_checkpoint.TRAINING_NAME
 MANIFEST_NAME = "champion.json"
-SAVED = re.compile(
-    r"Saved actor and training checkpoint at update (\d+)"
-)
-START = re.compile(
-    r"Starting deterministic P=(\d+) N=(\d+) evaluation after update (\d+)"
-)
-START_PREFIX = re.compile(
-    r"Starting deterministic P=(\d+) N=(\d+) evaluation after"
-)
-COMPLETE = re.compile(
-    r"Evaluation #\d+ P=(\d+) N=(\d+) score=([0-9.eE+-]+) "
-    r"success=([0-9.eE+-]+)"
+# One block of ppokit-run: its campaigns ("evaluation 'validation' at update N")
+# and the P/N of their episodes; the results are the run journal's events.
+EVALUATED = existing.EVAL_PATTERN
+EVALUATION_EPISODE = re.compile(
+    r"\[MAPPO_EVAL_EPISODE\] .*?\bP=(\d+) N=(\d+)\b"
 )
 
 
@@ -77,6 +74,12 @@ def _updates(path: Path) -> int:
     return existing.read_updates(path)
 
 
+def pair(directory: Path) -> tuple[Path, Path]:
+    """The actor and training files of a champion directory (new or former names)."""
+    return (blue_checkpoint.locate(directory, ACTOR_NAME),
+            blue_checkpoint.locate(directory, TRAINING_NAME))
+
+
 def _validate(directory: Path, gate: str) -> dict:
     metadata = json.loads((directory / MANIFEST_NAME).read_text(encoding="utf-8"))
     if (metadata.get("version") != 1 or metadata.get("gate") != gate
@@ -86,18 +89,16 @@ def _validate(directory: Path, gate: str) -> dict:
             or not isinstance(metadata.get("originGate"), str)
             or not isinstance(metadata.get("sha256"), dict)):
         raise ValueError(f"Invalid champion metadata for {gate}")
-    actor, training = directory / ACTOR_NAME, directory / TRAINING_NAME
+    actor, training = pair(directory)
     if not actor.is_file() or not training.is_file():
         raise ValueError(f"Missing mandatory champion pair for {gate}")
-    with actor.open("rb") as actor_stream, training.open("rb") as training_stream:
-        actor_header = actor_stream.readline().split()
-        training_header = training_stream.readline().split()
-    semantic = b"UNIFIED_PHYSICAL_GUIDANCE_V1"
-    if (actor.stat().st_size == 0 or training.stat().st_size == 0
-            or actor_header[:3] != [b"BLUE_TEAM_MAPPO_V10", b"10", b"10"]
-            or training_header[:3] != [b"BLUE_TEAM_TRAINING_V7", b"7", b"10"]
-            or semantic not in actor_header or semantic not in training_header
-            or _updates(training) != metadata["updates"]):
+    try:
+        blue_checkpoint.read(actor, "policy")
+        updates = blue_checkpoint.read_updates(training)
+    except ValueError as error:
+        raise ValueError(
+            f"Incomplete/incompatible champion checkpoint for {gate}: {error}") from None
+    if updates != metadata["updates"]:
         raise ValueError(f"Incomplete/incompatible champion checkpoint for {gate}")
     for path in (actor, training):
         if metadata["sha256"].get(path.name) != _digest(path):
@@ -187,8 +188,7 @@ def seed(gate: str, source: str | None,
         record = read(source)
         if record is None:
             raise ValueError(f"Missing previous gate champion: {source}")
-        source_actor = ROOT / source / ACTOR_NAME
-        source_training = ROOT / source / TRAINING_NAME
+        source_actor, source_training = pair(ROOT / source)
     else:
         source_actor = source_actor or LATEST_ACTOR
         source_training = source_training or existing.LATEST
@@ -198,7 +198,7 @@ def seed(gate: str, source: str | None,
 
 
 def restore_latest(gate: str) -> int:
-    """Restore actor and full V7 training together; never mix their epochs."""
+    """Restore actor and full training state together; never mix their epochs."""
     record = read(gate)
     if record is None:
         raise ValueError(f"No champion to restore: {gate}")
@@ -207,10 +207,8 @@ def restore_latest(gate: str) -> int:
                 (existing.LATEST, existing.LATEST.read_bytes()
                  if existing.LATEST.is_file() else None)]
     try:
-        for dest, source in (
-            (LATEST_ACTOR, ROOT / gate / ACTOR_NAME),
-            (existing.LATEST, ROOT / gate / TRAINING_NAME),
-        ):
+        actor, training = pair(ROOT / gate)
+        for dest, source in ((LATEST_ACTOR, actor), (existing.LATEST, training)):
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, dest)
     except Exception:
@@ -225,39 +223,60 @@ def restore_latest(gate: str) -> int:
     return record["updates"]
 
 
+def log_evaluations(log: Path) -> tuple[list[int], set[tuple[int, int]]]:
+    """The updates a block's process evaluated, and the P/N of its evaluation episodes."""
+    updates: list[int] = []
+    scenarios: set[tuple[int, int]] = set()
+    if not log.is_file():
+        return updates, scenarios
+    for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+        evaluated = EVALUATED.search(line)
+        if evaluated and evaluated[1] == existing.SUITE:
+            updates.append(int(evaluated[2]))
+        episode = EVALUATION_EPISODE.search(line)
+        if episode:
+            scenarios.add((int(episode[1]), int(episode[2])))
+    return updates, scenarios
+
+
+def journal_evaluation(update: int, journal: Path | None = None) -> dict | None:
+    """The journal's last campaign of the suite at `update`: score and success."""
+    path = existing.JOURNAL if journal is None else journal
+    if not path.is_file():
+        return None
+    result = None
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # A process stopped mid-write leaves at most a partial last line.
+        if (event.get("event") != "evaluation" or event.get("suite") != existing.SUITE
+                or event.get("update") != update):
+            continue
+        metrics = event.get("metrics", {})
+        score = metrics.get("score.mean")
+        success = metrics.get("mission_success.rate")
+        if type(score) not in (int, float) or type(success) not in (int, float):
+            raise ValueError(f"Journal campaign at update {update} lacks score or success")
+        score, success = float(score), float(success) * 100.0
+        if not (math.isfinite(score) and 0 <= score <= 100
+                and math.isfinite(success) and 0 <= success <= 100):
+            raise ValueError("Nonfinite/out-of-range evaluation result")
+        result = {"score": score, "successPercent": success}
+    return result
+
+
 def evaluation_at_update(log: Path, blue: int, red: int,
                          checkpoint_updates: int) -> dict | None:
-    """Require a completed evaluation of exactly the saved optimizer update."""
-    if not log.is_file():
+    """Require a completed evaluation of exactly the saved optimizer update.
+
+    The block's process must have evaluated that update (its log), on this P/N
+    only (its evaluation episodes); the result is the journal's campaign.
+    """
+    updates, scenarios = log_evaluations(log)
+    if checkpoint_updates not in updates or scenarios != {(blue, red)}:
         return None
-    started = None
-    saved_update = None
-    result = None
-    for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
-        saved = SAVED.search(line)
-        if saved:
-            saved_update = int(saved[1])
-        start = START.search(line)
-        if start:
-            started = (int(start[1]), int(start[2]), int(start[3]))
-        elif (prefix := START_PREFIX.search(line)) is not None:
-            # C++ stdout from other workers occasionally splits "update"
-            # midway. The successful actor+V7 save immediately before the
-            # campaign remains an authoritative optimizer epoch.
-            started = (int(prefix[1]), int(prefix[2]), saved_update)
-        complete = COMPLETE.search(line)
-        if complete:
-            scenario = (int(complete[1]), int(complete[2]))
-            if (started == (*scenario, checkpoint_updates)
-                    and saved_update == checkpoint_updates):
-                score, success = float(complete[3]), float(complete[4]) * 100.0
-                if not (math.isfinite(score) and 0 <= score <= 100
-                        and math.isfinite(success) and 0 <= success <= 100):
-                    raise ValueError("Nonfinite/out-of-range evaluation result")
-                if scenario == (blue, red):
-                    result = {"score": score, "successPercent": success}
-            started = None
-    return result
+    return journal_evaluation(checkpoint_updates)
 
 
 def promote(gate: str, evaluation: dict, updates: int) -> tuple[bool, dict]:
@@ -267,7 +286,7 @@ def promote(gate: str, evaluation: dict, updates: int) -> tuple[bool, dict]:
                 <= (current["successPercent"], current["score"])):
             return False, current
     if existing.read_updates() != updates:
-        raise ValueError("Evaluation and V7 optimizer checkpoint are not the same update")
+        raise ValueError("Evaluation and optimizer checkpoint are not the same update")
     promoted = _store(gate, LATEST_ACTOR, existing.LATEST, gate, evaluation)
     if promoted["updates"] != updates:
         raise ValueError("Promoted champion update mismatch")
@@ -282,7 +301,7 @@ def install_production_for_stage(stage: dict) -> None:
         existing.PROD_SCORE.unlink(missing_ok=True)
         return
     existing.PROD.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(ROOT / stage["id"] / ACTOR_NAME, existing.PROD)
+    shutil.copy2(pair(ROOT / stage["id"])[0], existing.PROD)
     if record["evaluatedForGate"]:
         existing.PROD_SCORE.write_text(
             "BLUE_PATROL_GENERALIZED_EVALUATION_V1 "

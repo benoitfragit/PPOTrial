@@ -3,10 +3,18 @@
 
 The generalized V6 checkpoint supports changing P/N between process launches.
 No C++ agent, simulator, optimizer or observation schema is modified here.
+
+Each block runs `ppokit-run train` on the BluePatrol project (blue_environment and
+blue_network). Its evaluations are the project's suite eval/validation.json, made
+the campaign of the training file for the block (seeds, cases, cadence): they
+reach the run journal and the suite's BEST store. After each block the best campaign of the
+block is promoted to PROD as PPO.exe's Training mode promoted it (score above the
+.score of the same P/N, or no such score).
 """
 from __future__ import annotations
 
 import argparse
+import array
 import hashlib
 import json
 import re
@@ -16,42 +24,46 @@ import sys
 import time
 from pathlib import Path
 
+import blue_checkpoint
 import mappo_process_watchdog
 
 
-TRAINING_FILE = Path("resources/settings/Training/BluePatrol.json")
-SCENARIO_FILE = Path("resources/settings/Scenarios/BlueDefense.json")
-MODEL_ROOT = Path("resources/model/BluePatrol")
-LATEST = MODEL_ROOT / "latest/blue_patrol_generalized_training_v7.txt"
-PROD = MODEL_ROOT / "prod/blue_patrol_generalized_v10.txt"
-PROD_SCORE = Path(str(PROD) + ".score")
+PROJECT = Path("Examples/BlueDefense/projects/BluePatrol")
+TRAINING_FILE = PROJECT / "blue_patrol_training.json"
+SCENARIO_FILE = PROJECT / "scenario.json"
+SUITE_FILE = PROJECT / "eval/validation.json"
+MODEL_ROOT = PROJECT / "checkpoints"
+LATEST = MODEL_ROOT / "latest" / blue_checkpoint.TRAINING_NAME
+PROD = MODEL_ROOT / "prod" / blue_checkpoint.POLICY_NAME
+PROD_SCORE = Path(str(PROD) + blue_checkpoint.SCORE_SUFFIX)
 PROGRESS = MODEL_ROOT / "curriculum-progress.json"
-TELEMETRY = MODEL_ROOT / "telemetry/mappo-training.csv"
-# Only the current Blue contract is reset; old candidate files remain available.
-FRESH_SEEDS = (LATEST, MODEL_ROOT / "latest/blue_patrol_generalized_v10.txt",
-               PROD, PROD_SCORE)
+LATEST_ACTOR = MODEL_ROOT / "latest" / blue_checkpoint.POLICY_NAME
+JOURNAL = MODEL_ROOT / "latest/metrics.jsonl"
+SUITE = "validation"
+# ppokit-run's BEST store of the suite; the gate champions live in best/<gate>/.
+BEST_MANIFEST = MODEL_ROOT / "best" / f"{SUITE}.json"
+SCORE_MAGIC = "BLUE_PATROL_GENERALIZED_EVALUATION_V1"
+# Only the current Blue contract is reset (under its new and former names);
+# old candidate files remain available.
+FRESH_SEEDS = (LATEST, LATEST_ACTOR, PROD, PROD_SCORE,
+               MODEL_ROOT / "latest" / blue_checkpoint.FORMER_TRAINING_NAME,
+               MODEL_ROOT / "latest" / blue_checkpoint.FORMER_POLICY_NAME,
+               MODEL_ROOT / "prod" / blue_checkpoint.FORMER_POLICY_NAME,
+               MODEL_ROOT / "prod" / (blue_checkpoint.FORMER_POLICY_NAME
+                                      + blue_checkpoint.SCORE_SUFFIX))
 OUTPUT = Path("build/mappo-telemetry")
-EVAL_PATTERN = re.compile(
-    r"Evaluation #\d+ P=(\d+) N=(\d+) score=([0-9.eE+-]+)"
-)
+# ppokit-run's line after each campaign of a suite during training.
+EVAL_PATTERN = re.compile(r"evaluation '([A-Za-z0-9_.-]+)' at update (\d+)")
 STAGE_NAMES = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
 def read_updates(path: Path = LATEST) -> int:
-    """Read the authoritative PPO update count, not an actor/CI timestamp."""
+    """Read the authoritative PPO update count, not an actor/CI timestamp.
+
+    The training checkpoint's contract is validated too (either format)."""
     if not path.exists():
         return 0
-    with path.open("r", encoding="utf-8") as stream:
-        first = stream.readline()
-        if not first.startswith("BLUE_TEAM_TRAINING_V7 "):
-            raise ValueError(f"Unsupported training checkpoint header: {path}")
-        for line in stream:
-            if line.startswith("UPDATES "):
-                parts = line.split()
-                if len(parts) != 2 or not parts[1].isdigit():
-                    raise ValueError(f"Malformed update marker: {path}")
-                return int(parts[1])
-    raise ValueError(f"Missing update marker: {path}")
+    return blue_checkpoint.read_updates(path)
 
 
 def validate_curriculum(document: dict) -> list[dict]:
@@ -136,14 +148,109 @@ def apply_stage(stage: dict, target_updates: int,
     write_json(SCENARIO_FILE, scenario)
 
 
+def suite_of_training(training: dict) -> dict:
+    """The project's suite evaluated during training, made the training file's campaign.
+
+    PPO.exe's campaign came from the training file (seeds, cases, cadence), which CI
+    changes (independent seeds); the suite takes them, and keeps the rest.
+    """
+    suite = json.loads(SUITE_FILE.read_text(encoding="utf-8"))
+    if suite.get("suite") != SUITE:
+        raise ValueError(f"{SUITE_FILE} must be the suite '{SUITE}'")
+    if suite.get("best") != [{"metric": "score.mean", "prefer": "higher"}]:
+        raise ValueError(f"{SUITE_FILE} must keep its BEST at the highest score.mean "
+                         "(PPO.exe's promotion rule)")
+    evaluation = training["evaluation"]
+    suite["seeds"] = {"first": evaluation["seed"], "count": evaluation["episodes"]}
+    suite["episodes"] = 1
+    suite["during_training"] = {"every_updates": training["training"]["checkpointEvery"]}
+    return suite
+
+
+def clear_suite_best() -> None:
+    """Empty the suite's BEST store so that it keeps the best campaign of one block."""
+    if BEST_MANIFEST.is_file():
+        BEST_MANIFEST.unlink()
+    # The store names its policies after the policy file (.ppokit; .txt before), and an
+    # interrupted copy leaves a .partial file.
+    for pattern in (f"{SUITE}_*.ppokit", f"{SUITE}_*.txt", f"{SUITE}_*.partial"):
+        for policy in BEST_MANIFEST.parent.glob(pattern):
+            policy.unlink()
+
+
+def float32(value: float) -> float:
+    """The value as the C++ float of PPO.exe's campaign score."""
+    return array.array("f", [value])[0]
+
+
+def promoted_score(blue: int, red: int) -> float | None:
+    """The .score of PROD for this P/N, as PPO.exe's LoadPromotedScore reads it."""
+    if not PROD.is_file() or not PROD_SCORE.is_file():
+        return None
+    fields = PROD_SCORE.read_text(encoding="utf-8").split()
+    try:
+        if (len(fields) >= 4 and fields[0] == SCORE_MAGIC
+                and int(fields[1]) == blue and int(fields[2]) == red):
+            return float32(float(fields[3]))
+    except ValueError:
+        pass
+    return None
+
+
+def promote_like_training(stage: dict) -> bool:
+    """PPO.exe's PromoteEvaluatedActor over one block: the block's best campaign
+    becomes PROD when its score is above the .score of the same P/N (or there is
+    none). Returns True when PROD changed."""
+    if not BEST_MANIFEST.is_file():
+        return False
+    best = json.loads(BEST_MANIFEST.read_text(encoding="utf-8"))
+    score = float32(float(best["report"]["aggregates"]["score.mean"]))
+    incumbent = promoted_score(stage["blue"], stage["red"])
+    if incumbent is not None and not score > incumbent:
+        return False
+    policy = BEST_MANIFEST.parent / best["policy"]
+    # A ppokit.best/2 manifest keeps the digest of the weights that were evaluated.
+    if "sha256" in best and hashlib.sha256(policy.read_bytes()).hexdigest() != best["sha256"]:
+        raise ValueError(f"{policy} does not hold the evaluated weights of {BEST_MANIFEST}")
+    PROD.parent.mkdir(parents=True, exist_ok=True)
+    temporary = PROD.with_suffix(PROD.suffix + ".tmp")
+    shutil.copyfile(policy, temporary)
+    temporary.replace(PROD)
+    temporary = PROD_SCORE.with_suffix(PROD_SCORE.suffix + ".tmp")
+    temporary.write_text(f"{SCORE_MAGIC} {stage['blue']} {stage['red']} {score:.9g}\n",
+                         encoding="utf-8")
+    temporary.replace(PROD_SCORE)
+    print(f"[BLUE MAPPO V10] Promoted evaluated generalized actor of update "
+          f"{best['update']} to {PROD} (score {score:.9g})", flush=True)
+    return True
+
+
 def run_stage(binary: Path, stage: dict, seconds: int, log_path: Path) -> str | None:
-    """Supervise a full block outside the hot path with bounded lifecycle."""
-    command = [str(binary.resolve()), "--no-gui", "--example",
-               "blue-defense", "--max-seconds", str(seconds)]
-    return mappo_process_watchdog.run(
-        command, stage["id"], seconds, log_path,
-        OUTPUT / "mappo-training.log", EVAL_PATTERN, read_updates,
-        metadata=stage)
+    """Supervise a full block outside the hot path with bounded lifecycle.
+
+    The block trains up to the training file's maxUpdates (apply_stage), saving
+    every saveEveryUpdates (else every checkpointEvery) update.
+    """
+    training = json.loads(TRAINING_FILE.read_text(encoding="utf-8"))
+    suite = suite_of_training(training)
+    settings = training["training"]
+    save_every = settings.get("saveEveryUpdates", settings["checkpointEvery"])
+    command = [str(binary.resolve()), "train", "--project", str((PROJECT / "project.legacy.json").resolve()),
+               "--until-update", str(settings["maxUpdates"]),
+               "--save-every", str(save_every),
+               "--max-seconds", str(seconds)]
+    clear_suite_best()
+    original_suite = SUITE_FILE.read_bytes()
+    write_json(SUITE_FILE, suite)
+    try:
+        return mappo_process_watchdog.run(
+            command, stage["id"], seconds, log_path,
+            OUTPUT / "mappo-training.log", EVAL_PATTERN, read_updates,
+            metadata=stage)
+    finally:
+        SUITE_FILE.write_bytes(original_suite)
+        # As in PPO.exe, a campaign finished before an interrupted block still promotes.
+        promote_like_training(stage)
 
 
 def save_candidate_and_restore(baseline: dict[Path, bytes | None],
@@ -243,7 +350,7 @@ def run_v2(args: argparse.Namespace, config: dict) -> int:
     version = config["formatVersion"]
     binary = Path(args.binary)
     if not binary.is_file():
-        raise FileNotFoundError(f"Missing built PPO executable: {binary}")
+        raise FileNotFoundError(f"Missing built ppokit-run executable: {binary}")
     original_training_bytes = TRAINING_FILE.read_bytes()
     original_scenario_bytes = SCENARIO_FILE.read_bytes()
     original_training = json.loads(original_training_bytes)
@@ -253,13 +360,9 @@ def run_v2(args: argparse.Namespace, config: dict) -> int:
         raise ValueError("Warm start requires V3 without --fresh-start")
     if args.fresh_start:
         require_clean_fresh_start()
+    # read_updates rejects a checkpoint of another observation schema (V3: 10).
     updates = read_updates()
     config_hash = fingerprint(config)
-    if version == 3 and LATEST.exists():
-        with LATEST.open(encoding="utf-8") as checkpoint:
-            header = checkpoint.readline().split()
-        if len(header) < 3 or header[2] != "10":
-            raise ValueError("V3 observation schema mismatch; start from scratch")
     if warm_start and (PROGRESS.exists() or not LATEST.is_file()
                        or updates <= 0):
         raise ValueError(
@@ -389,8 +492,8 @@ def run_v2(args: argparse.Namespace, config: dict) -> int:
                         raise RuntimeError(
                             f"Invalid V2 optimizer progress for {selected['id']}: "
                             f"{updates}->{fresh_updates}, target={block_end}")
-                    if TELEMETRY.is_file():
-                        shutil.copy2(TELEMETRY, block_dir / "telemetry.csv")
+                    if JOURNAL.is_file():
+                        shutil.copy2(JOURNAL, block_dir / "metrics.jsonl")
                     summary.append(
                         f"| {phase['id']} | {selected['id']} | "
                         f"{selected['blue']}/{selected['red']} | "
@@ -431,7 +534,7 @@ def run(args: argparse.Namespace) -> int:
     config_hash = fingerprint(config)
     binary = Path(args.binary)
     if not binary.is_file():
-        raise FileNotFoundError(f"Missing built PPO executable: {binary}")
+        raise FileNotFoundError(f"Missing built ppokit-run executable: {binary}")
     original_training = json.loads(TRAINING_FILE.read_text(encoding="utf-8"))
     original_scenario = json.loads(SCENARIO_FILE.read_text(encoding="utf-8"))
     original_training_bytes = TRAINING_FILE.read_bytes()
@@ -508,8 +611,8 @@ def run(args: argparse.Namespace) -> int:
                     raise RuntimeError(
                         f"Stage {stage['id']} made no optimizer progress: {updates}"
                     )
-                if TELEMETRY.is_file():
-                    shutil.copy2(TELEMETRY, stage_dir / "telemetry.csv")
+                if JOURNAL.is_file():
+                    shutil.copy2(JOURNAL, stage_dir / "metrics.jsonl")
                 if fresh_updates >= target:
                     progress["nextStage"] = index + 1
                     write_json(PROGRESS, progress)
@@ -536,21 +639,37 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_single_stage(args: argparse.Namespace) -> int:
+    """PPO.exe's Training mode on the scenario as it is: one block up to maxUpdates."""
+    binary = Path(args.binary)
+    if not binary.is_file():
+        raise FileNotFoundError(f"Missing built ppokit-run executable: {binary}")
+    settings = json.loads(SCENARIO_FILE.read_text(encoding="utf-8"))["blueDefense"]
+    stage = {"id": "single", "blue": settings["blueTeam"]["activeCount"],
+             "red": settings["redTeam"]["activeCount"]}
+    run_stage(binary, stage, args.max_seconds, OUTPUT / "single" / "training.log")
+    print(f"[CURRICULUM] Single stage {stage['blue']}v{stage['red']} ended at update "
+          f"{read_updates()}.", flush=True)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", default="build/release/Main/Release/PPO.exe")
+    parser.add_argument("--binary", default="build/release/PPOKit/Release/ppokit-run.exe")
     parser.add_argument("--curriculum",
-                        default="resources/settings/Training/BluePatrolCurriculum.json")
+                        default="Examples/BlueDefense/curricula/BluePatrolCurriculumV3.json")
     parser.add_argument("--max-seconds", type=int, required=True)
     parser.add_argument("--fresh-start", action="store_true",
                         help="ignore checked-in legacy Blue seeds (no resume run ID)")
     parser.add_argument("--warm-start", action="store_true",
                         help="one-time import of a full V10 checkpoint into V3")
+    parser.add_argument("--single-stage", action="store_true",
+                        help="no curriculum: train the scenario as it is up to maxUpdates")
     args = parser.parse_args()
     if not 1 <= args.max_seconds <= 18000:
         parser.error("--max-seconds must be in [1, 18000]")
     try:
-        return run(args)
+        return run_single_stage(args) if args.single_stage else run(args)
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as error:
         print(f"[CURRICULUM_ERROR] {error}", file=sys.stderr)
         return 1

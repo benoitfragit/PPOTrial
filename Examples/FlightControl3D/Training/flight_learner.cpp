@@ -3,15 +3,16 @@
  * @brief PPO with GAE on RLtools MLPs: collection buffer, update loop, KL guard and checkpoints.
  *
  * One update (Optimize), in order:
- * 1. GAE advantages and value targets on the full rollout (ComputeAdvantages);
- * 2. advantage normalization to zero mean and unit variance (epsilon 1e-8);
+ * 1. GAE advantages and value targets on the full rollout (ComputeAdvantages, ppokit::core::GaeStep),
+ *    the explained variance of the critic, then the advantages normalized to zero mean and
+ *    unit variance (ppokit::runtime::NormalizeLearnableAdvantages, epsilon 1e-8);
  * 3. for each epoch, a shuffle of the sample order with the learner RNG, then for each
  *    minibatch:
  *    a. per sample: actor forward, clipped PPO loss and its derivatives (flight_policy.hpp),
  *       sampled and approximate KL accumulation, actor backward, critic forward and
  *       backward on the squared error to the target;
- *    b. KL guard: the actor step is skipped when the sampled minibatch KL reaches 1.5 x
- *       targetKl; the critic, an independent network, always steps;
+ *    b. KL guard (ppokit/core/kl.hpp): the actor step is skipped when the sampled minibatch
+ *       KL reaches 1.5 x targetKl; the critic, an independent network, always steps;
  *    c. log-std clamped back into its bounds after each actor step; every parameter and
  *       Adam moment is checked for finiteness;
  * 4. rollout statistics (mean reward per channel) and an empty buffer.
@@ -23,7 +24,10 @@
  * Runtime/flight_session.cpp (collection loop).
  */
 #include "flight_learner.hpp"
-#include "flight_atomic_file.hpp"
+#include "ppokit/artifacts/atomic_file.hpp"
+#include "ppokit/core/gae.hpp"
+#include "ppokit/core/kl.hpp"
+#include "ppokit/runtime/advantages.hpp"
 #include "flight_rng_checkpoint.hpp"
 // Upstream CPU headers define non-inline symbols. Use its supported namespace
 // wrapper so this backend can coexist with BlueDefense in the same executable.
@@ -32,6 +36,9 @@
 #include <rl_tools/nn/operations_cpu_mux.h>
 #include <rl_tools/nn_models/mlp_unconditional_stddev/operations_generic.h>
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
+// Generated from task.json + graph.json by ppokit-codegen (CMake: ppokit_generate_networks).
+#include "flight_networks.hpp"
+#include "ppokit/backend/rltools/mlp_probes.hpp"
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
@@ -48,13 +55,12 @@ void ComputeAdvantages(Transition* transitions, std::size_t count, TrainingSetti
     for (std::size_t index = count; index > 0; --index)
     {
         auto& row = transitions[index - 1];
-        // The recursion restarts at every episode boundary: the next row
-        // belongs to another episode, whatever the reason the episode ended.
-        bool const episodeEnded = row.terminated || row.truncated;
-        advantage = AdvantageDelta(row.reward, row.value, row.nextValue, row.terminated, settings.gamma)
-            + (episodeEnded ? 0 : settings.gamma * settings.lambda * advantage);
+        // A truncation (time limit) keeps its bootstrap; any episode end restarts the
+        // recursion, because the next row belongs to another episode.
+        advantage = ppokit::core::GaeStep(row.reward, row.value, row.nextValue, advantage,
+            settings.gamma, settings.lambda, row.terminated, row.truncated);
         row.advantage = advantage;
-        row.target = advantage + row.value;
+        row.valueTarget = advantage + row.value;
     }
 }
 
@@ -74,6 +80,10 @@ struct FlightLearner::Impl
     std::array<double, RewardCount> rewardSums{};
     /** @brief Set when an update threw; the learner must be reloaded. */
     bool failed{};
+    /** @brief Probe the layers during the next updates (read-only, see ProbeLayers). */
+    bool probing{};
+    /** @brief Layer probes of the last probed update. */
+    FlightLayerProbes probes{};
 
     explicit Impl(Config const& configuration)
         : config(configuration), rng(configuration.training.seed), rows(configuration.training.rolloutSteps),
@@ -102,31 +112,26 @@ using Device = rlt::devices::DEVICE_FACTORY<>;
 using Index = typename Device::index_t;
 using Optimizer = rlt::nn::optimizers::Adam<rlt::nn::optimizers::adam::Specification<float, Index>>;
 
-/** @brief Input layer, two hidden layers and output layer: three weight layers after the input. */
-constexpr Index NetworkLayers = 3;
 /** @brief Batch size of the per-sample forward and backward passes. */
 constexpr Index SingleSampleBatch = 1;
 
-template<Index Width, Index Outputs>
-using Structure = rlt::nn_models::mlp::StructureSpecification<float, Index, ObservationSize, Outputs,
-    NetworkLayers,
-    Width, rlt::nn::activation_functions::TANH, rlt::nn::activation_functions::IDENTITY, SingleSampleBatch,
-    rlt::MatrixStaticTag>;
-template<Index Width, Index Outputs>
-using Network = rlt::nn_models::mlp::NeuralNetworkAdam<rlt::nn_models::mlp::AdamSpecification<Structure<Width,
-    Outputs>>>;
+// The networks are described in graph.json: MLPs with two tanh hidden layers and identity
+// outputs. The hidden width is a template parameter, chosen at run time among the precompiled
+// widths (FlightLearner constructor), so one build serves every scenario.
+namespace networks = task::networks;
+static_assert(networks::Actor::Inputs == ObservationSize && networks::Actor::Outputs == PolicyOutputs,
+    "graph.json/task.json and the Flight policy contract disagree on the actor");
+static_assert(networks::Critic::Inputs == ObservationSize, "the Flight critic reads the actor observation");
+
 template<Index Width>
-using Actor = rlt::nn_models::mlp_unconditional_stddev::NeuralNetworkAdam<
-    rlt::nn_models::mlp::AdamSpecification<Structure<Width, PolicyOutputs>>>;
+using Actor = networks::Actor::Network<Index, SingleSampleBatch, Width, rlt::MatrixStaticTag>;
+template<Index Width>
+using Critic = networks::Critic::Network<Index, SingleSampleBatch, Width, rlt::MatrixStaticTag>;
 template<Index Columns>
 using Matrix = rlt::MatrixStatic<rlt::matrix::Specification<float, Index, 1, Columns>>;
 
 /** @brief Header tag of the serialized actor, critic, optimizer and RNG state. */
 constexpr char CheckpointMagic[] = "PPO_FLIGHT_POLICY_V3";
-/** @brief Added to the advantage variance before the square root. */
-constexpr double AdvantageEpsilon = 1e-8;
-/** @brief The actor step is skipped when the sampled minibatch KL reaches this multiple of targetKl. */
-constexpr double KlSkipFactor = 1.5;
 /** @brief Derivative of the squared critic error (v - target)^2 with respect to v is 2 (v - target). */
 constexpr double SquaredErrorDerivativeFactor = 2;
 /** @brief Value above which a binary observation flag is set. */
@@ -295,7 +300,7 @@ class Learner final : public FlightLearner::Impl
 {
     Device device_{};
     Actor<Width> actor_{};
-    Network<Width, 1> critic_{};
+    Critic<Width> critic_{};
     Optimizer actorOptimizer_{};
     Optimizer criticOptimizer_{};
     Matrix<ObservationSize> input_{};
@@ -304,7 +309,9 @@ class Learner final : public FlightLearner::Impl
     Matrix<1> valueOutput_{};
     Matrix<1> valueDerivative_{};
     typename Actor<Width>::template Buffer<1, rlt::MatrixStaticTag> actorBuffer_{};
-    typename Network<Width, 1>::template Buffer<1, rlt::MatrixStaticTag> criticBuffer_{};
+    typename Critic<Width>::template Buffer<1, rlt::MatrixStaticTag> criticBuffer_{};
+    ppokit::backend::rltools::MlpProbes<Actor<Width>> actorProbes_{};
+    ppokit::backend::rltools::MlpProbes<Critic<Width>> criticProbes_{};
 
     /** @brief Copies a checked observation into the network input. */
     void Input(Observation const& observation)
@@ -352,26 +359,6 @@ class Learner final : public FlightLearner::Impl
         return policy;
     }
 
-    /** @brief Shift and scale the advantages to zero mean and unit variance (population variance). */
-    void NormalizeAdvantages()
-    {
-        double mean = 0;
-        double variance = 0;
-        for (auto const& row : rows)
-        {
-            mean += row.advantage / static_cast<double>(collected);
-        }
-        for (auto const& row : rows)
-        {
-            variance += (row.advantage - mean) * (row.advantage - mean) / static_cast<double>(collected);
-        }
-        double const advantageScale = 1 / std::sqrt(variance + AdvantageEpsilon);
-        for (auto& row : rows)
-        {
-            row.advantage = (row.advantage - mean) * advantageScale;
-        }
-    }
-
     void ResetUpdateStatistics() noexcept
     {
         stats.policyLoss = 0;
@@ -395,16 +382,18 @@ class Learner final : public FlightLearner::Impl
         double& sampledKl)
     {
         auto const policy = ForwardActor();
+        if (probing)
+        {
+            actorProbes_.ObserveForward(actor_, SingleSampleBatch);
+        }
         auto const loss = ClippedLoss(policy, row.action, row.advantage, config.training);
         double const logRatio = LogProbability(policy, row.action) - row.action.logProbability;
         if (!std::isfinite(logRatio))
         {
             throw std::runtime_error("FlightControl3D: invalid PPO log ratio");
         }
-        sampledKl -= logRatio / minibatchSize;
-        double const boundedLogRatio = std::clamp(logRatio, -MaximumAbsoluteLogRatio,
-            MaximumAbsoluteLogRatio);
-        approximateKl += std::max(0.0, std::expm1(boundedLogRatio) - boundedLogRatio) / minibatchSize;
+        sampledKl += ppokit::core::SampledKl(logRatio) / minibatchSize;
+        approximateKl += ppokit::core::ApproximateKl(logRatio) / minibatchSize;
         if (!std::isfinite(loss.loss))
         {
             throw std::runtime_error("FlightControl3D: invalid PPO loss");
@@ -431,7 +420,11 @@ class Learner final : public FlightLearner::Impl
     double AccumulateCriticSample(Transition const& row, double minibatchSize)
     {
         rlt::forward(device_, critic_, input_, valueOutput_);
-        double const difference = rlt::get(valueOutput_, 0, 0) - row.target;
+        if (probing)
+        {
+            criticProbes_.ObserveForward(critic_, SingleSampleBatch);
+        }
+        double const difference = rlt::get(valueOutput_, 0, 0) - row.valueTarget;
         rlt::set(valueDerivative_, 0, 0,
             static_cast<float>(SquaredErrorDerivativeFactor * difference / minibatchSize));
         rlt::backward(device_, critic_, input_, valueDerivative_, criticBuffer_);
@@ -452,7 +445,13 @@ class Learner final : public FlightLearner::Impl
         }
         stats.maximumApproximateKl = std::max(stats.maximumApproximateKl, approximateKl);
         stats.maximumSampledKl = std::max(stats.maximumSampledKl, sampledKl);
-        if (sampledKl >= KlSkipFactor * config.training.targetKl)
+        if (probing)
+        {
+            // Gradients of the whole minibatch, before the optimizer consumes them.
+            actorProbes_.ObserveGradients(actor_);
+            criticProbes_.ObserveGradients(critic_);
+        }
+        if (!ppokit::core::ActorStepAllowed(sampledKl, config.training.targetKl))
         {
             ++stats.actorKlSkips;
         }
@@ -595,8 +594,12 @@ public:
         try
         {
             ComputeAdvantages(rows.data(), collected, config.training);
-            NormalizeAdvantages();
             ResetUpdateStatistics();
+            actorProbes_.Reset();
+            criticProbes_.Reset();
+            // Before normalization: how well the critic predicted these returns.
+            stats.explainedVariance = ppokit::runtime::ExplainedVarianceOf(rows.data(), collected);
+            ppokit::runtime::NormalizeLearnableAdvantages(rows.data(), collected);
             double const samples = static_cast<double>(collected * config.training.epochs);
             for (std::size_t epoch = 0; epoch < config.training.epochs; ++epoch)
             {
@@ -605,6 +608,10 @@ public:
                 {
                     TrainMinibatch(start, samples);
                 }
+            }
+            if (probing)
+            {
+                probes = {actorProbes_.Summary(), criticProbes_.Summary()};
             }
             FinishRollout();
         }
@@ -660,7 +667,7 @@ public:
         // RLtools static matrices contain self-pointers: never use C++ copies.
         // Stage independent networks on the heap (including on Windows' small stack).
         auto candidateActor = std::make_unique<Actor<Width>>();
-        auto candidateCritic = std::make_unique<Network<Width, 1>>();
+        auto candidateCritic = std::make_unique<Critic<Width>>();
         rlt::forward(device_, actor_, input_, actorOutput_);
         rlt::forward(device_, critic_, input_, valueOutput_);
         rlt::copy(device_, device_, actor_, *candidateActor);
@@ -757,6 +764,16 @@ void FlightLearner::Optimize()
     impl_->Optimize();
 }
 
+void FlightLearner::ProbeLayers(bool probing) noexcept
+{
+    impl_->probing = probing;
+}
+
+FlightLayerProbes const& FlightLearner::LayerProbes() const noexcept
+{
+    return impl_->probes;
+}
+
 void FlightLearner::Record(Observation const& observation, PolicyAction const& action, StepResult const& step,
     Observation const& nextObservation)
 {
@@ -808,28 +825,26 @@ void FlightLearner::Record(Observation const& observation, PolicyAction const& a
     ++impl_->collected;
 }
 
+namespace {
+
+/** @brief Serializes the complete learner state (networks, Adam, RNG) into an artifact stream. */
+struct LearnerWriter final
+{
+    FlightLearner::Impl const& learner;
+    void operator()(std::ostream& stream) const { learner.Write(stream); }
+};
+
+} // namespace
+
 void FlightLearner::Save(std::filesystem::path const& path) const
 {
     if (impl_->collected != 0)
     {
         throw std::logic_error("FlightControl3D: save at an update boundary");
     }
-    if (!path.parent_path().empty())
-    {
-        std::filesystem::create_directories(path.parent_path());
-    }
-    auto temporary = path;
-    temporary += ".tmp";
-    {
-        std::ofstream stream(temporary, std::ios::trunc);
-        impl_->Write(stream);
-        stream.flush();
-        if (!stream)
-        {
-            throw std::runtime_error("FlightControl3D: checkpoint write failed");
-        }
-    }
-    detail::CommitTemporaryFile(temporary, path);
+    // The CI archives the ".previous" generation, so it is kept after the commit.
+    auto const options = ppokit::artifacts::AtomicWriteOptions::KeepingPrevious(".previous");
+    ppokit::artifacts::WriteFileAtomically(path, LearnerWriter{*impl_}, options, "FlightControl3D checkpoint");
 }
 
 void FlightLearner::Load(std::filesystem::path const& path)

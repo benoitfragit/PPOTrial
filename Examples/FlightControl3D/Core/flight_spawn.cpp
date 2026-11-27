@@ -51,6 +51,20 @@ Vec3 VelocityAlong(double speed, double heading, double slope) noexcept
 }
 } // namespace
 
+/** @brief Environment seed of a training block: SplitMix64 of the base seed and the update count. */
+std::uint32_t TrainingSeed(std::uint32_t base, std::uint64_t updates) noexcept
+{
+    constexpr std::uint64_t SplitMixIncrement = 0x9e3779b97f4a7c15ULL;
+    constexpr std::uint64_t SplitMixMultiplier1 = 0xbf58476d1ce4e5b9ULL;
+    constexpr std::uint64_t SplitMixMultiplier2 = 0x94d049bb133111ebULL;
+    // SplitMix64 keeps resumed update blocks deterministic but distinct.
+    std::uint64_t value = static_cast<std::uint64_t>(base) ^ ((updates + 1U) * SplitMixIncrement);
+    value = (value ^ (value >> 30U)) * SplitMixMultiplier1;
+    value = (value ^ (value >> 27U)) * SplitMixMultiplier2;
+    value ^= value >> 31U;
+    return static_cast<std::uint32_t>(value ^ (value >> 32U));
+}
+
 EpisodeStart EvaluationStart(std::size_t episode, std::size_t episodes, double rollingShare,
     double maximumDifficulty) noexcept
 {

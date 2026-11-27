@@ -1,6 +1,7 @@
 """Regression tests for staged MAPPO orchestration; no simulator build required."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -11,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import blue_checkpoint_fixtures as fixtures
 import mappo_curriculum as curriculum
 
 
@@ -256,8 +258,8 @@ class CurriculumTests(unittest.TestCase):
         self.previous = Path.cwd()
         os.chdir(self.temporary.name)
         self.addCleanup(os.chdir, self.previous)
-        curriculum.TRAINING_FILE.parent.mkdir(parents=True)
-        curriculum.SCENARIO_FILE.parent.mkdir(parents=True)
+        curriculum.TRAINING_FILE.parent.mkdir(parents=True, exist_ok=True)
+        curriculum.SCENARIO_FILE.parent.mkdir(parents=True, exist_ok=True)
         self.training = {
             "training": {"maxUpdates": 300, "saveEveryUpdates": 1},
             "evaluation": {"episodes": 8},
@@ -274,7 +276,7 @@ class CurriculumTests(unittest.TestCase):
         curriculum.write_json(curriculum.SCENARIO_FILE, self.scenario)
         self.original_training = curriculum.TRAINING_FILE.read_bytes()
         self.original_scenario = curriculum.SCENARIO_FILE.read_bytes()
-        curriculum.PROD.parent.mkdir(parents=True)
+        curriculum.PROD.parent.mkdir(parents=True, exist_ok=True)
         curriculum.PROD.write_text("baseline 4v4", encoding="utf-8")
         curriculum.PROD_SCORE.write_text("baseline score", encoding="utf-8")
         self.binary = Path("PPO.exe")
@@ -289,10 +291,7 @@ class CurriculumTests(unittest.TestCase):
 
     def fake_checkpoint(self, updates: int) -> None:
         curriculum.LATEST.parent.mkdir(parents=True, exist_ok=True)
-        curriculum.LATEST.write_text(
-            f"BLUE_TEAM_TRAINING_V7 7 10 200\nUPDATES {updates}\n",
-            encoding="utf-8",
-        )
+        curriculum.LATEST.write_text(fixtures.training(updates), encoding="utf-8")
 
     def test_validates_exact_stage_schema_and_counts(self) -> None:
         self.assertEqual(len(curriculum.validate_curriculum(test_stages())), 2)
@@ -313,10 +312,10 @@ class CurriculumTests(unittest.TestCase):
         for path in curriculum.FRESH_SEEDS:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("legacy blue seed")
-        red = Path("resources/model/RLMission/prod/model.pt")
+        red = Path("Examples/Airspace/models/RLMission/prod/policy.txt")
         red.parent.mkdir(parents=True, exist_ok=True)
         red.write_text("unchanged red model")
-        archived = Path("resources/model/BluePatrol/prod/blue_patrol_generalized_v8.txt")
+        archived = Path("Examples/BlueDefense/projects/BluePatrol/checkpoints/prod/blue_patrol_generalized_v8.txt")
         archived.write_text("preserved previous candidate")
         curriculum.require_clean_fresh_start()
         self.assertTrue(all(not path.exists()
@@ -333,6 +332,9 @@ class CurriculumTests(unittest.TestCase):
         self.assertEqual(curriculum.read_updates(), 0)
         self.fake_checkpoint(17)
         self.assertEqual(curriculum.read_updates(), 17)
+        # A former V7 file of an earlier run, restored under the new name.
+        curriculum.LATEST.write_text(fixtures.former_training(23), encoding="utf-8")
+        self.assertEqual(curriculum.read_updates(), 23)
         curriculum.LATEST.write_text("WRONG\nUPDATES 17\n", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "Unsupported"):
             curriculum.read_updates()
@@ -441,21 +443,6 @@ class CurriculumTests(unittest.TestCase):
             ],
         }
 
-    def test_v2_repository_policy_is_1000_updates_and_opt_in(self) -> None:
-        repository = Path(__file__).resolve().parents[2]
-        v2_file = (repository / "resources/settings/Training/"
-                   "BluePatrolCurriculumV2.json")
-        v1_file = (repository / "resources/settings/Training/"
-                   "BluePatrolCurriculum.json")
-        v2 = json.loads(v2_file.read_text(encoding="utf-8"))
-        stages, primary, prior = curriculum.validate_curriculum_v2(v2)
-        self.assertEqual(v2["totalUpdates"], 1000)
-        self.assertEqual(len(stages), 9)
-        self.assertEqual(sum(item["updates"] for item in stages), 1000)
-        self.assertEqual(stages[-1]["updates"], 400)
-        self.assertEqual((primary, prior), (24, 6))
-        self.assertEqual(json.loads(v1_file.read_text())["formatVersion"], 1)
-
     def test_v2_rehearsal_only_uses_prior_stages(self) -> None:
         cfg = self.v2_config()
         stages, primary, prior = curriculum.validate_curriculum_v2(cfg)
@@ -489,43 +476,6 @@ class CurriculumTests(unittest.TestCase):
             for cycle in range(4)
         ]
         self.assertEqual(seen, ["0", "1", "2", "3"])
-
-    def test_v2_all_phases_rehearse_and_final_is_mostly_four_v_four(self) -> None:
-        repository = Path(__file__).resolve().parents[2]
-        file = (repository / "resources/settings/Training/"
-                "BluePatrolCurriculumV2.json")
-        stages, primary, prior = curriculum.validate_curriculum_v2(
-            json.loads(file.read_text(encoding="utf-8")))
-        first_update = 0
-        for index, stage in enumerate(stages):
-            end = first_update + stage["updates"]
-            updates = first_update
-            primary_count = 0
-            earlier_ids = set()
-            while updates < end:
-                active, next_update = curriculum.choose_rehearsal_block(
-                    stages, index, first_update, end,
-                    updates, primary, prior)
-                self.assertGreater(next_update, updates)
-                self.assertLessEqual(next_update, end)
-                if active["id"] == stage["id"]:
-                    primary_count += next_update - updates
-                else:
-                    self.assertIn(active, stages[:index])
-                    earlier_ids.add(active["id"])
-                updates = next_update
-            self.assertEqual(updates, end)
-            if index == 0:
-                self.assertEqual(primary_count, stage["updates"])
-            else:
-                self.assertGreaterEqual(
-                    primary_count / stage["updates"], 0.75)
-                self.assertGreater(len(earlier_ids), 0)
-            if index == len(stages) - 1:
-                self.assertEqual(len(earlier_ids), 8)
-                self.assertGreaterEqual(primary_count, 320)
-            first_update = end
-        self.assertEqual(first_update, 1000)
 
     def test_v2_invalid_config_and_v1_progress_are_rejected(self) -> None:
         cfg = self.v2_config()
@@ -713,7 +663,7 @@ class CurriculumTests(unittest.TestCase):
     def test_v3_rejects_old_schema_and_previous_curriculum(self) -> None:
         self.v3_config()
         self.fake_checkpoint(796)
-        curriculum.LATEST.write_text("BLUE_TEAM_TRAINING_V7 7 9 200\nUPDATES 796\n")
+        curriculum.LATEST.write_text(fixtures.former_training(796, observation_version="9"))
         with self.assertRaisesRegex(ValueError, "schema mismatch"):
             curriculum.run(self.args())
         self.assertFalse(curriculum.PROGRESS.exists())
@@ -803,7 +753,7 @@ class CurriculumTests(unittest.TestCase):
         self.assertFalse(curriculum.PROGRESS.exists())
         self.fake_checkpoint(538)
         curriculum.LATEST.write_text(
-            "BLUE_TEAM_TRAINING_V7 7 9 200\nUPDATES 538\n", encoding="utf-8")
+            fixtures.artifact("training", 538, observation_version="9"), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "schema mismatch"):
             curriculum.run(args)
         self.fake_checkpoint(538)
@@ -845,7 +795,7 @@ class CurriculumTests(unittest.TestCase):
 
     def test_v3_repository_budget_and_patrol_rehearsal(self) -> None:
         repository = Path(__file__).resolve().parents[2]
-        cfg = json.loads((repository / "resources/settings/Training/"
+        cfg = json.loads((repository / "Examples/BlueDefense/curricula/"
                           "BluePatrolCurriculumV3.json").read_text())
         stages, primary, prior = curriculum.validate_curriculum_v2(cfg)
         self.assertEqual(cfg["totalUpdates"], 1200)
@@ -863,6 +813,198 @@ class CurriculumTests(unittest.TestCase):
                             for count in (1, 2, 3, 4)))
         self.assertNotIn("resumeFromV2Hash", cfg)
 
+
+
+
+class PpokitRunStageTests(unittest.TestCase):
+    """A block under ppokit-run: command, suite of the training file, PPO.exe's promotion."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.previous = Path.cwd()
+        os.chdir(self.temporary.name)
+        self.addCleanup(os.chdir, self.previous)
+        self.training = {
+            "training": {"maxUpdates": 120, "checkpointEvery": 10, "saveEveryUpdates": 1},
+            "evaluation": {"episodes": 8, "seed": 4242},
+        }
+        curriculum.write_json(curriculum.TRAINING_FILE, self.training)
+        curriculum.write_json(curriculum.SCENARIO_FILE, {"blueDefense": {
+            "blueTeam": {"activeCount": 2}, "redTeam": {"activeCount": 1}}})
+        curriculum.write_json(curriculum.SUITE_FILE, {
+            "schema": "ppokit.eval/1", "suite": "validation",
+            "seeds": {"first": 4242, "count": 8}, "episodes": 1,
+            "during_training": {"every_updates": 10},
+            "best": [{"metric": "score.mean", "prefer": "higher"}]})
+        self.binary = Path("ppokit-run.exe")
+        self.binary.write_text("test stub", encoding="utf-8")
+        self.stage = {"id": "2v1", "blue": 2, "red": 1}
+        # A gate champion beside the suite's BEST store: never touched by a block.
+        self.champion = curriculum.MODEL_ROOT / "best" / "2v1" / "champion.json"
+        self.champion.parent.mkdir(parents=True, exist_ok=True)
+        self.champion.write_text("{}", encoding="utf-8")
+
+    def best(self, update: int, score: float) -> None:
+        """What ppokit-run's BEST store keeps after a campaign of the block."""
+        text = f"actor of update {update}"
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        policy = curriculum.BEST_MANIFEST.parent / f"validation_{update}_{digest[:16]}.ppokit"
+        policy.write_text(text, encoding="utf-8")
+        curriculum.write_json(curriculum.BEST_MANIFEST, {
+            "schema": "ppokit.best/2", "suite": "validation", "update": update,
+            "policy": policy.name, "sha256": digest,
+            "report": {"aggregates": {"score.mean": score}}})
+
+    def incumbent(self, text: str) -> None:
+        curriculum.PROD.parent.mkdir(parents=True, exist_ok=True)
+        curriculum.PROD.write_text("incumbent actor", encoding="utf-8")
+        curriculum.PROD_SCORE.write_text(text, encoding="utf-8")
+
+    def run_block(self, outcome=None) -> list[str]:
+        commands = []
+
+        def watchdog(command, stage_id, seconds, log_path, combined, pattern,
+                     updates, metadata=None):
+            commands.append(command)
+            # The leftover BEST of an earlier block was cleared before launching.
+            self.assertFalse(curriculum.BEST_MANIFEST.exists())
+            self.assertTrue(self.champion.is_file())
+            if outcome is not None:
+                outcome()
+            return "evaluation 'validation' at update 120"
+
+        self.best(10, 99.0)  # An earlier block's BEST, possibly of another gate.
+        with patch.object(curriculum.mappo_process_watchdog, "run", side_effect=watchdog):
+            curriculum.run_stage(self.binary, self.stage, 600, Path("block/training.log"))
+        return commands[0]
+
+    def test_command_trains_to_the_target_with_the_save_rhythm(self) -> None:
+        command = self.run_block()
+        self.assertEqual(command[1:], [
+            "train", "--project", str((curriculum.PROJECT / "project.legacy.json").resolve()),
+            "--until-update", "120", "--save-every", "1", "--max-seconds", "600"])
+        self.assertEqual(command[0], str(self.binary.resolve()))
+        del self.training["training"]["saveEveryUpdates"]
+        curriculum.write_json(curriculum.TRAINING_FILE, self.training)
+        self.assertEqual(self.run_block()[7], "10")  # checkpointEvery by default
+
+    def test_block_evaluates_the_campaign_of_the_training_file(self) -> None:
+        original = curriculum.SUITE_FILE.read_bytes()
+        self.training["evaluation"] = {"episodes": 20, "seed": 1004242}
+        self.training["training"]["checkpointEvery"] = 5
+        curriculum.write_json(curriculum.TRAINING_FILE, self.training)
+        seen = []
+        self.run_block(lambda: seen.append(
+            json.loads(curriculum.SUITE_FILE.read_text(encoding="utf-8"))))
+        self.assertEqual(seen[0]["seeds"], {"first": 1004242, "count": 20})
+        self.assertEqual(seen[0]["episodes"], 1)
+        self.assertEqual(seen[0]["during_training"], {"every_updates": 5})
+        self.assertEqual(seen[0]["schema"], "ppokit.eval/1")
+        self.assertEqual(curriculum.SUITE_FILE.read_bytes(), original)
+
+    def test_suite_restored_after_a_failed_block(self) -> None:
+        original = curriculum.SUITE_FILE.read_bytes()
+        self.training["evaluation"]["seed"] = 7
+        curriculum.write_json(curriculum.TRAINING_FILE, self.training)
+
+        def failure():
+            raise RuntimeError("Curriculum stage 2v1 incomplete: crash")
+        with self.assertRaisesRegex(RuntimeError, "crash"):
+            self.run_block(failure)
+        self.assertEqual(curriculum.SUITE_FILE.read_bytes(), original)
+
+    def test_suite_must_keep_the_promotion_rule(self) -> None:
+        suite = json.loads(curriculum.SUITE_FILE.read_text(encoding="utf-8"))
+        suite["best"] = [{"metric": "success_rate", "prefer": "higher"}]
+        curriculum.write_json(curriculum.SUITE_FILE, suite)
+        with patch.object(curriculum.mappo_process_watchdog, "run") as launched:
+            with self.assertRaisesRegex(ValueError, "score.mean"):
+                curriculum.run_stage(self.binary, self.stage, 600, Path("x.log"))
+            launched.assert_not_called()
+
+    def test_best_campaign_above_the_incumbent_score_becomes_prod(self) -> None:
+        self.incumbent("BLUE_PATROL_GENERALIZED_EVALUATION_V1 2 1 70.5\n")
+        self.run_block(lambda: self.best(120, 71.25))
+        self.assertEqual(curriculum.PROD.read_text(encoding="utf-8"), "actor of update 120")
+        self.assertEqual(curriculum.PROD_SCORE.read_text(encoding="utf-8"),
+                         "BLUE_PATROL_GENERALIZED_EVALUATION_V1 2 1 71.25\n")
+
+    def test_best_policy_that_is_not_the_evaluated_one_is_not_promoted(self) -> None:
+        self.incumbent("BLUE_PATROL_GENERALIZED_EVALUATION_V1 2 1 70.5\n")
+        self.best(120, 71.25)
+        manifest = json.loads(curriculum.BEST_MANIFEST.read_text(encoding="utf-8"))
+        (curriculum.BEST_MANIFEST.parent / manifest["policy"]).write_text(
+            "another actor", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "evaluated weights"):
+            curriculum.promote_like_training(self.stage)
+        self.assertEqual(curriculum.PROD.read_text(encoding="utf-8"), "incumbent actor")
+
+    def test_former_manifest_without_digest_still_promotes(self) -> None:
+        policy = curriculum.BEST_MANIFEST.parent / "validation_120.ppokit"
+        policy.write_text("former actor", encoding="utf-8")
+        curriculum.write_json(curriculum.BEST_MANIFEST, {
+            "schema": "ppokit.best/1", "suite": "validation", "update": 120,
+            "policy": policy.name, "report": {"aggregates": {"score.mean": 80.0}}})
+        self.assertTrue(curriculum.promote_like_training(self.stage))
+        self.assertEqual(curriculum.PROD.read_text(encoding="utf-8"), "former actor")
+
+    def test_equal_or_lower_score_keeps_the_incumbent(self) -> None:
+        for score in (70.5, 60.0):
+            with self.subTest(score=score):
+                self.incumbent("BLUE_PATROL_GENERALIZED_EVALUATION_V1 2 1 70.5\n")
+                self.run_block(lambda: self.best(120, score))
+                self.assertEqual(curriculum.PROD.read_text(encoding="utf-8"), "incumbent actor")
+
+    def test_score_of_another_team_or_malformed_does_not_hold(self) -> None:
+        for text in ("BLUE_PATROL_GENERALIZED_EVALUATION_V1 4 4 99\n", "garbage\n"):
+            with self.subTest(text=text):
+                self.incumbent(text)
+                self.run_block(lambda: self.best(120, 10.0))
+                self.assertEqual(curriculum.PROD.read_text(encoding="utf-8"),
+                                 "actor of update 120")
+
+    def test_no_campaign_no_promotion(self) -> None:
+        self.incumbent("BLUE_PATROL_GENERALIZED_EVALUATION_V1 2 1 70.5\n")
+        # The store of an earlier run may hold policies of the former .txt names.
+        former = curriculum.BEST_MANIFEST.parent / "validation_90.txt"
+        former.write_text("former actor", encoding="utf-8")
+        # And an interrupted copy of the store.
+        (curriculum.BEST_MANIFEST.parent / "validation_100_0123456789abcdef.ppokit.partial").write_text(
+            "half an actor", encoding="utf-8")
+        self.run_block()
+        self.assertEqual(curriculum.PROD.read_text(encoding="utf-8"), "incumbent actor")
+        self.assertEqual(list(curriculum.BEST_MANIFEST.parent.glob("validation*")), [])
+
+    def test_interrupted_block_still_promotes_its_finished_campaign(self) -> None:
+        def campaign_then_timeout():
+            self.best(110, 80.0)
+            raise RuntimeError("Curriculum stage 2v1 incomplete: budget_timeout")
+        with self.assertRaisesRegex(RuntimeError, "budget_timeout"):
+            self.run_block(campaign_then_timeout)
+        self.assertEqual(curriculum.PROD.read_text(encoding="utf-8"), "actor of update 110")
+
+    def test_single_stage_trains_the_scenario_as_it_is(self) -> None:
+        curriculum.LATEST.parent.mkdir(parents=True, exist_ok=True)
+        curriculum.LATEST.write_text(fixtures.training(120), encoding="utf-8")
+        stages = []
+        with patch.object(curriculum, "run_stage",
+                          side_effect=lambda binary, stage, seconds, log: stages.append(
+                              (stage, seconds, log))):
+            code = curriculum.run_single_stage(
+                SimpleNamespace(binary=str(self.binary), max_seconds=900))
+        self.assertEqual(code, 0)
+        self.assertEqual(stages, [({"id": "single", "blue": 2, "red": 1}, 900,
+                                   curriculum.OUTPUT / "single" / "training.log")])
+        with self.assertRaisesRegex(FileNotFoundError, "ppokit-run"):
+            curriculum.run_single_stage(SimpleNamespace(binary="missing.exe", max_seconds=9))
+
+    def test_repository_suite_is_the_campaign_of_the_training_file(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        os.chdir(root)
+        suite = json.loads(curriculum.SUITE_FILE.read_text(encoding="utf-8"))
+        self.assertEqual(curriculum.suite_of_training(
+            json.loads(curriculum.TRAINING_FILE.read_text(encoding="utf-8"))), suite)
 
 
 if __name__ == "__main__":

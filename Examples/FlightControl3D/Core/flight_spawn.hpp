@@ -37,6 +37,12 @@ struct EpisodeStart final
     bool gearUp{};
 };
 
+/** @brief The historical deterministic environment seed for a training block at a completed update. */
+std::uint32_t TrainingSeed(std::uint32_t base, std::uint64_t updates) noexcept;
+
+/** @brief Inference covers the entire learned task, independently of the saved training frontier. */
+inline constexpr double FullTaskDifficulty = 1.0;
+
 /**
  * @brief Start of one episode of a stratified evaluation campaign.
  *

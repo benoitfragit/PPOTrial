@@ -11,7 +11,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import shutil
 import sys
 import time
@@ -27,10 +26,6 @@ import rehearsal_profiles as profiles  # noqa: E402
 GATES_FILE = Path("tools/ci/adaptive_curriculum/gates.json")
 STATE_FILE = existing.MODEL_ROOT / "adaptive-curriculum-progress.json"
 RESULT_FILE = existing.OUTPUT / "adaptive-gate-result.json"
-SUCCESS_LINE = re.compile(
-    r"Evaluation #\d+ P=(\d+) N=(\d+) score=[0-9.eE+-]+ "
-    r"success=([0-9.eE+-]+)"
-)
 
 
 def validate_gates(document: dict) -> list[dict]:
@@ -129,17 +124,11 @@ def select_training_stage(stages: list[dict], index: int, block: int,
 
 def matching_success(log: Path, blue: int, red: int) -> float | None:
     """Read only finished, matching evaluation campaigns, never a PPO score."""
-    value = None
-    if not log.is_file():
+    updates, scenarios = champion.log_evaluations(log)
+    if not updates or scenarios != {(blue, red)}:
         return None
-    for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
-        match = SUCCESS_LINE.search(line)
-        if match and int(match[1]) == blue and int(match[2]) == red:
-            rate = float(match[3])
-            if not 0.0 <= rate <= 1.0:
-                raise ValueError("Evaluation success outside [0,1]")
-            value = rate * 100.0
-    return value
+    result = champion.journal_evaluation(updates[-1])
+    return None if result is None else result["successPercent"]
 
 
 def equivalent_gate_config_hashes(config_bytes: bytes) -> set[str]:
@@ -384,7 +373,7 @@ def _run_gate(args: argparse.Namespace) -> dict:
         raise ValueError("block-updates must be [1,1000]")
     binary = Path(args.binary)
     if not binary.is_file():
-        raise FileNotFoundError(f"Missing Release PPO executable: {binary}")
+        raise FileNotFoundError(f"Missing Release ppokit-run executable: {binary}")
     max_team_size = getattr(args, "max_team_size", 2)
     config_bytes = GATES_FILE.read_bytes()
     config_hash = hashlib.sha256(config_bytes).hexdigest()
@@ -632,7 +621,7 @@ def _run_gate(args: argparse.Namespace) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", default="build/release/Main/Release/PPO.exe")
+    parser.add_argument("--binary", default="build/release/PPOKit/Release/ppokit-run.exe")
     parser.add_argument("--gate", default="1v0")
     parser.add_argument("--max-team-size", type=int, choices=(2, 3, 4), default=2)
     parser.add_argument("--hostile-zones", action="store_true",

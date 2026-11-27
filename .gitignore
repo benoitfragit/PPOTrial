@@ -62,6 +62,9 @@ BenchmarkDotNet.Artifacts/
 project.lock.json
 project.fragment.lock.json
 artifacts/
+# PPOKit source module named "artifacts", not a generated output.
+!PPOKit/include/ppokit/artifacts/
+!PPOKit/src/artifacts/
 
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
@@ -367,12 +370,15 @@ out/*
 docs/generated/
 
 # Locally trained Blue PPO policies (never commit generated weights)
-resources/model/BluePatrol/prod/*.txt.tmp
-resources/model/BluePatrol/prod/*.txt.bak
-resources/model/BluePatrol/prod/*.score.tmp
-resources/model/BluePatrol/prod/*.score.bak
-resources/model/BluePatrol/latest/*.txt.tmp
-resources/model/BluePatrol/latest/*.txt.bak
+Examples/BlueDefense/projects/*/checkpoints/prod/*.txt.tmp
+Examples/BlueDefense/projects/*/checkpoints/prod/*.txt.bak
+Examples/BlueDefense/projects/*/checkpoints/prod/*.score.tmp
+Examples/BlueDefense/projects/*/checkpoints/prod/*.score.bak
+Examples/BlueDefense/projects/*/checkpoints/latest/*.txt.tmp
+Examples/BlueDefense/projects/*/checkpoints/latest/*.txt.bak
+Examples/BlueDefense/projects/*/checkpoints/*/*.ppokit.tmp
+Examples/BlueDefense/projects/*/checkpoints/*/*.ppokit.bak
+Examples/BlueDefense/projects/*/checkpoints/*/*.ppokit.check
 /build/**
 
 # Windows shell links are generated for this checkout by the FlightControl3D build.
@@ -380,26 +386,7 @@ resources/model/BluePatrol/latest/*.txt.bak
 /FlightControl3D_Release.lnk
 /FlightControl3D_Curriculum_Release.lnk
 /FlightControl3D_T6_Release.lnk
-/resources/model/FlightControl3D/*
-!/resources/model/FlightControl3D/t6texan2_joint_v3/
-/resources/model/FlightControl3D/t6texan2_joint_v3/*
-!/resources/model/FlightControl3D/t6texan2_joint_v3/latest/
-/resources/model/FlightControl3D/t6texan2_joint_v3/latest/*
-!/resources/model/FlightControl3D/t6texan2_joint_v3/latest/flight_policy.txt
-!/resources/model/FlightControl3D/t6texan2_joint_v3/latest/curriculum_level.txt
-!/resources/model/FlightControl3D/t6texan2_joint_v3/best/
-/resources/model/FlightControl3D/t6texan2_joint_v3/best/*
-!/resources/model/FlightControl3D/t6texan2_joint_v3/best/current.json
-!/resources/model/FlightControl3D/t6texan2_joint_v3/best/flight_710_b8db07606953e196.txt
-
-# Run 53 seed: retain the resumable state and the validated BEST generation.
-!/resources/model/FlightControl3D/t6texan2_joint_v5/
-/resources/model/FlightControl3D/t6texan2_joint_v5/*
-!/resources/model/FlightControl3D/t6texan2_joint_v5/latest/
-/resources/model/FlightControl3D/t6texan2_joint_v5/latest/*
-!/resources/model/FlightControl3D/t6texan2_joint_v5/latest/flight_policy.txt
-!/resources/model/FlightControl3D/t6texan2_joint_v5/latest/curriculum_level.txt
-!/resources/model/FlightControl3D/t6texan2_joint_v5/best/
-/resources/model/FlightControl3D/t6texan2_joint_v5/best/*
-!/resources/model/FlightControl3D/t6texan2_joint_v5/best/current.json
-!/resources/model/FlightControl3D/t6texan2_joint_v5/best/flight_870_092d842f035af06e.txt
+# ppokit-run journal of the Airspace projects (beside their models).
+Examples/Airspace/models/*/metrics.jsonl
+# ppokit-run BEST store and evaluation reports of the Airspace projects.
+Examples/Airspace/projects/*/checkpoints/

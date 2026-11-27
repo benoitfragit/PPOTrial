@@ -5,7 +5,7 @@ projet : la carte des modules, le déroulé d'un pas, d'un épisode, d'une updat
 d'une validation et du curriculum, puis un glossaire, les tables des constantes, des
 récompenses et des observations, et enfin où modifier quoi sans casser les contrats.
 
-Le scénario de référence est `resources/settings/Scenarios/FlightControl3D_T6_Joint.json`.
+Le scénario de référence est `Examples/FlightControl3D/projects/T6/scenario.json`.
 Les choix de récompense et la procédure CI sont décrits dans
 [FlightControl3D T-6 : atterrissage et CI](PPOTrial_FlightControl3D_T6_Approach_CI.md).
 
@@ -34,7 +34,7 @@ flowchart LR
     subgraph Training["FlightControlLearner (Training/)"]
         policy[flight_policy] --> learner[flight_learner]
         rng[flight_rng_checkpoint] --> learner
-        atomic[flight_atomic_file] --> learner
+        atomic[PPOKit artifacts] --> learner
         learner --> store[flight_model_store]
         atomic --> store
         curriculum[flight_curriculum]
@@ -42,10 +42,9 @@ flowchart LR
     subgraph Runtime["FlightControlRuntime (Runtime/)"]
         tuning[flight_reward_tuning] --> session[flight_session]
         session --> headless[flight_headless]
-        session --> example[flight_example / flight_desktop]
     end
-    subgraph Renderer["FlightControlRenderer (Renderer/)"]
-        view[flight_view / profile / reward bars]
+    subgraph Visualiser["flight_visualiser (Visualiser/, ppokit-viewer)"]
+        view[scène 3D / profil / panneaux]
     end
     JSBSimLib[(libJSBSim 1.3.3)] --> jsbsim
     RLtools[(RLtools)] --> learner
@@ -56,7 +55,7 @@ flowchart LR
     learner --> session
     store --> session
     curriculum --> session
-    session --> view
+    environment -. ligne de monde, UDP .-> view
 ```
 
 | Module | Fichiers | Ne fait pas |
@@ -64,8 +63,8 @@ flowchart LR
 | Core | types, configuration, géométrie, guidage, contact, récompenses, observation, départs, mission | aucun appel JSBSim, aucun réseau |
 | Simulator | adaptateur JSBSim, filtre de commande, boucle d'action, resets | aucune politique, aucune statistique |
 | Training | politique gaussienne, PPO + GAE (RLtools), checkpoints, BEST, curriculum | aucune physique, aucun ECS |
-| Runtime | session (entraînement, validation, inférence), runner headless, pont ECS desktop | aucune formule de récompense |
-| Renderer | scène 3D raylib et panneaux ImGui | ne modifie jamais la session |
+| Runtime | session (entraînement, validation, inférence), runner headless | aucune formule de récompense |
+| Visualiser | vue de ppokit-viewer : scène 3D, profil d'approche et panneaux, à partir de la ligne de monde (`Core/flight_world.hpp`) envoyée après chaque pas | ne modifie jamais la simulation |
 
 ## Flux d'un pas d'action
 
@@ -308,7 +307,7 @@ Toutes les valeurs sont dans [−1, 1]. `SignedLog(x, r, M) = sign(x)·log(1 + |
 
 | Je veux… | Où | Invariants et tests qui protègent la zone |
 |---|---|---|
-| Changer un poids de récompense | JSON `reward.weights` (ou panneau desktop) | `ValidateReward`, `reward_tests`, signature de contrat (warm start autorisé, BEST revalidé) |
+| Changer un poids de récompense | JSON `reward.weights` | `ValidateReward`, `reward_tests`, signature de contrat (warm start autorisé, BEST revalidé) |
 | Changer une formule de récompense | `Core/flight_reward.cpp` | **Change le modèle** : nouvelle `ContractVersion`, `reward_tests`, `simulator_tests` (ActionLevelPotential), golden trace |
 | Ajouter/retirer une observation | `Core/flight_observation.*` | **Change le contrat** : `ObservationSize`, checkpoint, `ContractVersion`, `core_tests`, golden trace |
 | Modifier le guidage | `Core/flight_guidance.cpp` | `core_tests` (AimPointOnRunway, ApproachDirection, FlareTrajectory), signature (mission) |
@@ -317,7 +316,7 @@ Toutes les valeurs sont dans [−1, 1]. `SignedLog(x, r, M) = sign(x)·log(1 + |
 | Toucher à l'adaptateur JSBSim | `Simulator/jsbsim_aircraft.cpp` | conventions d'unités/repères/signes, `simulator_tests`, golden trace |
 | Modifier PPO | `Training/flight_policy.hpp`, `Training/flight_learner.cpp` | `learner_tests` (gradients par différences finies, KL), format de checkpoint, golden trace |
 | Changer un journal ou un CSV | `Runtime/flight_session.cpp`, `Runtime/flight_headless.cpp` | parsés par `tools/flight/curriculum_ci.py` et la CI : `python -m unittest tools/flight/test_curriculum_ci.py` |
-| Changer l'affichage | `Renderer/` | lecture seule du `FlightSnapshot` ; `display_tests` (build desktop) |
+| Changer l'affichage | `Visualiser/flight_visualiser.cpp` | lecture seule de la ligne de monde ; `visualiser_tests` (build desktop) |
 
 Le test `FlightControl_golden_trace_tests` (`tests/golden_trace_tests.cpp`) calcule une
 empreinte FNV-1a 64 de tout le comportement (épisodes seedés, 7 canaux, frontières,

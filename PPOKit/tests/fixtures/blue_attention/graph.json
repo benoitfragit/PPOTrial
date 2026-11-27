@@ -1,0 +1,45 @@
+{
+  "schema": "ppokit.graph/2",
+  "actor": {
+    "nodes": {
+      "own":            { "type": "input", "from": "observation.own" },
+      "red":            { "type": "input", "from": "observation.red_tracks" },
+      "friends":        { "type": "input", "from": "observation.blue_tracks" },
+      "context":        { "type": "input", "from": "observation.patrol" },
+      "red_embed":      { "type": "entity_encoder", "width": 8, "activation": "tanh" },
+      "red_query":      { "type": "dense", "width": 8, "activation": "tanh" },
+      "red_attend":     { "type": "masked_attention" },
+      "red_mean":       { "type": "masked_pool", "mode": "mean" },
+      "red_max":        { "type": "masked_pool", "mode": "max" },
+      "friends_embed":  { "type": "entity_encoder", "width": 6, "activation": "tanh" },
+      "friends_query":  { "type": "dense", "width": 6, "activation": "tanh" },
+      "friends_attend": { "type": "masked_attention" },
+      "features":       { "type": "concat" },
+      "trunk":          { "type": "mlp", "layers": 2, "width": 64, "activation": "tanh" },
+      "policy":         { "type": "gaussian_head" }
+    },
+    "edges": [
+      ["red", "red_embed"], ["own", "red_query"],
+      ["red_query", "red_attend.query"], ["red_embed", "red_attend.set"],
+      ["red_embed", "red_mean"], ["red_embed", "red_max"],
+      ["friends", "friends_embed"], ["own", "friends_query"],
+      ["friends_query", "friends_attend.query"], ["friends_embed", "friends_attend.set"],
+      ["own", "features.in1"], ["context", "features.in2"], ["red_attend", "features.in3"],
+      ["red_mean", "features.in4"], ["red_max", "features.in5"], ["friends_attend", "features.in6"],
+      ["features", "trunk"], ["trunk", "policy"]
+    ]
+  },
+  "critic": {
+    "nodes": {
+      "own":   { "type": "input", "from": "critic.own" },
+      "mean":  { "type": "input", "from": "critic.team_mean" },
+      "max":   { "type": "input", "from": "critic.team_max" },
+      "all":   { "type": "concat" },
+      "trunk": { "type": "mlp", "layers": 2, "width": 32, "activation": "relu" },
+      "value": { "type": "value" }
+    },
+    "edges": [
+      ["own", "all.in1"], ["mean", "all.in2"], ["max", "all.in3"], ["all", "trunk"], ["trunk", "value"]
+    ]
+  }
+}

@@ -20,6 +20,9 @@
 #pragma once
 
 #include "flight_config.hpp"
+
+#include "ppokit/runtime/promotion_window.hpp"
+
 #include <filesystem>
 #include <optional>
 
@@ -55,12 +58,12 @@ public:
     /** @brief Stops recorded in the current window. */
     std::size_t WindowStops() const noexcept
     {
-        return stops_;
+        return window_.Successes();
     }
     /** @brief Airborne episodes recorded in the current window. */
     std::size_t WindowEpisodes() const noexcept
     {
-        return episodes_;
+        return window_.Episodes();
     }
     /**
      * @brief Records the outcome of an airborne training episode.
@@ -70,12 +73,18 @@ public:
     bool Record(bool stopped) noexcept;
     /** @brief Restores a saved level, clamped to the configured levels, with an empty window. */
     void Restore(std::size_t level) noexcept;
+    /**
+     * @brief Resumes a training run where it was saved: its level and its current window.
+     * @throws std::invalid_argument for a level beyond the configured ones or a window with
+     *         more stops than episodes.
+     */
+    void Resume(std::size_t level, std::size_t windowEpisodes, std::size_t windowStops);
 
 private:
     CurriculumSettings settings_;
     std::size_t level_{};
-    std::size_t episodes_{};
-    std::size_t stops_{};
+    /** @brief Episodes of the current level and their stops (PPOKit's promotion rule). */
+    ppokit::runtime::PromotionWindow window_;
 };
 
 /**

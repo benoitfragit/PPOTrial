@@ -5,6 +5,9 @@
  * Read next: flight_curriculum.hpp.
  */
 #include "flight_curriculum.hpp"
+
+#include "ppokit/artifacts/atomic_file.hpp"
+
 #include <algorithm>
 #include <fstream>
 #include <stdexcept>
@@ -32,33 +35,29 @@ bool FlightCurriculum::Record(bool stopped) noexcept
     {
         return false;
     }
-    ++episodes_;
-    if (stopped)
-    {
-        ++stops_;
-    }
-    if (episodes_ < settings_.windowEpisodes)
-    {
-        return false;
-    }
-    double const rate = static_cast<double>(stops_) / static_cast<double>(episodes_);
-    bool const promoted = rate >= settings_.promotionSuccessRate;
+    bool const promoted = window_.Record(stopped, settings_.windowEpisodes, settings_.promotionSuccessRate);
     if (promoted)
     {
         ++level_;
     }
-    // Each decision starts a fresh window, so a promotion is judged only on
-    // episodes drawn from the level being left.
-    episodes_ = 0;
-    stops_ = 0;
     return promoted;
 }
 
 void FlightCurriculum::Restore(std::size_t level) noexcept
 {
     level_ = std::min(level, Levels() - 1);
-    episodes_ = 0;
-    stops_ = 0;
+    window_.Clear();
+}
+
+void FlightCurriculum::Resume(std::size_t level, std::size_t windowEpisodes, std::size_t windowStops)
+{
+    if (level >= Levels())
+    {
+        throw std::invalid_argument("FlightControl3D: curriculum level " + std::to_string(level) + " of "
+            + std::to_string(Levels()) + " levels");
+    }
+    window_.Restore(windowEpisodes, windowStops);
+    level_ = level;
 }
 
 std::optional<std::size_t> LoadCurriculumLevel(std::filesystem::path const& path)
@@ -79,22 +78,9 @@ std::optional<std::size_t> LoadCurriculumLevel(std::filesystem::path const& path
 
 void SaveCurriculumLevel(std::filesystem::path const& path, std::size_t level)
 {
-    if (!path.parent_path().empty())
-    {
-        std::filesystem::create_directories(path.parent_path());
-    }
-    auto temporary = path;
-    temporary += ".tmp";
-    {
-        std::ofstream output(temporary, std::ios::trunc);
-        output << level << '\n';
-        output.flush();
-        if (!output)
-        {
-            throw std::runtime_error("FlightControl3D: curriculum level write failed");
-        }
-    }
-    // A single rename replaces the level atomically; no backup is kept.
-    std::filesystem::rename(temporary, path);
+    // Written beside, then swapped in: a crash never leaves a half-written level, and no backup stays.
+    ppokit::artifacts::WriteFileAtomically(
+        path, [level](std::ostream& output) { output << level << '\n'; }, ppokit::artifacts::AtomicWriteOptions{},
+        "FlightControl3D: curriculum level");
 }
 } // namespace ppo::examples::flight

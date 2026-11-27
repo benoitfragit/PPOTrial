@@ -1,0 +1,22 @@
+{
+  "schema": "ppokit.train/1",
+  "ppo": {
+    "rollout_steps": 512,
+    "minibatch": 64,
+    "epochs": 4,
+    "actor_learning_rate": 0.0003,
+    "critic_learning_rate": 0.001,
+    "target_kl": 0.02,
+    "seed": 1
+  },
+  "probes": { "every": 10 },
+  "curriculum": {
+    "window": 50,
+    "promote_at": 0.8,
+    "rehearse": 0.1,
+    "stages": [
+      { "name": "near", "sample": { "start_distance": { "uniform": [0.2, 0.5] } } },
+      { "name": "far", "sample": { "start_distance": { "uniform": [0.5, 1.5] } } }
+    ]
+  }
+}

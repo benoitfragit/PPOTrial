@@ -3,8 +3,8 @@ project(AirspaceEvaluation LANGUAGES CXX)
 
 add_library(${PROJECT_NAME}
     STATIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/evaluator.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/evaluator.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/evaluation_campaign.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/evaluation_campaign.cpp)
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

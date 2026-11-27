@@ -1,8 +1,10 @@
 # Documentation PPOTrial
 
-Ce dossier sépare la documentation courante des sources Doxygen et des prompts.
-Les anciennes notes datées, les comptes rendus de PR et les versions remplacées
-ont été retirés : Git conserve leur historique.
+Ce dossier rassemble la documentation courante et les sources Doxygen. Git
+conserve l'historique des documents remplacés.
+
+Le dépôt présente trois démonstrateurs : **RLMission**, PPO en 2D ; **Blue
+MAPPO**, MA-PPO en 2D ; et **FlightControl3D**, PPO en 3D.
 
 ## Commencer ici
 
@@ -17,16 +19,14 @@ ont été retirés : Git conserve leur historique.
 - [MAPPO à effectifs variables](mappo-variable-teams.md)
 - [Séquenceur de patrouille à dix waypoints](architecture/blue-patrol-waypoint-sequencer.md)
 - [Curriculum MAPPO V3 et observation V10](blue-mappo-v3.md)
-- [Monde dédié à l'évaluation MAPPO](mappo-evaluation-world-architecture.md)
+- [Conception PPOKit : framework commun aux trois exemples, backend rl_tools, codegen et studio](architecture/ppokit-framework-design.md)
 - [Contrats génériques des agents](agent-contracts.md)
 - [Noyau RL générique](generic-rl-core.md)
 - [Entités partagées du monde](shared-world-entities.md)
-- [Catalogue des exemples](example-catalog.md)
 
 ## Exploitation
 
 - [Entraînement MAPPO distant](remote-mappo-training.md)
-- [Prompt d'implémentation des zones rouges et équipes P/N](prompts/red-zones-and-p-vs-n.md)
 
 ## Référence Doxygen
 

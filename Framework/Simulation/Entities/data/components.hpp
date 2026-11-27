@@ -9,13 +9,13 @@
 #pragma once
 
 #include <array>
+#include <random>
 #include <string>
 #include <vector>
 
 #include "entt/entt.hpp"
 
 #include "entitytypes.hpp"
-#include "ppo/core/evaluator_state.hpp"
 
 namespace ppo::model {
 
@@ -36,6 +36,16 @@ struct sEnvironmentState
     * @brief Fixed simulation time step in seconds.
     */
     float m_dt{ 0.02F };
+};
+
+/**
+* @brief The engine the entity initializers draw from, in the registry context.
+* @details See InitializationEngine (utils.hpp): from the system's entropy unless the
+* world's caller seeds it.
+*/
+struct sInitializationRandom
+{
+    std::mt19937_64 m_engine{};
 };
 
 /**

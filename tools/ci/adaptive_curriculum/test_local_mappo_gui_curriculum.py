@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import local_mappo_gui_curriculum as local  # noqa: E402
+import blue_checkpoint  # noqa: E402
+import blue_checkpoint_fixtures as fixtures  # noqa: E402
 
 
 class LocalMappoGuiCurriculumTests(unittest.TestCase):
@@ -141,17 +143,20 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             actor = Path(directory) / "source-v10.txt"
             training = Path(directory) / "source-v7.txt"
-            actor.write_text(
-                "BLUE_TEAM_MAPPO_V10 10 10 UNIFIED_PHYSICAL_GUIDANCE_V1\n",
-                encoding="utf-8")
-            training.write_text(
-                "BLUE_TEAM_TRAINING_V7 7 10 UNIFIED_PHYSICAL_GUIDANCE_V1\n"
-                "UPDATES 2590\n", encoding="utf-8")
+            actor.write_text(fixtures.former_policy(), encoding="utf-8")
+            training.write_text(fixtures.former_training(2590), encoding="utf-8")
             self.assertEqual(local._validate_checkpoint_pair(
                 2590, actor, training, require_prod_match=False), 2590)
             with self.assertRaisesRegex(ValueError, "Expected source update"):
                 local._validate_checkpoint_pair(
                     1790, actor, training, require_prod_match=False)
+            actor.write_text(fixtures.policy(), encoding="utf-8")
+            training.write_text(fixtures.training(2600), encoding="utf-8")
+            self.assertEqual(local._validate_checkpoint_pair(
+                2600, actor, training, require_prod_match=False), 2600)
+            with self.assertRaisesRegex(ValueError, "not a compatible"):
+                local._validate_checkpoint_pair(
+                    2600, training, actor, require_prod_match=False)
 
     def test_explicit_source_needs_an_evaluated_matching_best_manifest(self) -> None:
         import hashlib
@@ -161,12 +166,8 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
             gate.mkdir(parents=True)
             actor = gate / local.champion.ACTOR_NAME
             training = gate / local.champion.TRAINING_NAME
-            actor.write_text(
-                "BLUE_TEAM_MAPPO_V10 10 10 UNIFIED_PHYSICAL_GUIDANCE_V1\n",
-                encoding="utf-8")
-            training.write_text(
-                "BLUE_TEAM_TRAINING_V7 7 10 UNIFIED_PHYSICAL_GUIDANCE_V1\n"
-                "UPDATES 2590\n", encoding="utf-8")
+            actor.write_text(fixtures.policy(), encoding="utf-8")
+            training.write_text(fixtures.training(2590), encoding="utf-8")
             with self.assertRaises((ValueError, FileNotFoundError)):
                 local.validate_evaluated_best_source(actor, training)
             manifest = {
@@ -187,15 +188,36 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
             training.write_text(training.read_text() + "MIXED EPOCH\n")
             with self.assertRaisesRegex(ValueError, "checksum mismatch"):
                 local.validate_evaluated_best_source(actor, training)
-            training.write_text(
-                "BLUE_TEAM_TRAINING_V7 7 10 UNIFIED_PHYSICAL_GUIDANCE_V1\n"
-                "UPDATES 2590\n", encoding="utf-8")
+            training.write_text(fixtures.training(2590), encoding="utf-8")
             manifest["evaluatedForGate"] = False
             manifest["successPercent"] = None
             manifest["score"] = None
             (gate / "champion.json").write_text(json.dumps(manifest),
                                                 encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "evaluated BEST"):
+                local.validate_evaluated_best_source(actor, training)
+
+    def test_explicit_source_may_be_a_former_champion_of_an_earlier_run(self) -> None:
+        import hashlib
+        import json
+        with tempfile.TemporaryDirectory() as directory:
+            gate = Path(directory) / "best" / "2v2"
+            gate.mkdir(parents=True)
+            actor = gate / blue_checkpoint.FORMER_POLICY_NAME
+            training = gate / blue_checkpoint.FORMER_TRAINING_NAME
+            actor.write_text(fixtures.former_policy(2, 2), encoding="utf-8")
+            training.write_text(fixtures.former_training(2590, 2, 2), encoding="utf-8")
+            (gate / "champion.json").write_text(json.dumps({
+                "version": 1, "gate": "2v2", "originGate": "2v1",
+                "evaluatedForGate": True, "updates": 2590,
+                "successPercent": 95.0, "score": 60.0,
+                "sha256": {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                           for path in (actor, training)}}), encoding="utf-8")
+            self.assertEqual(
+                local.validate_evaluated_best_source(actor, training)["updates"], 2590)
+            # Once a new pair is there, it is the one champion.read validates.
+            (gate / local.champion.ACTOR_NAME).write_text(fixtures.policy(), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "canonical"):
                 local.validate_evaluated_best_source(actor, training)
 
     def test_modern_dry_run_requires_a_source_or_saved_session(self) -> None:
@@ -232,14 +254,10 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
             live_training = root / "latest" / local.curriculum.LATEST.name
             live_actor.parent.mkdir(parents=True)
             def make_pair(label: str, updates: int) -> None:
-                live_actor.write_text(
-                    "BLUE_TEAM_MAPPO_V10 10 10 "
-                    f"UNIFIED_PHYSICAL_GUIDANCE_V1 {label}\n",
-                    encoding="utf-8")
-                live_training.write_text(
-                    "BLUE_TEAM_TRAINING_V7 7 10 "
-                    f"UNIFIED_PHYSICAL_GUIDANCE_V1 {label}\n"
-                    f"UPDATES {updates}\n", encoding="utf-8")
+                live_actor.write_text(fixtures.policy(body=f"{label}\n"),
+                                      encoding="utf-8")
+                live_training.write_text(fixtures.training(updates, body=f"{label}\n"),
+                                         encoding="utf-8")
             with patch.object(local, "LATEST_ACTOR", live_actor), (
                     patch.object(local.curriculum, "LATEST", live_training)):
                 first = root / "first"
@@ -258,6 +276,15 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
                 self.assertEqual(local.curriculum.read_updates(live_training), 202)
                 with self.assertRaisesRegex(ValueError, "mismatch"):
                     local._activate_session_checkpoint(first, 202)
+                # A session saved before the PPOKit artifacts: former names.
+                stored = first / local.SESSION_CHECKPOINT
+                (stored / live_actor.name).rename(
+                    stored / blue_checkpoint.FORMER_POLICY_NAME)
+                (stored / live_training.name).rename(
+                    stored / blue_checkpoint.FORMER_TRAINING_NAME)
+                local._activate_session_checkpoint(first, 101)
+                self.assertIn("first", live_actor.read_text())
+                self.assertEqual(local.curriculum.read_updates(live_training), 101)
 
     def test_explicit_source_transaction_rolls_back_late_failure(self) -> None:
         from unittest.mock import patch
@@ -304,12 +331,8 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
             live_actor = root / "latest" / local.LATEST_ACTOR.name
             live_training = root / "latest" / local.curriculum.LATEST.name
             live_actor.parent.mkdir(parents=True)
-            live_actor.write_text(
-                "BLUE_TEAM_MAPPO_V10 10 10 UNIFIED_PHYSICAL_GUIDANCE_V1\n",
-                encoding="utf-8")
-            live_training.write_text(
-                "BLUE_TEAM_TRAINING_V7 7 10 UNIFIED_PHYSICAL_GUIDANCE_V1\n"
-                "UPDATES 4\n", encoding="utf-8")
+            live_actor.write_text(fixtures.policy(), encoding="utf-8")
+            live_training.write_text(fixtures.training(4), encoding="utf-8")
             session = root / "session"
             session.mkdir()
             with patch.object(local, "LATEST_ACTOR", live_actor), (
@@ -341,23 +364,95 @@ class LocalMappoGuiCurriculumTests(unittest.TestCase):
                 with local._exclusive_training_lock():
                     pass
 
-    def test_gui_files_are_restored_after_a_visual_run(self) -> None:
-        self.assertIn(local.GUI_LAYOUT, local.PRESERVED_RUNTIME_FILES)
-        self.assertIn(local.RENDERER_SETTINGS,
-                      local.PRESERVED_RUNTIME_FILES)
+    def test_runtime_files_are_restored_after_a_visual_run(self) -> None:
+        self.assertIn(local.curriculum.TRAINING_FILE, local.PRESERVED_RUNTIME_FILES)
+        self.assertIn(local.curriculum.PROD, local.PRESERVED_RUNTIME_FILES)
         with tempfile.TemporaryDirectory() as directory:
-            layout = Path(directory) / "imgui.ini"
-            renderer = Path(directory) / "Renderer.json"
-            layout.write_bytes(b"original layout")
-            renderer.write_bytes(b"original renderer")
-            snapshot = local.FileSnapshot((layout, renderer))
+            training = Path(directory) / "blue_patrol_training.json"
+            created = Path(directory) / "prod.score"
+            training.write_bytes(b"original training")
+            snapshot = local.FileSnapshot((training, created))
 
-            layout.write_bytes(b"runtime layout")
-            renderer.write_bytes(b"runtime renderer")
+            training.write_bytes(b"runtime training")
+            created.write_bytes(b"runtime score")
             snapshot.restore()
 
-            self.assertEqual(layout.read_bytes(), b"original layout")
-            self.assertEqual(renderer.read_bytes(), b"original renderer")
+            self.assertEqual(training.read_bytes(), b"original training")
+            self.assertFalse(created.exists())
+
+
+class LocalPpokitRunTests(unittest.TestCase):
+    """A local block is the CI's block, watched in ppokit-viewer."""
+
+    def test_block_is_the_ci_block_and_completes_at_its_target(self) -> None:
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            log = root / "block" / "training.log"
+            combined = root / "training.log"
+            calls = []
+
+            def ci_block(binary, stage, seconds, log_path):
+                calls.append((binary, stage, seconds, log_path))
+                log_path.write_text("update 10/10\n", encoding="utf-8")
+            stage = {"id": "2v1", "blue": 2, "red": 1}
+            with patch.object(local.curriculum, "run_stage", side_effect=ci_block), (
+                    patch.object(local.curriculum, "read_updates", return_value=10)):
+                self.assertTrue(local._run_block(Path("ppokit-run"), stage, 10, 300, log, combined))
+                self.assertFalse(local._run_block(Path("ppokit-run"), stage, 20, 300, log, combined))
+            self.assertEqual(calls[0], (Path("ppokit-run"), stage, 300, log))
+            self.assertEqual(combined.read_text(encoding="utf-8"), "update 10/10\n" * 2)
+
+            def failure(binary, stage, seconds, log_path):
+                log_path.write_text("crash\n", encoding="utf-8")
+                raise RuntimeError("Curriculum stage 2v1 incomplete: process_error")
+            with patch.object(local.curriculum, "run_stage", side_effect=failure):
+                with self.assertRaisesRegex(RuntimeError, "process_error"):
+                    local._run_block(Path("ppokit-run"), stage, 10, 300, log, combined)
+            self.assertTrue(combined.read_text(encoding="utf-8").endswith("crash\n"))
+
+    def test_viewer_and_visualiser_come_from_the_program_registry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "ppokit_programs_Release.txt"
+            self.assertEqual(local.find_programs(registry), (None, None))
+            registry.write_text("C:/b/PPOKit/Release/ppokit-run.exe\n"
+                                "C:/b/PPOKit/viewer/Release/ppokit-viewer.exe\n"
+                                "C:/b/Examples/BlueDefense/Release/blue_visualiser.dll\n",
+                                encoding="utf-8")
+            viewer, visualiser = local.find_programs(registry)
+            self.assertEqual(viewer.name, "ppokit-viewer.exe")
+            self.assertEqual(visualiser.name, "blue_visualiser.dll")
+        self.assertEqual(local.visualiser_port(), 47001)
+
+    def test_viewer_opens_for_the_session_and_closes_after(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock, patch
+        process = MagicMock()
+        process.poll.return_value = None
+        options = SimpleNamespace(viewer=True, programs=Path("registry"))
+        with patch.object(local, "find_programs",
+                          return_value=(Path("ppokit-viewer"), Path("blue_visualiser.so"))), (
+                patch.object(local.subprocess, "Popen", return_value=process)) as popen:
+            with local.watched(options):
+                popen.assert_called_once()
+                command = popen.call_args[0][0]
+                self.assertEqual(command, ["ppokit-viewer", "--view", "blue_visualiser.so",
+                                           "--port", "47001"])
+            process.terminate.assert_called_once()
+        # Not built, or not asked: training goes on without a window.
+        for found, viewer in (((None, None), True), ((Path("v"), Path("b")), False)):
+            with patch.object(local, "find_programs", return_value=found), (
+                    patch.object(local.subprocess, "Popen")) as popen:
+                with local.watched(SimpleNamespace(viewer=viewer, programs=Path("r"))):
+                    pass
+                popen.assert_not_called()
+
+    def test_cli_defaults_to_ppokit_run_and_the_viewer(self) -> None:
+        options = local.parse_args([])
+        self.assertTrue(str(options.binary).replace("\\", "/").endswith(
+            "build/release/PPOKit/Release/ppokit-run.exe"))
+        self.assertTrue(options.viewer)
+        self.assertFalse(local.parse_args(["--no-viewer"]).viewer)
 
 
 if __name__ == "__main__":

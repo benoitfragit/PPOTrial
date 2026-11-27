@@ -1,8 +1,9 @@
 # MAPPO defender teams: architecture and migration
 
 This document describes the generalized Blue P/N learner introduced on 2026-10-29.
-`blue-defense` trains it and `blue-defense-inference` runs the promoted actor
-on the exact same P/N scene. The inference runner owns only actor inference
+`ppokit-run train` on the BluePatrol project trains it and `ppokit-run play`
+with `checkpoints/prod/policy.ppokit` runs the promoted actor on the exact same
+P/N scene. The inference runner owns only actor inference
 state: it cannot collect rollouts, optimize, save, or start an evaluation.
 The historical two-blue controller has been removed; only compatible V4/V7
 checkpoint import readers remain to migrate existing parameters once. Red
@@ -86,9 +87,10 @@ verified instead of inferring convergence from motion alone.
 - **Inference actor**: V10 keeps the 128-wide parameter dimensions, but uses
   the fixed-waypoint guidance semantics. V9 and older weights are rejected;
   V10 requires a fresh training run.
-- **Full generalized training state**: V7
-  (`BLUE_TEAM_TRAINING_V7`) contains the 470-input/256-wide critic and requires
-  the waypoint-guidance observation contract V10.
+- **Full generalized training state**: the PPOKit training artifact
+  (`latest.ppokit`; formerly V7, `BLUE_TEAM_TRAINING_V7`, still readable)
+  contains the 470-input/256-wide critic and requires the waypoint-guidance
+  observation contract V10.
   Same architecture can resume across different P/N episode counts.
 - **Historical states**: archived files remain untouched, but are not valid
   warm starts for the V10 observation semantics. Incompatible or malformed

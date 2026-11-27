@@ -12,13 +12,12 @@ import unittest
 from pathlib import Path
 
 import branch_checkpoint_seed as branch
+import blue_checkpoint_fixtures as fixtures
 import dispatch_next_gate as dispatcher
 import rehearsal_profiles as profiles
 
 
 ROOT = Path(__file__).resolve().parents[3]
-ACTOR = "BLUE_TEAM_MAPPO_V10 10 10 295 UNIFIED_PHYSICAL_GUIDANCE_V1\n"
-TRAINING = "BLUE_TEAM_TRAINING_V7 7 10 295 UNIFIED_PHYSICAL_GUIDANCE_V1\n"
 HASHES = {"latestActor": "a" * 64, "latestTraining": "b" * 64,
           "prodActor": "c" * 64}
 
@@ -33,10 +32,10 @@ class BranchCheckpointSeedTests(unittest.TestCase):
         self.actor = self.root / "latest" / branch.ACTOR_NAME
         self.training = self.root / "latest" / branch.TRAINING_NAME
         self.prod = self.root / "prod" / branch.ACTOR_NAME
-        self.actor.write_text(ACTOR + "actor weights\n", encoding="utf-8")
-        self.training.write_text(TRAINING + "UPDATES 1791\noptimizer\n",
+        self.actor.write_text(fixtures.policy(body="actor weights\n"), encoding="utf-8")
+        self.training.write_text(fixtures.training(1791, body="optimizer\n"),
                                  encoding="utf-8")
-        self.prod.write_text(ACTOR + "promoted weights\n", encoding="utf-8")
+        self.prod.write_text(fixtures.policy(body="promoted weights\n"), encoding="utf-8")
 
     def test_accepts_distinct_prod_and_complete_latest_seed(self) -> None:
         result = branch.validate_branch_checkpoints(self.root)
@@ -54,6 +53,11 @@ class BranchCheckpointSeedTests(unittest.TestCase):
         self.assertIsNone(provenance["sourceRunId"])
         self.assertEqual(provenance["sourceBranchSha"], "1" * 40)
 
+    def test_former_formats_under_the_new_names_are_accepted(self) -> None:
+        self.actor.write_text(fixtures.former_policy(body="actor weights\n"))
+        self.training.write_text(fixtures.former_training(1800))
+        self.assertEqual(branch.validate_branch_checkpoints(self.root)["updates"], 1800)
+
     def test_missing_prod_fails_closed(self) -> None:
         self.prod.unlink()
         with self.assertRaisesRegex(ValueError, "Missing or empty"):
@@ -70,13 +74,16 @@ class BranchCheckpointSeedTests(unittest.TestCase):
             branch.validate_branch_checkpoints(self.root)
 
     def test_zero_completed_updates_fails_closed(self) -> None:
-        self.training.write_text(TRAINING + "UPDATES 0\n")
+        self.training.write_text(fixtures.training(0))
         with self.assertRaisesRegex(ValueError, "no completed PPO"):
             branch.validate_branch_checkpoints(self.root)
 
     def test_mismatched_prod_architecture_fails_closed(self) -> None:
-        self.prod.write_text(ACTOR.replace("295", "296"))
+        self.prod.write_text(fixtures.policy(2, 2))
         with self.assertRaisesRegex(ValueError, "architectures differ"):
+            branch.validate_branch_checkpoints(self.root)
+        self.prod.write_text(fixtures.former_policy().replace(" 295 ", " 296 "))
+        with self.assertRaisesRegex(ValueError, "Incompatible"):
             branch.validate_branch_checkpoints(self.root)
 
     def test_invalid_provenance_fails_closed(self) -> None:
@@ -140,16 +147,17 @@ class BranchCheckpointSeedTests(unittest.TestCase):
         compile(script, "<branch-bootstrap>", "exec")
         with tempfile.TemporaryDirectory() as folder:
             sandbox = Path(folder)
-            model = sandbox / "resources/model/BluePatrol"
+            model = sandbox / "Examples/BlueDefense/projects/BluePatrol/checkpoints"
             (model / "latest").mkdir(parents=True)
             (model / "prod").mkdir()
             actor = model / "latest" / branch.ACTOR_NAME
             training = model / "latest" / branch.TRAINING_NAME
             prod = model / "prod" / branch.ACTOR_NAME
-            actor.write_text(ACTOR + "actor weights\n", encoding="utf-8")
-            training.write_text(TRAINING + "UPDATES 1791\noptimizer\n",
+            actor.write_text(fixtures.policy(body="actor weights\n"), encoding="utf-8")
+            training.write_text(fixtures.training(1791, body="optimizer\n"),
                                 encoding="utf-8")
-            prod.write_text(ACTOR + "production weights\n", encoding="utf-8")
+            prod.write_text(fixtures.policy(body="production weights\n"),
+                            encoding="utf-8")
             source_bytes = actor.read_bytes()
             production_bytes = prod.read_bytes()
             gates = sandbox / "tools/ci/adaptive_curriculum/gates.json"

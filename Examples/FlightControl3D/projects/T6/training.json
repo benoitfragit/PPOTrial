@@ -1,0 +1,19 @@
+{
+  "schema": "ppokit.train/1",
+  "ppo": {
+    "gamma": 0.999,
+    "lambda": 0.98,
+    "rollout_steps": 32768,
+    "minibatch": 4096,
+    "epochs": 4,
+    "actor_learning_rate": 0.0003,
+    "critic_learning_rate": 0.0003,
+    "clip": 0.2,
+    "target_kl": 0.02,
+    "entropy_coefficient": 0.002,
+    "initial_log_std": -2.0,
+    "seed": 42,
+    "minimum_log_std": -3.5,
+    "maximum_log_std": -1.0
+  }
+}

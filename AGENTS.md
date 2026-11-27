@@ -76,9 +76,9 @@ repository. Adapted from the MFDStudio AGENTS.md engineering conventions.
 - The only x64 Debug build directory is `build/debug`.
 - The only x64 Release build directory is `build/release`.
 - Never configure or compile x64 artifacts in another directory. Reuse these
-  destinations for every incremental build so root shortcuts stay stable.
-- The root Debug shortcut targets `build/debug/Main/Debug/PPO.exe`; the root
-  Release shortcut targets `build/release/Main/Release/PPO.exe`.
+  destinations for every incremental build so the root launchers (`.bat`) stay
+  valid: they run the Release programs of `build/release` (ppokit-studio,
+  ppokit-run, ppokit-viewer).
 - Do not relocate an existing build merely to apply this convention. State any
   unverified configuration instead of creating a temporary x64 build tree.
 

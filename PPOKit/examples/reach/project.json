@@ -1,0 +1,11 @@
+{
+  "schema": "ppokit.project/1",
+  "name": "reach",
+  "controlProtocol": "udp/1",
+  "program": {
+    "executable": "ppokit_reach",
+    "train": ["train", "--project", "{project}"],
+    "evaluate": ["eval", "--project", "{project}"],
+    "inference": ["play", "--project", "{project}"]
+  }
+}

@@ -13,6 +13,7 @@
 #include <rl_tools/nn/operations_cpu_mux.h>
 #include <rl_tools/nn_models/mlp_unconditional_stddev/operations_generic.h>
 
+#include <cstdint>
 #include <random>
 #include <type_traits>
 
@@ -144,7 +145,19 @@ namespace ppo::examples::bluedefense::defenders {
 namespace rlt = rl_tools;
 using Device = rlt::devices::DEVICE_FACTORY<>;
 using Index = typename Device::index_t;
-using Engine = decltype(rlt::random::default_engine(typename Device::SPEC::RANDOM{}));
+/**
+ * @brief Sampling engine of the Blue learner: std::mt19937 on every platform.
+ * @details rl_tools' default engine is std::default_random_engine, which is std::mt19937 with
+ * MSVC but another engine with libstdc++: checkpoints could not move between Windows and
+ * Linux. MakePatrolEngine seeds it as rl_tools did (seed + 1), so Windows runs are unchanged.
+ */
+using Engine = std::mt19937;
+
+/** @brief The learner's engine for `seed`, seeded as rl_tools' default engine (seed + 1). */
+inline Engine MakePatrolEngine(std::uint32_t seed)
+{
+    return Engine(seed + 1U);
+}
 using Environment = rlt::rl::environments::BluePatrol<float, Index>;
 
 /** @brief Déclare le type PPOParameters, utilisé par Implémentation des calculs et contrats d'entraînement patrol rltools. */

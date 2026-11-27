@@ -1,15 +1,15 @@
 /** @file
- * @brief Exercises leader loss through the real ECS training/inference controller.
+ * @brief Exercises leader loss through the real ECS controller, driven as ppokit-run drives
+ *        it (PrepareExternalStep, the actions in the exchange, the world's step).
  */
 #include "generalized_patrol_team_agent.hpp"
 #include "initializer.hpp"
 #include "components.hpp"
 #include "sharedworldcomponents.hpp"
 
-#include <chrono>
 #include <cmath>
-#include <filesystem>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 
@@ -18,24 +18,33 @@ namespace scenario = ppo::examples::bluedefense;
 namespace model = ppo::model;
 namespace {
 
-/** @brief Owns only disposable test checkpoints, never latest or prod. */
-struct Checkpoints final
-{
-    std::filesystem::path directory = std::filesystem::temp_directory_path()
-        / ("PPOTrial_leader_relief_" + std::to_string(
-            std::chrono::steady_clock::now().time_since_epoch().count()));
-    Checkpoints() { std::filesystem::create_directory(directory); }
-    ~Checkpoints()
-    {
-        std::error_code error;
-        std::filesystem::remove_all(directory, error);
-    }
-};
-
 void Require(bool const condition, char const* const message)
 {
     if (!condition)
         throw std::runtime_error(message);
+}
+
+/** @brief Publishes the team's observations and writes a finite action for every slot. */
+void ActOnce(blue::GeneralizedPatrolMappoAgent& agent)
+{
+    agent.PrepareExternalStep();
+    for (auto& action : agent.Exchange().actions)
+        action = {0.25F, -0.5F};
+    agent.ChooseAction();
+}
+
+/** @brief Whether the published observations of the available slots are finite. */
+bool FiniteObservations(blue::GeneralizedPatrolMappoAgent const& agent, std::size_t const count)
+{
+    for (std::size_t index = 0U; index < count; ++index)
+    {
+        if (!agent.Exchange().available[index])
+            continue;
+        for (float const value : agent.Exchange().observations[index].values)
+            if (!std::isfinite(value))
+                return false;
+    }
+    return true;
 }
 
 /** @brief Makes a minimal finite ECS mobile controlled by the real actor. */
@@ -53,9 +62,7 @@ std::unique_ptr<model::BaseEntity> Mobile(entt::registry& registry,
 }
 
 /** @brief Loss before delayed spawn and in combat, with repeated promotions. */
-void RunCase(std::size_t const count, std::size_t const redCount,
-    bool const activeRed, blue::GeneralizedPatrolExecutionMode const mode,
-    Checkpoints const& checkpoints, std::filesystem::path const& actor)
+void RunCase(std::size_t const count, std::size_t const redCount, bool const activeRed)
 {
     entt::registry registry;
     auto& context = registry.ctx().emplace<scenario::InitializerContext>();
@@ -76,13 +83,12 @@ void RunCase(std::size_t const count, std::size_t const redCount,
     attackers[0] = red.get();
     auto objective = Mobile(registry, -10000.F, false);
     blue::GeneralizedPatrolMappoAgent agent{guards, count, attackers, redCount,
-        *objective, {}, {}, mode, checkpoints.directory / "latest.txt",
-        checkpoints.directory / "training.txt", actor};
+        *objective, {}, {}};
     agent.Init();
     std::size_t visibilitySteps = 0U;
     if (redCount != 0U && !activeRed)
     {
-        agent.ChooseAction();
+        ActOnce(agent);
         Require(context.patrolReferenceOverlay.Visible(),
             "configured but inactive Red hid patrol references");
         auto [redState] = red->get<model::sEntityState>();
@@ -91,7 +97,7 @@ void RunCase(std::size_t const count, std::size_t const redCount,
             "Red activation retained visible references in the resolved snapshot");
         Require(context.patrolReferenceOverlay.m_references[0].m_valid,
             "render-only hiding changed policy guidance validity");
-        agent.ChooseAction();
+        ActOnce(agent);
         redState.m_destroyed = true;
         Require(!agent.SetNewState() && context.patrolReferenceOverlay.Visible(),
             "patrol references did not return after the active threat disappeared");
@@ -100,7 +106,7 @@ void RunCase(std::size_t const count, std::size_t const redCount,
     for (std::size_t loss = 0U; loss < count; ++loss)
     {
         std::size_t const oldLeader = context.blueTeamRoles->LeaderPhysicalIndex();
-        agent.ChooseAction();
+        ActOnce(agent);
         Require(context.patrolReferenceOverlay.Visible() == !activeRed,
             "patrol reference visibility disagrees with actual Red activity");
         auto [state] = guards[oldLeader]->get<model::sEntityState>();
@@ -120,31 +126,16 @@ void RunCase(std::size_t const count, std::size_t const redCount,
             "new leader guidance was not published");
         Require(context.patrolReferenceOverlay.Visible() == !activeRed,
             "leader relief retained stale patrol visibility");
-        agent.ChooseAction();
-        for (std::size_t index = 0U; index < count; ++index)
-        {
-            auto const [control] = guards[index]->get<model::sSNAControlState>();
-            Require(std::isfinite(control.m_rotSpeedCmd)
-                    && std::isfinite(control.m_accCmd), "nonfinite post-relief action");
-            auto const [body] = guards[index]->get<model::sEntityState>();
-            if (body.m_destroyed
-                && mode == blue::GeneralizedPatrolExecutionMode::ProductionInference)
-                Require(control.m_rotSpeedCmd == 0.F && control.m_accCmd == 0.F,
-                    "destroyed physical participant received an action");
-        }
+        ActOnce(agent);
+        Require(FiniteObservations(agent, count), "nonfinite post-relief observation");
         Require(!agent.SetNewState(), "post-relief step ended an ongoing mission");
-        auto const snapshot = agent.GetSnapshot();
-        Require(snapshot.m_common.m_completedEvaluations == 0U,
-            "relief unexpectedly started an evaluation");
-        Require(snapshot.m_common.m_step
-                == static_cast<long long>(visibilitySteps + 2U * (loss + 1U)),
+        Require(agent.EpisodeStep() == visibilitySteps + 2U * (loss + 1U),
             "relief reset or dropped the physical trajectory step");
     }
 }
 
 /** @brief The ECS reward must use live pre-loss kinematics, including the objective. */
-void NeutralizationCredit(Checkpoints const& checkpoints,
-    std::filesystem::path const& actor, float const distance, float const risk)
+void NeutralizationCredit(float const distance, float const risk)
 {
     entt::registry registry;
     auto& context = registry.ctx().emplace<scenario::InitializerContext>();
@@ -161,42 +152,73 @@ void NeutralizationCredit(Checkpoints const& checkpoints,
     guards[0] = guard.get();
     attackers[0] = red.get();
     blue::GeneralizedPatrolMappoAgent agent{guards, 1U, attackers, 1U,
-        *objective, {}, {}, blue::GeneralizedPatrolExecutionMode::Training,
-        checkpoints.directory / "latest.txt", checkpoints.directory / "training.txt", actor};
+        *objective, {}, {}};
+    blue::GeneralizedRewardValues weights{};
+    weights.fill(1.F); // The published channels are then the unweighted ones.
+    agent.SetRewardWeights(weights);
     agent.Init();
-    agent.ChooseAction();
+    ActOnce(agent);
     redState.m_destroyed = true;
     redState.m_x = 500000.F; // Post-loss data must not erase the pre-loss risk.
     redState.m_speed = -1.F;
     Require(agent.SetNewState(), "last neutralized Red did not end the mission");
-    auto const snapshot = agent.GetSnapshot();
-    Require(std::abs(snapshot.m_rewards[static_cast<std::size_t>(
+    // Shared channels: the single blue's are the team's.
+    auto const& channels = agent.Exchange().weightedChannels[0];
+    Require(std::abs(channels[static_cast<std::size_t>(
                 blue::GeneralizedRewardChannel::RedNeutralization)] - (1.F + risk))
             < 1.e-6F, "runtime neutralization did not use pre-loss objective risk");
-    Require(std::abs(snapshot.m_rewards[static_cast<std::size_t>(
+    Require(std::abs(channels[static_cast<std::size_t>(
                 blue::GeneralizedRewardChannel::ThreatContainment)] - risk)
             < 1.e-6F, "existing threat containment changed during neutralization");
 }
+
+/** @brief A live edit preserves the configured own-loss weight and rejects invalid edits atomically. */
+void LiveRewardWeights()
+{
+    entt::registry registry;
+    auto guard = Mobile(registry, 0.F, false);
+    auto objective = Mobile(registry, 10000.F, false);
+    std::array<model::BaseEntity*, 9U> guards{};
+    std::array<model::BaseEntity*, 10U> attackers{};
+    guards[0] = guard.get();
+    blue::GeneralizedPatrolMappoAgent agent{guards, 1U, attackers, 0U, *objective, {}, {}};
+    auto const own = static_cast<std::size_t>(blue::GeneralizedRewardChannel::OwnLoss);
+    auto const patrol = static_cast<std::size_t>(blue::GeneralizedRewardChannel::PatrolTracking);
+    auto weights = agent.RewardWeights();
+    Require(weights[own] == 24.F, "configured own-loss default changed");
+    weights[patrol] = 2.F;
+    agent.SetRewardWeights(weights);
+    Require(agent.RewardWeights()[own] == 24.F && agent.RewardWeights()[patrol] == 2.F,
+        "editing patrol must preserve the configured own-loss weight");
+    auto const accepted = agent.RewardWeights();
+    for (float invalid : {-1.F, 11.F, std::numeric_limits<float>::infinity(),
+             std::numeric_limits<float>::quiet_NaN()})
+    {
+        auto rejected = accepted;
+        rejected[patrol] = invalid;
+        bool failed = false;
+        try { agent.SetRewardWeights(rejected); }
+        catch (std::invalid_argument const&) { failed = true; }
+        Require(failed && agent.RewardWeights() == accepted, "invalid edit changed the active reward weights");
+    }
+}
+
 } // namespace
 
-int main(int argc, char** argv)
+int main()
 {
-    if (argc != 2)
-        return 2;
     try
     {
-        Checkpoints checkpoints;
-        NeutralizationCredit(checkpoints, argv[1], 120000.F, 0.F);
-        NeutralizationCredit(checkpoints, argv[1], 63333.333F, 0.5F);
-        NeutralizationCredit(checkpoints, argv[1], 9999.F, 1.F);
-        for (auto mode : {blue::GeneralizedPatrolExecutionMode::Training,
-                blue::GeneralizedPatrolExecutionMode::ProductionInference})
-            for (std::size_t count : {1U, 2U, 3U, 4U, 9U})
-            {
-                RunCase(count, 0U, false, mode, checkpoints, argv[1]);
-                RunCase(count, 1U, false, mode, checkpoints, argv[1]);
-                RunCase(count, 1U, true, mode, checkpoints, argv[1]);
-            }
+        LiveRewardWeights();
+        NeutralizationCredit(120000.F, 0.F);
+        NeutralizationCredit(63333.333F, 0.5F);
+        NeutralizationCredit(9999.F, 1.F);
+        for (std::size_t count : {1U, 2U, 3U, 4U, 9U})
+        {
+            RunCase(count, 0U, false);
+            RunCase(count, 1U, false);
+            RunCase(count, 1U, true);
+        }
     }
     catch (std::exception const& error)
     {

@@ -19,9 +19,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.ci.adaptive_curriculum import champion_checkpoints as champion  # noqa: E402
-
-ACTOR = "BLUE_TEAM_MAPPO_V10 10 10 295 UNIFIED_PHYSICAL_GUIDANCE_V1\n"
-TRAINING = "BLUE_TEAM_TRAINING_V7 7 10 295 UNIFIED_PHYSICAL_GUIDANCE_V1\n"
+from tools.ci import blue_checkpoint  # noqa: E402
+from tools.ci import blue_checkpoint_fixtures as fixtures  # noqa: E402
 
 
 class RestartCrossVariantTests(unittest.TestCase):
@@ -29,22 +28,23 @@ class RestartCrossVariantTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.workspace = Path(temporary.name)
-        self.root = self.workspace / "resources/model/BluePatrol"
+        self.root = self.workspace / "Examples/BlueDefense/projects/BluePatrol/checkpoints"
         latest = self.root / "latest"
         latest.mkdir(parents=True)
         (self.root / "prod").mkdir()
         self.actor = latest / champion.ACTOR_NAME
         self.training = latest / champion.TRAINING_NAME
         self.prod = self.root / "prod" / champion.ACTOR_NAME
-        self.actor.write_text(ACTOR + "later candidate\n", encoding="utf-8")
+        self.actor.write_text(fixtures.policy(body="later candidate\n"), encoding="utf-8")
         self.training.write_text(
-            TRAINING + "UPDATES 1910\nlater optimizer\n", encoding="utf-8")
-        self.prod.write_text(ACTOR + "production actor\n", encoding="utf-8")
+            fixtures.training(1910, body="later optimizer\n"), encoding="utf-8")
+        self.prod.write_text(fixtures.policy(body="production actor\n"), encoding="utf-8")
         self.original_prod = self.prod.read_bytes()
         self.source_best = self.root / "best/4v4"
         self.source_best.mkdir(parents=True)
-        self.best_actor = ACTOR.encode() + b"evaluated actor\n"
-        self.best_training = TRAINING.encode() + b"UPDATES 1900\nevaluated optimizer\n"
+        self.best_actor = fixtures.policy(body="evaluated actor\n").encode()
+        self.best_training = fixtures.training(
+            1900, body="evaluated optimizer\n").encode()
         (self.source_best / champion.ACTOR_NAME).write_bytes(self.best_actor)
         (self.source_best / champion.TRAINING_NAME).write_bytes(self.best_training)
         self.manifest = {
@@ -115,7 +115,7 @@ class RestartCrossVariantTests(unittest.TestCase):
         old_namespace = champion.ROOT
         try:
             os.chdir(self.workspace)
-            champion.ROOT = Path("resources/model/BluePatrol/best")
+            champion.ROOT = Path("Examples/BlueDefense/projects/BluePatrol/checkpoints/best")
             with (mock.patch.dict(os.environ, env),
                   mock.patch.object(subprocess, "check_output",
                                     side_effect=gh_api),
@@ -193,6 +193,38 @@ class RestartCrossVariantTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Missing mandatory champion pair"):
             self.bootstrap("randomized_no_zones")
         self.assertEqual(json.loads(self.progress.read_text()), self.source_state)
+
+    def test_artifact_of_an_earlier_run_keeps_working_under_the_new_names(self) -> None:
+        """The source run saved the former V10/V7 files and champion names."""
+        prod_score = b"BLUE_PATROL_GENERALIZED_EVALUATION_V1 4 4 61.5\n"
+        for path in (self.actor, self.training, self.prod):
+            path.unlink()
+        latest, prod = self.root / "latest", self.root / "prod"
+        (latest / blue_checkpoint.FORMER_POLICY_NAME).write_text(
+            fixtures.former_policy(body="later candidate\n"), encoding="utf-8")
+        (latest / blue_checkpoint.FORMER_TRAINING_NAME).write_text(
+            fixtures.former_training(1910), encoding="utf-8")
+        (prod / blue_checkpoint.FORMER_POLICY_NAME).write_bytes(self.original_prod)
+        (prod / (blue_checkpoint.FORMER_POLICY_NAME + ".score")).write_bytes(prod_score)
+        for name in (champion.ACTOR_NAME, champion.TRAINING_NAME):
+            (self.source_best / name).unlink()
+        self.best_actor = fixtures.former_policy(body="evaluated actor\n").encode()
+        self.best_training = fixtures.former_training(1900).encode()
+        (self.source_best / blue_checkpoint.FORMER_POLICY_NAME).write_bytes(self.best_actor)
+        (self.source_best / blue_checkpoint.FORMER_TRAINING_NAME).write_bytes(
+            self.best_training)
+        self.manifest["sha256"] = {
+            blue_checkpoint.FORMER_POLICY_NAME: hashlib.sha256(self.best_actor).hexdigest(),
+            blue_checkpoint.FORMER_TRAINING_NAME:
+                hashlib.sha256(self.best_training).hexdigest(),
+        }
+        self.write_manifest()
+        self.assert_new_campaign(
+            "randomized_no_zones", self.root / "best/objective-randomized/4v4")
+        self.assertEqual(sorted(p.name for p in latest.iterdir()),
+                         [champion.TRAINING_NAME, champion.ACTOR_NAME])
+        self.assertEqual((prod / "policy.ppokit.score").read_bytes(), prod_score)
+        self.assertFalse((prod / blue_checkpoint.FORMER_POLICY_NAME).exists())
 
     def test_same_variant_preserves_existing_certified_best(self) -> None:
         state = self.bootstrap("fixed_no_zones")

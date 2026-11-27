@@ -1,0 +1,26 @@
+{
+  "schema": "ppokit.models/1",
+  "policies": {
+    "HISTORICAL_BEST": {
+      "path": "references/pc7_best_610.ppokit",
+      "sha256": "74a7e2851672af08c8bfac8dd71c4a317c0b4948b1084d137ac69390afab4673",
+      "source": {
+        "commit": "dfeb2b43a857c35b79f575dd52184c199fc0dcb6",
+        "path": "flight_610_0b6a880567ae4791.txt",
+        "sha256": "5cc6337bdd215701c22f28536a796d6aaeb3a294a6083d101290d15587f1a2d4",
+        "update": 610,
+        "run": "https://github.com/benoitfragit/PPOTrial/actions/runs/45460292649",
+        "artifact_id": 14960752977,
+        "artifact_sha256": "1c1c99c63f33893847271d55c64f810b705f6770c4345695140eb8eda7190c60",
+        "converted_historical_sha256": "b3574df581a8ce89c6344d8817bf361f80a5ad5c3ac71bd9c50181c497e7293c",
+        "historical_contract": "pc7@8",
+        "evaluation_contract": "pc7@8-centreline1200"
+      },
+      "suite": "validation",
+      "environment_state": {
+        "schema": "flight.evaluation_level/1",
+        "level": 12
+      }
+    }
+  }
+}

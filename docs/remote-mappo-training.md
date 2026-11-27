@@ -2,61 +2,72 @@
 
 ## Architecture
 
-The existing `PPO.exe` now accepts a headless training mode, without adding
-a second executable or changing the red production `RLMission` agent.
+Blue MAPPO trains as the PPOKit project `Examples/BlueDefense/projects/BluePatrol`
+under `ppokit-run` (environment DLL `blue_environment`, team network DLL
+`blue_network`), without changing the red production `RLMission` agent. The
+former `PPO.exe` headless training mode has been removed.
 
 - Blue team: RLTools generalized shared MAPPO actor and centralized critic.
-- Red team: unchanged LibTorch `RLMission` production model and weights.
-- Simulator: the same ECS physics, world rules, observations, actions and
-  episode resets as the desktop.
-- UI: Raylib/ImGui is never initialized by `--no-gui`.
-- Toolchain: VS2022 x64 **Release**, `PPO_LIBTORCH_VARIANT=Release`.
-  `dependencies.cmake` pins LibTorch **2.9.1 +cpu**.
-
-Headless mode skips the desktop's 2 ms artificial delay and publishes ECS
-snapshots once per 256 iterations. This does not remove any simulator steps.
+- Red team: unchanged `RLMission` production weights (`policy.txt`, converted from LibTorch with identical actions).
+- Simulator: the BlueDefense ECS physics, world rules, observations, actions and
+  episode resets of the former desktop mode, now stepped only by the
+  environment DLL (the in-world execution modes were removed with `PPO.exe`;
+  `Examples/BlueDefense/tests/world_settings_tests.cpp` checks that the DLL's
+  world uses the time step and limits of the shared `Environment.json`).
+- UI: `ppokit-run` never opens a window. The world is watched, when wanted,
+  in a separate `ppokit-viewer` process fed over UDP by the project's
+  Visualiseur `blue_visualiser` (port 47001 in the project's `network.json`).
+- Toolchain: VS2022 x64 **Release**.
 
 ## Launch locally
 
 ```powershell
-cmake -S . -B build/release -G "Visual Studio 17 2022" -A x64 -DCMAKE_CONFIGURATION_TYPES=Release -DPPO_LIBTORCH_VARIANT=Release -DPPO_BUILD_DESKTOP=ON
-cmake --build build/release --config Release --target PPO --parallel 2
-& build/release/Main/Release/PPO.exe --no-gui --example blue-defense --max-seconds 14400
+cmake -S . -B build/release -G "Visual Studio 17 2022" -A x64 -DCMAKE_CONFIGURATION_TYPES=Release -DPPO_BUILD_DESKTOP=ON
+cmake --build build/release --config Release --target ppokit-run blue_environment blue_network blue_visualiser --parallel 2
+& build/release/PPOKit/Release/ppokit-run.exe train --project Examples/BlueDefense/projects/BluePatrol --until-update 4000 --max-seconds 14400
 ```
 
-Only `--example blue-defense` is accepted in headless training mode.
-`blue-defense-inference` is a desktop production run and never enters the
-headless learner monitor. Training stops at its time limit or when
-`maxUpdates` is reached, and returns an error when no resumable training-state
-checkpoint exists.
+`--max-seconds S` ends the training at the first update boundary after S
+seconds, as if it were the last update (campaigns included). Production
+inference is `ppokit-run play --project Examples/BlueDefense/projects/BluePatrol
+--policy checkpoints/prod/policy.ppokit --realtime`, watched with
+`ppokit-viewer --view <build>/Examples/BlueDefense/Release/blue_visualiser.dll --port 47001`;
+`ppokit-studio` launches the same commands from the project's `project.json`.
+The CI does not call `ppokit-run train` directly: `tools/ci/mappo_curriculum.py`
+runs it block by block (`--until-update`, `--save-every`, `--max-seconds`) and
+promotes PROD after each block as the former `PPO.exe` Training mode did.
 
 ## Visual local run-84 2v2 rehearsal
 
-For the run-84 investigation on Windows, double-click the repository-root
-launcher:
+For the run-84 investigation, build `ppokit-run`, `ppokit-viewer` and the Blue
+libraries (`blue_environment`, `blue_network`, `blue_visualiser`) in the fixed
+x64 Release tree, then run:
 
-```text
-Lancer_MAPPO_2v2_Balanced_GUI.bat
+```powershell
+py -3.12 tools/local_mappo_gui_curriculum.py --profile balanced_v1 --expected-source-updates 1790
 ```
 
-The launcher incrementally builds only the fixed x64 Release tree, validates
-the V10 actor and complete V7 optimizer checkpoint at update 1790, and opens
-the normal Raylib/ImGui Blue Defense view. It presses Play automatically and
-closes/reopens the window only at process-block boundaries, so every block uses
-the same scenario restart semantics as the progressive CI runner.
+It validates the V10 actor and complete V7 optimizer checkpoint at update 1790
+(the run-84 pair). The project's committed checkpoint is now at update 5250:
+the script stops unless `checkpoints/latest` holds the run-84 pair, or
+`--source-actor` and `--source-training` name an evaluated BEST pair. Each block is the CI's block
+(`ppokit-run train` on the BluePatrol project), so every block uses the same
+scenario restart semantics as the progressive CI runner. `ppokit-viewer` opens
+once for the session on the run's world (`blue_visualiser`, port read from the
+project's `network.json`); `--no-viewer` trains without it.
 
 The schedule directly calls the production `balanced_v1` selector. Each
 20-block cycle contains `1v0=3`, `2v0=4`, `1v1=2`, `2v1=3`, and `2v2=8`.
 Blocks stop at the next `checkpointEvery` evaluation boundary, exactly like
 the CI gate runner. The default wall-clock budget is 7200 seconds.
 
-Before the first update, the launcher copies the source actor, full optimizer
+Before the first update, the script copies the source actor, full optimizer
 and production actor into `build/local-mappo-gui/session-*/source-run84` and
 records SHA-256 digests. Stable progress is stored in
-`build/local-mappo-gui/state.json`. Closing the GUI stops the automatic loop;
-running the BAT again resumes the same incomplete rehearsal block. During any
-exit, `BluePatrol.json`, `BlueDefense.json`, the production actor, its score,
-`Renderer.json` and `imgui.ini` are restored byte-for-byte. `latest`
+`build/local-mappo-gui/state.json`. Interrupting the script (Ctrl+C) stops
+the loop; running it again resumes the same incomplete rehearsal block.
+During any exit, the project's `blue_patrol_training.json` and `scenario.json`,
+the production actor and its score are restored byte-for-byte. `latest`
 intentionally remains at the newest completed PPO update.
 
 Python 3.12 is required. A non-mutating preflight prints the next exact cycle
@@ -66,21 +77,15 @@ and update boundary:
 py -3.12 tools/local_mappo_gui_curriculum.py --dry-run
 ```
 
-For a short visual inspection, bypass the BAT after building and stop after a
-single completed block:
+For a short visual inspection, stop after a single completed block:
 
 ```powershell
 py -3.12 tools/local_mappo_gui_curriculum.py --max-blocks 1 --max-seconds 1800
 ```
 
-The C++ `--auto-run` option is restricted to an explicitly selected Blue
-Defense automatic mode. Unlike `--no-gui`, it keeps rendering and the normal
-desktop 2 ms simulation throttle; it is an investigation tool, not a throughput
-benchmark.
-
 ## Checkpoints
 
-`resources/settings/Training/BluePatrol.json` supports:
+`Examples/BlueDefense/projects/BluePatrol/blue_patrol_training.json` supports:
 
 - `training.rolloutSteps`: number of environment steps per PPO update
   (currently 2048).
@@ -91,12 +96,20 @@ benchmark.
 
 The learner writes these files at completed PPO-update boundaries:
 
-- `resources/model/BluePatrol/latest/blue_patrol_generalized_v10.txt`:
-  inference actor.
-- `resources/model/BluePatrol/latest/blue_patrol_generalized_training_v7.txt`:
-  **full training state**, using internal format `BLUE_TEAM_TRAINING_V7`.
-- `resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt`:
-  promoted actor only after successful evaluation, when present.
+- `Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/policy.ppokit`:
+  inference actor (PPOKit artifact, kind `policy`).
+- `Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/latest.ppokit`:
+  **full training state** (PPOKit artifact, kind `training`).
+- `Examples/BlueDefense/projects/BluePatrol/checkpoints/prod/policy.ppokit`:
+  promoted actor only after successful evaluation, when present (score in
+  `policy.ppokit.score`).
+
+Artifacts of earlier runs hold the former `blue_patrol_generalized_v10.txt`
+(`BLUE_TEAM_MAPPO_V10`) and `blue_patrol_generalized_training_v7.txt`
+(`BLUE_TEAM_TRAINING_V7`) files. The loaders still read that format by
+content; after restoring such an artifact the workflows move these files to
+the new names (`python tools/ci/blue_checkpoint.py adopt`), and BEST champions
+of earlier runs are read under their former names.
 
 Training-state serialization includes actor, critic, Adam moments,
 optimizer scalars, RNG and completed PPO updates. Partial in-progress rollout
@@ -105,15 +118,16 @@ is performed atomically at optimizer boundaries.
 
 ## GitHub Actions
 
-Use **Actions > MAPPO training (Windows Release) > Run workflow** once the
+Use **Actions > Blue Defense (Windows Release) > Run workflow** once the
 workflow file has been merged into the repository's default branch.
 
 Choose the scenario, `max_seconds`, and `save_every_updates`; optionally
 supply a previous workflow `resume_run_id` to restore the
 `blue-mappo-checkpoints` artifact before training.
 
-The workflow checks out the requested commit, downloads the same LibTorch
-release through CMake, compiles `PPO` in Release, verifies scenario startup,
+The workflow checks out the requested commit, compiles `ppokit-run` and the
+BlueDefense DLLs in Release (`-DPPO_BUILD_DESKTOP=OFF`), verifies the runtime
+with a one-episode `ppokit-run play` of the committed production actor,
 launches training and publishes downloadable artifacts. A fresh output
 checkpoint is required for a successful training job. Artifact retention is
 30 days; download useful states before expiry.
@@ -165,16 +179,17 @@ ID. This preserves all ten original GitHub Actions inputs (the platform permits
 no more than ten). A numeric ID continues the existing run-source behavior.
 Branch mode starts a fresh curriculum from the exact selected commit:
 
-- `resources/model/BluePatrol/latest/blue_patrol_generalized_v10.txt`:
-  the LATEST actor corresponding to the full V7 optimizer.
-- `resources/model/BluePatrol/latest/blue_patrol_generalized_training_v7.txt`:
+- `Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/policy.ppokit`:
+  the LATEST actor corresponding to the full training state.
+- `Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/latest.ppokit`:
   critic, Adam, RNG and PPO update counter; this is the actual training seed.
-- `resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt`:
+- `Examples/BlueDefense/projects/BluePatrol/checkpoints/prod/policy.ppokit`:
   separate production inference incumbent, preserved without treating its
   score as a curriculum-gate certification.
 
 All three files must be committed to the selected branch. The bootstrap checks
-semantic V10/V7 headers, actor architecture compatibility, positive optimizer
+the checkpoint contracts (observation 10, network sizes, guidance semantics),
+actor architecture compatibility, positive optimizer
 updates and SHA-256 provenance. Its checkpoint artifact records the commit and
 three file hashes, and carries an *unverified warm start* into the existing
 `Progressive Blue Defense (Windows Release)` action. Existing BEST checkpoints
@@ -210,8 +225,8 @@ is created and RLMission, physics, actions and rewards are not changed.
 
 ## Limitations and acceptance checks
 
-1. This is a Windows x64 headless **runtime**, not a graphics-free compile:
-   the existing desktop dependencies are still linked, though no window opens.
+1. The CI configures without the desktop programs (`PPO_BUILD_DESKTOP=OFF`):
+   it builds `ppokit-run` and the BlueDefense DLLs only, without graphics.
 2. The GitHub runner builds the project for each workflow run; the dependency
    download may dominate a cold first run.
 3. Checkpoint restore preserves optimizer state, but not an interrupted

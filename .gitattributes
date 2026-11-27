@@ -61,7 +61,6 @@
 #*.PDF   diff=astextplain
 #*.rtf   diff=astextplain
 #*.RTF   diff=astextplain
-/resources/model/FlightControl3D/t6texan2_joint_v2/latest/flight_policy.txt -text -diff
 
-# BEST manifests checksum the raw checkpoint bytes; never convert line endings.
-/resources/model/FlightControl3D/t6texan2_joint_v5/**/*.txt -text -diff
+# PPOKit artifacts are written and read byte for byte.
+*.ppokit -text

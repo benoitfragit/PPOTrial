@@ -8,28 +8,37 @@ pour un scénario figé à deux Bleus.
 
 ## Une scène, deux modes d'exécution
 
-| Exemple (sélecteur IHM / CLI) | Politique bleue | Scénario |
+La scène est le projet PPOKit `Examples/BlueDefense/projects/BluePatrol`
+(DLL d'environnement `blue_environment`, DLL réseau d'équipe `ppokit_graph_network`),
+exécuté par `ppokit-run`.
+
+| Commande | Politique bleue | Scénario |
 |---|---|---|
-| `blue-defense` | learner MAPPO `latest`, entraînement et évaluations périodiques | `Scenarios/BlueDefense.json` |
-| `blue-defense-inference` | acteur déterministe promu `prod`, sans entraînement ni évaluation | `Scenarios/BlueDefense.json` |
+| `ppokit-run train` | learner MAPPO `latest`, entraînement et évaluations périodiques | `scenario.json` du projet |
+| `ppokit-run play --model PROD` | acteur déterministe promu `prod`, sans entraînement ni évaluation | `scenario.json` du projet |
 
 Le JSON déclare `blueDefense.blueTeam.activeCount` et
 `blueDefense.redTeam.activeCount`. Le loader instancie dans les deux modes
 `blue_1..blue_P` et `red_1..red_N` à partir de templates
 `blue_template` et `red_template`. Le nombre de membres n'est
-pas codé en dur dans l'IHM ni dans les classes du contrôleur.
+pas codé en dur dans la vue ni dans les classes du contrôleur.
 
 ### Exécution
 
 ```sh
-PPO.exe --example blue-defense
-PPO.exe --example blue-defense-inference
-PPO.exe --example blue-defense --check-example
+ppokit-run train --project Examples/BlueDefense/projects/BluePatrol --updates 100
+ppokit-run eval  --project Examples/BlueDefense/projects/BluePatrol --model PROD
+ppokit-run play  --project Examples/BlueDefense/projects/BluePatrol --model PROD --realtime --step-seconds 0.004
+ppokit-viewer --view <build>/Examples/BlueDefense/Release/blue_visualiser.dll --port 47001
 ```
 
-Sans option, le sélecteur graphique d'exemples propose les deux modes
-et l'exemple Airspace. Ses cartes proviennent de `ExampleCatalog`,
-sans logique spéciale pour une équipe de deux.
+`ppokit-studio Examples/BlueDefense/projects/BluePatrol` ouvre le projet ; ses
+boutons « Train », « Evaluate » et « Inference » lancent les commandes de
+`project.json`, et l'inférence ouvre ppokit-viewer sur le monde. Les anciens
+modes `blue-defense` et `blue-defense-inference` de PPO.exe ont été supprimés
+avec lui : `Examples/BlueDefense/Scenario/bluedefenseexample.cpp` ne fournit
+plus que `LoadExternalScenario`, qui charge le monde de la DLL
+`blue_environment`.
 
 ## MAPPO et récompenses
 
@@ -42,46 +51,35 @@ sans logique spéciale pour une équipe de deux.
 - Défense : protection de l'objectif, neutralisation, survie, collisions et
   zones interdites.
 
-Les **15 canaux** du snapshot sont : Patrol tracking, Formation keeping,
+Les **15 canaux** de récompense sont : Patrol tracking, Formation keeping,
 Pursuit progress, Control effort, Blue survival, Red neutralization,
 Threat containment, Objective survival, Mission outcome, Timeout,
 Blue separation, Restricted zone clearance, Boundary clearance,
 Low speed risk et Own loss.
 
-Les poids des canaux restent lus de `Training/BluePatrol.json`
+Les poids des canaux restent lus de `blue_patrol_training.json` (projet BluePatrol)
 et sont convertis explicitement au runtime généralisé.
 
-## Intégration IHM
+## Visualisation
 
-Le bouton Play utilise l'exécution ECS habituelle. Le mode est immuable dès le
-chargement : Play entraîne dans `blue-defense` et lance l'acteur de production
-dans `blue-defense-inference`. Le runner de production ne contient ni critic,
-ni optimizer, ni buffer de rollout, ni API d'évaluation ou de sauvegarde.
+Le mode est fixé par la commande : `train` entraîne, `play` lance l'acteur de
+production. Le runner de production ne contient ni critic, ni optimizer, ni
+buffer de rollout, ni API d'évaluation ou de sauvegarde.
 
-La vue tactique multi-caméras, active par défaut, affiche une vue ajustée par
-Bleu dans une grille bornée à neuf cellules. Les paramètres distance, hauteur
-et champ de vision sont communs à toutes les vues. `Multiple blue cameras`
-permet de revenir à la caméra unique historique.
-
-Le rendu publie les rôles déjà échantillonnés par l'épisode sans intervenir
-dans leur attribution : **L** (doré) désigne le leader et **E** (cyan) un
-équipier. Les badges apparaissent au-dessus des voitures, dans les titres des
-vues et sur la mini-carte. Le changement de cible, la destruction du mobile
-suivi et les téléportations de reset provoquent un recalage déterministe de la
-caméra ; le déplacement continu utilise un lissage indépendant du FPS.
-
-`Show patrol references`, dans **World and display settings**, commande un
-overlay distinct de l'hippodrome. Pour `L` puis chaque slot `W1` à `W8`, un
-anneau montre la projection instantanée de suivi et une flèche montre la pose
-anticipée (position et cap) réellement fournie dans l'observation MAPPO. Les
-données sont copiées après leur calcul par le runtime, dans un stockage borné
-de neuf entrées, puis consommées uniquement par la vue 3D et la mini-carte.
-
-`Show patrol waypoints` commande séparément l'affichage des dix points figés
-de la patrouille sans Rouge. `WP1` à `WP10` sont rendus en vue 3D et sur la
-mini-carte : actif en doré, futurs en vert et validés en gris. Les deux cases
-sont persistées indépendamment. Le stockage de l'overlay est borné à dix
-entrées et n'intervient ni dans la physique, ni dans la politique.
+L'observateur `blue_watch@2` du `network.json` du projet (port 47001) envoie le
+monde après chaque pas ; le Visualiseur `blue_visualiser` en dessine une vue 2D
+de dessus dans ppokit-viewer, reprise de la mini-carte tactique de l'ancien
+PPO.exe, plus les pseudo-lidars et les explosions de sa vue 3D : zone défendue,
+rectangle d'échec, zones interdites, objectif ; piste de patrouille du leader
+et ses waypoints (actif, validés, cap) ; pour chaque Bleu son cap, sa traînée,
+son badge de rôle (**L** pour le leader, **W1**... pour les équipiers), son cône
+d'engagement, ses faisceaux de pseudo-lidar et sa référence de patrouille
+(point projeté, point de guidage et cap) ; pour chaque Rouge son cap, sa
+traînée et son cône (une croix une fois détruit). Le nord est en haut ; on
+déplace la vue en la faisant glisser et on zoome à la molette ; un clic sur un
+Bleu affiche son pseudo-lidar. La vue ne fait que lire les rôles et
+références déjà calculés par le runtime : elle n'intervient ni dans la
+physique, ni dans la politique.
 
 ## Compatibilité de checkpoints
 
@@ -89,13 +87,13 @@ Le runtime courant exige l'acteur V10 et l'état d'entraînement V7. Le guidage
 figé change la sémantique des colonnes de patrouille sans changer leur taille :
 les poids V9, dont ceux du run 22, sont donc incompatibles et ne sont pas
 repris silencieusement. L'entraînement MAPPO V10 repart de zéro et
-s'enregistre dans `resources/model/BluePatrol/latest`.
+s'enregistre dans `Examples/BlueDefense/projects/BluePatrol/checkpoints/latest`.
 
 ## Vérification
 
 - Tests de contrat P=1,2,4,9 et N=0,2,4,10.
 - Initialisation du wedge maximal, LiDAR et collisions.
-- Test de rendu/snapshot et mouvement via le vrai ECS.
+- Test du Visualiseur de bout en bout (`Examples/BlueDefense/tests/visualiser_tests.cpp` : ppokit-run joue BluePatrol, les trames arrivent en UDP et la vue dessine la scène) et mouvement via le vrai ECS.
 - Compilation VS2022 Debug/Release et CTest Core Windows/Linux.
 
 Un résultat de CI ou de CTest vert démontre la validité du build et des

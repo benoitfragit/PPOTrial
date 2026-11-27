@@ -4,8 +4,9 @@
 The reusable `Examples/Shared/World` C++17 library owns the concrete 2D world entities
 `Mobile`, `RestrictedZone`, `Objective`, the unchanged sensor/control/motion
 systems and their state layouts. `Examples/Airspace` owns the historic
-scenario, scoring, evaluator and graphical renderer, but no longer duplicates
-these basic entity classes and algorithms.
+scenario, scoring, evaluation campaign (`EvaluationCampaign`) and 2D
+Visualiseur (the former evaluator and renderer were removed with `PPO.exe`),
+but no longer duplicates these basic entity classes and algorithms.
 
 This extraction deliberately preserves the legacy SNA component names,
 `FlightModel` and `SNAControl` serialized sections and the network contract.
@@ -18,9 +19,11 @@ not renamed as part of the public class and folder cleanup.
 - **Canonical scenario types**: `"Mobile"`, `"RestrictedZone"`,
   `"Objective"`.
 - **Legacy scenario aliases**: `"Aircraft"` instantiates a **Mobile**;
-  `"SAM"` instantiates a **RestrictedZone**. The factory registry also maps
-  `ResolveType("Aircraft")` to the reflected `Mobile` type and
-  `ResolveType("SAM")` to the reflected `RestrictedZone` type.
+  `"SAM"` instantiates a **RestrictedZone**: the factory table registers both
+  names with the same factories (`RegisterEntityFactory("Aircraft", ...)`
+  creates a `Mobile`, `RegisterEntityFactory("SAM", ...)` a `RestrictedZone`).
+  There is no reflection lookup any more (`ResolveType` and `entt::meta` were
+  removed).
 - **Legacy C++ headers**: `aircraft.hpp` and `sam.hpp` are thin aliases;
   there are no duplicate implementations or duplicate ECS components.
 - **Serialized category values** remain unchanged: `Mobile`/`Aircraft` = 3,
@@ -31,8 +34,8 @@ not renamed as part of the public class and folder cleanup.
 
 ## Platform files
 Canonical directories:
-`resources/settings/Platforms/Mobile` and
-`resources/settings/Platforms/RestrictedZone`.
+`Examples/Shared/settings/Platforms/Mobile` and
+`Examples/Shared/settings/Platforms/RestrictedZone`.
 Historical archetype names `aircraft`, `trainingaircraft`,
 `evalaircraft`, `sam` are deliberately retained so old scenario files
 continue to load. Canonical example files `mobile.json` and
@@ -56,8 +59,8 @@ against hostile red mobiles are retained unchanged.
 ## Validation
 - `SharedWorldLidarTests`: 61 beams, legacy enum values, forward ray,
   friend/destroyed masking, inside-zone zero, and map-boundary normalization.
-- `AirspaceMetaTests`: both old and new names resolve to the same reflected
-  class and create entities of the expected canonical category and components.
+- `AirspaceMetaTests`: both old and new names create entities of the same
+  canonical class, category and components through the factory table.
 - Existing historic CTest/checkpoint tests are required before merge.
 - Manual GUI and RLMission training/eval/prod smoke tests are still required
   after successful CI. No model conversion or retraining.

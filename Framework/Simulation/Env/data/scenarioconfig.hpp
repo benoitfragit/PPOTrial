@@ -169,8 +169,8 @@ struct EvaluationBufferDefinition
 };
 
 /**
-* @brief Resolves one resource-relative path against the project resource root.
-* @param path Resource-relative or absolute path.
+* @brief Resolves a relative path against the shared settings folder (Examples/Shared/settings).
+* @param path Relative or absolute path.
 * @return Resolved filesystem path.
 */
 std::filesystem::path ResolveResourcePath(std::filesystem::path const& path);

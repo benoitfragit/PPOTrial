@@ -11,8 +11,8 @@ add_library(${PROJECT_NAME}
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/data)
 
-target_link_libraries(${PROJECT_NAME} PUBLIC GenericEntities 
-											 
+target_link_libraries(${PROJECT_NAME} PUBLIC GenericEntities
+                                             GenericRLCore
                                              LegacyAgentAPI
                                              GenericSerializer 
 											 EnTT::EnTT)
@@ -27,9 +27,12 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_executable(ScenarioConfigurationTests
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/scenario_config_tests.cpp)
     target_compile_features(ScenarioConfigurationTests PRIVATE cxx_std_17)
-    target_link_libraries(ScenarioConfigurationTests PRIVATE GenericEnv)
-    target_compile_definitions(ScenarioConfigurationTests PRIVATE
-        PPO_SETTINGS_ROOT="${CMAKE_SOURCE_DIR}/resources/settings")
+    target_link_libraries(ScenarioConfigurationTests PRIVATE GenericEnv PPOLayout)
     add_test(NAME ScenarioConfigurationTests
         COMMAND ScenarioConfigurationTests)
+    # The world driven step by step from the caller's thread (environment DLLs).
+    add_executable(EnvironmentSteppingTests ${CMAKE_CURRENT_SOURCE_DIR}/tests/stepping_tests.cpp)
+    target_compile_features(EnvironmentSteppingTests PRIVATE cxx_std_17)
+    target_link_libraries(EnvironmentSteppingTests PRIVATE GenericEnv PPOLayout)
+    add_test(NAME EnvironmentSteppingTests COMMAND EnvironmentSteppingTests)
 endif()

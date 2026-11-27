@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Run the CI-equivalent 2v2 rehearsal curriculum through the desktop GUI.
+"""Run the CI-equivalent 2v2 rehearsal curriculum locally, watched in ppokit-viewer.
 
-The launcher consumes the complete V7 checkpoint already stored in ``latest``.
-It changes only the normal Training/Scenario JSON files while a block runs,
-restores those files and the GUI layout byte-for-byte afterwards, and keeps an
-immutable source backup under ``build/local-mappo-gui``.  Agent actions,
-rewards, physics and the production Red controller remain owned by the C++
-runtime.
+The launcher consumes the complete training checkpoint already stored in ``latest``.
+Each block is the CI's block (mappo_curriculum.run_stage: ``ppokit-run train``
+up to the block's update, the suite of the training file's campaign, PPO.exe's
+PROD promotion); the world of the run shows in ``ppokit-viewer`` through the
+BlueDefense Visualiseur. It changes only the normal Training/Scenario JSON
+files while a block runs, restores those files byte-for-byte afterwards, and
+keeps an immutable source backup under ``build/local-mappo-gui``. Agent
+actions, rewards, physics and the production Red controller remain owned by
+the C++ runtime.
 """
 from __future__ import annotations
 
@@ -31,27 +34,23 @@ ADAPTIVE_TOOLS = CI_TOOLS / "adaptive_curriculum"
 sys.path.insert(0, str(CI_TOOLS))
 sys.path.insert(0, str(ADAPTIVE_TOOLS))
 
+import blue_checkpoint  # noqa: E402
 import mappo_curriculum as curriculum  # noqa: E402
 import progressive_gate as adaptive  # noqa: E402
 import rehearsal_profiles as profiles  # noqa: E402
 import champion_checkpoints as champion  # noqa: E402
 
 
-LATEST_ACTOR = Path(
-    "resources/model/BluePatrol/latest/blue_patrol_generalized_v10.txt")
+LATEST_ACTOR = curriculum.LATEST_ACTOR
 DEFAULT_STATE_ROOT = Path("build/local-mappo-gui")
 STATE_NAME = "state.json"
 SESSION_FORMAT_VERSION = 1
 TARGET_GATE = "2v2"
-GUI_LAYOUT = Path("imgui.ini")
-RENDERER_SETTINGS = Path("resources/settings/Renderer.json")
 PRESERVED_RUNTIME_FILES = (
     curriculum.TRAINING_FILE,
     curriculum.SCENARIO_FILE,
     curriculum.PROD,
     curriculum.PROD_SCORE,
-    RENDERER_SETTINGS,
-    GUI_LAYOUT,
 )
 
 
@@ -74,6 +73,9 @@ class LauncherOptions:
     validated_gates: tuple[str, ...] | None = None
     source_actor: Path | None = None
     source_training: Path | None = None
+    # ppokit-viewer on the run's world, found in the build's program registry.
+    programs: Path = Path("build/release/ppokit_programs_Release.txt")
+    viewer: bool = False
 
 
 class FileSnapshot:
@@ -191,16 +193,18 @@ def next_update_target(updates: int, cadence: int,
 
 def validate_evaluated_best_source(actor: Path, training: Path) -> dict:
     """Authenticate both source files against the same evaluated BEST manifest."""
-    if (actor.name != champion.ACTOR_NAME
-            or training.name != champion.TRAINING_NAME
-            or actor.parent.resolve() != training.parent.resolve()):
+    # The pair champion.read validates: the canonical names, or the former
+    # V10/V7 names of a champion of an earlier run.
+    if (actor.parent.resolve() != training.parent.resolve()
+            or (actor.name, training.name)
+                != tuple(path.name for path in champion.pair(actor.parent))):
         raise ValueError(
             "Explicit V10/V7 sources must share one BEST gate directory "
             "and use the canonical actor/training filenames")
     record = champion.read(actor.parent.name, actor.parent.parent)
     if record is None or not record["evaluatedForGate"]:
         raise ValueError("Explicit source must be an evaluated BEST checkpoint")
-    # champion.read validates V10/V7 semantic headers, epoch and BOTH SHA-256
+    # champion.read validates both contracts (either format), epoch and BOTH SHA-256
     # hashes against one manifest; never accept an arbitrary pair by filename.
     return record
 
@@ -214,17 +218,12 @@ def _validate_checkpoint_pair(
     for path in paths:
         if not path.is_file() or path.stat().st_size == 0:
             raise FileNotFoundError(f"Missing local V10/V7 checkpoint: {path}")
-    with actor.open(encoding="utf-8") as stream:
-        actor_header = stream.readline().split()
-    with training.open(encoding="utf-8") as stream:
-        training_header = stream.readline().split()
-    semantic = "UNIFIED_PHYSICAL_GUIDANCE_V1"
-    if (actor_header[:3] != ["BLUE_TEAM_MAPPO_V10", "10", "10"]
-            or training_header[:3]
-                != ["BLUE_TEAM_TRAINING_V7", "7", "10"]
-            or semantic not in actor_header or semantic not in training_header):
-        raise ValueError("Local checkpoint is not a compatible V10/V7 pair")
-    updates = curriculum.read_updates(training)
+    try:
+        blue_checkpoint.read(actor, "policy")
+        updates = blue_checkpoint.read_updates(training)
+    except ValueError as error:
+        raise ValueError(
+            f"Local checkpoint is not a compatible V10/V7 pair: {error}") from None
     if expected_updates is not None and updates != expected_updates:
         raise ValueError(
             f"Expected source update {expected_updates}, found {updates}.")
@@ -272,12 +271,17 @@ SESSION_CHECKPOINT = "session-latest"
 SESSION_MANIFEST = "checkpoint.json"
 
 
+def _session_file(directory: Path, target: Path) -> Path:
+    """The session's copy of a latest file (sessions of earlier versions: former name)."""
+    return blue_checkpoint.locate(directory, target.name)
+
+
 def _verified_session_checkpoint(directory: Path) -> int:
     """Reject incomplete, mismatched or corrupted per-session checkpoints."""
     manifest = json.loads((directory / SESSION_MANIFEST).read_text(
         encoding="utf-8"))
-    actor = directory / LATEST_ACTOR.name
-    training = directory / curriculum.LATEST.name
+    actor = _session_file(directory, LATEST_ACTOR)
+    training = _session_file(directory, curriculum.LATEST)
     if (not isinstance(manifest, dict)
             or manifest.get("version") != 1
             or type(manifest.get("updates")) is not int
@@ -347,7 +351,7 @@ def _activate_session_checkpoint(session_root: Path,
             if target.is_file():
                 shutil.copy2(target, previous / target.name)
         for target in (LATEST_ACTOR, curriculum.LATEST):
-            source = directory / target.name
+            source = _session_file(directory, target)
             temporary = target.with_suffix(target.suffix + ".session-staged")
             temporary.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, temporary)
@@ -358,9 +362,9 @@ def _activate_session_checkpoint(session_root: Path,
                 recorded_updates, LATEST_ACTOR, curriculum.LATEST,
                 require_prod_match=False) != recorded_updates
                 or _sha256(LATEST_ACTOR) !=
-                   _sha256(directory / LATEST_ACTOR.name)
+                   _sha256(_session_file(directory, LATEST_ACTOR))
                 or _sha256(curriculum.LATEST) !=
-                   _sha256(directory / curriculum.LATEST.name)):
+                   _sha256(_session_file(directory, curriculum.LATEST))):
             raise ValueError("Session checkpoint failed after activation")
         installed = True
     finally:
@@ -549,41 +553,68 @@ def _load_or_create_state(options: LauncherOptions) -> tuple[dict, Path]:
     return state, session_root
 
 
-def _run_gui_block(binary: Path, seconds: int, log_path: Path,
-                   combined_path: Path) -> bool:
-    """Run one visible C++ process and stream its diagnostics to both logs."""
-    command = [str(binary), "--auto-run", "--example", "blue-defense",
-               "--max-seconds", str(seconds)]
-    completed = False
+def _run_block(binary: Path, stage: dict, target: int, seconds: int,
+               log_path: Path, combined_path: Path) -> bool:
+    """Run one block as the CI does; True when it reached its target update.
+
+    The block's log is appended to the session's combined log. A block stopped
+    by the time budget before its target is not completed (it resumes later).
+    """
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("w", encoding="utf-8") as block_log, (
-            combined_path.open("a", encoding="utf-8")) as combined_log:
-        process = subprocess.Popen(
-            command, cwd=ROOT, stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-            errors="replace", bufsize=1)
-        try:
-            assert process.stdout is not None
-            for line in process.stdout:
-                sys.stdout.write(line)
-                block_log.write(line)
-                combined_log.write(line)
-                if "[GUI_AUTORUN] Automatic block completed" in line:
-                    completed = True
-            return_code = process.wait()
-        except KeyboardInterrupt:
+    try:
+        curriculum.run_stage(binary, stage, seconds, log_path)
+    finally:
+        if log_path.is_file():
+            with combined_path.open("a", encoding="utf-8") as combined:
+                combined.write(log_path.read_text(encoding="utf-8", errors="replace"))
+    return curriculum.read_updates() == target
+
+
+def find_programs(registry: Path) -> tuple[Path | None, Path | None]:
+    """ppokit-viewer and the BlueDefense Visualiseur in the build's program registry."""
+    viewer = visualiser = None
+    if registry.is_file():
+        for line in registry.read_text(encoding="utf-8").splitlines():
+            program = Path(line.strip())
+            if program.stem == "ppokit-viewer":
+                viewer = program
+            elif program.stem in ("blue_visualiser", "libblue_visualiser"):
+                visualiser = program
+    return viewer, visualiser
+
+
+def visualiser_port() -> int:
+    """The port the project's Visualiseur sends the world to (network.json)."""
+    network = json.loads((curriculum.PROJECT / "network.json").read_text(encoding="utf-8"))
+    return int(network["observers"]["nodes"]["watch"]["config"]["port"])
+
+
+@contextmanager
+def watched(options: LauncherOptions) -> Iterable[None]:
+    """ppokit-viewer on the run's world for the session (unless --no-viewer)."""
+    process = None
+    if options.viewer:
+        viewer, visualiser = find_programs(options.programs)
+        if viewer is None or visualiser is None:
+            print("[LOCAL_GUI] ppokit-viewer or blue_visualiser not built: training without "
+                  "a window (cmake --build build/release --config Release --target "
+                  "ppokit-viewer blue_visualiser).", flush=True)
+        else:
+            process = subprocess.Popen(
+                [str(viewer), "--view", str(visualiser), "--port", str(visualiser_port())],
+                cwd=ROOT)
+            print(f"[LOCAL_GUI] ppokit-viewer opened on the run's world ({visualiser.name}).",
+                  flush=True)
+    try:
+        yield
+    finally:
+        if process is not None and process.poll() is None:
             process.terminate()
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
-            raise
-    if return_code != 0:
-        raise RuntimeError(
-            f"GUI training process failed with exit code {return_code}; "
-            f"see {log_path}")
-    return completed
 
 
 def _print_schedule(stages: list[dict], target_index: int,
@@ -606,7 +637,7 @@ def _run_unlocked(options: LauncherOptions) -> int:
     os.chdir(ROOT)
     if not options.dry_run and not options.binary.is_file():
         raise FileNotFoundError(
-            f"Missing Release GUI executable: {options.binary}")
+            f"Missing Release ppokit-run executable: {options.binary}")
     if not 1 <= options.max_seconds <= 86400:
         raise ValueError("max-seconds must be in [1, 86400]")
     if not 1 <= options.block_updates <= 1000:
@@ -710,8 +741,9 @@ def _run_unlocked(options: LauncherOptions) -> int:
             print(f"[LOCAL_GUI] block={state['blockIndex']} "
                   f"replay={selected['id']} updates={updates}->{target} "
                   f"remaining_s={remaining}", flush=True)
-            completed = _run_gui_block(
-                options.binary, remaining, log_path, combined_path)
+            completed = _run_block(
+                options.binary, selected, target, remaining, log_path,
+                combined_path)
             observed = curriculum.read_updates()
             if not updates <= observed <= target:
                 raise RuntimeError(
@@ -721,14 +753,11 @@ def _run_unlocked(options: LauncherOptions) -> int:
             if observed > updates:
                 state["lastCheckpointUpdates"] = observed
             if completed:
-                if observed != target:
-                    raise RuntimeError(
-                        "GUI reported completion before the target update")
                 state["blockIndex"] += 1
                 completed_blocks += 1
             _write_state(session_state_root(options) / STATE_NAME, state)
             if not completed:
-                print("[LOCAL_GUI] Visual run stopped before block completion; "
+                print("[LOCAL_GUI] Run stopped before block completion; "
                       "the same rehearsal will resume next time.", flush=True)
                 break
     finally:
@@ -754,7 +783,7 @@ def run(options: LauncherOptions) -> int:
     """Prevent simultaneous GUI writers from corrupting a shared latest pair."""
     if options.dry_run:
         return _run_unlocked(options)
-    with _exclusive_training_lock():
+    with _exclusive_training_lock(), watched(options):
         return _run_unlocked(options)
 
 
@@ -763,7 +792,14 @@ def parse_args(argv: list[str] | None = None) -> LauncherOptions:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--binary", type=Path,
-        default=Path("build/release/Main/Release/PPO.exe"))
+        default=Path("build/release/PPOKit/Release/ppokit-run.exe"))
+    parser.add_argument(
+        "--programs", type=Path,
+        default=Path("build/release/ppokit_programs_Release.txt"),
+        help="The build's program registry (ppokit-viewer, blue_visualiser).")
+    parser.add_argument(
+        "--no-viewer", action="store_true",
+        help="Train without opening ppokit-viewer on the run's world.")
     parser.add_argument(
         "--profile", choices=tuple(profiles.WEIGHTS), default="balanced_v1")
     parser.add_argument("--max-seconds", type=int, default=7200)
@@ -792,8 +828,10 @@ def parse_args(argv: list[str] | None = None) -> LauncherOptions:
     binary = args.binary if args.binary.is_absolute() else ROOT / args.binary
     state_root = (args.state_root if args.state_root.is_absolute()
                   else ROOT / args.state_root)
+    programs = args.programs if args.programs.is_absolute() else ROOT / args.programs
     return LauncherOptions(
-        binary=binary, profile=args.profile, max_seconds=args.max_seconds,
+        binary=binary, programs=programs, viewer=not args.no_viewer,
+        profile=args.profile, max_seconds=args.max_seconds,
         block_updates=args.block_updates,
         expected_source_updates=(args.expected_source_updates
                                  if args.expected_source_updates is not None

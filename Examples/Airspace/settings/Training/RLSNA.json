@@ -1,0 +1,19 @@
+{
+    "formatVersion": 2,
+    "training": {
+        "rolloutSteps": 800
+    },
+    "rewards": {
+        "clamp": 10,
+        "weights": {
+            "Target destruction": 1,
+            "Target in EZ": 0.2160000056028366,
+            "Ownship destruction": 1,
+            "Closing": 0.07999999821186066,
+            "NavPN": 0.7910000085830688,
+            "NavAPN": 0.5529999732971191,
+            "Fuel": 0.007000000216066837,
+            "MissionFailure": 1
+        }
+    }
+}

@@ -280,11 +280,14 @@ def run(command: list[str], stage_id: str, budget_seconds: float,
                     log.write(item)
                     combined.write(item)
                     last_log = time.monotonic()
-                    if "Starting deterministic" in item:
+                    # PPO.exe's and ppokit-run's own words for the phases.
+                    if ("Starting deterministic" in item
+                            or "phase=evaluation" in item):
                         phase = "evaluation"
                     elif "Saved actor and training checkpoint" in item:
                         phase = "checkpoint"
-                    elif "update=" in item or "PPO update" in item:
+                    elif ("update=" in item or "PPO update" in item
+                          or item.startswith("update ")):
                         phase = "training"
                     # Optimizer completion is observable before the next
                     # disk checkpoint; both are valid liveness evidence.

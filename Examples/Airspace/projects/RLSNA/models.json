@@ -1,0 +1,25 @@
+{
+  "schema": "ppokit.models/1",
+  "policies": {
+    "PROD": {
+      "path": "../../models/RLSNA/prod/policy.ppokit",
+      "sha256": "53bda4a793269f83e1fa597be80fe5264dd09f5d3feb7d3291e7fab93eae5587",
+      "source": {
+        "commit": "b5ea31967f16d5fb2390268648715da5c6fe1b10",
+        "path": "resources/model/RLSNA/prod/model.pt",
+        "sha256": "97acfe7578130181e66aaaf21da464000e5a1c92fe46f71682d2391149b7c986",
+        "update": null
+      }
+    },
+    "EVAL": {
+      "path": "../../models/RLSNA/eval/policy.ppokit",
+      "sha256": "1121354dc4c1e10e88a16e3a5329b23fbe8c19babd84b8ba477f430017bf5552",
+      "source": {
+        "commit": "b5ea31967f16d5fb2390268648715da5c6fe1b10",
+        "path": "resources/model/RLSNA/eval/model.pt",
+        "sha256": "7d3b7300250db14809eb10c12a97dfa435c010a8ae787489b66613a32c434f9b",
+        "update": 888
+      }
+    }
+  }
+}

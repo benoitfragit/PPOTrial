@@ -9,22 +9,25 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import blue_checkpoint_fixtures as fixtures
 import inference_validation as validation
 
 
-def make_log(blue: int, red: int, episodes: int = 2,
-             seed_base: int = 2004242, success: float = 1.0) -> str:
-    rows = [
-        (f"[MAPPO_EVAL_EPISODE] update=0 campaign=1 case={i + 1} "
-         f"seed={seed_base + i} steps=310 P={blue} N={red} "
-         "blue_alive=1 red_alive=0 objective_alive=1 terminal=reds_cleared")
-        for i in range(episodes)
-    ]
-    rows.append(
-        f"[BLUE MAPPO V10] Evaluation #1 P={blue} N={red} "
-        f"score=88.5 success={success} blue-survival=1 "
-        "red-neutralization=1 objective-survival=1")
-    return "\n".join(rows)
+NAMES = ["objective_survived", "mission_success", "timeout", "blue_survival",
+         "red_neutralization", "leader_patrol_quality", "formation_quality", "score"]
+
+
+def make_report(episodes: int = 2, seed_base: int = 2004242, success: float = 1.0,
+                suite: str = "inference") -> dict:
+    """A ppokit-run suite report as `eval` writes it (aggregates and episodes)."""
+    cases = [{"seed": seed_base + i, "return": 12.5, "length": 310, "terminated": True,
+              "metrics": [1.0, success, 0.0, 1.0, 1.0, 0.9, 0.8, 88.5]}
+             for i in range(episodes)]
+    return {"suite": suite, "passed": True,
+            "aggregates": {"score.mean": 88.5, "mission_success.rate": success,
+                           "blue_survival.mean": 1.0, "red_neutralization.mean": 1.0,
+                           "objective_survived.rate": 1.0},
+            "episodes": cases}
 
 
 class InferenceValidationTests(unittest.TestCase):
@@ -45,118 +48,130 @@ class InferenceValidationTests(unittest.TestCase):
             [gate[0] for gate in validation.selected_gates("2v2")],
             ["2v2"])
 
+    def test_metric_names_follow_task_json(self):
+        task = {"metrics": {name: {"kind": "number"} for name in NAMES}}
+        self.assertEqual(validation.metric_names(task), NAMES)
+
     def test_complete_readonly_inference_evaluation(self):
         result = validation.evaluation_result(
-            make_log(2, 2), ("2v2", 2, 2), 2004242, 2)
+            make_report(), NAMES, ("2v2", 2, 2), 2004242, 2)
         self.assertEqual(result["success_percent"], 100)
         self.assertEqual(result["score"], 88.5)
-        self.assertEqual({case["seed"] for case in result["cases"]},
-                         {2004242, 2004243})
+        self.assertEqual([case["seed"] for case in result["cases"]], [2004242, 2004243])
+        self.assertEqual({case["termination"] for case in result["cases"]}, {"success"})
 
-    def test_reject_wrong_gate_and_duplicate_campaign(self):
-        with self.assertRaisesRegex(ValueError, "P/N"):
-            validation.evaluation_result(
-                make_log(2, 1), ("1v1", 1, 1), 2004242, 2)
-        with self.assertRaisesRegex(ValueError, "one completed campaign"):
-            validation.evaluation_result(
-                make_log(1, 0) + "\n" + make_log(1, 0),
-                ("1v0", 1, 0), 2004242, 2)
+    def test_case_outcomes_from_metrics(self):
+        self.assertEqual(validation.case_termination({"timeout": 1.0, "mission_success": 0.0}), "timeout")
+        self.assertEqual(validation.case_termination({"timeout": 0.0, "mission_success": 1.0}), "success")
+        self.assertEqual(validation.case_termination({"timeout": 0.0, "mission_success": 0.0}), "failure")
 
-    def test_reject_missing_duplicate_or_wrong_seeds(self):
-        with self.assertRaisesRegex(ValueError, "diagnostics"):
+    def test_reject_other_suite_missing_or_wrong_seeds(self):
+        with self.assertRaisesRegex(ValueError, "suite"):
             validation.evaluation_result(
-                make_log(1, 0, episodes=1),
-                ("1v0", 1, 0), 2004242, 2)
+                make_report(suite="validation"), NAMES, ("1v0", 1, 0), 2004242, 2)
+        with self.assertRaisesRegex(ValueError, "expected 2 episodes"):
+            validation.evaluation_result(
+                make_report(episodes=1), NAMES, ("1v0", 1, 0), 2004242, 2)
         with self.assertRaisesRegex(ValueError, "seeds"):
             validation.evaluation_result(
-                make_log(1, 0, seed_base=1004242),
-                ("1v0", 1, 0), 2004242, 2)
+                make_report(seed_base=1004242), NAMES, ("1v0", 1, 0), 2004242, 2)
 
-    def test_temporary_scenario_configuration(self):
+    def test_reject_metrics_that_do_not_match_the_task(self):
+        report = make_report()
+        report["episodes"][0]["metrics"].pop()
+        with self.assertRaisesRegex(ValueError, "task.json"):
+            validation.evaluation_result(report, NAMES, ("1v0", 1, 0), 2004242, 2)
+
+    def test_temporary_scenario_and_suite(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            training_file = root / "training.json"
             scenario_file = root / "scenario.json"
-            training = {"evaluation": {"episodes": 8, "seed": 4242}}
+            suite_file = root / "eval" / "inference.json"
             scenario = {"blueDefense": {
                 "blueTeam": {"activeCount": 4},
                 "redTeam": {"activeCount": 4},
                 "restrictedZones": {"enabled": True},
                 "restrictedZoneSpawn": {"enabledProbability": 0.75}}}
-            training_bytes = json.dumps(training).encode()
-            scenario_bytes = json.dumps(scenario).encode()
-            with (patch.object(validation, "TRAINING_CONFIG", training_file),
-                  patch.object(validation, "SCENARIO_CONFIG", scenario_file)):
-                validation.configure(("2v1", 2, 1), 20, 2004242,
-                                     training_bytes, scenario_bytes)
-                self.assertEqual(json.loads(training_file.read_text())["evaluation"],
-                                 {"episodes": 20, "seed": 2004242})
+            with (patch.object(validation, "SCENARIO_CONFIG", scenario_file),
+                  patch.object(validation, "SUITE_FILE", suite_file)):
+                validation.configure(("2v1", 2, 1), 20, 2004242, json.dumps(scenario).encode())
                 configured = json.loads(scenario_file.read_text())["blueDefense"]
                 self.assertEqual(configured["blueTeam"]["activeCount"], 2)
                 self.assertEqual(configured["redTeam"]["activeCount"], 1)
                 self.assertFalse(configured["restrictedZones"]["enabled"])
                 self.assertEqual(
                     configured["restrictedZoneSpawn"]["enabledProbability"], 0.0)
+                suite = json.loads(suite_file.read_text())
+                self.assertEqual(suite["seeds"], {"first": 2004242, "count": 20})
+                self.assertEqual(suite["episodes"], 1)
 
-    def test_patrol_stderr_cannot_split_evaluation_telemetry(self):
-        # Run 41979503675 completed 20 2v0 cases, but merged pipes put
-        # '[BLUE PATROL] Episode ...' inside the case-5 stdout row.
-        stdout = make_log(2, 0, episodes=20, success=0.0)
-        stderr = ("[BLUE PATROL] Episode 7 racetrack length=40156m "
-                  "direction=counter-clockwise leader=blue_1\n")
-        corrupted = stdout.replace(
-            "objective_alive=1 terminal=reds_cleared",
-            "objective_a" + stderr + "live=1 terminal=reds_cleared", 1)
-        with self.assertRaisesRegex(ValueError, "got 19"):
-            validation.evaluation_result(
-                corrupted, ("2v0", 2, 0), 2004242, 20)
+    def test_readonly_run_restores_the_project(self):
+        for name, text in (("policy artifact", fixtures.policy(2, 0)),
+                           ("former V10 actor", fixtures.former_policy(2, 0))):
+            with self.subTest(actor=name):
+                self.run_readonly(text)
 
+    def test_training_or_foreign_actor_is_refused(self):
+        for text in (fixtures.training(12), "BLUE_TEAM_MAPPO_V10 10 9 test\n"):
+            with self.subTest(text=text[:40]):
+                with self.assertRaises(ValueError):
+                    self.run_readonly(text)
+
+    def run_readonly(self, actor_text: str) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            binary = root / "PPO.exe"
-            binary.write_bytes(b"not executed - subprocess is mocked")
-            actor_root = root / "models"
-            actor = actor_root / "prod/blue_patrol_generalized_v10.txt"
+            runner = root / "ppokit-run"
+            runner.write_bytes(b"not executed - subprocess is mocked")
+            project = root / "BluePatrol"
+            model_root = project / "checkpoints"
+            actor = model_root / "prod/policy.ppokit"
             actor.parent.mkdir(parents=True)
-            actor.write_text("BLUE_TEAM_MAPPO_V10 10 10 test\n", encoding="utf-8")
-            training_file = root / "training.json"
-            scenario_file = root / "scenario.json"
-            training_file.write_text(json.dumps({
-                "evaluation": {"episodes": 8, "seed": 42}}))
+            actor.write_text(actor_text, encoding="utf-8")
+            scenario_file = project / "scenario.json"
             scenario_file.write_text(json.dumps({
                 "blueDefense": {
                     "blueTeam": {"activeCount": 4},
                     "redTeam": {"activeCount": 4},
                     "restrictedZones": {"enabled": True},
                     "restrictedZoneSpawn": {"enabledProbability": 0.75}}}))
-            training_original = training_file.read_bytes()
+            task_file = project / "task.json"
+            task_file.write_text(json.dumps({"metrics": {name: {} for name in NAMES}}))
+            suite_file = project / "eval" / "inference.json"
+            report_file = model_root / "evaluation_inference.json"
             scenario_original = scenario_file.read_bytes()
             output = root / "results"
             args = argparse.Namespace(
-                binary=str(binary), output=str(output),
+                ppokit_run=str(runner), output=str(output),
                 source_run_id=41948019589, gate="2v0", episodes=20,
                 seed_base=2004242, threshold=90.0, timeout_seconds=1200)
-            result = subprocess.CompletedProcess(
-                args=[], returncode=0, stdout=stdout, stderr=stderr)
-            with (patch.object(validation, "MODEL_ROOT", actor_root),
-                  patch.object(validation, "TRAINING_CONFIG", training_file),
+
+            def evaluate(command, **_):
+                # ppokit-run eval writes its report next to the checkpoints.
+                self.assertEqual(command[1:3], ["eval", "--project"])
+                self.assertEqual(command[3], str(project / "project.legacy.json"))
+                self.assertIn("--policy", command)
+                report_file.write_text(json.dumps(make_report(episodes=20)))
+                return subprocess.CompletedProcess(args=command, returncode=0, stdout="ok", stderr="")
+
+            with (patch.object(validation, "PROJECT", project),
+                  patch.object(validation, "MODEL_ROOT", model_root),
                   patch.object(validation, "SCENARIO_CONFIG", scenario_file),
-                  patch.object(validation.subprocess, "run",
-                               return_value=result) as launched):
+                  patch.object(validation, "TASK", task_file),
+                  patch.object(validation, "SUITE_FILE", suite_file),
+                  patch.object(validation, "REPORT", report_file),
+                  patch.object(validation.subprocess, "run", side_effect=evaluate)):
                 self.assertEqual(validation.run(args), 0)
-            self.assertIs(launched.call_args.kwargs["stdout"], subprocess.PIPE)
-            self.assertIs(launched.call_args.kwargs["stderr"], subprocess.PIPE)
-            self.assertEqual((output / "2v0.log").read_text(), stdout)
-            self.assertEqual((output / "2v0.stderr.log").read_text(), stderr)
             self.assertEqual(len(json.loads(
                 (output / "results.json").read_text())["results"][0]["cases"]), 20)
-            self.assertEqual(training_file.read_bytes(), training_original)
+            self.assertTrue((output / "2v0.json").is_file())
             self.assertEqual(scenario_file.read_bytes(), scenario_original)
-            self.assertEqual(actor.read_text(), "BLUE_TEAM_MAPPO_V10 10 10 test\n")
+            self.assertFalse(suite_file.exists())
+            self.assertFalse(report_file.exists())
+            self.assertEqual(actor.read_text(), actor_text)
 
     def test_model_grade_does_not_claim_ci_failure(self):
         cases = [validation.evaluation_result(
-            make_log(2, 2, success=0.8), ("2v2", 2, 2), 2004242, 2)]
+            make_report(success=0.8), NAMES, ("2v2", 2, 2), 2004242, 2)]
         result = validation.render_summary(cases, "deadbeef", 41948019589, 90)
         self.assertIn("Overall assessment: FAIL", result)
         self.assertIn("not a CI infrastructure failure", result)

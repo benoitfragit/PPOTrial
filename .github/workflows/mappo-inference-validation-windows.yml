@@ -7,6 +7,8 @@ on:
       - '.github/workflows/mappo-inference-validation-windows.yml'
       - 'tools/ci/inference_validation.py'
       - 'tools/ci/test_inference_validation.py'
+      - 'tools/ci/blue_checkpoint.py'
+      - 'tools/ci/test_blue_checkpoint.py'
   workflow_dispatch:
     inputs:
       source_run_id:
@@ -71,7 +73,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run isolated deterministic regression tests
-        run: python -m unittest discover -s tools/ci -p "test_inference_validation.py" -v
+        run: |
+          python -m unittest discover -s tools/ci -p "test_inference_validation.py" -v
+          python -m unittest discover -s tools/ci -p "test_blue_checkpoint.py" -v
 
   infer:
     if: github.event_name == 'workflow_dispatch'
@@ -128,17 +132,24 @@ jobs:
           name: blue-mappo-checkpoints
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ github.token }}
-          path: resources/model/BluePatrol
+          path: Examples/BlueDefense/projects/BluePatrol/checkpoints
 
       - name: Verify BEST champion provenance, then stage actor locally
         env:
           MODEL_GATE: ${{ inputs.model_gate }}
         run: |
-          $root = "resources/model/BluePatrol"
+          $root = "Examples/BlueDefense/projects/BluePatrol/checkpoints"
           $best = Join-Path $root "best/$env:MODEL_GATE"
           $metadataFile = Join-Path $best "champion.json"
-          $actor = Join-Path $best "blue_patrol_generalized_v10.txt"
-          $training = Join-Path $best "blue_patrol_generalized_training_v7.txt"
+          # Champions of earlier runs keep their former V10/V7 names.
+          $actor = Join-Path $best "policy.ppokit"
+          if (-not (Test-Path -LiteralPath $actor -PathType Leaf)) {
+            $actor = Join-Path $best "blue_patrol_generalized_v10.txt"
+          }
+          $training = Join-Path $best "latest.ppokit"
+          if (-not (Test-Path -LiteralPath $training -PathType Leaf)) {
+            $training = Join-Path $best "blue_patrol_generalized_training_v7.txt"
+          }
           foreach ($file in @($metadataFile, $actor, $training)) {
             if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
               throw "Missing verified BEST checkpoint component: $file"
@@ -158,16 +169,16 @@ jobs:
               throw "Invalid BEST checkpoint checksum: $file"
             }
           }
-          $actorHeader = Get-Content -LiteralPath $actor -TotalCount 1
-          $trainingHeader = Get-Content -LiteralPath $training -TotalCount 1
-          if (-not $actorHeader.StartsWith("BLUE_TEAM_MAPPO_V10 10 10 ") -or
-              -not $trainingHeader.StartsWith("BLUE_TEAM_TRAINING_V7 7 10 ") -or
-              -not $actorHeader.Contains("UNIFIED_PHYSICAL_GUIDANCE_V1") -or
-              -not $trainingHeader.Contains("UNIFIED_PHYSICAL_GUIDANCE_V1")) {
-            throw "BEST checkpoint schema is not the expected unified V10 policy"
+          # Contract of either format (observation 10, sizes, unified guidance).
+          python tools/ci/blue_checkpoint.py check --kind policy $actor
+          $actorValid = $LASTEXITCODE -eq 0
+          python tools/ci/blue_checkpoint.py check --kind training $training
+          if (-not $actorValid -or $LASTEXITCODE -ne 0) {
+            throw "BEST checkpoint schema is not the expected unified policy"
           }
           # CI-local copy: no change to source run, repository or uploaded model.
-          $destination = Join-Path $root "prod/blue_patrol_generalized_v10.txt"
+          # The C++ loader reads a former V10 actor by content under the new name.
+          $destination = Join-Path $root "prod/policy.ppokit"
           New-Item -ItemType Directory -Path (Split-Path $destination) -Force | Out-Null
           Copy-Item -LiteralPath $actor -Destination $destination -Force
           if ((Get-FileHash $destination -Algorithm SHA256).Hash -ne
@@ -182,7 +193,7 @@ jobs:
 
       - name: Verify unchanged red production model
         run: |
-          if (-not (Test-Path "resources/model/RLMission/prod/model.pt" -PathType Leaf)) {
+          if (-not (Test-Path "Examples/Airspace/models/RLMission/prod/policy.txt" -PathType Leaf)) {
             throw "Missing unchanged RLMission production model"
           }
 
@@ -190,55 +201,53 @@ jobs:
         id: runtime_cache
         uses: actions/cache/restore@v4
         with:
-          path: build/release/Main/Release
-          key: mappo-runtime-${{ runner.os }}-x64-msvc2022-Release-libtorch291cpu-${{ github.sha }}
+          path: |
+            build/release/PPOKit/Release
+            build/release/Examples/BlueDefense/Release
+            build/release/ppokit_programs_Release.txt
+          key: ppokit-blue-runtime-${{ runner.os }}-x64-msvc2022-Release-${{ github.sha }}
 
       - name: Validate runtime cache
         id: runtime_probe
         run: |
-          $root = "build/release/Main/Release"
-          $usable = $false
-          if ("${{ steps.runtime_cache.outputs.cache-hit }}" -eq "true" -and
-              (Test-Path "$root/PPO.exe" -PathType Leaf) -and
-              (Test-Path "$root/torch_cpu.dll" -PathType Leaf) -and
-              (Test-Path "$root/c10.dll" -PathType Leaf)) {
-            try {
-              & "$root/PPO.exe" --example blue-defense-evaluation --check-example
-              $usable = $LASTEXITCODE -eq 0
-            } catch {
-              Write-Warning "Cached binary is unusable: $_"
-            }
+          $usable = "${{ steps.runtime_cache.outputs.cache-hit }}" -eq "true"
+          foreach ($file in @("build/release/PPOKit/Release/ppokit-run.exe",
+                              "build/release/Examples/BlueDefense/Release/blue_environment.dll",
+                              "build/release/Examples/BlueDefense/Release/blue_network.dll",
+                              "build/release/Examples/BlueDefense/Release/blue_visualiser.dll",
+                              "build/release/ppokit_programs_Release.txt")) {
+            if (-not (Test-Path $file -PathType Leaf)) { $usable = $false }
           }
           "usable=$($usable.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
 
       - name: Configure x64 Release using existing build directory
         if: steps.runtime_probe.outputs.usable != 'true'
         run: |
+          # ppokit-run and the BlueDefense DLLs only: the ECS world without graphics.
           cmake -S . -B build/release -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_CONFIGURATION_TYPES=Release `
-            -DPPO_LIBTORCH_VARIANT=Release `
-            -DPPO_BUILD_DESKTOP=ON `
+            -DPPO_BUILD_DESKTOP=OFF `
+            -DPPO_BUILD_WORLD=ON `
             -DPPO_BUILD_CORE_TESTS=OFF `
             -DPPO_BUILD_CHECKPOINT_TESTS=OFF
           if ($LASTEXITCODE -ne 0) { throw "Release configure failed" }
 
-      - name: Compile evaluation-enabled PPO.exe Release
+      - name: Compile ppokit-run and the BlueDefense DLLs (Release)
         if: steps.runtime_probe.outputs.usable != 'true'
         run: |
-          cmake --build build/release --config Release --parallel 2
+          cmake --build build/release --config Release --parallel 2 `
+            --target ppokit-run blue_environment blue_network blue_visualiser
           if ($LASTEXITCODE -ne 0) { throw "Release build failed" }
 
-      - name: Verify headless evaluation example bootstraps
-        run: |
-          & "build/release/Main/Release/PPO.exe" --example blue-defense-evaluation --check-example
-          if ($LASTEXITCODE -ne 0) { throw "Inference evaluation scenario failed to initialize" }
-
-      - name: Cache validated Release binary and LibTorch DLLs
+      - name: Cache validated Release binaries
         if: steps.runtime_probe.outputs.usable != 'true'
         uses: actions/cache/save@v4
         with:
-          path: build/release/Main/Release
-          key: mappo-runtime-${{ runner.os }}-x64-msvc2022-Release-libtorch291cpu-${{ github.sha }}
+          path: |
+            build/release/PPOKit/Release
+            build/release/Examples/BlueDefense/Release
+            build/release/ppokit_programs_Release.txt
+          key: ppokit-blue-runtime-${{ runner.os }}-x64-msvc2022-Release-${{ github.sha }}
 
       - name: Unit-test inference validation and reporting
         run: |
@@ -254,6 +263,7 @@ jobs:
           THRESHOLD: ${{ inputs.success_percent }}
         run: |
           python -u tools/ci/inference_validation.py `
+            --ppokit-run build/release/PPOKit/Release/ppokit-run.exe `
             --source-run-id $env:SOURCE_RUN_ID `
             --gate $env:EVALUATE_GATE `
             --episodes $env:CASES `

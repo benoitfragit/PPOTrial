@@ -1,0 +1,18 @@
+{
+  "schema": "ppokit.eval/1",
+  "suite": "validation",
+  "seeds": {
+    "first": 4242,
+    "count": 8
+  },
+  "episodes": 1,
+  "during_training": {
+    "every_updates": 10
+  },
+  "best": [
+    {
+      "metric": "score.mean",
+      "prefer": "higher"
+    }
+  ]
+}

@@ -10,6 +10,10 @@
  * The CSV columns and the log lines are parsed by tools/flight/curriculum_ci.py and the
  * CI workflows: their text and order are a compatibility contract.
  *
+ * --project DIR runs a PPOKit project: its scenario (project.json "settings"), checkpoints in
+ * DIR/checkpoints, reward weights from the studio, and a clean stop when
+ * the attached UDP supervisor requests Stop. --legacy-control enables the older command files.
+ *
  * Read-only modes: --inspect-contract prints the network contract and signature as JSON;
  * --check-checkpoint FILE loads a checkpoint against the scenario; --trim prints the JSBSim
  * trim of the nominal approach and of level flight.
@@ -18,7 +22,10 @@
  * docs/PPOTrial_FlightControl3D_T6_Approach_CI.md.
  */
 #include "flight_session.hpp"
+#include "ppokit/live/live_control.hpp"
+#include "ppokit/ipc/control.hpp"
 #include "flight_trim.hpp"
+#include "ppokit/schema/project.hpp"
 #include <nlohmann/json.hpp>
 #include <charconv>
 #include <algorithm>
@@ -82,6 +89,12 @@ std::uint64_t Sum(Counts const& counts) noexcept
 struct Options final
 {
     std::filesystem::path configPath{PPO_FLIGHT_CONFIG};
+    /** @brief --config was given (it cannot be combined with --project). */
+    bool configGiven{};
+    bool legacyControl{};
+    std::string controlEndpoint;
+    /** @brief PPOKit project folder (--project); empty for --config or the default T-6 scenario. */
+    std::filesystem::path project;
     std::filesystem::path output;
     std::filesystem::path checkpointToCheck;
     bool training{true};
@@ -113,13 +126,14 @@ Options ParseOptions(int argc, char** argv)
             options.trim = true;
             continue;
         }
+        if (option == "--legacy-control") { options.legacyControl = true; continue; }
         if (option == "--help")
         {
             options.help = true;
             return options;
         }
         if (option != "--config" && option != "--output" && option != "--updates" && option != "--episodes"
-            && option != "--check-checkpoint")
+            && option != "--check-checkpoint" && option != "--project" && option != "--control")
         {
             throw std::invalid_argument("Unknown option");
         }
@@ -130,6 +144,15 @@ Options ParseOptions(int argc, char** argv)
         if (option == "--config")
         {
             options.configPath = argv[index];
+            options.configGiven = true;
+        }
+        else if (option == "--control")
+        {
+            options.controlEndpoint = argv[index];
+        }
+        else if (option == "--project")
+        {
+            options.project = argv[index];
         }
         else if (option == "--check-checkpoint")
         {
@@ -148,7 +171,44 @@ Options ParseOptions(int argc, char** argv)
             options.episodes = Positive(argv[index]);
         }
     }
+    if (options.legacyControl && !options.controlEndpoint.empty()) throw std::invalid_argument("Select one control protocol");
     return options;
+}
+
+/**
+ * @brief With --project, the scenario is the project's settings file; --config and --output
+ *        cannot be given too (the project decides both).
+ */
+void ApplyProject(Options& options)
+{
+    if (options.project.empty())
+    {
+        return;
+    }
+    if (options.configGiven || !options.output.empty())
+    {
+        throw std::invalid_argument("--project decides the scenario and the output: drop --config and --output");
+    }
+    ppokit::schema::Project const project = ppokit::schema::LoadProject(options.project);
+    std::optional<std::filesystem::path> const settings = project.SettingsFile();
+    if (!settings)
+    {
+        throw std::invalid_argument(options.project.string() + "/project.json has no \"settings\" scenario file");
+    }
+    options.configPath = *settings;
+}
+
+/** @brief True once, when DIR/checkpoints/stop.request appeared; the request is then removed. */
+bool TakeStopRequest(std::filesystem::path const& output)
+{
+    std::filesystem::path const request = output / "stop.request";
+    std::error_code error;
+    if (!std::filesystem::exists(request, error))
+    {
+        return false;
+    }
+    std::filesystem::remove(request, error);
+    return true;
 }
 
 /** @brief Read-only contract or checkpoint inspection. */
@@ -309,6 +369,82 @@ void LogGate(Config const& config, FlightSnapshot const& state)
         << " difficulty=" << difficulty << " passed=" << (passed ? "true" : "false") << std::endl;
 }
 
+/**
+ * @brief The live channel of a training session: the studio follows the journal and the
+ *        rewards of the window, pauses, resumes, stops and changes weights. A session that
+ *        cannot open it trains without it.
+ */
+class LiveRun final
+{
+public:
+    LiveRun(FlightSession& session, bool training, std::uint64_t update) : session_(session)
+    {
+        ppokit::runtime::RunLogWriter* const journal = session.Journal();
+        if (!training || journal == nullptr)
+        {
+            return;
+        }
+        try
+        {
+            server_.emplace(journal->Path().parent_path(), journal->Path(), session.Ledger().Channels());
+            journal->SetSink(&*server_);
+            control_.emplace(*server_, session.Ledger(), update);
+        }
+        catch (std::exception const& error)
+        {
+            std::cerr << "[FLIGHT] live channel unavailable, training without it: " << error.what() << std::endl;
+            control_.reset();
+            server_.reset();
+        }
+    }
+    ~LiveRun()
+    {
+        if (server_ && session_.Journal() != nullptr)
+        {
+            session_.Journal()->SetSink(nullptr);
+        }
+    }
+    LiveRun(LiveRun const&) = delete;
+    LiveRun& operator=(LiveRun const&) = delete;
+
+    /** @brief After each step: talks to the studio when due, blocks while paused. */
+    void AfterStep()
+    {
+        if (control_)
+        {
+            control_->AfterStep();
+        }
+    }
+    /** @brief After an update: status, and the weights sent live take effect now. */
+    void AtUpdate(std::uint64_t update, std::uint64_t episodes)
+    {
+        if (!control_)
+        {
+            return;
+        }
+        control_->AtUpdate(update, episodes);
+        while (std::optional<ppokit::runtime::WeightRequest> const request = control_->TakeWeights())
+        {
+            ppokit::runtime::WeightAnswer const answer = session_.ApplyWeightRequest(*request);
+            server_->Answer(answer);
+            std::cout << "[FLIGHT_WEIGHTS] " << answer.message << std::endl;
+        }
+    }
+    bool StopRequested() const noexcept { return control_ && control_->StopRequested(); }
+    void Finish()
+    {
+        if (control_)
+        {
+            control_->Finish();
+        }
+    }
+
+private:
+    FlightSession& session_;
+    std::optional<ppokit::live::LiveServer> server_;
+    std::optional<ppokit::live::LiveControl> control_;
+};
+
 /** @brief Runs the session to completion while writing telemetry and progress logs. */
 void Run(Options const& options, Config const& config)
 {
@@ -318,11 +454,16 @@ void Run(Options const& options, Config const& config)
     auto output = options.output;
     if (output.empty())
     {
-        // Default: <repository>/<checkpointDirectory>, the scenario living in resources/settings/Scenarios.
-        output = std::filesystem::absolute(options.configPath).parent_path().parent_path().parent_path()
-            / config.training.checkpointDirectory;
+        output = ModelDirectoryFor(options.configPath, config);
     }
-    FlightSession session(config, options.training, output, options.episodes, TrainingBudget::TotalUpdates);
+    // A project's scenario belongs to the project: the studio may change its reward weights.
+    std::filesystem::path weightsFile;
+    if (!options.project.empty())
+    {
+        weightsFile = options.configPath;
+    }
+    FlightSession session(config, options.training, output, options.episodes, TrainingBudget::TotalUpdates,
+        weightsFile, options.legacyControl);
     std::filesystem::create_directories(output);
     std::ofstream telemetry(output / (options.training ? "training.csv" : "evaluation.csv"));
     if (!telemetry)
@@ -343,9 +484,16 @@ void Run(Options const& options, Config const& config)
     std::uint64_t previousEpisodes = 0;
     std::uint64_t previousUpdates = session.Snapshot().learning.updates;
     std::uint64_t previousValidations = 0;
+    std::uint64_t episodesAtUpdate = 0;
+    LiveRun live(session, options.legacyControl && options.training, previousUpdates);
+    std::optional<ppokit::ipc::Worker> worker;
+    if (!options.controlEndpoint.empty()) worker.emplace(options.controlEndpoint, options.training && !weightsFile.empty());
     while (!session.Finished())
     {
+        if (worker && !worker->Continue() && !options.training) break;
+        // Training completes the current rollout even after Stop. Evaluation can end at this step.
         session.Tick();
+        if (options.legacyControl) live.AfterStep();
         auto const state = session.Snapshot();
         if (state.episodes != previousEpisodes)
         {
@@ -362,6 +510,22 @@ void Run(Options const& options, Config const& config)
                 WriteDiagnosticsRow(diagnostics, state);
             }
             previousUpdates = state.learning.updates;
+            if (options.legacyControl) live.AtUpdate(state.learning.updates, state.episodes - episodesAtUpdate);
+            if (worker)
+            {
+                if (auto const request = worker->TakeWeights()) worker->Answer(session.ApplyWeightRequest(*request));
+            }
+            episodesAtUpdate = state.episodes;
+            // Right after an update the buffer is empty: a stop asked by the studio saves here.
+            if (options.training && ((options.legacyControl && (TakeStopRequest(output) || live.StopRequested()))
+                || (worker && worker->Stopping())))
+            {
+                if (worker) worker->Saving();
+                session.SaveCheckpoint();
+                std::cout << "[FLIGHT] stopped on request at update " << state.learning.updates
+                          << ", checkpoint saved" << std::endl;
+                break;
+            }
         }
         if (state.validationCampaigns != previousValidations)
         {
@@ -369,6 +533,8 @@ void Run(Options const& options, Config const& config)
             previousValidations = state.validationCampaigns;
         }
     }
+    live.Finish();
+    if (worker) worker->Finish();
     auto const state = session.Snapshot();
     if (options.training && state.gateEvaluated > 0)
     {
@@ -383,13 +549,14 @@ int main(int argc, char** argv)
 {
     try
     {
-        auto const options = ParseOptions(argc, argv);
+        auto options = ParseOptions(argc, argv);
         if (options.help)
         {
-            std::cout << "FlightControlHeadless [--config FILE] [--output DIRECTORY] [--updates N] "
+            std::cout << "FlightControlHeadless [--project DIR | --config FILE [--output DIRECTORY]] [--control PORT/SESSION | --legacy-control] [--updates N] "
                 << "[--evaluate --episodes N] [--inspect-contract | --check-checkpoint FILE | --trim]\n";
             return 0;
         }
+        ApplyProject(options);
         auto config = LoadConfig(options.configPath);
         if (options.updates)
         {

@@ -22,7 +22,7 @@ dans [FlightControl3D : architecture et reprise du code](FlightControl3D_Archite
 | `Core/flight_observation` | Observation normalisée de la politique |
 | `Core/flight_mission` | Machine d'état approche → roulage → arrêt |
 | `Simulator/` | JSBSim natif et boucle de transition |
-| `Training/` | Acteur gaussien PPO (RLtools), checkpoints et BEST (écriture atomique : `flight_atomic_file`) |
+| `Training/` | Acteur gaussien PPO (RLtools), checkpoints et BEST (écriture atomique : `PPOKit::Artifacts`) |
 | `Runtime/` | Session partagée desktop/headless et réglage des récompenses |
 
 ## Géométrie d'approche et guidage

@@ -2,8 +2,11 @@ name: Restart Progressive Blue Defense (checkpoint)
 
 on:
   pull_request:
+    # The pull-request job lints both MAPPO workflows and runs the gate regressions.
     paths:
       - .github/workflows/mappo-restart-progressive.yml
+      - .github/workflows/mappo-training-windows.yml
+      - tools/ci/**
   workflow_dispatch:
     inputs:
       max_team_size:
@@ -26,7 +29,7 @@ on:
           - randomized_no_zones
           - randomized_zones
       source_run_id:
-        description: "Source selector: enter branch for committed LATEST V7 + PROD V10, or a completed run ID"
+        description: "Source selector: enter branch for committed LATEST training + PROD actor, or a completed run ID"
         required: false
         type: string
         default: "41865674608"
@@ -144,8 +147,8 @@ jobs:
         if: ${{ inputs.source_run_id != 'branch' }}
         shell: bash
         run: |
-          rm -rf resources/model/BluePatrol/latest resources/model/BluePatrol/prod
-          rm -f resources/model/BluePatrol/adaptive-curriculum-progress.json
+          rm -rf Examples/BlueDefense/projects/BluePatrol/checkpoints/latest Examples/BlueDefense/projects/BluePatrol/checkpoints/prod
+          rm -f Examples/BlueDefense/projects/BluePatrol/checkpoints/adaptive-curriculum-progress.json
 
       - name: Restore source actor, critic, Adam and RNG
         if: ${{ inputs.source_run_id != 'branch' }}
@@ -155,7 +158,7 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ github.token }}
-          path: resources/model/BluePatrol
+          path: Examples/BlueDefense/projects/BluePatrol/checkpoints
 
       - name: Verify full checkpoint and reset only curriculum progression
         env:
@@ -185,27 +188,31 @@ jobs:
           from tools.ci.adaptive_curriculum import branch_checkpoint_seed as branch_seed
           from tools.ci.adaptive_curriculum.rehearsal_profiles import (
               PROFILES, effective_profile)
+          from tools.ci import blue_checkpoint
           from tools.ci import mappo_curriculum
 
-          root = Path('resources/model/BluePatrol')
-          actor = root / 'latest/blue_patrol_generalized_v10.txt'
-          training = root / 'latest/blue_patrol_generalized_training_v7.txt'
-          progress_path = root / 'adaptive-curriculum-progress.json'
+          root = Path('Examples/BlueDefense/projects/BluePatrol/checkpoints')
           use_branch = os.environ.get('SOURCE_RUN_ID', '').strip().lower() == 'branch'
+          if not use_branch:
+              # Artifacts of earlier runs hold the former V10/V7 names; the
+              # loaders read either format by content, under the new names.
+              for former, current in blue_checkpoint.adopt_former_names(root):
+                  print(f'[RESTART] restored {former.name} as {current}')
+          actor = root / 'latest' / blue_checkpoint.POLICY_NAME
+          training = root / 'latest' / blue_checkpoint.TRAINING_NAME
+          progress_path = root / 'adaptive-curriculum-progress.json'
           required_paths = ((actor, training) if use_branch
                             else (actor, training, progress_path))
           for path in required_paths:
               if not path.is_file() or path.stat().st_size == 0:
                   raise RuntimeError(f'Missing or empty source artifact: {path}')
 
-          actor_header = actor.open(encoding='utf-8').readline().strip()
-          training_header = training.open(encoding='utf-8').readline().strip()
-          semantic = 'UNIFIED_PHYSICAL_GUIDANCE_V1'
-          if (not actor_header.startswith('BLUE_TEAM_MAPPO_V10 10 10 ')
-                  or semantic not in actor_header.split()
-                  or not training_header.startswith('BLUE_TEAM_TRAINING_V7 7 10 ')
-                  or semantic not in training_header.split()):
-              raise RuntimeError('Incompatible V10 actor or full V7 optimizer semantic contract')
+          try:
+              blue_checkpoint.read(actor, 'policy')
+              blue_checkpoint.read(training, 'training')
+          except ValueError as error:
+              raise RuntimeError(
+                  f'Incompatible actor or full optimizer semantic contract: {error}') from None
 
           gates_bytes = Path('tools/ci/adaptive_curriculum/gates.json').read_bytes()
           stages = select_curriculum(
@@ -438,12 +445,12 @@ jobs:
         with:
           name: blue-mappo-checkpoints
           path: |
-            resources/model/BluePatrol/latest/blue_patrol_generalized_v10.txt
-            resources/model/BluePatrol/latest/blue_patrol_generalized_training_v7.txt
-            resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt
-            resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt.score
-            resources/model/BluePatrol/best/**
-            resources/model/BluePatrol/adaptive-curriculum-progress.json
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/policy.ppokit
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/latest.ppokit
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/prod/policy.ppokit
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/prod/policy.ppokit.score
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/best/**
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/adaptive-curriculum-progress.json
           if-no-files-found: error
           retention-days: 30
 

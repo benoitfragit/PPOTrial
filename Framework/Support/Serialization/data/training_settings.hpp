@@ -1,6 +1,6 @@
 /**
  * @file training_settings.hpp
- * @brief Application-independent PPO settings parsed from the version 2 JSON.
+ * @brief Application-independent training settings parsed from the version 2 JSON.
  *
  * Reward channel identities are supplied by the model in their actual order.
  */
@@ -11,24 +11,15 @@
 
 namespace ppo::serialization {
 
-/** @brief Déclare le type TrainingSettings, utilisé par Interface ou implémentation du composant training settings. */
+/** @brief The training settings of an Airspace agent (settings/Training/<agent>.json). */
 struct TrainingSettings
 {
+    /** @brief Steps of one rollout: the episode's step limit under ppokit-run. */
     long long rolloutSteps{ 0 };
-    unsigned int checkpointEvery{ 0 };
-    unsigned int modelVersion{ 0 };
+    /** @brief Bound of the step's reward, |reward| <= rewardClamp. */
     float rewardClamp{ 0.F };
+    /** @brief Weights of the reward channels, in the model's order. */
     std::vector<float> rewardWeights{};
-
-    float gamma{ 0.F };
-    float gaeLambda{ 0.F };
-    float clipEpsilon{ 0.F };
-    float valueCoefficient{ 0.F };
-    float entropyCoefficient{ 0.F };
-    float learningRate{ 0.F };
-    int epochs{ 0 };
-    int batchSize{ 0 };
-    float targetKL{ 0.F };
 };
 
 /** Parse the sole supported training format (formatVersion = 2).
@@ -36,10 +27,5 @@ struct TrainingSettings
  */
 TrainingSettings ReadTrainingSettings(
     json const& document, std::vector<std::string> const& rewardNames);
-
-/** Persist exactly the version 2 format. */
-void WriteTrainingSettings(
-    json& document, TrainingSettings const& settings,
-    std::vector<std::string> const& rewardNames);
 
 } // namespace ppo::serialization

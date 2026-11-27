@@ -63,7 +63,7 @@ Entity::Init(void) noexcept
 
     OnInit();
 
-    auto& [state] = get<sEntityState>();
+    auto [state] = get<sEntityState>();
 
     state.m_destroyed = false;
     state.m_prevDestroyed = false;
@@ -86,7 +86,7 @@ Entity::Run(void) noexcept
 
     auto const& envState{ p_registry->ctx().get<sEnvironmentState>() };
 
-    auto& [state] = get<sEntityState>();
+    auto [state] = get<sEntityState>();
 
     if (std::numeric_limits<float>::epsilon() < state.m_speed)
     {

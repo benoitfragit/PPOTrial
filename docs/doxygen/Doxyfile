@@ -15,10 +15,9 @@ CASE_SENSE_NAMES        = YES
 
 # Point capital : scanner l'arborescence ACTUELLE et non les anciens dossiers.
 # Script tools/generatedoc.ps1 exécute Doxygen depuis la racine du dépôt.
-INPUT                   = .
+INPUT                   = README.md AGENTS.md PPOKit Framework Examples tools docs
 FILE_PATTERNS           = *.hpp *.cpp *.h *.c *.cc *.cxx *.hxx *.inl *.md *.dox
 RECURSIVE               = YES
-EXCLUDE                 = .git .vs build out docs/generated
 EXCLUDE_PATTERNS        = */.git/* */.vs/* */build/* */out/* */docs/generated/* */__pycache__/*
 USE_MDFILE_AS_MAINPAGE  = docs/doxygen/mainpage.md
 
@@ -71,13 +70,17 @@ GENERATE_XML            = NO
 GENERATE_RTF            = NO
 GENERATE_MAN            = NO
 
-CLASS_DIAGRAMS          = YES
 HAVE_DOT                = YES
 DOT_IMAGE_FORMAT        = svg
 INTERACTIVE_SVG         = YES
-CALL_GRAPH              = YES
-CALLER_GRAPH            = YES
-DIRECTORY_GRAPH         = YES
+CLASS_GRAPH             = NO
+COLLABORATION_GRAPH     = NO
+INCLUDE_GRAPH           = NO
+INCLUDED_BY_GRAPH       = NO
+CALL_GRAPH              = NO
+CALLER_GRAPH            = NO
+DIRECTORY_GRAPH         = NO
+GRAPHICAL_HIERARCHY     = NO
 UML_LOOK                = YES
 DOT_GRAPH_MAX_NODES     = 100
 MAX_DOT_GRAPH_DEPTH     = 3

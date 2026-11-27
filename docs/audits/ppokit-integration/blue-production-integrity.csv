@@ -1,0 +1,11 @@
+field,tensors_or_words,scalars,exact
+actor,15,37152,1
+critic,6,186625,1
+actor_m1,15,37152,1
+actor_m2,15,37152,1
+critic_m1,6,186625,1
+critic_m2,6,186625,1
+actor_adam_settings_and_age,1,9,1
+critic_adam_settings_and_age,1,9,1
+rng,624,624,1
+update,1,1,1

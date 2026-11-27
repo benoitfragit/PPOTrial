@@ -1,0 +1,290 @@
+{
+  "schema": "ppokit.graph/2",
+  "actor": {
+    "nodes": {
+      "tracks": {
+        "type": "input",
+        "from": "observation.tracks"
+      },
+      "ammo": {
+        "type": "input",
+        "from": "observation.ammo"
+      },
+      "lidar": {
+        "type": "input",
+        "from": "observation.lidar"
+      },
+      "encode1": {
+        "type": "entity_encoder",
+        "width": 128,
+        "activation": "relu",
+        "encode_absent": true
+      },
+      "encode2": {
+        "type": "entity_encoder",
+        "width": 64,
+        "activation": "relu",
+        "encode_absent": true
+      },
+      "mean": {
+        "type": "masked_pool",
+        "mode": "mean"
+      },
+      "max": {
+        "type": "masked_pool",
+        "mode": "max",
+        "mask_fill": -1000000000.0
+      },
+      "pooled": {
+        "type": "concat"
+      },
+      "query": {
+        "type": "dense",
+        "width": 64,
+        "activation": "identity"
+      },
+      "keys": {
+        "type": "entity_encoder",
+        "width": 64,
+        "activation": "identity",
+        "encode_absent": true
+      },
+      "attend": {
+        "type": "masked_attention",
+        "keys": true,
+        "mask_fill": -1000000000.0
+      },
+      "features": {
+        "type": "concat"
+      },
+      "motion": {
+        "type": "gaussian_head",
+        "log_std": "state",
+        "log_std_min": -20,
+        "log_std_max": 2
+      },
+      "fire": {
+        "type": "bernoulli_head"
+      }
+    },
+    "edges": [
+      [
+        "tracks",
+        "encode1"
+      ],
+      [
+        "encode1",
+        "encode2"
+      ],
+      [
+        "encode2",
+        "mean"
+      ],
+      [
+        "encode2",
+        "max"
+      ],
+      [
+        "mean",
+        "pooled.in1"
+      ],
+      [
+        "max",
+        "pooled.in2"
+      ],
+      [
+        "pooled",
+        "query"
+      ],
+      [
+        "encode2",
+        "keys"
+      ],
+      [
+        "query",
+        "attend.query"
+      ],
+      [
+        "encode2",
+        "attend.set"
+      ],
+      [
+        "keys",
+        "attend.keys"
+      ],
+      [
+        "mean",
+        "features.in1"
+      ],
+      [
+        "max",
+        "features.in2"
+      ],
+      [
+        "attend",
+        "features.in3"
+      ],
+      [
+        "ammo",
+        "features.in4"
+      ],
+      [
+        "lidar",
+        "features.in5"
+      ],
+      [
+        "features",
+        "motion"
+      ],
+      [
+        "features",
+        "fire"
+      ]
+    ]
+  },
+  "critic": {
+    "nodes": {
+      "tracks": {
+        "type": "input",
+        "from": "observation.tracks"
+      },
+      "ammo": {
+        "type": "input",
+        "from": "observation.ammo"
+      },
+      "lidar": {
+        "type": "input",
+        "from": "observation.lidar"
+      },
+      "encode1": {
+        "type": "entity_encoder",
+        "width": 128,
+        "activation": "relu",
+        "share": "encode1",
+        "encode_absent": true
+      },
+      "encode2": {
+        "type": "entity_encoder",
+        "width": 64,
+        "activation": "relu",
+        "share": "encode2",
+        "encode_absent": true
+      },
+      "mean": {
+        "type": "masked_pool",
+        "mode": "mean"
+      },
+      "max": {
+        "type": "masked_pool",
+        "mode": "max",
+        "mask_fill": -1000000000.0
+      },
+      "pooled": {
+        "type": "concat"
+      },
+      "query": {
+        "type": "dense",
+        "width": 64,
+        "activation": "identity",
+        "share": "query"
+      },
+      "keys": {
+        "type": "entity_encoder",
+        "width": 64,
+        "activation": "identity",
+        "share": "keys",
+        "encode_absent": true
+      },
+      "attend": {
+        "type": "masked_attention",
+        "keys": true,
+        "mask_fill": -1000000000.0
+      },
+      "features": {
+        "type": "concat"
+      },
+      "hidden": {
+        "type": "dense",
+        "width": 64,
+        "activation": "relu"
+      },
+      "value": {
+        "type": "value"
+      }
+    },
+    "edges": [
+      [
+        "tracks",
+        "encode1"
+      ],
+      [
+        "encode1",
+        "encode2"
+      ],
+      [
+        "encode2",
+        "mean"
+      ],
+      [
+        "encode2",
+        "max"
+      ],
+      [
+        "mean",
+        "pooled.in1"
+      ],
+      [
+        "max",
+        "pooled.in2"
+      ],
+      [
+        "pooled",
+        "query"
+      ],
+      [
+        "encode2",
+        "keys"
+      ],
+      [
+        "query",
+        "attend.query"
+      ],
+      [
+        "encode2",
+        "attend.set"
+      ],
+      [
+        "keys",
+        "attend.keys"
+      ],
+      [
+        "mean",
+        "features.in1"
+      ],
+      [
+        "max",
+        "features.in2"
+      ],
+      [
+        "attend",
+        "features.in3"
+      ],
+      [
+        "ammo",
+        "features.in4"
+      ],
+      [
+        "lidar",
+        "features.in5"
+      ],
+      [
+        "features",
+        "hidden"
+      ],
+      [
+        "hidden",
+        "value"
+      ]
+    ]
+  }
+}

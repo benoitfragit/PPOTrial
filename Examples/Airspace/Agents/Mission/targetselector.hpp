@@ -12,8 +12,8 @@
 #include "prodagent.hpp"
 #include "ppo/core/agent_contract.hpp"
 #include "missionlayout.hpp"
-#include "actorcriticmission.hpp"
-#include "evaluator.hpp"
+#include "graph_network.hpp"
+#include "evaluation_campaign.hpp"
 
 namespace rl {
 
@@ -146,27 +146,35 @@ struct StatesAndActionsForMission
     ppo::model::BaseEntity m_entity{ nullptr };
 };
 
+/** @brief task.json and graph.json of the RLMission networks (PPOKit training). */
+ppo::model::GraphNetworkFiles MissionNetworkFiles();
+
+/**
+ * @brief Production policy of a model version ("prod" or "eval").
+ * @details A policy trained with PPOKit (policy.ppokit) when there is one, else the policy
+ *          converted from LibTorch (policy.txt); null, and an idle agent, when neither exists.
+ */
+std::unique_ptr<ppo::core::IPolicy> MakeMissionPolicy(std::string const& version);
+
 /**
 * @brief Training agent used for the mission task.
 */
 class TargetSelectorTrainingAgent :
-    public ppo::model::TrainingAgent<ActorCriticTrackAttention, StatesAndActionsForMission>
+    public ppo::model::TrainingAgent<StatesAndActionsForMission>
 {
 public:
     /**
     * @brief Base training-agent alias.
     */
-    using Base = ppo::model::TrainingAgent<ActorCriticTrackAttention, StatesAndActionsForMission>;
+    using Base = ppo::model::TrainingAgent<StatesAndActionsForMission>;
 
     /**
     * @brief Creates the mission training agent for one entity.
     * @param entity Controlled entity wrapper.
     */
     explicit TargetSelectorTrainingAgent(ppo::model::BaseEntity& entity) :
-        Base(&(entity.add<StatesAndActionsForMission>(entity)), "RLMission", RESOURCE_RLMISSIONMODEL_PATH, nullptr)
+        Base(&(entity.add<StatesAndActionsForMission>(entity)), "RLMission")
     {
-        EnsureMissionEvaluationFactoriesRegistered();
-        SetEvaluator(&m_evaluator);
         m_entity = entity;
     }
 
@@ -185,10 +193,6 @@ private:
     * @brief Controlled entity wrapper.
     */
     ppo::model::BaseEntity m_entity{ nullptr };
-    /**
-    * @brief Evaluator launched periodically by the training flow.
-    */
-    ppo::evaluation::Evaluator m_evaluator{};
     /**
     * @brief True once previous-step memories have been initialized.
     */
@@ -219,13 +223,13 @@ private:
 * @brief Production agent used for mission inference and evaluation.
 */
 class TargetSelectorProdAgent :
-    public ppo::model::ProdAgent<ActorCriticTrackAttentionProd, StatesAndActionsForMission>
+    public ppo::model::ProdAgent<StatesAndActionsForMission>
 {
 public:
     /**
     * @brief Base production-agent alias.
     */
-    using Base = ppo::model::ProdAgent<ActorCriticTrackAttentionProd, StatesAndActionsForMission>;
+    using Base = ppo::model::ProdAgent<StatesAndActionsForMission>;
 
     /**
     * @brief Creates the mission production agent for one entity.
@@ -233,9 +237,18 @@ public:
     * @param version Model subfolder to load, usually prod or eval.
     */
     TargetSelectorProdAgent(ppo::model::BaseEntity& entity, std::string const& version = "prod") :
-        Base(&(entity.add<StatesAndActionsForMission>(entity)),
-             "RLMission",
-             std::filesystem::path(RESOURCE_RLMISSIONMODEL_PATH) / version / "model.pt")
+        Base(&(entity.add<StatesAndActionsForMission>(entity)), "RLMission", MakeMissionPolicy(version))
+    {
+        m_entity = entity;
+    }
+
+    /**
+    * @brief The same agent playing a given policy (ppokit-run's evaluation through the environment DLL).
+    * @param entity Controlled entity wrapper.
+    * @param policy Policy to play.
+    */
+    TargetSelectorProdAgent(ppo::model::BaseEntity& entity, std::unique_ptr<ppo::core::IPolicy> policy) :
+        Base(&(entity.add<StatesAndActionsForMission>(entity)), "RLMission", std::move(policy))
     {
         m_entity = entity;
     }
@@ -253,7 +266,7 @@ private:
 };
 
 /**
-* @brief Registers the production agent factory used by the evaluator.
+* @brief Registers the production agent factory of the evaluation scenarios (their opponents).
 */
 inline void
 EnsureMissionEvaluationFactoriesRegistered(void)

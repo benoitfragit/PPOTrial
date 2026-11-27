@@ -10,9 +10,11 @@
  *
  * Read next: Training/flight_policy.hpp, Training/flight_learner.cpp.
  */
+#include <iterator>
 #include "test_support.hpp"
 #include "flight_learner.hpp"
 #include "flight_rng_checkpoint.hpp"
+#include "flight_session.hpp"
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -408,6 +410,41 @@ void KlRejectedActorState(Config c)
     std::size_t actorAge{},criticAge{};checkpoint>>actorAge>>criticAge;
     Check(actorAge==1 && criticAge==5,"skipping never advances the actor Adam age");
 }
+/** @brief Layer probes are read-only: a probed update saves the same checkpoint, and every layer is seen. */
+void ProbedUpdateIsReadOnly(Config c)
+{
+    c.training.hiddenWidth=32;c.training.rolloutSteps=64;c.training.minibatch=16;c.training.epochs=2;
+    TemporaryDirectory directory("flight-probes-");
+    auto const train=[&](bool probed,std::filesystem::path const& path){
+        FlightLearner learner(c);
+        learner.ProbeLayers(probed);
+        for(std::size_t row=0;row<c.training.rolloutSteps;++row)
+        {
+            Observation observation{};
+            observation[0]=static_cast<float>(row)/64.F;observation[1]=-observation[0];
+            auto const action=learner.Choose(observation);
+            StepResult step{};step.reward=action.raw[0];step.terminated=row%8==7;
+            learner.Record(observation,action,step,observation);
+        }
+        learner.Optimize();learner.Save(path);
+        return learner.LayerProbes();
+    };
+    auto const probes=train(true,directory.path/"probed.txt");
+    auto const unprobed=train(false,directory.path/"plain.txt");
+    std::ifstream probed(directory.path/"probed.txt"),plain(directory.path/"plain.txt");
+    std::string const probedText((std::istreambuf_iterator<char>(probed)),std::istreambuf_iterator<char>());
+    std::string const plainText((std::istreambuf_iterator<char>(plain)),std::istreambuf_iterator<char>());
+    Check(!probedText.empty() && probedText==plainText,"a probed update saves a bit-identical checkpoint");
+    Check(unprobed.actor.empty() && probes.actor.size()==3 && probes.critic.size()==3,
+        "the two hidden layers and the output of each network are probed, only when asked");
+    bool seen=true;
+    for(auto const* network : {&probes.actor,&probes.critic})
+        for(auto const& layer : *network)
+            seen=seen && layer.samples>0 && std::isfinite(layer.deviation) && layer.gradientNorm>0;
+    Check(seen,"every probed layer has outputs and a gradient size");
+    Check(probes.actor.front().type=="dense tanh" && probes.actor.back().block=="output",
+        "layers are named and typed for the studio");
+}
 void AnalyticKl()
 {
     PolicyDistribution previous{};
@@ -436,7 +473,7 @@ void GearPolicy(Config const& c)
     {
         policy.output[GearOutput]=logit;
         double const p=1/(1+std::exp(-logit));
-        Check(Near(GearEntropy(logit),-p*std::log(p)-(1-p)*std::log(1-p),1e-12),"Bernoulli gear entropy");
+        Check(Near(ppokit::heads::BernoulliEntropy(logit),-p*std::log(p)-(1-p)*std::log(1-p),1e-12),"Bernoulli gear entropy");
         for(double const other : {-0.4,0.7})
         {
             double const q=1/(1+std::exp(-other));
@@ -535,6 +572,26 @@ void TrimmedNeutralApproach(Config c)
     }
 }
 
+/**
+ * @brief The checkpoints committed in the projects load with the current learner.
+ * @details Loading only, no training: a format or signature change that would orphan a
+ * saved run fails here instead of at the next desktop session.
+ * @param configPath Scenario of a project.
+ * @param required The project must commit a run; else a missing checkpoint is skipped. No
+ *        project does today: the T-6 run continues under ppokit-run (its checkpoint is
+ *        checked by PPOKitRepositoryProjectsTests).
+ */
+void CommittedCheckpoints(char const* configPath,bool required)
+{
+    auto const config=LoadConfig(configPath);
+    auto const latest=ModelDirectoryFor(configPath,config)/"latest/flight_policy.txt";
+    Check(!required || std::filesystem::exists(latest),"the project commits its latest checkpoint");
+    if(!std::filesystem::exists(latest)) return;
+    FlightLearner learner(config);
+    learner.Load(latest);
+    Check(learner.Stats().updates>0,"a committed checkpoint loads with its updates");
+}
+
 int main()
 {
     try
@@ -542,7 +599,8 @@ int main()
         auto const c=LoadConfig(PPO_FLIGHT_CONFIG);
         PortableRngCheckpoint();
         GaussianPolicy(c); Exploration(c); ActiveControls(c); ObservationBounds(c); Training(c); AnalyticKl();
-        KlProtection(c); KlRejectedActorState(c); TrimmedNeutralApproach(c); GearPolicy(c);
+        KlProtection(c); KlRejectedActorState(c); ProbedUpdateIsReadOnly(c); TrimmedNeutralApproach(c); GearPolicy(c);
+        CommittedCheckpoints(PPO_FLIGHT_CONFIG,false); CommittedCheckpoints(PPO_FLIGHT_PC7_CONFIG,false);
     }
     catch(std::exception const& e) { std::cerr<<e.what()<<'\n'; return 1; }
     std::cout<<"Gaussian PPO/RLtools regressions passed\n";

@@ -16,8 +16,9 @@
  *
  * Floating-point results of JSBSim, libm and the RNG stream representation are
  * platform specific, so the reference is only enforced on the platform where it
- * was frozen (Linux x86_64, GCC 13, libstdc++). Elsewhere the test prints its
- * fingerprint and reports a CTest skip (return code 77).
+ * was frozen (Linux x86_64, GCC 13, libstdc++, Ubuntu 24.04 libm 2.39).
+ * Other GCC 13 Linux builds also compare the digest and can expose libm
+ * differences. Other compilers return 77. The reference CI treats 77 as failure.
  *
  * Related files: tests/session_tests.cpp (session semantics),
  * tests/learner_tests.cpp (PPO derivatives), docs/FlightControl3D_Architecture.md.
@@ -347,8 +348,18 @@ int main()
         std::cout << "[FLIGHT_GOLDEN] fingerprint=" << Hex(fingerprint) << '\n';
 #if defined(__linux__) && defined(__x86_64__) && defined(__GLIBCXX__) && defined(__GNUC__) \
     && !defined(__clang__) && __GNUC__ == 13
-        // Frozen before the readability refactoring; identical in Debug and Release.
-        constexpr std::uint64_t Reference = 0x848d71c6725f735cULL;
+        // Master #107 with the shared PPOKit Gaussian, Bernoulli and surrogate formulas (user
+        // decision B). Master #107 alone gives 0xde36fa860eca0d8d: the 19 replayed episodes,
+        // their actions and outcomes are identical, only the last bits of log-probabilities and
+        // weights differ. Identical in Debug and Release. (Master still holds the pre-#87 value
+        // 0x848d71c6725f735c, never re-checked because CI runs GCC 15.)
+        // Master #109 then changed the model on purpose: approach starts turn toward the
+        // centreline and the T-6 and PC-7 curriculum thresholds moved. With #109's spawn and
+        // scenarios undone, this code still gives 0x419024d0dcfe2a0d; with them, 0x65f430ba639ad945.
+        // Master #110 then changed the guidance on purpose (holding laps along geometric tangents,
+        // contract 8). With #110's Core changes undone, this code still gives 0x65f430ba639ad945;
+        // with them, the value below (Debug and Release).
+        constexpr std::uint64_t Reference = 0x20c6e13722644e9dULL;
         Check(fingerprint == Reference, "golden trace changed: the refactoring altered model behaviour");
         std::cout << "Flight golden trace matches the pre-refactoring reference\n";
         return 0;

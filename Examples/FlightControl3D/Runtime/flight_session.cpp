@@ -17,13 +17,17 @@
  * Read next: flight_session.hpp, flight_headless.cpp, Training/flight_model_store.cpp.
  */
 #include "flight_session.hpp"
+#include "flight_task_layout.hpp"
+#include "ppokit/schema/project.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <iostream>
 #include <limits>
 #include <random>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace ppo::examples::flight {
 namespace {
@@ -40,13 +44,8 @@ std::string CurriculumStageName(CurriculumSettings const& settings, double diffi
 
 /** @brief Largest accepted inference budget, in episodes. */
 constexpr std::size_t MaximumInferenceEpisodes = 1000000;
-/** @brief Difficulty of the inference mix: the full task. */
-constexpr double FullTaskDifficulty = 1.0;
-/** @brief SplitMix64 increment (golden ratio) and output multipliers. */
-constexpr std::uint64_t SplitMixIncrement = 0x9e3779b97f4a7c15ULL;
-constexpr std::uint64_t SplitMixMultiplier1 = 0xbf58476d1ce4e5b9ULL;
-constexpr std::uint64_t SplitMixMultiplier2 = 0x94d049bb133111ebULL;
-
+/** @brief Updates between two probed updates (layer statistics for the studio's Probes tab). */
+constexpr std::uint64_t ProbeEveryUpdates = 10;
 std::uint64_t AdditionalUpdateLimit(std::uint64_t updates, std::size_t additional)
 {
     if (updates > std::numeric_limits<std::uint64_t>::max() - additional)
@@ -54,17 +53,6 @@ std::uint64_t AdditionalUpdateLimit(std::uint64_t updates, std::size_t additiona
         throw std::overflow_error("FlightControl3D: training update budget overflow");
     }
     return updates + additional;
-}
-
-/** @brief Environment seed of a training block: SplitMix64 of the base seed and the update count. */
-std::uint32_t TrainingSeed(std::uint32_t base, std::uint64_t updates) noexcept
-{
-    // SplitMix64 keeps resumed update blocks deterministic but distinct.
-    std::uint64_t value = static_cast<std::uint64_t>(base) ^ ((updates + 1U) * SplitMixIncrement);
-    value = (value ^ (value >> 30U)) * SplitMixMultiplier1;
-    value = (value ^ (value >> 27U)) * SplitMixMultiplier2;
-    value ^= value >> 31U;
-    return static_cast<std::uint32_t>(value ^ (value >> 32U));
 }
 
 /** @brief Emits one complete rollout's losses and weighted reward-channel means. */
@@ -78,7 +66,8 @@ void LogUpdate(LearningStats const& stats)
         << " max_minibatch_approx_kl=" << stats.maximumApproximateKl
         << " max_minibatch_sampled_kl=" << stats.maximumSampledKl
         << " actor_steps=" << stats.actorSteps << " critic_steps=" << stats.criticSteps
-        << " actor_kl_skips=" << stats.actorKlSkips;
+        << " actor_kl_skips=" << stats.actorKlSkips
+        << " explained_variance=" << stats.explainedVariance;
     for (std::size_t channel = 0; channel < RewardCount; ++channel)
     {
         std::cout << ' ' << RewardNames[channel] << '=' << stats.meanRewards[channel];
@@ -86,35 +75,41 @@ void LogUpdate(LearningStats const& stats)
     std::cout << std::endl;
 }
 
-/** @brief Filtered physical controls in action-axis order. */
-std::array<double, ContinuousActions> Applied(Controls const& controls) noexcept
+/** @brief Reward weights in channel order, as the journal and the ledger take them. */
+std::vector<double> WeightVector(RewardSettings const& reward)
 {
-    return {controls.elevator, controls.aileron, controls.rudder, controls.throttle, controls.brake};
+    return {reward.weights.begin(), reward.weights.end()};
 }
 
-/**
- * @brief Whether a raw action saturates.
- *
- * The raw brake maps [-1, 1] to [0, 1] (BrakeCommand), so a non-positive raw brake is
- * already released; the other axes saturate symmetrically.
- */
-bool RawSaturated(std::size_t axis, double raw, double threshold) noexcept
+/** @brief `start` event of the journal: task, channels with labels and weights, hyper-parameters. */
+ppokit::runtime::RunHeader JournalHeader(Config const& config)
 {
-    if (axis == BrakeAction)
+    using Layout = task::TaskLayout;
+    ppokit::runtime::RunHeader header;
+    header.task = Layout::Name;
+    for (std::size_t channel = 0; channel < RewardCount; ++channel)
     {
-        return raw <= 0 || raw >= threshold;
+        header.channels.push_back({Layout::Reward::Names[channel], Layout::Reward::Labels[channel],
+            config.reward.weights[channel]});
     }
-    return std::abs(raw) >= threshold;
+    auto const& training = config.training;
+    header.settings = {{"gamma", training.gamma}, {"lambda", training.lambda}, {"clip", training.clip},
+        {"actor_learning_rate", training.actorRate}, {"critic_learning_rate", training.criticRate},
+        {"entropy_coefficient", training.entropy}, {"epochs", static_cast<double>(training.epochs)},
+        {"minibatch", static_cast<double>(training.minibatch)},
+        {"rollout_steps", static_cast<double>(training.rolloutSteps)}, {"target_kl", training.targetKl},
+        {"hidden_width", static_cast<double>(training.hiddenWidth)},
+        {"seed", static_cast<double>(training.seed)}, {"probe_every", static_cast<double>(ProbeEveryUpdates)}};
+    return header;
 }
 
-/** @brief Whether an applied control saturates; throttle and brake are one-sided physical ranges. */
-bool AppliedSaturated(std::size_t axis, double applied, double threshold) noexcept
+/** @brief Flight PPO statistics under the journal's stable names. */
+ppokit::runtime::NamedValues JournalMetrics(LearningStats const& stats)
 {
-    if (axis >= ThrottleAction)
-    {
-        return applied <= 1 - threshold || applied >= threshold;
-    }
-    return std::abs(applied) >= threshold;
+    return {{"policy_loss", stats.policyLoss}, {"value_loss", stats.valueLoss}, {"entropy", stats.entropy},
+        {"mean_reward", stats.meanReward}, {"max_approx_kl", stats.maximumApproximateKl},
+        {"max_sampled_kl", stats.maximumSampledKl}, {"actor_kl_skips", static_cast<double>(stats.actorKlSkips)},
+        {"explained_variance", stats.explainedVariance}};
 }
 
 void UpdateLiveDiagnostics(FlightDiagnostics& diagnostics, Observation const& observation,
@@ -298,10 +293,11 @@ void AddEpisodeRewards(std::array<double, RewardCount>& sums, StepResult const& 
 } // namespace
 
 FlightSession::FlightSession(Config config, bool training, std::filesystem::path modelDirectory,
-    std::optional<std::size_t> inferenceEpisodes, TrainingBudget budget, std::filesystem::path scenarioPath)
+    std::optional<std::size_t> inferenceEpisodes, TrainingBudget budget, std::filesystem::path scenarioPath, bool legacyInbox)
     : config_(std::move(config)), training_(training), scenarioPath_(std::move(scenarioPath)),
       models_(config_, std::move(modelDirectory)),
-      curriculum_(config_.training.curriculum), learner_(config_)
+      curriculum_(config_.training.curriculum), learner_(config_),
+      rewardLedger_(WeightVector(config_.reward), 1)
 {
     diagnostics_.enabled = config_.diagnostics.enabled;
     lastDiagnostics_.enabled = config_.diagnostics.enabled;
@@ -338,6 +334,10 @@ FlightSession::FlightSession(Config config, bool training, std::filesystem::path
     else
     {
         trainingUpdateLimit_ = config_.training.maxUpdates;
+    }
+    if (training_)
+    {
+        OpenJournal(legacyInbox);
     }
     CreateTrainingEnvironment();
     if (training_ && learner_.Stats().updates >= trainingUpdateLimit_)
@@ -422,6 +422,7 @@ void FlightSession::Tick()
     if (training_)
     {
         learner_.Record(observation, action, lastStep_, environment_->ObservationNow());
+        rewardLedger_.RecordWeighted(0, lastStep_.rewards.data(), lastStep_.reward);
     }
     if (lastStep_.terminated || lastStep_.truncated)
     {
@@ -458,6 +459,10 @@ void FlightSession::FinishEpisode()
     {
         ++timeouts_;
     }
+    if (training_)
+    {
+        rewardLedger_.EndEpisode(0);
+    }
     // Only airborne episodes measure the curriculum difficulty.
     if (training_ && environment_->StartedAirborne())
     {
@@ -485,10 +490,116 @@ void FlightSession::SaveLatest()
     SaveCurriculumLevel(models_.CurriculumLevel(), curriculum_.Level());
 }
 
+void FlightSession::OpenJournal(bool legacyInbox)
+{
+    auto const path = models_.RunJournal();
+    std::filesystem::create_directories(path.parent_path());
+    auto header = JournalHeader(config_);
+    // The studio can change weights only where they can be saved: a scenario file.
+    header.acceptsWeightRequests = !scenarioPath_.empty();
+    // A resumed latest continues its journal; a new policy starts a new one.
+    journal_ = resumed_ ? ppokit::runtime::RunLogWriter::Resume(path, header, learner_.Stats().updates, &rewardLedger_)
+                        : ppokit::runtime::RunLogWriter(path, header);
+    journalStart_ = std::chrono::steady_clock::now();
+    if (header.acceptsWeightRequests && legacyInbox)
+    {
+        std::vector<std::string> names;
+        for (auto const& channel : header.channels)
+        {
+            names.push_back(channel.name);
+        }
+        weightRequests_.emplace(path, std::move(names));
+    }
+}
+
+void FlightSession::TakeWeightRequest()
+{
+    if (!weightRequests_)
+    {
+        return;
+    }
+    try
+    {
+        auto const request = weightRequests_->Take();
+        if (!request)
+        {
+            return;
+        }
+        weightRequests_->Answer(ApplyWeightRequest(*request));
+    }
+    catch (std::exception const& error)
+    {
+        // A studio file problem must never stop the training.
+        std::cerr << "[FLIGHT_WEIGHTS] weight request ignored: " << error.what() << std::endl;
+    }
+}
+
+ppokit::runtime::WeightAnswer FlightSession::ApplyWeightRequest(ppokit::runtime::WeightRequest const& request)
+{
+    if (scenarioPath_.empty())
+    {
+        return {request.id, false, "Refused: this session has no scenario file to save the weights in"};
+    }
+    // Validate every weight before applying any: a request is applied whole or not at all.
+    Config candidate = pendingRewardConfig_ ? *pendingRewardConfig_ : config_;
+    try
+    {
+        for (auto const& [channel, weight] : request.weights)
+        {
+            candidate = WithRewardTuning(candidate, channel, weight);
+        }
+    }
+    catch (std::exception const& error)
+    {
+        return {request.id, false, std::string("Refused: ") + error.what()};
+    }
+    bool applied = true;
+    for (auto const& [channel, weight] : request.weights)
+    {
+        applied = SetRewardTuning(channel, weight) && applied;
+    }
+    std::uint64_t const from = learner_.Stats().updates + 1U;
+    // Right after an update the change takes effect at once (ApplyPendingRewardTuning checks it).
+    ApplyPendingRewardTuning();
+    std::string const status = rewardTuningStatus_.data();
+    std::string const message = applied ? "Applied from update " + std::to_string(from) + ". " + status : status;
+    return {request.id, applied, message};
+}
+
+void FlightSession::JournalUpdate()
+{
+    if (!journal_)
+    {
+        return;
+    }
+    ppokit::runtime::UpdateRecord record;
+    record.update = learner_.Stats().updates;
+    record.elapsedSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - journalStart_).count();
+    record.ppo = JournalMetrics(learner_.Stats());
+    record.rewards = rewardLedger_.Summarize();
+    journal_->WriteUpdate(record);
+}
+
+void FlightSession::JournalProbes()
+{
+    auto const update = learner_.Stats().updates;
+    journal_->WriteProbes({update, "actor", learner_.LayerProbes().actor});
+    journal_->WriteProbes({update, "critic", learner_.LayerProbes().critic});
+}
+
 void FlightSession::OptimizeAndCheckpoint()
 {
+    // Every ProbeEveryUpdates-th update is probed for the studio (read-only: same weights).
+    bool const probed = journal_ && (learner_.Stats().updates + 1U) % ProbeEveryUpdates == 0U;
+    learner_.ProbeLayers(probed);
     learner_.Optimize();
+    learner_.ProbeLayers(false);
     LogUpdate(learner_.Stats());
+    JournalUpdate();
+    if (probed)
+    {
+        JournalProbes();
+    }
     auto const updates = learner_.Stats().updates;
     bool const final = updates >= trainingUpdateLimit_;
     // Diagnostics are logged per window of logEveryUpdates updates, and after the last one.
@@ -498,7 +609,8 @@ void FlightSession::OptimizeAndCheckpoint()
         LogDiagnostics(lastDiagnostics_, updates);
         diagnostics_ = NextDiagnosticsWindow(diagnostics_);
     }
-    // The buffer is empty now: a pending reward edit can take effect.
+    // The buffer is empty now: a weight request of the studio or a pending reward edit can take effect.
+    TakeWeightRequest();
     if (pendingRewardConfig_)
     {
         ApplyPendingRewardTuning();
@@ -648,6 +760,17 @@ void FlightSession::ApplyPendingRewardTuning()
         return;
     }
     auto const& next = *pendingRewardConfig_;
+    if (journal_)
+    {
+        auto const previous = WeightVector(config_.reward);
+        auto const weights = WeightVector(next.reward);
+        if (weights != previous)
+        {
+            // The buffer is empty: the next update is the first one collected under these weights.
+            journal_->WriteWeights({learner_.Stats().updates + 1U, previous, weights});
+        }
+        rewardLedger_.SetWeights(weights);
+    }
     learner_.SetRewardContract(next.reward, next.checkpointSignature);
     models_.SetRewardContract(next.reward, next.checkpointSignature);
     environment_->SetRewardSettings(next.reward);
@@ -779,4 +902,15 @@ void FlightSession::CreateTrainingEnvironment()
         ResetInferenceEpisode();
     }
 }
+std::filesystem::path ModelDirectoryFor(std::filesystem::path const& scenarioPath, Config const& config)
+{
+    std::filesystem::path const absolute = std::filesystem::absolute(scenarioPath);
+    if (std::optional<std::filesystem::path> const project = ppokit::schema::ProjectFolderOf(absolute))
+    {
+        return *project / "checkpoints";
+    }
+    // A scenario outside a project keeps its models beside it.
+    return (absolute.parent_path() / config.training.checkpointDirectory).lexically_normal();
+}
+
 } // namespace ppo::examples::flight

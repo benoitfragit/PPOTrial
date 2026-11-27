@@ -39,29 +39,6 @@ struct GeneralizedEvaluationSample final
     bool patrolCompleted{};
 };
 
-/** @brief Final normalized metrics of a deterministic evaluation campaign. */
-struct GeneralizedEvaluationMetrics final
-{
-    /** @brief Number of valid episodes included in this report. */
-    std::size_t episodes{};
-    /** @brief Mean fraction of active P blue mobiles still alive. */
-    float blueSurvivalRate{};
-    /** @brief Mean fraction of active N red mobiles neutralized. */
-    float redNeutralizationRate{};
-    /** @brief Fraction of episodes where the fixed objective survived. */
-    float objectiveSurvivalRate{};
-    /** @brief Mean surviving-leader patrol responsibility quality. */
-    float leaderPatrolQuality{};
-    /** @brief Mean surviving-teammate formation-slot quality. */
-    float formationQuality{};
-    /** @brief Fraction of episodes with objective safe and no red remaining. */
-    float missionSuccessRate{};
-    /** @brief Fraction of episodes that reached their step limit. */
-    float timeoutRate{};
-    /** @brief Stable weighted score in [0, 100]. */
-    float score{};
-};
-
 /** @brief Result of adding one generalized evaluation sample. */
 enum class GeneralizedEvaluationStatus : std::uint8_t
 {
@@ -71,162 +48,138 @@ enum class GeneralizedEvaluationStatus : std::uint8_t
     InvalidQuality
 };
 
-/**
- * @brief Allocation-free deterministic campaign metric accumulator.
- *
- * Survival and neutralization are divided by episode P and N before campaign
- * averaging, so a 9v10 case cannot dominate a 1v0 case. For N=0, red
- * neutralization is complete by definition. For P=1, formation responsibility
- * is complete because no teammate slot exists.
- */
-class GeneralizedEvaluationAccumulator final
+/** @brief Normalized results of one evaluation episode, as a campaign averages them. */
+struct GeneralizedEpisodeEvaluation final
 {
-public:
-    /** @brief Clears all recorded episodes and accumulated metrics. */
-    void Reset() noexcept
+    /** @brief Fraction of the episode's P blue mobiles still alive. */
+    double blueSurvival{};
+    /** @brief Fraction of the episode's N red mobiles neutralized (1 for N = 0). */
+    double redNeutralization{};
+    /** @brief Leader patrol quality, 0 when the leader was lost. */
+    double patrolQuality{};
+    /** @brief Mean quality of the surviving teammates' formation slots (1 for P = 1). */
+    double formationQuality{};
+    bool objectiveSurvived{};
+    /** @brief Objective safe, no red remaining, a blue alive (and the patrol completed for N = 0). */
+    bool success{};
+    bool timeout{};
+};
+
+/**
+ * @brief Stable weighted score in [0, 100] of campaign means (or of one episode's values:
+ *        the score of a campaign is the mean of its episodes' scores).
+ */
+inline double GeneralizedEvaluationScore(double objectiveSurvival, double missionSuccess,
+    double blueSurvival, double redNeutralization, double leaderPatrolQuality,
+    double formationQuality) noexcept
+{
+    double const score = 25.0 * objectiveSurvival
+        + 20.0 * missionSuccess
+        + 15.0 * blueSurvival
+        + 15.0 * redNeutralization
+        + 15.0 * leaderPatrolQuality
+        + 10.0 * formationQuality;
+    return std::clamp(score, 0.0, 100.0);
+}
+
+/** @brief Score of one episode (GeneralizedEvaluationScore of its values). */
+inline double GeneralizedEpisodeScore(GeneralizedEpisodeEvaluation const& episode) noexcept
+{
+    return GeneralizedEvaluationScore(episode.objectiveSurvived ? 1.0 : 0.0,
+        episode.success ? 1.0 : 0.0, episode.blueSurvival, episode.redNeutralization,
+        episode.patrolQuality, episode.formationQuality);
+}
+
+/**
+ * @brief Validates one complete episode and computes its normalized results.
+ * @param roles Stable leader and teammate-slot assignment.
+ * @param sample Final masks and responsibility qualities.
+ * @param result Receives the results when the sample is valid.
+ * @return Recorded, or the rejected contract category (result untouched).
+ *
+ * Survival and neutralization are divided by episode P and N, so a 9v10 case cannot
+ * dominate a 1v0 case. For N=0, red neutralization is complete by definition. For P=1,
+ * formation responsibility is complete because no teammate slot exists.
+ */
+inline GeneralizedEvaluationStatus EvaluateGeneralizedEpisode(
+    BlueTeamRoles const& roles,
+    GeneralizedEvaluationSample const& sample,
+    GeneralizedEpisodeEvaluation& result) noexcept
+{
+    if (!roles.IsValid())
+        return GeneralizedEvaluationStatus::InvalidRoles;
+    std::size_t const blueCount = roles.ActiveBlueCount();
+    if (!generalized_reward_detail::ValidMasks(
+            sample.finalState, sample.finalState, blueCount))
     {
-        *this = {};
+        return GeneralizedEvaluationStatus::InvalidMasks;
+    }
+    if (!std::isfinite(sample.leaderPatrolQuality)
+        || sample.leaderPatrolQuality < 0.F
+        || sample.leaderPatrolQuality > 1.F)
+    {
+        return GeneralizedEvaluationStatus::InvalidQuality;
+    }
+    for (std::size_t slot = 0U; slot + 1U < blueCount; ++slot)
+    {
+        float const quality = sample.formationSlotQuality[slot];
+        if (!std::isfinite(quality) || quality < 0.F || quality > 1.F)
+            return GeneralizedEvaluationStatus::InvalidQuality;
     }
 
-    /**
-     * @brief Validates and records one complete episode.
-     * @param roles Stable leader and teammate-slot assignment.
-     * @param sample Final masks and responsibility qualities.
-     * @return Recorded, or the rejected contract category without mutation.
-     */
-    GeneralizedEvaluationStatus Record(
-        BlueTeamRoles const& roles,
-        GeneralizedEvaluationSample const& sample) noexcept
+    std::size_t const redCount = generalized_reward_detail::Count(
+        sample.finalState.redActive);
+    std::size_t const survivingBlue = generalized_reward_detail::Count(
+        sample.finalState.blueAlive);
+    std::size_t const survivingRed = generalized_reward_detail::Count(
+        sample.finalState.redAlive);
+
+    GeneralizedEpisodeEvaluation episode{};
+    episode.blueSurvival = static_cast<double>(survivingBlue)
+        / static_cast<double>(blueCount);
+    episode.redNeutralization = redCount > 0U
+        ? static_cast<double>(redCount - survivingRed)
+            / static_cast<double>(redCount)
+        : 1.0;
+
+    std::size_t const leaderIndex = roles.LeaderPhysicalIndex();
+    episode.patrolQuality = sample.finalState.blueAlive[leaderIndex]
+        ? static_cast<double>(sample.leaderPatrolQuality) : 0.0;
+    episode.formationQuality = 1.0;
+    if (blueCount > 1U)
     {
-        if (!roles.IsValid())
-            return GeneralizedEvaluationStatus::InvalidRoles;
-        std::size_t const blueCount = roles.ActiveBlueCount();
-        if (!generalized_reward_detail::ValidMasks(
-                sample.finalState, sample.finalState, blueCount))
-        {
-            return GeneralizedEvaluationStatus::InvalidMasks;
-        }
-        if (!std::isfinite(sample.leaderPatrolQuality)
-            || sample.leaderPatrolQuality < 0.F
-            || sample.leaderPatrolQuality > 1.F)
-        {
-            return GeneralizedEvaluationStatus::InvalidQuality;
-        }
+        double sum = 0.0;
         for (std::size_t slot = 0U; slot + 1U < blueCount; ++slot)
         {
-            float const quality = sample.formationSlotQuality[slot];
-            if (!std::isfinite(quality) || quality < 0.F || quality > 1.F)
-                return GeneralizedEvaluationStatus::InvalidQuality;
-        }
-
-        std::size_t const redCount = generalized_reward_detail::Count(
-            sample.finalState.redActive);
-        std::size_t const survivingBlue = generalized_reward_detail::Count(
-            sample.finalState.blueAlive);
-        std::size_t const survivingRed = generalized_reward_detail::Count(
-            sample.finalState.redAlive);
-
-        double const blueSurvival = static_cast<double>(survivingBlue)
-            / static_cast<double>(blueCount);
-        double const redNeutralization = redCount > 0U
-            ? static_cast<double>(redCount - survivingRed)
-                / static_cast<double>(redCount)
-            : 1.0;
-
-        std::size_t const leaderIndex = roles.LeaderPhysicalIndex();
-        double const patrolQuality = sample.finalState.blueAlive[leaderIndex]
-            ? static_cast<double>(sample.leaderPatrolQuality) : 0.0;
-        double formationQuality = 1.0;
-        if (blueCount > 1U)
-        {
-            double sum = 0.0;
-            for (std::size_t slot = 0U; slot + 1U < blueCount; ++slot)
+            bool alive = false;
+            for (std::size_t physicalIndex = 0U;
+                 physicalIndex < blueCount; ++physicalIndex)
             {
-                bool alive = false;
-                for (std::size_t physicalIndex = 0U;
-                     physicalIndex < blueCount; ++physicalIndex)
+                BlueRoleAssignment const assignment =
+                    *roles.Assignment(physicalIndex);
+                if (assignment.role == BlueRole::Teammate
+                    && assignment.formationSlot == slot)
                 {
-                    BlueRoleAssignment const assignment =
-                        *roles.Assignment(physicalIndex);
-                    if (assignment.role == BlueRole::Teammate
-                        && assignment.formationSlot == slot)
-                    {
-                        alive = sample.finalState.blueAlive[physicalIndex];
-                        break;
-                    }
+                    alive = sample.finalState.blueAlive[physicalIndex];
+                    break;
                 }
-                if (alive)
-                    sum += sample.formationSlotQuality[slot];
             }
-            formationQuality = sum / static_cast<double>(blueCount - 1U);
+            if (alive)
+                sum += sample.formationSlotQuality[slot];
         }
-
-        bool const objectiveSurvived =
-            sample.finalState.objectiveAvailable;
-        bool const success = objectiveSurvived && !sample.missionFailed
-            && survivingBlue > 0U && survivingRed == 0U
-            && (redCount > 0U || sample.patrolCompleted);
-
-        ++episodes_;
-        blueSurvivalSum_ += blueSurvival;
-        redNeutralizationSum_ += redNeutralization;
-        objectiveSurvivalSum_ += objectiveSurvived ? 1.0 : 0.0;
-        patrolQualitySum_ += patrolQuality;
-        formationQualitySum_ += formationQuality;
-        missionSuccessSum_ += success ? 1.0 : 0.0;
-        timeoutSum_ += sample.timeout ? 1.0 : 0.0;
-        return GeneralizedEvaluationStatus::Recorded;
+        episode.formationQuality = sum / static_cast<double>(blueCount - 1U);
     }
 
-    /**
-     * @brief Returns a normalized snapshot without mutating the campaign.
-     * @return Zero metrics when no episode was recorded.
-     */
-    GeneralizedEvaluationMetrics Metrics() const noexcept
-    {
-        GeneralizedEvaluationMetrics result{};
-        result.episodes = episodes_;
-        if (episodes_ == 0U)
-            return result;
-        double const inverseCount = 1.0 / static_cast<double>(episodes_);
-        result.blueSurvivalRate = static_cast<float>(
-            blueSurvivalSum_ * inverseCount);
-        result.redNeutralizationRate = static_cast<float>(
-            redNeutralizationSum_ * inverseCount);
-        result.objectiveSurvivalRate = static_cast<float>(
-            objectiveSurvivalSum_ * inverseCount);
-        result.leaderPatrolQuality = static_cast<float>(
-            patrolQualitySum_ * inverseCount);
-        result.formationQuality = static_cast<float>(
-            formationQualitySum_ * inverseCount);
-        result.missionSuccessRate = static_cast<float>(
-            missionSuccessSum_ * inverseCount);
-        result.timeoutRate = static_cast<float>(timeoutSum_ * inverseCount);
-
-        double const score = 25.0 * result.objectiveSurvivalRate
-            + 20.0 * result.missionSuccessRate
-            + 15.0 * result.blueSurvivalRate
-            + 15.0 * result.redNeutralizationRate
-            + 15.0 * result.leaderPatrolQuality
-            + 10.0 * result.formationQuality;
-        result.score = static_cast<float>(std::clamp(score, 0.0, 100.0));
-        return result;
-    }
-
-private:
-    std::size_t episodes_{};
-    double blueSurvivalSum_{};
-    double redNeutralizationSum_{};
-    double objectiveSurvivalSum_{};
-    double patrolQualitySum_{};
-    double formationQualitySum_{};
-    double missionSuccessSum_{};
-    double timeoutSum_{};
-};
+    episode.objectiveSurvived = sample.finalState.objectiveAvailable;
+    episode.success = episode.objectiveSurvived && !sample.missionFailed
+        && survivingBlue > 0U && survivingRed == 0U
+        && (redCount > 0U || sample.patrolCompleted);
+    episode.timeout = sample.timeout;
+    result = episode;
+    return GeneralizedEvaluationStatus::Recorded;
+}
 
 static_assert(std::is_trivially_copyable_v<GeneralizedEvaluationSample>,
     "Generalized evaluation samples must remain fixed-capacity values");
-static_assert(std::is_trivially_copyable_v<GeneralizedEvaluationAccumulator>,
-    "Generalized evaluation metrics must not allocate dynamic storage");
 
 } // namespace ppo::examples::bluedefense::defenders

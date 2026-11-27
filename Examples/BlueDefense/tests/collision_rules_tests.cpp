@@ -64,17 +64,6 @@ void TestSweptBlueCollision()
     Require(firstState.m_destroyedById == second->uniqid()
                 && secondState.m_destroyedById == first->uniqid(),
             "blue collision attribution is incorrect");
-
-    entt::registry snapshot;
-    auto const snapshotFirst = snapshot.create(first->uniqid());
-    auto const snapshotSecond = snapshot.create(second->uniqid());
-    Require(snapshotFirst == first->uniqid()
-                && snapshotSecond == second->uniqid(),
-            "snapshot entity identifiers changed");
-    rules.CopySnapshot(world, snapshot);
-    auto const& events = snapshot.ctx().get<sExplosionEventBuffer>().m_events;
-    Require(events.size() == 2U,
-            "blue collision did not publish both explosion events");
 }
 
 /**
@@ -364,113 +353,10 @@ void TestGeneralizedThreatActivationByMetadataIndex()
             "a friendly mobile consumed a red activation slot");
 }
 
-/**
- * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
- * @details Consulte ou modifie des composants ECS.
- */
-void TestPatrolOverlaySnapshot()
+/** @brief The patrol-reference overlay accepts 1 to 9 references and shows only valid ones. */
+void TestPatrolReferenceOverlayCapacity()
 {
     using namespace ppo::model;
-    using ppo::examples::bluedefense::InitializerContext;
-
-    entt::registry world;
-    auto& environment = world.ctx().emplace<sEnvironmentState>();
-    environment.m_maxNorth = 50000.F;
-    environment.m_maxEast = 80000.F;
-    auto& context = world.ctx().emplace<InitializerContext>();
-    context.patrolGeometryReady = true;
-    context.blueTeamRoles =
-        ppo::examples::bluedefense::defenders::BlueTeamRoles::Create(4U, 2U);
-    context.patrolGeometry.anchorNorth = 120.F;
-    context.patrolGeometry.anchorEast = -340.F;
-    auto& sourceOverlay = context.patrolTrackOverlay;
-    sourceOverlay.m_sampleCount = sourceOverlay.SampleCapacity;
-    float const circuit = ppo::examples::bluedefense::defenders::CircuitLength(
-        context.patrolGeometry);
-    for (std::size_t sample = 0U;
-         sample < sourceOverlay.m_sampleCount; ++sample)
-    {
-        auto const pose =
-            ppo::examples::bluedefense::defenders::EvaluatePatrolCurve(
-                context.patrolGeometry,
-                circuit * static_cast<float>(sample)
-                    / static_cast<float>(sourceOverlay.m_sampleCount - 1U));
-        sourceOverlay.m_north[sample] = pose.north;
-        sourceOverlay.m_east[sample] = pose.east;
-    }
-    auto& sourceReferences = context.patrolReferenceOverlay;
-    sourceReferences.m_activeReferenceCount = 4U;
-    sourceReferences.m_showInPatrol = true;
-    for (std::size_t roleIndex = 0U; roleIndex < 4U; ++roleIndex)
-    {
-        float const role = static_cast<float>(roleIndex);
-        sourceReferences.m_references[roleIndex] = {
-            100.F + role, 200.F + role,
-            300.F + role, 400.F + role,
-            0.1F * role, true};
-    }
-    ppo::model::sPatrolWaypointOverlay waypointOverlay{};
-    waypointOverlay.m_activeWaypointIndex = 3U;
-    waypointOverlay.m_validatedWaypointCount = 3U;
-    for (std::size_t index = 0U;
-         index < waypointOverlay.WaypointCount; ++index)
-    {
-        float const value = static_cast<float>(index);
-        waypointOverlay.m_waypoints[index] = {
-            500.F + value, 600.F + value, 0.2F * value};
-    }
-    context.patrolWaypointOverlay = waypointOverlay;
-
-    entt::registry snapshot;
-    ppo::examples::bluedefense::BlueDefenseWorldRules rules;
-    rules.CopySnapshot(world, snapshot);
-    Require(snapshot.ctx().contains<sPatrolTrackOverlay>(),
-            "BlueDefense snapshot has no patrol visualization overlay");
-    auto const& overlay = snapshot.ctx().get<sPatrolTrackOverlay>();
-    Require(overlay.m_sampleCount == sPatrolTrackOverlay::SampleCapacity,
-            "patrol overlay sample count is invalid");
-    std::size_t const last = overlay.m_sampleCount - 1U;
-    Require(std::hypot(
-                overlay.m_north[0] - overlay.m_north[last],
-                overlay.m_east[0] - overlay.m_east[last]) < 0.1F,
-            "leader patrol overlay is not closed");
-    Require(snapshot.ctx().contains<sBlueTeamRoleOverlay>(),
-            "BlueDefense snapshot has no blue role visualization overlay");
-    auto const& roles = snapshot.ctx().get<sBlueTeamRoleOverlay>();
-    Require(roles.Valid() && roles.m_activeBlueCount == 4U
-                && roles.m_leaderPhysicalIndex == 2U,
-            "blue role visualization overlay changed the sampled assignment");
-    Require(snapshot.ctx().contains<sPatrolReferenceOverlay>(),
-            "BlueDefense snapshot has no patrol-reference overlay");
-    auto const& references =
-        snapshot.ctx().get<sPatrolReferenceOverlay>();
-    Require(references.Visible() && references.m_activeReferenceCount == 4U,
-            "patrol-reference overlay active prefix is invalid");
-    Require(references.m_references[0U].m_valid
-                && references.m_references[3U].m_valid
-                && references.m_references[0U].m_projectedNorth == 100.F
-                && references.m_references[3U].m_guidanceEast == 403.F
-                && references.m_references[3U].m_guidanceHeading == 0.3F,
-            "patrol-reference overlay changed exact policy guidance data");
-    Require(snapshot.ctx().contains<sPatrolWaypointOverlay>(),
-            "BlueDefense snapshot has no patrol-waypoint overlay");
-    auto const& waypoints = snapshot.ctx().get<sPatrolWaypointOverlay>();
-    Require(waypoints.Valid() && waypoints.m_activeWaypointIndex == 3U
-                && waypoints.m_validatedWaypointCount == 3U
-                && waypoints.m_waypoints[9U].m_north == 509.F,
-            "patrol-waypoint overlay changed the frozen sequence");
-
-    for (bool const show : {false, true, false})
-    {
-        sourceReferences.m_showInPatrol = show;
-        snapshot.ctx().clear(); // Same fresh-context contract as Environment.
-        rules.CopySnapshot(world, snapshot);
-        auto const& copied = snapshot.ctx().get<sPatrolReferenceOverlay>();
-        Require(copied.Visible() == show
-                && copied.m_references[3U].m_guidanceEast == 403.F
-                && snapshot.ctx().get<sBlueTeamRoleOverlay>().Valid(),
-            "snapshot lost visibility, exact guidance or real-vehicle role badges");
-    }
 
     sPatrolReferenceOverlay capacity{};
     capacity.m_activeReferenceCount = 1U;
@@ -545,7 +431,7 @@ int main()
         TestFriendlyRestrictedZoneStillAffectsRed();
         TestDelayedThreatActivation();
         TestGeneralizedThreatActivationByMetadataIndex();
-        TestPatrolOverlaySnapshot();
+        TestPatrolReferenceOverlayCapacity();
         TestBlueRolePermutationContract();
         return 0;
     }

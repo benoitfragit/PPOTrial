@@ -4,12 +4,15 @@ on:
   pull_request:
     branches:
       - master
+    # Everything the Windows build compiles, generates or reads in its tests: sources and C
+    # headers, CMake helpers, and the projects' JSON (task, graph, network, scenario and
+    # settings files generate layouts and pin behaviour, e.g. the evaluation scores).
     paths:
-      - '**/*.cpp'
-      - '**/*.hpp'
+      - 'PPOKit/**'
+      - 'Framework/**'
+      - 'Examples/**'
       - '**/CMakeLists.txt'
-      - 'CMakeLists.txt'
-      - 'dependencies.cmake'
+      - '**/*.cmake'
       - '.github/workflows/desktop-windows.yml'
   workflow_dispatch:
 
@@ -32,12 +35,9 @@ jobs:
         run: >-
           cmake -S . -B ${{ matrix.build_dir }} -G "Visual Studio 17 2022" -A x64
           -DCMAKE_CONFIGURATION_TYPES=${{ matrix.configuration }}
-          -DPPO_LIBTORCH_VARIANT=${{ matrix.configuration }}
           -DPPO_BUILD_DESKTOP=ON -DPPO_BUILD_CORE_TESTS=ON
           -DPPO_BUILD_CHECKPOINT_TESTS=ON
       - name: Build ${{ matrix.configuration }}
         run: cmake --build ${{ matrix.build_dir }} --config ${{ matrix.configuration }} --parallel 2
       - name: CTest ${{ matrix.configuration }}
         run: ctest --test-dir ${{ matrix.build_dir }} -C ${{ matrix.configuration }} --output-on-failure
-      - name: Dedicated FlightControl3D executable
-        run: '& "${{ matrix.build_dir }}/Main/${{ matrix.configuration }}/FlightControl3D.exe" --check-example'

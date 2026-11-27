@@ -1,6 +1,6 @@
 /**
 * @file Env/data/environment.hpp
-* @brief Declarations for environment.
+* @brief The ECS world of the 2D examples, stepped by its caller (an environment DLL).
 * @author PPOTrial
 * @date 2026-03-29
 * @copyright Copyright (c) 2026 PPOTrial
@@ -9,33 +9,32 @@
 #pragma once
 #include "components.hpp"
 #include "entity.hpp"
-#include "iagent.hpp"
+#include "ppo/runtime/iagent.hpp"
 #include "worldrules.hpp"
 
-#include <string>
-#include <memory>
-#include <array>
-#include <functional>
+#include <cstdint>
 #include <filesystem>
+#include <memory>
 
 namespace ppo::model {
 
 /**
-* @brief Runtime container responsible for simulation orchestration.
+* @brief The ECS world: its entities, agents and rules, stepped by its caller.
 *
-* The environment owns entities and agents, exposes lifecycle controls,
-* and provides a thread-safe snapshot mechanism over the ECS registry.
+* Each step has two halves: BeginStep (rules before the step, the re-initialization after an
+* ended episode) and EndStep (agents choose, entities advance, rules resolve, agents read the
+* new state). The caller observes the world between them (SteppedWorld).
 */
 class Environment
 {
 public:
     /**
-    * @brief Creates an empty environment instance.
+    * @brief Creates an empty environment.
     */
     Environment(void);
 
     /**
-    * @brief Stops the environment and destroys owned resources.
+    * @brief Destroys the environment.
     */
     virtual ~Environment(void);
 
@@ -45,16 +44,10 @@ public:
     Environment& operator=(Environment&&) = delete;
 
     /**
-    * @brief Creates and registers a new entity instance.
-    *
-    * The created entity is wired with the random initializer system and then
-    * stored in the internal entity list.
-    *
-    * @tparam T Entity type, must derive from Entity.
-    * @tparam Args Constructor argument types.
-    * @param args Constructor arguments forwarded to T.
-    * @return Shared pointer to the created entity, or nullptr when T is not
-    *         an Entity-derived type.
+    * @brief Creates and registers one entity instance.
+    * @tparam T Entity type.
+    * @param args Constructor arguments.
+    * @return Created entity or nullptr.
     */
     template<typename T, typename... Args>
     std::shared_ptr<T>
@@ -76,12 +69,10 @@ public:
     };
 
     /**
-    * @brief Creates and registers a new agent instance.
-    * @tparam Ag Agent type, must derive from IAgent.
-    * @tparam Args Constructor argument types.
-    * @param args Constructor arguments forwarded to Ag.
-    * @return Shared pointer to the created agent, or nullptr when Ag is not
-    *         an IAgent-derived type.
+    * @brief Creates and registers one agent instance.
+    * @tparam Ag Agent type.
+    * @param args Constructor arguments.
+    * @return Created agent or nullptr.
     */
     template<typename Ag, typename... Args>
     std::shared_ptr<Ag>
@@ -98,95 +89,74 @@ public:
     };
 
     /**
-    * @brief Installs scenario-owned outcome and snapshot rules before starting.
-    * @return False if the worker is active or the rules are invalid.
+    * @brief Installs the scenario's outcome rules.
+    * @return False when the rules are null.
     */
     bool SetWorldRules(std::unique_ptr<IWorldRules> rules);
 
-    // Optional initializer supplied by the example before entities are created.
-/**
- * @brief Met à jour ou enregistre les données sous la responsabilité.
- * @details Consulte ou modifie des composants ECS.
- */
+    /**
+    * @brief Sets the initializer given to the entities created next (episode resets).
+    * @return Always true.
+    */
     bool SetEntityInitializer(Entity::InitializerSystem initializer) noexcept;
 
     /**
-    * @brief Reads a consistent snapshot of the internal registry.
-    * @param reader Callback executed with the snapshot registry.
+    * @brief First half of one step: the rules before the step, and the re-initialization of
+    *        the entities and agents when the last step ended an episode (or one was requested).
+    *        The world is then ready to be observed.
     */
-    void ReadSnapshot(std::function<void(entt::registry const&)> const& reader) const;
-
+    void BeginStep(void);
     /**
-    * @brief Starts the simulation loop thread.
+    * @brief Second half of the step begun by BeginStep: agents choose, entities advance, the
+    *        rules resolve, agents read the new state; then the rules after the step.
+    * @return True when an agent ended the episode: the next BeginStep re-initializes.
     */
-    void Start(void);
+    bool EndStep(void);
     /**
-    * @brief Resumes execution when paused.
+    * @brief The live world, read only: the state its agents read.
+    * @return The world's registry.
     */
-    void Play(void);
-
-    /** Enables unthrottled simulation with reduced snapshot frequency.
-     * Must be called before starting the worker thread.
-     */
-    void SetHeadlessMode(bool enabled);
+    entt::registry const& SteppedWorld(void) const noexcept;
     /**
-    * @brief Pauses the simulation loop.
+    * @brief The next BeginStep re-initializes the entities and agents, as after an episode
+    *        an agent ended (a caller that starts a new episode in the middle of one).
     */
-    void Pause(void);
+    void RequestReinitialization(void) noexcept;
     /**
-    * @brief Stops the simulation and releases runtime resources.
+    * @brief Seeds the engine the entity initializers draw from (sInitializationRandom): the
+    *        same seed gives the same episodes. Unseeded, it draws from the system's entropy.
+    * @param seed Seed of the initializations that follow.
     */
-    void Stop(void);
-
+    void SeedInitialization(std::uint64_t seed);
     /**
-    * @brief Queues a real-time command targeting one agent.
-    * @param command Command payload.
+    * @brief Applies an Environment.json: the world's limits and time step.
+    * @param file The settings file.
+    * @throws std::runtime_error When the file has no "environment" section.
     */
-    void AddAgentCommand(sAgentRealTimeCommand const& command);
-
-    /**
-    * @brief Sets the environment spatial limits.
-    * @param north Max range on the north axis.
-    * @param east Max range on the east axis.
-    */
-    void SetMaxRange(float north, float east);
-    /**
-    * @brief Sets the simulation time step in seconds.
-    * @param timestep Fixed delta time.
-    */
-    void SetTimeStep(float timestep);
+    void LoadSettings(std::filesystem::path const& file);
 
 private:
     /**
-    * @brief Returns the internal live registry pointer.
-    * @return Registry pointer used for entity creation.
+    * @brief Returns the live registry pointer used for entity creation.
     */
     entt::registry* GetRegistry(void) noexcept;
 
-/**
- * @brief Retourne une vue ou une valeur calculée depuis l'état courant.
- */
+    /**
+    * @brief The initializer given to new entities.
+    */
     Entity::InitializerSystem GetEntityInitializer(void) const noexcept;
 
     /**
-    * @brief Appends one entity to the managed entity list.
-    * @param entity Entity instance to store.
+    * @brief Stores one entity in the managed entity list.
     */
     void AddEntity(std::shared_ptr<Entity> entity);
 
     /**
-    * @brief Appends one agent to the managed agent list.
-    * @param pAgent Agent instance to store.
+    * @brief Stores one agent, once.
     */
     void AddAgent(std::shared_ptr<IAgent> pAgent);
 
-    /**
-    * @brief Hidden implementation storing runtime state and worker thread.
-    */
     struct Impl;
-    /**
-    * @brief Pointer to the environment implementation.
-    */
     std::unique_ptr<Impl> p_impl;
 };
 

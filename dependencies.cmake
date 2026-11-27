@@ -34,51 +34,20 @@ target_include_directories(implot PUBLIC ${implot_SOURCE_DIR})
 
 target_link_libraries(implot PUBLIC imgui)
 
-# --- LIBTORCH ---
-# Windows LibTorch binaries use different CRTs for Debug and Release.
-# Each build directory must use the archive matching its MSVC configuration.
-# Keep Debug as the default to preserve the historical desktop setup.
-set(PPO_LIBTORCH_VARIANT "Debug" CACHE STRING "LibTorch binary variant (Debug or Release)")
-set_property(CACHE PPO_LIBTORCH_VARIANT PROPERTY STRINGS Debug Release)
-
-if(PPO_LIBTORCH_VARIANT STREQUAL "Debug")
-    set(PPO_LIBTORCH_ARCHIVE "libtorch-win-shared-with-deps-debug-2.9.1%2Bcpu.zip")
-elseif(PPO_LIBTORCH_VARIANT STREQUAL "Release")
-    set(PPO_LIBTORCH_ARCHIVE "libtorch-win-shared-with-deps-2.9.1%2Bcpu.zip")
-else()
-    message(FATAL_ERROR "PPO_LIBTORCH_VARIANT must be Debug or Release")
-endif()
-
-# Visual Studio is multi-configuration; avoid silently testing a Release binary
-# against a Debug LibTorch distribution (or the reverse). Use separate build
-# directories with CMAKE_CONFIGURATION_TYPES set to the selected variant.
-if(MSVC AND CMAKE_CONFIGURATION_TYPES AND PPO_BUILD_CHECKPOINT_TESTS)
-    foreach(config IN LISTS CMAKE_CONFIGURATION_TYPES)
-        if(NOT config STREQUAL PPO_LIBTORCH_VARIANT)
-            message(FATAL_ERROR
-                "LibTorch ${PPO_LIBTORCH_VARIANT} cannot be used with ${config}. "
-                "Configure a separate build directory with "
-                "-DCMAKE_CONFIGURATION_TYPES=${PPO_LIBTORCH_VARIANT} "
-                "-DPPO_LIBTORCH_VARIANT=${PPO_LIBTORCH_VARIANT}, "
-                "or disable checkpoint tests for a legacy mixed-config build.")
-        endif()
-    endforeach()
-endif()
-
-set(LIBTORCH_URL "https://download.pytorch.org/libtorch/cpu/${PPO_LIBTORCH_ARCHIVE}")
-
+# --- IMNODES (node editor of PPOKit studio) ---
+# Pinned commit: it compiles against the Dear ImGui 1.92.1 used above.
+# Only the sources are used: SOURCE_SUBDIR names a folder without CMakeLists.txt, so
+# imnodes' own project (which expects other ImGui targets) is not added.
 FetchContent_Declare(
-    libtorch
-    URL ${LIBTORCH_URL}
-    SOURCE_DIR ${CMAKE_BINARY_DIR}/libtorch
+    imnodes
+    GIT_REPOSITORY https://github.com/Nelarius/imnodes.git
+    GIT_TAG 2d0c280b07b2f62b120034811cc6e41251673961
+    SOURCE_SUBDIR sources-only
 )
-
-FetchContent_MakeAvailable(libtorch)
-
-# Important : le find_package regarde dans <build>/libtorch/libtorch
-set(CMAKE_PREFIX_PATH "${CMAKE_BINARY_DIR}/libtorch")
-
-find_package(Torch REQUIRED)
+FetchContent_MakeAvailable(imnodes)
+add_library(imnodes STATIC ${imnodes_SOURCE_DIR}/imnodes.cpp)
+target_include_directories(imnodes PUBLIC ${imnodes_SOURCE_DIR})
+target_link_libraries(imnodes PUBLIC imgui)
 
 # --- RAYLIB ---
 FetchContent_Declare(
@@ -131,19 +100,12 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(json)
 
 # ---------------------------------------------------------
-#                Fetch ENTT
+#                ENTT (the ECS world, shared with the world-only build)
 # ---------------------------------------------------------
-FetchContent_Declare(
-    entt
-    GIT_REPOSITORY https://github.com/skypjack/entt.git
-    GIT_TAG        v3.16.0
-)
-
-FetchContent_MakeAvailable(entt)
+include(${CMAKE_CURRENT_LIST_DIR}/world_dependencies.cmake)
 
 
-# RLtools (CPU, C++17) is the optional future defender policy backend.
-# The red RLMission production policy continues to use the legacy LibTorch model.
+# RLtools (CPU, C++17): network backend of the PPOKit learners.
 set(RL_TOOLS_ENABLE_TARGETS OFF CACHE BOOL "Build upstream RLtools examples" FORCE)
 set(RL_TOOLS_ENABLE_TESTS OFF CACHE BOOL "Build upstream RLtools tests" FORCE)
 set(RL_TOOLS_ENABLE_HDF5 OFF CACHE BOOL "Use RLtools HDF5" FORCE)

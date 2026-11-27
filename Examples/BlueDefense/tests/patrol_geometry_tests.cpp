@@ -82,7 +82,8 @@ bool TestGeneralizedRewardConfiguration()
 /** @brief Checks the actual Blue JSON and fallback, retaining outer thresholds. */
 bool TestObjectiveRiskConfiguration()
 {
-    auto const parameters = patrol::LoadPatrolParameters(PPO_SETTINGS_ROOT);
+    auto const parameters = patrol::LoadPatrolParameters(patrol::PatrolSettingsIn(
+        PPO_SHARED_SETTINGS, std::filesystem::path{PPO_BLUEDEFENSE_PROJECT} / "blue_patrol_training.json"));
     for (auto const settings : {patrol::DefenseSettings{}, parameters.defense})
     {
         if (settings.protectedRadiusMeters != 10000.F

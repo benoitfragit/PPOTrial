@@ -7,6 +7,7 @@
 * @license MIT
 */
 #include "targetselector.hpp"
+#include "mission_policy.hpp"
 #include "missiontrackfilter.hpp"
 #include "airspacecomponents.hpp"
 #include "utils.hpp"
@@ -627,4 +628,25 @@ TargetSelectorProdAgent::Init()
     stateActions.Init();
 }
 
+ppo::model::GraphNetworkFiles MissionNetworkFiles()
+{
+    std::filesystem::path const folder{RL_MISSION_NETWORK_DIR};
+    return {folder / "task.json", folder / "graph.json"};
 }
+
+std::unique_ptr<ppo::core::IPolicy> MakeMissionPolicy(std::string const& version)
+{
+    std::filesystem::path const folder = std::filesystem::path(RESOURCE_RLMISSIONMODEL_PATH) / version;
+    if (std::filesystem::exists(folder / "policy.ppokit"))
+    {
+        return std::make_unique<ppo::model::GraphPolicy<MissionObservationLayout::kStateDimension,
+            MissionObservationLayout::kActionCount>>(MissionNetworkFiles(), folder / "policy.ppokit");
+    }
+    if (std::filesystem::exists(folder / "policy.txt"))
+    {
+        return std::make_unique<MissionPolicy>(folder / "policy.txt");
+    }
+    return nullptr;
+}
+
+} // namespace rl

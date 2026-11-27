@@ -1,0 +1,262 @@
+{
+  "schema": "ppokit.graph/2",
+  "actor": {
+    "nodes": {
+      "runway": {
+        "type": "input",
+        "from": "observation.runway"
+      },
+      "velocity": {
+        "type": "input",
+        "from": "observation.velocity"
+      },
+      "attitude": {
+        "type": "input",
+        "from": "observation.attitude"
+      },
+      "directions": {
+        "type": "input",
+        "from": "observation.directions"
+      },
+      "phase": {
+        "type": "input",
+        "from": "observation.phase"
+      },
+      "controls": {
+        "type": "input",
+        "from": "observation.controls"
+      },
+      "features": {
+        "type": "concat"
+      },
+      "trunk": {
+        "type": "mlp",
+        "layers": 2,
+        "width": 128,
+        "activation": "tanh"
+      },
+      "control_head": {
+        "type": "gaussian_head"
+      },
+      "gear_head": {
+        "type": "bernoulli_head"
+      }
+    },
+    "edges": [
+      [
+        "runway",
+        "features.in1"
+      ],
+      [
+        "velocity",
+        "features.in2"
+      ],
+      [
+        "attitude",
+        "features.in3"
+      ],
+      [
+        "directions",
+        "features.in4"
+      ],
+      [
+        "phase",
+        "features.in5"
+      ],
+      [
+        "controls",
+        "features.in6"
+      ],
+      [
+        "features",
+        "trunk"
+      ],
+      [
+        "trunk",
+        "control_head"
+      ],
+      [
+        "trunk",
+        "gear_head"
+      ]
+    ]
+  },
+  "critic": {
+    "nodes": {
+      "runway": {
+        "type": "input",
+        "from": "observation.runway"
+      },
+      "velocity": {
+        "type": "input",
+        "from": "observation.velocity"
+      },
+      "attitude": {
+        "type": "input",
+        "from": "observation.attitude"
+      },
+      "directions": {
+        "type": "input",
+        "from": "observation.directions"
+      },
+      "phase": {
+        "type": "input",
+        "from": "observation.phase"
+      },
+      "controls": {
+        "type": "input",
+        "from": "observation.controls"
+      },
+      "features": {
+        "type": "concat"
+      },
+      "trunk": {
+        "type": "mlp",
+        "layers": 2,
+        "width": 128,
+        "activation": "tanh"
+      },
+      "value": {
+        "type": "value"
+      }
+    },
+    "edges": [
+      [
+        "runway",
+        "features.in1"
+      ],
+      [
+        "velocity",
+        "features.in2"
+      ],
+      [
+        "attitude",
+        "features.in3"
+      ],
+      [
+        "directions",
+        "features.in4"
+      ],
+      [
+        "phase",
+        "features.in5"
+      ],
+      [
+        "controls",
+        "features.in6"
+      ],
+      [
+        "features",
+        "trunk"
+      ],
+      [
+        "trunk",
+        "value"
+      ]
+    ]
+  },
+  "components": [
+    "flight_visualiser"
+  ],
+  "observers": {
+    "nodes": {
+      "aircraft": {
+        "type": "input",
+        "from": "world.aircraft"
+      },
+      "airfield": {
+        "type": "input",
+        "from": "world.airfield"
+      },
+      "deck": {
+        "type": "input",
+        "from": "world.deck"
+      },
+      "guidance": {
+        "type": "input",
+        "from": "world.guidance"
+      },
+      "mission": {
+        "type": "input",
+        "from": "world.mission"
+      },
+      "landing": {
+        "type": "input",
+        "from": "world.landing"
+      },
+      "crash": {
+        "type": "input",
+        "from": "world.crash"
+      },
+      "episode_rewards": {
+        "type": "input",
+        "from": "world.episode_rewards"
+      },
+      "diagnostics": {
+        "type": "input",
+        "from": "world.diagnostics"
+      },
+      "action": {
+        "type": "input",
+        "from": "action"
+      },
+      "rewards": {
+        "type": "input",
+        "from": "reward"
+      },
+      "watch": {
+        "type": "component:flight_watch@2",
+        "config": {
+          "port": 47000,
+          "rate": 30
+        }
+      }
+    },
+    "edges": [
+      [
+        "aircraft",
+        "watch.aircraft"
+      ],
+      [
+        "airfield",
+        "watch.airfield"
+      ],
+      [
+        "deck",
+        "watch.deck"
+      ],
+      [
+        "guidance",
+        "watch.guidance"
+      ],
+      [
+        "mission",
+        "watch.mission"
+      ],
+      [
+        "landing",
+        "watch.landing"
+      ],
+      [
+        "crash",
+        "watch.crash"
+      ],
+      [
+        "episode_rewards",
+        "watch.episode_rewards"
+      ],
+      [
+        "diagnostics",
+        "watch.diagnostics"
+      ],
+      [
+        "action",
+        "watch.action"
+      ],
+      [
+        "rewards",
+        "watch.rewards"
+      ]
+    ]
+  }
+}

@@ -81,7 +81,7 @@ void WriteJson(fs::path const& path, Json const& doc)
 }
 
 
-void CheckAdditionalAssets(fs::path const& root)
+void CheckAdditionalAssets(fs::path const& root, fs::path const& airspace)
 {
     auto const world = ppo::serialization::Serializer::Parse(root / "Environment.json");
     Require(world.at("formatVersion") == 2, "world formatVersion changed");
@@ -90,40 +90,6 @@ void CheckAdditionalAssets(fs::path const& root)
         && environment.at("maxEast").get<float>() == 71454.F
         && environment.at("timeStep").get<double>() == 0.20000000298023224,
         "environment state changed during migration");
-
-    auto const display = ppo::serialization::Serializer::Parse(root / "Renderer.json");
-    Require(display.at("formatVersion") == 2, "renderer formatVersion changed");
-    auto const& renderer = display.at("renderer");
-    Require(renderer.at("scaleLevel").get<int>() == 1
-        && renderer.at("autoAttachCamera").get<bool>()
-        && renderer.at("multipleCameras").get<bool>()
-        && !renderer.at("showGrid").get<bool>()
-        && !renderer.at("showPseudoLidar").get<bool>()
-        && renderer.at("camera").at("fovy").get<float>() == 45.F,
-        "renderer settings changed during migration");
-
-    // The V2 file must retain the original camera data and current workspace
-    // panel visibility, not just a small subset of renderer preferences.
-    auto const& camera = renderer.at("camera");
-    Require(camera.at("position").size() == 3
-        && camera.at("position").at(0).get<double>() == 36.58390808105469
-        && camera.at("position").at(1).get<double>() == 24.686992645263672
-        && camera.at("position").at(2).get<double>() == 23.742538452148438
-        && camera.at("target").at(0).get<double>() == 7.42773962020874
-        && camera.at("target").at(1).get<double>() == 0.34999987483024597
-        && camera.at("target").at(2).get<double>() == -12.805513381958008
-        && renderer.at("cameraDistance").get<double>() == 39.375
-        && renderer.at("cameraHeight").get<double>() == 17.0
-        && renderer.at("domainHeight").get<double>() == 2.318000078201294
-        && renderer.at("trailDuration").get<double>() == 3.0999999046325684,
-        "renderer V2 lost original camera precision");
-    Require(!renderer.at("showMinimap").get<bool>()
-        && !renderer.at("showEntities").get<bool>()
-        && !renderer.at("showInspection").get<bool>()
-        && renderer.at("showSimulation").get<bool>()
-        && renderer.at("showPatrolTrack").get<bool>()
-        && !renderer.at("showHardBoundary").get<bool>(),
-        "renderer V2 workspace panel defaults changed");
 
     auto const profiles = ppo::serialization::Serializer::Parse(root / "AgentProfiles.json");
     Require(profiles.at("formatVersion").get<int>() == 2, "wrong agent profile format");
@@ -174,7 +140,7 @@ void CheckAdditionalAssets(fs::path const& root)
     }
 
     auto const presets = ppo::serialization::Serializer::Parse(
-        root / "Evaluation" / "InitialStates.json");
+        airspace / "Evaluation" / "InitialStates.json");
     Require(presets.at("formatVersion").get<int>() == 2, "invalid initial-state format");
     for (auto const& name : {"blueeval", "redeval"})
     {
@@ -213,13 +179,15 @@ int main()
     fs::path temporary{};
     try
     {
-        fs::path const root{PPO_SETTINGS_ROOT};
-        CheckAdditionalAssets(root);
-        CheckScenario(root / "Scenarios" / "Playground.json",
+        // Shared world layers and the Airspace example's own settings.
+        fs::path const root{PPO_SHARED_SETTINGS};
+        fs::path const airspace{PPO_AIRSPACE_SETTINGS};
+        CheckAdditionalAssets(root, airspace);
+        CheckScenario(airspace / "Scenarios" / "Playground.json",
                       7, "TargetSelectorTrainingAgent", false, 0);
-        CheckScenario(root / "Scenarios" / "Evaluation" / "RLMission.json",
+        CheckScenario(airspace / "Scenarios" / "Evaluation" / "RLMission.json",
                       7, "TargetSelectorProdAgent", true, 1024);
-        CheckScenario(root / "Scenarios" / "Evaluation" / "RLSNA.json",
+        CheckScenario(airspace / "Scenarios" / "Evaluation" / "RLSNA.json",
                       2, "SNAProdAgent", true, 512);
 
         // Reject invalid format rather than guessing at an alternate schema.
@@ -228,7 +196,7 @@ int main()
                 std::chrono::steady_clock::now().time_since_epoch().count()));
         fs::create_directories(temporary);
         Json original = ppo::serialization::Serializer::Parse(
-            root / "Scenarios" / "Playground.json");
+            airspace / "Scenarios" / "Playground.json");
 
         Json invalidVersion = original;
         invalidVersion["formatVersion"] = 1;

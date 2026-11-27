@@ -8,7 +8,7 @@
 
 // Deterministic 2D patrol and protection domain used by the blue MAPPO team.
 // Coordinates: north x / east y, metres; heading 0 towards north.
-// No dependencies on Torch, EnTT, a renderer, or RLtools in this domain layer.
+// No dependencies on EnTT, a renderer, or RLtools in this domain layer.
 #include "patrol_geometry.hpp"
 #include "patrol_defense.hpp"
 #include <algorithm>
@@ -176,17 +176,6 @@ inline float StraightHalfLength(Parameters const& p) noexcept
 inline float CircuitLength(Parameters const& p) noexcept
 {
     return CircuitLength(p.geometry);
-}
-
-/**
- * @brief Returns the nominal leader-to-follower arclength gap in metres.
- * @param p Valid patrol geometry.
- * @return Gap scaled to the long straight and kept above the caution radius.
- */
-inline float FormationGap(Parameters const& p) noexcept
-{
-    return p.geometry.separationDistance
-        * std::cos(p.geometry.separationAngle);
 }
 
 /**

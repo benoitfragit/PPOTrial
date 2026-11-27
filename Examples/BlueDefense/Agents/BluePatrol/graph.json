@@ -1,0 +1,10 @@
+{
+  "schema": "ppokit.graph/1",
+  "actor": { "model": "external" },
+  "critic": {
+    "model": "mlp",
+    "input": "critic",
+    "hidden": { "layers": 2, "width": 256 },
+    "activation": "relu"
+  }
+}

@@ -8,6 +8,8 @@
 
 #include "patrol_checkpoint.hpp"
 
+#include "ppokit/artifacts/random_state.hpp"
+
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -143,6 +145,37 @@ void WritePatrolOptimizer(std::ostream& stream, OPTIMIZER const& optimizer)
            << p.bias_lr_factor << ' ' << optimizer.age << '\n';
 }
 
+/** @brief True for a finite optimizer setting. */
+template<typename Value>
+bool FiniteSetting(Value value) noexcept
+{
+    return std::isfinite(static_cast<double>(value));
+}
+
+/**
+ * @brief Refuses rl_tools Adam settings that cannot come from a training run.
+ * @param parameters Learning rate, betas, epsilon, weight decays and bias factor.
+ * @param age Steps taken (at least one at an update boundary).
+ * @throws std::runtime_error for a non-finite or out-of-range value.
+ */
+template<typename PARAMETERS, typename AGE>
+void RequireValidPatrolOptimizer(PARAMETERS const& parameters, AGE age)
+{
+    if (!FiniteSetting(parameters.alpha) || parameters.alpha <= 0
+        || !FiniteSetting(parameters.beta_1) || parameters.beta_1 < 0
+        || parameters.beta_1 >= 1 || !FiniteSetting(parameters.beta_2)
+        || parameters.beta_2 < 0 || parameters.beta_2 >= 1
+        || !FiniteSetting(parameters.epsilon) || parameters.epsilon <= 0
+        || !FiniteSetting(parameters.weight_decay) || parameters.weight_decay < 0
+        || !FiniteSetting(parameters.weight_decay_input)
+        || parameters.weight_decay_input < 0
+        || !FiniteSetting(parameters.weight_decay_output)
+        || parameters.weight_decay_output < 0
+        || !FiniteSetting(parameters.bias_lr_factor)
+        || parameters.bias_lr_factor <= 0 || age == 0)
+        throw std::runtime_error("Nonfinite blue MAPPO optimizer state");
+}
+
 template<typename OPTIMIZER>
 void ReadPatrolOptimizer(std::istream& stream, OPTIMIZER& optimizer)
 {
@@ -153,22 +186,7 @@ void ReadPatrolOptimizer(std::istream& stream, OPTIMIZER& optimizer)
           >> parameters.weight_decay_input >> parameters.weight_decay_output
           >> parameters.bias_lr_factor >> age))
         throw std::runtime_error("Invalid blue MAPPO optimizer state");
-    auto const finite = [](auto value) {
-        return std::isfinite(static_cast<double>(value));
-    };
-    if (!finite(parameters.alpha) || parameters.alpha <= 0
-        || !finite(parameters.beta_1) || parameters.beta_1 < 0
-        || parameters.beta_1 >= 1 || !finite(parameters.beta_2)
-        || parameters.beta_2 < 0 || parameters.beta_2 >= 1
-        || !finite(parameters.epsilon) || parameters.epsilon <= 0
-        || !finite(parameters.weight_decay) || parameters.weight_decay < 0
-        || !finite(parameters.weight_decay_input)
-        || parameters.weight_decay_input < 0
-        || !finite(parameters.weight_decay_output)
-        || parameters.weight_decay_output < 0
-        || !finite(parameters.bias_lr_factor)
-        || parameters.bias_lr_factor <= 0 || age == 0)
-        throw std::runtime_error("Nonfinite blue MAPPO optimizer state");
+    RequireValidPatrolOptimizer(parameters, age);
     optimizer.parameters = parameters;
     optimizer.age = age;
 }
@@ -237,7 +255,7 @@ void WritePatrolTrainingState(std::ostream& stream,
     stream << "OPTIMIZERS\n";
     training_checkpoint_detail::WritePatrolOptimizer(stream, actorOptimizer);
     training_checkpoint_detail::WritePatrolOptimizer(stream, criticOptimizer);
-    stream << "UPDATES " << updates << "\nRNG\n" << rng
+    stream << "UPDATES " << updates << "\nRNG\n" << ppokit::artifacts::StandardRandomText(rng)
            << "\nEND_BLUE_PATROL_TRAINING\n";
     if (!stream)
         throw std::runtime_error("Failed to serialize blue MAPPO training state");
@@ -312,9 +330,11 @@ std::uint64_t ReadPatrolTrainingState(std::istream& stream,
     if (!(stream >> updates))
         throw std::runtime_error("Invalid blue MAPPO update count");
     training_checkpoint_detail::RequirePatrolCheckpointToken(stream, "RNG");
-    // Some standard engines clear skipws while reading their state.
-    if (!(stream >> std::ws >> rng))
-        throw std::runtime_error("Invalid blue MAPPO random-engine state");
+    // Standard (MSVC) or libstdc++ form: the checkpoint may come from another platform.
+    std::string randomText;
+    stream >> std::ws;
+    std::getline(stream, randomText);
+    rng = ppokit::artifacts::ParseRandomText(randomText, "blue MAPPO training checkpoint");
     training_checkpoint_detail::RequirePatrolCheckpointToken(
         stream, "END_BLUE_PATROL_TRAINING");
     std::string unexpected;

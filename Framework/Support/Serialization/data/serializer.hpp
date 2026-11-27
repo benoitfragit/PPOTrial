@@ -11,8 +11,10 @@
 #include <fstream>
 #include <iostream>
 #include <filesystem>
+#include <vector>
 #include <string>
 #include <functional>
+#include <cstdint>
 #include <memory>
 
 namespace ppo::serialization {
@@ -28,7 +30,7 @@ using json = nlohmann::json;
 constexpr int kConfigFormatVersion = 2;
 
 /**
- * @brief Singleton service used to load/save JSON configuration files.
+ * @brief Singleton service used to load JSON configuration files.
  */
 class Serializer {
 public:
@@ -49,36 +51,45 @@ public:
     Serializer& operator=(Serializer&&) = delete;
 
     /**
-    * @brief Sets the base directory used for registered files.
-    * @param path Root configuration folder.
+    * @brief Sets the ordered folders searched for registered files.
+    * @details An example keeps its own settings beside the shared ones: Load()
+    *          resolves a registered relative file against the first folder that contains it,
+    *          else against the first folder (so a missing file is reported there).
+    * @param paths Search folders, highest priority first.
     */
-    void SetPath(std::filesystem::path path);
+    void SetSearchPaths(std::vector<std::filesystem::path> paths);
 
     /**
     * @brief Callback invoked when loading a JSON document.
     */
     using JsonLoadFunction = std::function<void(json& ar)>;
-    /**
-    * @brief Callback invoked when saving a JSON document.
-    */
-    using JsonSaveFunction = std::function<void(json& ar)>;
 
     /**
-    * @brief Registers load and save callbacks for one file.
-    * @param path File path relative to the configured root.
-    * @param load Load callback, optional.
-    * @param save Save callback, optional.
+    * @brief Identifies one Register() call, to remove its callbacks with Unregister().
     */
-    void Register(std::filesystem::path path, JsonLoadFunction load, JsonSaveFunction save);
+    using Registration = std::uint64_t;
+
+    /**
+    * @brief Registers the load callback of one file.
+    * @details A callback capturing an object must be removed with Unregister() before that
+    *          object is destroyed: the singleton outlives it, and a process can build several
+    *          environments in turn (a training environment, then an evaluation one).
+    * @param path File path relative to the search folders (resolved by each Load).
+    * @param load Load callback.
+    * @return The handle of this registration (0, ignored by Unregister, for a null callback).
+    */
+    Registration Register(std::filesystem::path path, JsonLoadFunction load);
+
+    /**
+    * @brief Removes the callbacks of one registration; an unknown handle is ignored.
+    * @param registration Handle returned by Register().
+    */
+    void Unregister(Registration registration) noexcept;
 
     /**
     * @brief Loads every registered configuration file.
     */
     void Load(void);
-    /**
-    * @brief Saves every registered configuration file.
-    */
-    void Save(void);
 
     /**
      * @brief Parse a JSON file with robust error handling.
@@ -99,7 +110,7 @@ private:
     static bool ValidateFormatVersion(std::filesystem::path const& file, json const& content);
 
     /**
-    * @brief Hidden implementation holding callback maps and path state.
+    * @brief Hidden implementation holding the callbacks and the search folders.
     */
     struct Impl;
     /**

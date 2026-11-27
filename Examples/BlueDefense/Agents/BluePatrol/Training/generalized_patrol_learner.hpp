@@ -6,11 +6,15 @@
  */
 #pragma once
 
+#include "generalized_artifact.hpp"
 #include "generalized_training_checkpoint.hpp"
 #include "generalized_critic_network.hpp"
-#include "generalized_advantage.hpp"
+#include "ppokit/runtime/hosted_trainer.hpp"
 
 #include <rl_tools/nn/optimizers/adam/operations_generic.h>
+
+#include "ppokit/backend/rltools/mlp_probes.hpp"
+#include "ppokit/graph/probes.hpp"
 
 #include <algorithm>
 #include <array>
@@ -24,7 +28,6 @@
 #include <iostream>
 #include <limits>
 #include <memory>
-#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -156,6 +159,13 @@ private:
  * The historical two-agent PatrolLearner remains unchanged. This class owns the
  * v10 actor, agent-conditioned centralized critic and V7 training state.
  */
+/** @brief What the actor graph blocks and the critic layers output during a probed update. */
+struct GeneralizedLayerProbes final
+{
+    std::vector<ppokit::runtime::BlockProbe> actor;
+    std::vector<ppokit::runtime::BlockProbe> critic;
+};
+
 class GeneralizedPatrolLearner final
 {
 public:
@@ -176,16 +186,15 @@ public:
     GeneralizedPatrolLearner(ActiveTeamCounts const counts,
                              std::uint32_t const seed,
                              std::size_t const rolloutTeamSteps = 2048U)
-        : counts_(counts), rolloutTeamSteps_(rolloutTeamSteps),
-          transitions_(CheckedTransitionCapacity(counts, rolloutTeamSteps)),
-          trainingOrder_(transitions_.size()),
-          rng_(rlt::random::default_engine(
-              typename Device::SPEC::RANDOM{}, seed))
+        : counts_(counts), rolloutTeamSteps_(rolloutTeamSteps), seed_(seed),
+          rng_(MakePatrolEngine(seed)),
+          trainer_(models_, random_, CheckedTeamSize(counts, rolloutTeamSteps),
+                   rolloutTeamSteps, TeamSettings())
     {
         if (!Valid(counts_))
             throw std::invalid_argument("Invalid generalized P/N team counts");
 
-        std::iota(trainingOrder_.begin(), trainingOrder_.end(), 0U);
+        trainer_.SetHooks(ProgressHooks());
 
         try
         {
@@ -220,70 +229,57 @@ public:
                           AvailabilityMask const& availability)
     {
         optimizationGuard_.RequireWritable(
-            collectedTeamSteps_, rolloutTeamSteps_, __FILE__, __LINE__);
-        if (pending_)
+            trainer_.CollectedTeamSteps(), rolloutTeamSteps_, __FILE__, __LINE__);
+        if (trainer_.HasPendingAction())
             throw std::logic_error(GeneralizedOptimizationGuard::Diagnostic(
                 __FILE__, __LINE__, "ChooseActions",
                 "synchronized feedback is missing"));
         ValidateBatch(observations, availability);
 
         TransformObservations(observations);
-        using ActorMlp = rlt::nn_models::mlp::NeuralNetwork<ActorSpecification>;
-        rlt::evaluate(device_, static_cast<ActorMlp const&>(actor_),
-                      inferenceCompact_, inferenceOutput_,
-                      inferenceActorBuffer_);
         ++actorEvaluationCount_;
 
         BuildAgentCriticObservations(availability, pendingAgentCritic_);
 
-        Actions actions{};
-        constexpr float kTwoPi = 6.28318530717958647692F;
+        // The shared rollout and the PPO update belong to PPOKit (HostedTrainer):
+        // this pass already gave the means, so they are handed over as they are.
         for (std::size_t agent = 0U; agent < counts_.blueMobiles; ++agent)
         {
-            auto& transition = transitions_[TransitionIndex(
-                collectedTeamSteps_, agent)];
-            transition.observation = observations[agent].values;
-            transition.centralCritic = pendingAgentCritic_[agent];
-            transition.available = availability[agent];
-            transition.teamStep = collectedTeamSteps_;
-            transition.oldLogProbability = 0.F;
+            teamObservations_[agent] = observations[agent].values.data();
+            teamCritics_[agent] = pendingAgentCritic_[agent].data();
+            teamPresence_[agent] = availability[agent] ? ppokit::runtime::AgentPresence::Active
+                                                       : ppokit::runtime::AgentPresence::Destroyed;
             for (std::size_t action = 0U;
                  action < GeneralizedObservationLayout::ActionSize; ++action)
             {
-                float const mean = rlt::get(
-                    inferenceOutput_, static_cast<Index>(agent),
-                    static_cast<Index>(action));
-                float const logStd = rlt::get(
-                    actor_.log_std.parameters, 0,
-                    static_cast<Index>(action));
-                float const deviation = std::exp(logStd);
-                if (!std::isfinite(mean) || !std::isfinite(deviation)
-                    || deviation <= 0.F)
-                {
-                    throw std::runtime_error(GeneralizedOptimizationGuard::Diagnostic(
-                        __FILE__, __LINE__, "ChooseActions",
-                        "invalid Gaussian distribution for agent="
-                            + std::to_string(agent)));
-                }
-                float const sampled =
-                    rlt::random::normal_distribution::sample(
-                        typename Device::SPEC::RANDOM{}, mean, deviation,
-                        rng_);
-                if (!std::isfinite(sampled))
-                    throw std::runtime_error(GeneralizedOptimizationGuard::Diagnostic(
-                        __FILE__, __LINE__, "ChooseActions",
-                        "nonfinite action for agent=" + std::to_string(agent)));
-                float const normalized = (sampled - mean) / deviation;
-                transition.oldLogProbability +=
-                    -0.5F * normalized * normalized - logStd
-                    - 0.5F * std::log(kTwoPi);
-                actions[agent][action] = sampled;
-                transition.action[action] = sampled;
+                teamMeans_[agent * GeneralizedObservationLayout::ActionSize + action] =
+                    rlt::get(inferenceOutput_, static_cast<Index>(agent),
+                             static_cast<Index>(action));
             }
         }
+        Actions actions{};
+        try
+        {
+            trainer_.ChooseActionsFromMeans(teamObservations_.data(), teamMeans_.data(),
+                                            teamCritics_.data(), teamPresence_.data(),
+                                            teamActions_.data());
+        }
+        catch (std::runtime_error const& error)
+        {
+            throw std::runtime_error(GeneralizedOptimizationGuard::Diagnostic(
+                __FILE__, __LINE__, "ChooseActions", error.what()));
+        }
 
+        for (std::size_t agent = 0U; agent < counts_.blueMobiles; ++agent)
+        {
+            for (std::size_t action = 0U;
+                 action < GeneralizedObservationLayout::ActionSize; ++action)
+            {
+                actions[agent][action] =
+                    teamActions_[agent * GeneralizedObservationLayout::ActionSize + action];
+            }
+        }
         pendingAvailability_ = availability;
-        pending_ = true;
         lastTeamActionCount_ = counts_.blueMobiles;
         totalActionsSampled_ += counts_.blueMobiles;
         return actions;
@@ -306,15 +302,11 @@ public:
             throw std::logic_error(GeneralizedOptimizationGuard::Diagnostic(
                 __FILE__, __LINE__, "EvaluateActions",
                 "PPO optimizer previously failed; evaluation forbidden"));
-        if (pending_ || collectedTeamSteps_ != 0U)
+        if (!trainer_.AtUpdateBoundary())
             throw std::logic_error(
                 "Generalized MAPPO evaluation requires an update boundary");
         ValidateBatch(observations, availability);
         TransformObservations(observations);
-        using ActorMlp = rlt::nn_models::mlp::NeuralNetwork<ActorSpecification>;
-        rlt::evaluate(device_, static_cast<ActorMlp const&>(actor_),
-                      inferenceCompact_, inferenceOutput_,
-                      inferenceActorBuffer_);
         ++actorEvaluationCount_;
 
         Actions actions{};
@@ -352,8 +344,8 @@ public:
                  bool const terminated, bool const truncated)
     {
         optimizationGuard_.RequireWritable(
-            collectedTeamSteps_, rolloutTeamSteps_, __FILE__, __LINE__);
-        if (!pending_)
+            trainer_.CollectedTeamSteps(), rolloutTeamSteps_, __FILE__, __LINE__);
+        if (!trainer_.HasPendingAction())
             throw std::logic_error(GeneralizedOptimizationGuard::Diagnostic(
                 __FILE__, __LINE__, "Observe",
                 "actions are required before feedback"));
@@ -363,6 +355,11 @@ public:
         std::array<CentralCriticObservation,
                    TeamCapacity::MaximumBlueMobiles> nextCritics{};
         BuildAgentCriticObservations(nextAvailability, nextCritics);
+        std::array<float const*, TeamCapacity::MaximumBlueMobiles> nextCriticRows{};
+        for (std::size_t agent = 0U; agent < counts_.blueMobiles; ++agent)
+        {
+            nextCriticRows[agent] = nextCritics[agent].data();
+        }
 
         for (std::size_t agent = 0U; agent < counts_.blueMobiles; ++agent)
         {
@@ -370,27 +367,31 @@ public:
                 throw std::invalid_argument(GeneralizedOptimizationGuard::Diagnostic(
                     __FILE__, __LINE__, "Observe",
                     "nonfinite reward for agent=" + std::to_string(agent)));
-            auto& transition = transitions_[TransitionIndex(
-                collectedTeamSteps_, agent)];
-            transition.nextCentralCritic = nextCritics[agent];
-            transition.reward = rewards[agent];
-            transition.terminated = terminated;
-            transition.truncated = truncated;
         }
+        // The whole team ends together; a terminated step never bootstraps.
+        ppokit::runtime::StepEnd const end = terminated
+            ? ppokit::runtime::StepEnd::Terminated
+            : (truncated ? ppokit::runtime::StepEnd::Truncated
+                         : ppokit::runtime::StepEnd::Running);
+        std::array<ppokit::runtime::StepEnd, TeamCapacity::MaximumBlueMobiles> ends{};
+        ends.fill(end);
 
-        pending_ = false;
         lastMasks_ = pendingAvailability_;
         lastTeamTransitionCount_ = counts_.blueMobiles;
         totalTransitionsRecorded_ += counts_.blueMobiles;
-        ++collectedTeamSteps_;
-        if (collectedTeamSteps_ != rolloutTeamSteps_)
-            return false;
+        bool const fillsRollout = trainer_.CollectedTeamSteps() + 1U == rolloutTeamSteps_;
+        if (!fillsRollout)
+            return trainer_.Observe(nextCriticRows.data(), rewards.data(), ends.data());
 
         // Never advance/reset this rollout if optimizer or Adam updates fail.
         // Fail-stop prevents indexing a full buffer on the next team step.
-        optimizationGuard_.Run([this] { OptimizeRollout(); },
-                               __FILE__, __LINE__);
-        collectedTeamSteps_ = 0U;
+        if (probing_)
+            StartProbes();
+        optimizationGuard_.Run(
+            [&] { trainer_.Observe(nextCriticRows.data(), rewards.data(), ends.data()); },
+            __FILE__, __LINE__);
+        if (probeActive_)
+            FinishProbes();
         ++completedUpdates_;
         return true;
     }
@@ -400,12 +401,10 @@ public:
     /** @brief Returns synchronized team steps currently buffered. */
     std::size_t CollectedTeamSteps() const noexcept
     {
-        return collectedTeamSteps_;
+        return trainer_.CollectedTeamSteps();
     }
-    /** @brief Returns synchronized team steps per update. */
-    std::size_t RolloutSize() const noexcept { return rolloutTeamSteps_; }
     /** @brief Returns whether Observe still owes feedback for one actor batch. */
-    bool HasPendingAction() const noexcept { return pending_; }
+    bool HasPendingAction() const noexcept { return trainer_.HasPendingAction(); }
     /** @brief True after a possibly partial/invalid PPO optimizer update. */
     bool OptimizationFailed() const noexcept
     {
@@ -421,12 +420,27 @@ public:
      */
     void AbortPendingStep() noexcept
     {
-        pending_ = false;
+        trainer_.AbortPendingStep();
         pendingAvailability_.fill(false);
     }
 
     /** @brief Returns completed generalized policy updates. */
     std::uint64_t StepCount() const noexcept { return completedUpdates_; }
+
+    /**
+     * @brief Probes the actor blocks and critic layers of the next updates (outputs, dead and
+     *        saturated units, gradient sizes). Read-only: the same weights as without probes.
+     */
+    void ProbeLayers(bool probing) noexcept { probing_ = probing; }
+    /** @brief Probes of the last update run while probing (empty before). */
+    GeneralizedLayerProbes const& LayerProbes() const noexcept { return lastProbes_; }
+    /** @brief Statistics of the latest completed update (zeros before the first). */
+    ppokit::runtime::TeamUpdateStatistics const& LastUpdate() const noexcept
+    {
+        return trainer_.LastUpdate();
+    }
+    /** @brief The PPO hyper-parameters this learner trains with. */
+    static ppokit::runtime::TeamPpoSettings PpoSettings() noexcept { return TeamSettings(); }
     /** @brief Returns sampled decentralized actions in the latest team step. */
     std::size_t LastTeamActionCount() const noexcept
     {
@@ -450,7 +464,7 @@ public:
     /** @brief Returns the current/last per-slot rollout learning masks. */
     AvailabilityMask CurrentMasks() const noexcept
     {
-        return pending_ ? pendingAvailability_ : lastMasks_;
+        return trainer_.HasPendingAction() ? pendingAvailability_ : lastMasks_;
     }
     /** @brief Returns one agent-conditioned critic input. */
     CentralCriticObservation const& LastAgentCriticObservation(
@@ -488,53 +502,49 @@ public:
         std::forward<Consumer>(consumer)(actor_);
     }
 
-    /** @brief Saves the inference-only v10 actor atomically. */
-    void SaveActor(std::filesystem::path const& checkpoint) const
+    /**
+     * @brief Hands the whole training state to `consumer(actor, critic, actorOptimizer,
+     *        criticOptimizer, generator, updates, seed)`, read-only (checkpoint conversion).
+     * @throws std::logic_error between two update boundaries (a rollout is being collected).
+     */
+    template<typename Consumer>
+    void WithTrainingState(Consumer&& consumer) const
     {
-        SaveGeneralizedPolicy(checkpoint, actor_, Metadata());
+        if (!trainer_.AtUpdateBoundary())
+            throw std::logic_error("Generalized MAPPO training state is read at an update boundary only");
+        std::forward<Consumer>(consumer)(actor_, critic_, actorOptimizer_, criticOptimizer_, rng_,
+                                         completedUpdates_, seed_);
     }
 
-    /** @brief Loads a strict v10 actor and resets its Adam moments. */
-    void LoadActor(std::filesystem::path const& checkpoint)
+    /** @brief Saves the inference actor atomically as a PPOKit policy artifact. */
+    void SaveActor(std::filesystem::path const& checkpoint) const
     {
-        RequireUpdateBoundary("load a generalized actor");
-        std::ifstream stream{checkpoint};
-        if (!stream)
-            throw std::runtime_error(
-                "Cannot open generalized blue actor checkpoint: "
-                + checkpoint.string());
-        (void)ReadGeneralizedPolicy(
-            stream, actor_, true);
-        rlt::reset_optimizer_state(device_, actorOptimizer_, actor_);
+        SaveGeneralizedPolicyArtifact<Critic>(checkpoint, actor_, Metadata(), completedUpdates_, seed_);
     }
 
     /**
-     * @brief Migrates a historical v7 parameter layout into the generalized actor.
-     * @param checkpoint Strict historical v7 actor checkpoint.
+     * @brief Loads an actor and resets its Adam moments.
+     * @param checkpoint A PPOKit policy or training artifact of these networks, or a former
+     *        V10 actor file (whose own header is checked strictly).
      */
-    void LoadV7Actor(std::filesystem::path const& checkpoint)
+    void LoadActor(std::filesystem::path const& checkpoint)
     {
-        RequireUpdateBoundary("migrate a v7 actor");
-        LegacyActor legacy{};
-        rlt::malloc(device_, legacy);
-        try
+        RequireUpdateBoundary("load a generalized actor");
+        if (IsPpokitArtifact(checkpoint))
         {
-            rlt::reset_optimizer_state(device_, actorOptimizer_, legacy);
-            std::ifstream stream{checkpoint};
-            if (!stream)
-                throw std::runtime_error(
-                    "Cannot open legacy blue actor checkpoint: "
-                    + checkpoint.string());
-            ReadPatrolPolicy(stream, legacy);
-            MigrateV7Actor(legacy, actor_);
-            rlt::reset_optimizer_state(device_, actorOptimizer_, actor_);
+            (void)LoadGeneralizedPolicyArtifact<Critic>(checkpoint, actor_);
         }
-        catch (...)
+        else
         {
-            rlt::free(device_, legacy);
-            throw;
+            LoadV10Actor(checkpoint);
         }
-        rlt::free(device_, legacy);
+        rlt::reset_optimizer_state(device_, actorOptimizer_, actor_);
+    }
+
+    /** @brief Saves the V10 actor of the former format (conversion checks only). */
+    void SaveV10Actor(std::filesystem::path const& checkpoint) const
+    {
+        SaveGeneralizedPolicy(checkpoint, actor_, Metadata());
     }
 
     /**
@@ -558,8 +568,7 @@ public:
         LegacyCritic legacyCritic{};
         ActorOptimizer legacyActorOptimizer{};
         CriticOptimizer legacyCriticOptimizer{};
-        auto legacyRng = rlt::random::default_engine(
-            typename Device::SPEC::RANDOM{}, 0U);
+        auto legacyRng = MakePatrolEngine(0U);
         bool legacyActorAllocated = false;
         bool legacyCriticAllocated = false;
         GeneralizedTrainingMigrationReport report{};
@@ -583,8 +592,7 @@ public:
             actorOptimizer_.parameters.alpha = 3.e-4F;
             criticOptimizer_ = CriticOptimizer{};
             criticOptimizer_.parameters.alpha = 3.e-4F;
-            rng_ = rlt::random::default_engine(
-                typename Device::SPEC::RANDOM{}, restartSeed);
+            rng_ = MakePatrolEngine(restartSeed);
             rlt::init_weights(device_, critic_, rng_);
             rlt::reset_optimizer_state(device_, criticOptimizer_, critic_);
             completedUpdates_ = 0U;
@@ -611,56 +619,16 @@ public:
         return report;
     }
 
-    /**
-     * @brief Migrates only the shared actor from a historical v5 trainer.
-     *        The incompatible old critic/Adam state is deliberately reset.
-     */
-    void MigrateV5TrainingActor(std::filesystem::path const& checkpoint)
+    /** @brief Saves the complete update-boundary training state as a PPOKit training artifact. */
+    void SaveTrainingState(std::filesystem::path const& checkpoint) const
     {
-        RequireUpdateBoundary("migrate v5 actor");
-        std::ifstream stream{checkpoint};
-        if (!stream)
-            throw std::runtime_error("Cannot open old generalized checkpoint");
-        std::string magic;
-        unsigned version{}, observationVersion{};
-        std::size_t raw{}, compact{}, output{}, actorHidden{}, actorLayers{};
-        std::size_t criticInput{}, criticHidden{}, criticLayers{};
-        if (!(stream >> magic >> version >> observationVersion
-              >> raw >> compact >> output >> actorHidden >> actorLayers
-              >> criticInput >> criticHidden >> criticLayers)
-            || magic != "BLUE_TEAM_TRAINING_V5" || version != 5U
-            || observationVersion != GeneralizedObservationLayout::Version
-            || raw != GeneralizedObservationLayout::Size
-            || compact != ObservationLayout::Size
-            || output != GeneralizedObservationLayout::ActionSize
-            || actorHidden != TrainingParameters::ACTOR_HIDDEN_DIM
-            || actorLayers != TrainingParameters::ACTOR_NUM_LAYERS
-            || criticInput != ObservationLayout::Size
-            || criticHidden != TrainingParameters::CRITIC_HIDDEN_DIM
-            || criticLayers != TrainingParameters::CRITIC_NUM_LAYERS)
-        {
-            throw std::runtime_error("Incompatible v5 generalized checkpoint");
-        }
-        auto const metadata = generalized_checkpoint_detail::ReadMetadata(stream);
-        training_checkpoint_detail::RequirePatrolCheckpointToken(
-            stream, "ACTOR");
-        auto const actorMetadata = ReadGeneralizedPolicyParameters(stream, actor_);
-        if (actorMetadata.activeBlueMobiles != metadata.activeBlueMobiles
-            || actorMetadata.activeRedMobiles != metadata.activeRedMobiles)
-        {
-            throw std::runtime_error("Inconsistent V5 actor metadata");
-        }
-        rlt::reset_optimizer_state(device_, actorOptimizer_, actor_);
-        rlt::reset_optimizer_state(device_, criticOptimizer_, critic_);
-        completedUpdates_ = 0U;
-        totalActionsSampled_ = 0U;
-        totalTransitionsRecorded_ = 0U;
-        pendingAgentCritic_ = {};
-        diagnostics_ = {};
+        RequireUpdateBoundary("save generalized training state");
+        SaveGeneralizedTrainingArtifact(checkpoint, actor_, critic_, actorOptimizer_, criticOptimizer_, rng_,
+            completedUpdates_, Metadata(), seed_);
     }
 
-    /** @brief Saves the complete update-boundary V7 training state. */
-    void SaveTrainingState(std::filesystem::path const& checkpoint) const
+    /** @brief Saves the V7 training state of the former format (conversion checks only). */
+    void SaveV7TrainingState(std::filesystem::path const& checkpoint) const
     {
         RequireUpdateBoundary("save generalized training state");
         SaveGeneralizedTrainingState(
@@ -668,19 +636,19 @@ public:
             rng_, completedUpdates_, Metadata());
     }
 
-    /** @brief Restores a V7 update-boundary model across valid P/N counts. */
+    /**
+     * @brief Restores an update-boundary model across valid P/N counts.
+     * @param checkpoint A PPOKit training artifact of these networks, or a former V7
+     *        training file (whose own header is checked strictly).
+     */
     void LoadTrainingState(std::filesystem::path const& checkpoint)
     {
         RequireUpdateBoundary("load generalized training state");
-        std::ifstream stream{checkpoint};
-        if (!stream)
-            throw std::runtime_error(
-                "Cannot open generalized blue training checkpoint: "
-                + checkpoint.string());
         GeneralizedCheckpointMetadata metadata{};
-        std::uint64_t const updates = ReadGeneralizedTrainingState(
-            stream, actor_, critic_, actorOptimizer_, criticOptimizer_, rng_,
-            metadata, true);
+        std::uint64_t const updates = IsPpokitArtifact(checkpoint)
+            ? LoadGeneralizedTrainingArtifact(checkpoint, actor_, critic_, actorOptimizer_, criticOptimizer_, rng_,
+                  metadata, &seed_)
+            : LoadV7TrainingState(checkpoint, metadata);
         // P/N are properties of the saved episode, not model dimensions.
         // A new rollout is constructed with the current P/N and fresh masks.
         // Shared actor/critic weights and Adam moments remain compatible.
@@ -696,6 +664,35 @@ public:
     }
 
 private:
+    /** @brief Reads a former V10 actor file (strict header with guidance semantics). */
+    void LoadV10Actor(std::filesystem::path const& checkpoint)
+    {
+        std::ifstream stream{checkpoint};
+        if (!stream)
+            throw std::runtime_error(
+                "Cannot open generalized blue actor checkpoint: "
+                + checkpoint.string());
+        (void)ReadGeneralizedPolicy(stream, actor_, true);
+    }
+
+    /**
+     * @brief Reads a former V7 training file.
+     * @param metadata Receives the P/N it was saved with.
+     * @return Its completed PPO updates.
+     */
+    std::uint64_t LoadV7TrainingState(std::filesystem::path const& checkpoint,
+        GeneralizedCheckpointMetadata& metadata)
+    {
+        std::ifstream stream{checkpoint};
+        if (!stream)
+            throw std::runtime_error(
+                "Cannot open generalized blue training checkpoint: "
+                + checkpoint.string());
+        return ReadGeneralizedTrainingState(
+            stream, actor_, critic_, actorOptimizer_, criticOptimizer_, rng_,
+            metadata, true);
+    }
+
     static constexpr Index kTrainingBatch = TrainingParameters::BATCH_SIZE;
     using ActorSpecification = TrainingConfig::NN::ACTOR_SPEC;
     static_assert(ActorSpecification::BATCH_SIZE >= kTrainingBatch,
@@ -706,25 +703,6 @@ private:
     using LegacyCritic = TrainingConfig::NN::CRITIC_TYPE;
     using ActorOptimizer = TrainingConfig::NN::ACTOR_OPTIMIZER;
     using CriticOptimizer = TrainingConfig::NN::CRITIC_OPTIMIZER;
-
-/** @brief Déclare le type Transition, utilisé par Collecte de transitions multi-agents, optimisation PPO et sérialisation des états d'entraînement. */
-    struct Transition final
-    {
-        GeneralizedRawObservation observation{};
-        CentralCriticObservation centralCritic{};
-        CentralCriticObservation nextCentralCritic{};
-        Action action{};
-        float oldLogProbability{};
-        float reward{};
-        float value{};
-        float nextValue{};
-        float returnValue{};
-        float advantage{};
-        std::size_t teamStep{};
-        bool available{};
-        bool terminated{};
-        bool truncated{};
-    };
 
     using InferenceRawSpecification = rlt::matrix::Specification<
         float, Index, static_cast<Index>(TeamCapacity::MaximumBlueMobiles),
@@ -748,10 +726,10 @@ private:
         float, Index, kTrainingBatch, 1>;
 
 /**
- * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
- * @details Peut signaler un état invalide par exception.
+ * @brief Team size P of the rollout, after checking the rollout capacity.
+ * @throws std::invalid_argument for invalid counts or an unbounded rollout.
  */
-    static std::size_t CheckedTransitionCapacity(
+    static std::size_t CheckedTeamSize(
         ActiveTeamCounts const counts, std::size_t const rolloutTeamSteps)
     {
         if (!Valid(counts) || rolloutTeamSteps == 0U
@@ -763,17 +741,287 @@ private:
             throw std::invalid_argument(
                 "Invalid generalized MAPPO rollout capacity");
         }
-        return rolloutTeamSteps * counts.blueMobiles;
+        return counts.blueMobiles;
     }
 
-/**
- * @brief Réalise l'opération TransitionIndex; voir les préconditions et effets dans son corps C++.
- * @details Peut signaler un état invalide par exception.
- */
-    std::size_t TransitionIndex(std::size_t const teamStep,
-                                std::size_t const agent) const noexcept
+    /** @brief The Blue PPO hyper-parameters, for the PPOKit trainer. */
+    static ppokit::runtime::TeamPpoSettings TeamSettings() noexcept
     {
-        return teamStep * counts_.blueMobiles + agent;
+        ppokit::runtime::TeamPpoSettings settings;
+        settings.gamma = PPOParameters::GAMMA;
+        settings.lambda = PPOParameters::LAMBDA;
+        settings.clip = PPOParameters::EPSILON_CLIP;
+        settings.entropyCoefficient = PPOParameters::ACTION_ENTROPY_COEFFICIENT;
+        settings.epochs = static_cast<std::size_t>(PPOParameters::N_EPOCHS);
+        settings.minibatch = static_cast<std::size_t>(kTrainingBatch);
+        return settings;
+    }
+
+    /**
+     * @brief The rl_tools actor, critic and optimizers of this learner, as PPOKit Models.
+     * @details Rows are copied into the fixed rl_tools training batch (zeros for padding),
+     * so a minibatch runs exactly the historical rl_tools calls in the historical order.
+     */
+    class TeamModels final
+    {
+    public:
+        explicit TeamModels(GeneralizedPatrolLearner& learner) noexcept : learner_(learner) {}
+
+        std::size_t ObservationSize() const noexcept { return ObservationWidth; }
+        std::size_t CriticSize() const noexcept { return CriticWidth; }
+        std::size_t ActionSize() const noexcept { return ActionWidth; }
+
+        float LogStd(std::size_t action) const
+        {
+            return rlt::get(learner_.actor_.log_std.parameters, 0, static_cast<Index>(action));
+        }
+
+        /** @brief Not used: Blue hands its own means to ChooseActionsFromMeans. */
+        void ActorMeans(float const* const*, std::size_t, float*)
+        {
+            throw std::logic_error("Blue MAPPO computes the team means in TransformObservations");
+        }
+
+        void CriticValues(float const* const* inputs, std::size_t rows, float* values)
+        {
+            FillCritic(inputs, rows);
+            rlt::evaluate(learner_.device_, learner_.critic_, learner_.trainingCritic_,
+                          learner_.trainingCriticOutput_, learner_.trainingCriticBuffer_);
+            ReadValues(rows, values);
+        }
+
+        void ActorForward(float const* const* observations, std::size_t rows, float* means)
+        {
+            CopyRows(observations, rows, ObservationWidth, learner_.trainingRaw_);
+            rlt::zero_gradient(learner_.device_, learner_.actor_);
+            rlt::forward(learner_.device_, learner_.actor_, learner_.trainingRaw_, learner_.trainingActorOutput_);
+            for (std::size_t row = 0; row < rows; ++row)
+            {
+                for (std::size_t action = 0; action < ActionWidth; ++action)
+                {
+                    means[row * ActionWidth + action] = rlt::get(
+                        learner_.trainingActorOutput_, static_cast<Index>(row), static_cast<Index>(action));
+                }
+            }
+            actorRows_ = rows;
+        }
+
+        void ActorBackwardAndStep(float const* meanGradients, float const* logStdGradients)
+        {
+            auto& derivative = learner_.trainingActorDerivative_;
+            rlt::set_all(learner_.device_, derivative, 0.F);
+            for (std::size_t row = 0; row < actorRows_; ++row)
+            {
+                for (std::size_t action = 0; action < ActionWidth; ++action)
+                {
+                    rlt::set(derivative, static_cast<Index>(row), static_cast<Index>(action),
+                             meanGradients[row * ActionWidth + action]);
+                }
+            }
+            for (std::size_t action = 0; action < ActionWidth; ++action)
+            {
+                rlt::increment(learner_.actor_.log_std.gradient, 0, static_cast<Index>(action),
+                               logStdGradients[action]);
+            }
+            if (learner_.probeActive_)
+                learner_.actor_.graph->SetProbes(learner_.actorProbes_.get(), actorRows_);
+            rlt::backward(learner_.device_, learner_.actor_, learner_.trainingRaw_, derivative,
+                          learner_.trainingActorBuffer_);
+            learner_.actor_.graph->SetProbes(nullptr, 0);
+            rlt::step(learner_.device_, learner_.actorOptimizer_, learner_.actor_);
+        }
+
+        void CriticForward(float const* const* inputs, std::size_t rows, float* values)
+        {
+            FillCritic(inputs, rows);
+            rlt::zero_gradient(learner_.device_, learner_.critic_);
+            rlt::forward(learner_.device_, learner_.critic_, learner_.trainingCritic_,
+                         learner_.trainingCriticOutput_);
+            if (learner_.probeActive_)
+                learner_.criticProbes_->ObserveForward(learner_.critic_, rows);
+            ReadValues(rows, values);
+            criticRows_ = rows;
+        }
+
+        void CriticBackwardAndStep(float const* valueGradients)
+        {
+            auto& derivative = learner_.trainingCriticDerivative_;
+            rlt::set_all(learner_.device_, derivative, 0.F);
+            for (std::size_t row = 0; row < criticRows_; ++row)
+            {
+                rlt::set(derivative, static_cast<Index>(row), 0, valueGradients[row]);
+            }
+            rlt::backward(learner_.device_, learner_.critic_, learner_.trainingCritic_, derivative,
+                          learner_.trainingCriticBuffer_);
+            if (learner_.probeActive_)
+                learner_.criticProbes_->ObserveGradients(learner_.critic_);
+            rlt::step(learner_.device_, learner_.criticOptimizer_, learner_.critic_);
+        }
+
+    private:
+        static constexpr std::size_t ObservationWidth = GeneralizedObservationLayout::Size;
+        static constexpr std::size_t CriticWidth = GeneralizedCriticLayout::Size;
+        static constexpr std::size_t ActionWidth = GeneralizedObservationLayout::ActionSize;
+
+        void FillCritic(float const* const* inputs, std::size_t rows)
+        {
+            CopyRows(inputs, rows, CriticWidth, learner_.trainingCritic_);
+        }
+
+        /** @brief Zeroes the batch matrix, then copies every non-null row into it. */
+        template<typename Matrix>
+        void CopyRows(float const* const* sources, std::size_t rows, std::size_t width, Matrix& matrix)
+        {
+            rlt::set_all(learner_.device_, matrix, 0.F);
+            for (std::size_t row = 0; row < rows; ++row)
+            {
+                float const* const source = sources[row];
+                if (source == nullptr)
+                {
+                    continue; // padding row
+                }
+                for (std::size_t feature = 0; feature < width; ++feature)
+                {
+                    rlt::set(matrix, static_cast<Index>(row), static_cast<Index>(feature), source[feature]);
+                }
+            }
+        }
+
+        void ReadValues(std::size_t rows, float* values) const
+        {
+            for (std::size_t row = 0; row < rows; ++row)
+            {
+                values[row] = rlt::get(learner_.trainingCriticOutput_, static_cast<Index>(row), 0);
+            }
+        }
+
+        GeneralizedPatrolLearner& learner_;
+        std::size_t actorRows_ = 0;
+        std::size_t criticRows_ = 0;
+    };
+
+    /** @brief The rl_tools generator of this learner (saved in the training state), for PPOKit. */
+    class TeamRandom final
+    {
+    public:
+        explicit TeamRandom(GeneralizedPatrolLearner& learner) noexcept : learner_(learner) {}
+
+        void Shuffle(std::vector<std::size_t>& order) { std::shuffle(order.begin(), order.end(), learner_.rng_); }
+
+        float Normal(float mean, float deviation)
+        {
+            return rlt::random::normal_distribution::sample(
+                typename Device::SPEC::RANDOM{}, mean, deviation, learner_.rng_);
+        }
+
+    private:
+        GeneralizedPatrolLearner& learner_;
+    };
+
+    using Trainer = ppokit::runtime::HostedTrainer<TeamModels, TeamRandom>;
+    using Clock = std::chrono::steady_clock;
+
+    /** @brief Clears the probes and lets the models feed them during the update that starts. */
+    void StartProbes()
+    {
+        if (!actorProbes_)
+        {
+            actorProbes_ = std::make_unique<ppokit::graph::GraphProbes>(actor_.graph->Network());
+            criticProbes_ = std::make_unique<CriticProbes>();
+        }
+        actorProbes_->Reset();
+        criticProbes_->Reset();
+        probeActive_ = true;
+    }
+
+    /** @brief Keeps what the probes saw during the update that just ended. */
+    void FinishProbes()
+    {
+        probeActive_ = false;
+        lastProbes_ = {actorProbes_->Summary(), criticProbes_->Summary()};
+    }
+
+    static long long Milliseconds(Clock::duration duration) noexcept
+    {
+        return static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+    }
+
+    /**
+     * @brief Historical [MAPPO_TIMING] and [MAPPO_UPDATE] logs, and the diagnostics.
+     * @details The first line is emitted before the synchronous update so that a stalled
+     * first update cannot look like an idle evaluator in CI logs.
+     */
+    ppokit::runtime::HostedUpdateHooks ProgressHooks()
+    {
+        ppokit::runtime::HostedUpdateHooks hooks;
+        hooks.began = [this](std::uint64_t, std::size_t rows) {
+            updateStarted_ = Clock::now();
+            diagnostics_ = {};
+            std::clog << "[MAPPO_TIMING] optimizer=begin update=" << completedUpdates_ + 1U
+                      << " transitions=" << rows << std::endl;
+        };
+        hooks.baselinesDone = [this]() {
+            baselinesDone_ = Clock::now();
+            std::clog << "[MAPPO_TIMING] phase=critic_baselines_done update=" << completedUpdates_ + 1U
+                      << " elapsed_ms=" << Milliseconds(baselinesDone_ - updateStarted_) << std::endl;
+        };
+        hooks.advantagesDone = [this]() { advantagesDone_ = Clock::now(); };
+        hooks.epochDone = [this](std::size_t epoch) {
+            std::clog << "[MAPPO_TIMING] phase=epoch_done update=" << completedUpdates_ + 1U << " epoch=" << epoch
+                      << '/' << PPOParameters::N_EPOCHS
+                      << " elapsed_ms=" << Milliseconds(Clock::now() - updateStarted_) << std::endl;
+        };
+        hooks.finished = [this](ppokit::runtime::TeamUpdateStatistics const& statistics) {
+            RecordDiagnostics(statistics);
+            LogUpdate(Clock::now());
+        };
+        return hooks;
+    }
+
+    void RecordDiagnostics(ppokit::runtime::TeamUpdateStatistics const& statistics) noexcept
+    {
+        diagnostics_.learnableTransitions = statistics.learnableRows;
+        diagnostics_.criticTransitions = statistics.criticRows;
+        diagnostics_.generalizedAdvantageAbsMean = statistics.advantageAbsMean;
+        diagnostics_.actorDerivativeL1 = statistics.actorDerivativeL1;
+        diagnostics_.criticDerivativeL1 = statistics.criticDerivativeL1;
+        diagnostics_.logStdGradientL1 = statistics.logStdGradientL1;
+        diagnostics_.policyLoss = statistics.policyLoss;
+        diagnostics_.valueLoss = statistics.valueLoss;
+        diagnostics_.entropy = statistics.entropy;
+        diagnostics_.approximateKl = statistics.approximateKl;
+        diagnostics_.clipFraction = statistics.clipFraction;
+        diagnostics_.explainedVariance = statistics.explainedVariance;
+        diagnostics_.actionStdMean = statistics.actionStdMean;
+    }
+
+    void LogUpdate(Clock::time_point const ended) const
+    {
+        std::clog << "[MAPPO_TIMING] optimizer=done update=" << completedUpdates_ + 1U
+                  << " learnable=" << diagnostics_.learnableTransitions
+                  << " critic_rows=" << diagnostics_.criticTransitions
+                  << " critic_baselines_ms=" << Milliseconds(baselinesDone_ - updateStarted_)
+                  << " advantages_ms=" << Milliseconds(advantagesDone_ - baselinesDone_)
+                  << " ppo_ms=" << Milliseconds(ended - advantagesDone_)
+                  << " total_ms=" << Milliseconds(ended - updateStarted_) << std::endl;
+        std::ostringstream metrics;
+        metrics << std::setprecision(9)
+                << "[MAPPO_UPDATE] update=" << completedUpdates_ + 1U
+                << " policy_loss=" << diagnostics_.policyLoss
+                << " value_loss=" << diagnostics_.valueLoss
+                << " entropy=" << diagnostics_.entropy
+                << " approx_kl=" << diagnostics_.approximateKl
+                << " clip_fraction=" << diagnostics_.clipFraction
+                << " explained_variance=" << diagnostics_.explainedVariance
+                << " advantage_abs_mean=" << diagnostics_.generalizedAdvantageAbsMean
+                << " actor_derivative_l1=" << diagnostics_.actorDerivativeL1
+                << " critic_derivative_l1=" << diagnostics_.criticDerivativeL1
+                << " log_std_gradient_l1=" << diagnostics_.logStdGradientL1
+                << " action_std_mean=" << diagnostics_.actionStdMean
+                << " learnable=" << diagnostics_.learnableTransitions
+                << " critic_rows=" << diagnostics_.criticTransitions
+                << " total_ms=" << Milliseconds(ended - updateStarted_);
+        std::clog << metrics.str() << std::endl;
     }
 
     GeneralizedCheckpointMetadata Metadata() const noexcept
@@ -815,13 +1063,14 @@ private:
  */
     void RequireUpdateBoundary(char const* const operation) const
     {
-        if (pending_ || collectedTeamSteps_ != 0U)
+        if (!trainer_.AtUpdateBoundary())
             throw std::logic_error(std::string{"Cannot "} + operation
                                    + " during a rollout");
     }
 
 /**
- * @brief Construit, transforme ou échantillonne les données produites par TransformObservations.
+ * @brief Runs the actor on the team: action means in inferenceOutput_, and the compact v7
+ *        rows in inferenceCompact_, from which the centralized critic input is built.
  */
     void TransformObservations(Observations const& observations)
     {
@@ -838,8 +1087,8 @@ private:
                          observations[agent].values[feature]);
             }
         }
-        rlt::blue_generalized_attention_detail::transform(
-            device_, actor_, inferenceRaw_, inferenceCompact_);
+        rlt::blue_generalized_attention_detail::evaluate_with_compact(
+            device_, actor_, inferenceRaw_, inferenceOutput_, inferenceCompact_);
     }
 
 /**
@@ -900,438 +1149,6 @@ private:
                 teamFraction;
         }
     }
-
-/**
- * @brief Exécute une étape d'évolution ou de calcul du composant.
- * @details Applique des bornes numériques.
- */
-    void OptimizeRollout()
-    {
-        using Clock = std::chrono::steady_clock;
-        auto const started = Clock::now();
-        // Emit before the synchronous optimizer so a stalled first update
-        // cannot look like an idle evaluator in CI logs.
-        std::clog << "[MAPPO_TIMING] optimizer=begin update="
-                  << completedUpdates_ + 1U
-                  << " transitions=" << transitions_.size() << std::endl;
-        diagnostics_ = {};
-        EvaluateCriticBaselines();
-        auto const baselinesDone = Clock::now();
-        std::clog << "[MAPPO_TIMING] phase=critic_baselines_done update="
-                  << completedUpdates_ + 1U << " elapsed_ms="
-                  << std::chrono::duration_cast<std::chrono::milliseconds>(
-                         baselinesDone - started).count() << std::endl;
-        std::size_t learnable = EstimateGeneralizedAdvantages();
-        diagnostics_.learnableTransitions = learnable;
-        diagnostics_.criticTransitions = transitions_.size();
-        diagnostics_.explainedVariance = ExplainedVariance();
-        if (learnable != 0U)
-            NormalizeAdvantages(learnable);
-        auto const advantagesDone = Clock::now();
-
-        for (Index epoch = 0; epoch < PPOParameters::N_EPOCHS; ++epoch)
-        {
-            std::shuffle(trainingOrder_.begin(), trainingOrder_.end(), rng_);
-            for (std::size_t offset = 0U; offset < transitions_.size();
-                 offset += static_cast<std::size_t>(kTrainingBatch))
-            {
-                FillTrainingBatch(offset, false);
-                std::size_t const batchLearnable =
-                    CountLearnableBatch(offset);
-                if (batchLearnable != 0U)
-                    TrainActorBatch(offset, batchLearnable);
-                std::size_t const criticRows = std::min(
-                    static_cast<std::size_t>(kTrainingBatch),
-                    trainingOrder_.size() - offset);
-                TrainCriticBatch(offset, criticRows);
-            }
-            std::clog << "[MAPPO_TIMING] phase=epoch_done update="
-                      << completedUpdates_ + 1U << " epoch="
-                      << epoch + 1 << '/' << PPOParameters::N_EPOCHS
-                      << " elapsed_ms="
-                      << std::chrono::duration_cast<std::chrono::milliseconds>(
-                             Clock::now() - started).count() << std::endl;
-        }
-        FinalizeDiagnostics(learnable);
-        auto const ended = Clock::now();
-        auto const millis = [](Clock::duration duration) {
-            return std::chrono::duration_cast<
-                std::chrono::milliseconds>(duration).count();
-        };
-        std::clog << "[MAPPO_TIMING] optimizer=done update="
-                  << completedUpdates_ + 1U
-                  << " learnable=" << learnable
-                  << " critic_rows=" << diagnostics_.criticTransitions
-                  << " critic_baselines_ms=" << millis(baselinesDone - started)
-                  << " advantages_ms=" << millis(advantagesDone - baselinesDone)
-                  << " ppo_ms=" << millis(ended - advantagesDone)
-                  << " total_ms=" << millis(ended - started) << std::endl;
-        std::ostringstream metrics;
-        metrics << std::setprecision(9)
-                << "[MAPPO_UPDATE] update=" << completedUpdates_ + 1U
-                << " policy_loss=" << diagnostics_.policyLoss
-                << " value_loss=" << diagnostics_.valueLoss
-                << " entropy=" << diagnostics_.entropy
-                << " approx_kl=" << diagnostics_.approximateKl
-                << " clip_fraction=" << diagnostics_.clipFraction
-                << " explained_variance=" << diagnostics_.explainedVariance
-                << " advantage_abs_mean="
-                << diagnostics_.generalizedAdvantageAbsMean
-                << " actor_derivative_l1=" << diagnostics_.actorDerivativeL1
-                << " critic_derivative_l1=" << diagnostics_.criticDerivativeL1
-                << " log_std_gradient_l1=" << diagnostics_.logStdGradientL1
-                << " action_std_mean=" << diagnostics_.actionStdMean
-                << " learnable=" << diagnostics_.learnableTransitions
-                << " critic_rows=" << diagnostics_.criticTransitions
-                << " total_ms=" << millis(ended - started);
-        std::clog << metrics.str() << std::endl;
-    }
-
-    /**
-     * @brief Computes the critic's pre-update explained variance.
-     * @return Finite value ``1 - Var(return-value)/Var(return)`` or zero when
-     * the return variance is degenerate.
-     */
-    float ExplainedVariance() const noexcept
-    {
-        if (transitions_.empty())
-            return 0.F;
-        float meanReturn = 0.F;
-        float meanResidual = 0.F;
-        for (auto const& transition : transitions_)
-        {
-            meanReturn += transition.returnValue;
-            meanResidual += transition.returnValue - transition.value;
-        }
-        float const inverse = 1.F / static_cast<float>(transitions_.size());
-        meanReturn *= inverse;
-        meanResidual *= inverse;
-        float returnVariance = 0.F;
-        float residualVariance = 0.F;
-        for (auto const& transition : transitions_)
-        {
-            float const centeredReturn = transition.returnValue - meanReturn;
-            float const centeredResidual = transition.returnValue
-                - transition.value - meanResidual;
-            returnVariance += centeredReturn * centeredReturn;
-            residualVariance += centeredResidual * centeredResidual;
-        }
-        returnVariance *= inverse;
-        residualVariance *= inverse;
-        if (returnVariance <= PPOParameters::ADVANTAGE_EPSILON)
-            return 0.F;
-        float const result = 1.F - residualVariance / returnVariance;
-        return std::isfinite(result) ? result : 0.F;
-    }
-
-    /**
-     * @brief Converts accumulated per-sample diagnostics into finite means.
-     * @param learnable Number of unique actor rows in the rollout.
-     */
-    void FinalizeDiagnostics(std::size_t const learnable) noexcept
-    {
-        std::size_t const actorSamples = learnable
-            * static_cast<std::size_t>(PPOParameters::N_EPOCHS);
-        if (actorSamples != 0U)
-        {
-            float const inverse = 1.F / static_cast<float>(actorSamples);
-            diagnostics_.policyLoss *= inverse;
-            diagnostics_.entropy *= inverse;
-            diagnostics_.approximateKl *= inverse;
-            diagnostics_.clipFraction *= inverse;
-        }
-        std::size_t const criticSamples = transitions_.size()
-            * static_cast<std::size_t>(PPOParameters::N_EPOCHS);
-        if (criticSamples != 0U)
-            diagnostics_.valueLoss /= static_cast<float>(criticSamples);
-
-        float standardDeviation = 0.F;
-        for (Index action = 0;
-             action < static_cast<Index>(
-                          GeneralizedObservationLayout::ActionSize);
-             ++action)
-        {
-            standardDeviation += std::exp(
-                rlt::get(actor_.log_std.parameters, 0, action));
-        }
-        diagnostics_.actionStdMean = standardDeviation
-            / static_cast<float>(GeneralizedObservationLayout::ActionSize);
-    }
-
-/**
- * @brief Réalise l'opération BatchTransition; voir les préconditions et effets dans son corps C++.
- */
-    Transition* BatchTransition(std::size_t const offset,
-                                Index const row) noexcept
-    {
-        std::size_t const orderIndex =
-            offset + static_cast<std::size_t>(row);
-        if (orderIndex >= trainingOrder_.size())
-            return nullptr;
-        return &transitions_[trainingOrder_[orderIndex]];
-    }
-
-    void FillTrainingBatch(std::size_t const offset,
-                           bool const useNextCritic)
-    {
-        rlt::set_all(device_, trainingRaw_, 0.F);
-        rlt::set_all(device_, trainingCritic_, 0.F);
-        for (Index row = 0; row < kTrainingBatch; ++row)
-        {
-            Transition const* const transition = BatchTransition(offset, row);
-            if (transition == nullptr)
-                continue;
-            for (Index feature = 0;
-                 feature < static_cast<Index>(
-                               GeneralizedObservationLayout::Size);
-                 ++feature)
-            {
-                rlt::set(trainingRaw_, row, feature,
-                         transition->observation[feature]);
-            }
-            for (Index feature = 0;
-                 feature < static_cast<Index>(GeneralizedCriticLayout::Size);
-                 ++feature)
-            {
-                rlt::set(trainingCritic_, row, feature,
-                         useNextCritic
-                             ? transition->nextCentralCritic[feature]
-                             : transition->centralCritic[feature]);
-            }
-        }
-    }
-
-/**
- * @brief Calcule EvaluateCriticBaselines à partir des entrées et des formules présentes dans le code.
- */
-    void EvaluateCriticBaselines()
-    {
-        std::iota(trainingOrder_.begin(), trainingOrder_.end(), 0U);
-        for (std::size_t offset = 0U; offset < transitions_.size();
-             offset += static_cast<std::size_t>(kTrainingBatch))
-        {
-            FillTrainingBatch(offset, false);
-            rlt::evaluate(device_, critic_, trainingCritic_,
-                          trainingCriticOutput_, trainingCriticBuffer_);
-            for (Index row = 0; row < kTrainingBatch; ++row)
-            {
-                Transition* const transition = BatchTransition(offset, row);
-                if (transition != nullptr)
-                    transition->value = rlt::get(
-                        trainingCriticOutput_, row, 0);
-            }
-
-            FillTrainingBatch(offset, true);
-            rlt::evaluate(device_, critic_, trainingCritic_,
-                          trainingCriticOutput_, trainingCriticBuffer_);
-            for (Index row = 0; row < kTrainingBatch; ++row)
-            {
-                Transition* const transition = BatchTransition(offset, row);
-                if (transition != nullptr)
-                    transition->nextValue = rlt::get(
-                        trainingCriticOutput_, row, 0);
-            }
-        }
-    }
-
-/**
- * @brief Calcule EstimateGeneralizedAdvantages à partir des entrées et des formules présentes dans le code.
- */
-    std::size_t EstimateGeneralizedAdvantages() noexcept
-    {
-        std::size_t learnable = 0U;
-        float absoluteAdvantage = 0.F;
-        for (std::size_t agent = 0U; agent < counts_.blueMobiles; ++agent)
-        {
-            float followingAdvantage = 0.F;
-            for (std::size_t reverse = rolloutTeamSteps_; reverse > 0U;
-                 --reverse)
-            {
-                auto& transition = transitions_[TransitionIndex(
-                    reverse - 1U, agent)];
-                // Death masks actor gradients, never the mission return.
-                transition.advantage = GeneralizedMissionAdvantage(
-                    transition.reward, transition.value, transition.nextValue,
-                    followingAdvantage, PPOParameters::GAMMA,
-                    PPOParameters::LAMBDA, transition.terminated,
-                    transition.truncated);
-                transition.returnValue = transition.value + transition.advantage;
-                followingAdvantage = transition.advantage;
-                if (transition.available)
-                {
-                    absoluteAdvantage += std::abs(transition.advantage);
-                    ++learnable;
-                }
-            }
-        }
-        diagnostics_.generalizedAdvantageAbsMean = learnable == 0U
-            ? 0.F
-            : absoluteAdvantage / static_cast<float>(learnable);
-        return learnable;
-    }
-
-/**
- * @brief Calcule NormalizeAdvantages à partir des entrées et des formules présentes dans le code.
- */
-    void NormalizeAdvantages(std::size_t const learnable) noexcept
-    {
-        float mean = 0.F;
-        for (auto const& transition : transitions_)
-            if (transition.available)
-                mean += transition.advantage;
-        mean /= static_cast<float>(learnable);
-        float variance = 0.F;
-        for (auto const& transition : transitions_)
-        {
-            if (!transition.available)
-                continue;
-            float const centered = transition.advantage - mean;
-            variance += centered * centered;
-        }
-        float const scale = 1.F / std::sqrt(
-            variance / static_cast<float>(learnable)
-            + PPOParameters::ADVANTAGE_EPSILON);
-        for (auto& transition : transitions_)
-            if (transition.available)
-                transition.advantage =
-                    (transition.advantage - mean) * scale;
-    }
-
-/**
- * @brief Retourne une vue ou une valeur calculée depuis l'état courant.
- */
-    std::size_t CountLearnableBatch(std::size_t const offset) noexcept
-    {
-        std::size_t count = 0U;
-        for (Index row = 0; row < kTrainingBatch; ++row)
-        {
-            Transition const* const transition = BatchTransition(offset, row);
-            if (transition != nullptr && transition->available)
-                ++count;
-        }
-        return count;
-    }
-
-/**
- * @brief Exécute une étape d'évolution ou de calcul du composant.
- * @details Applique des bornes numériques.
- */
-    void TrainActorBatch(std::size_t const offset,
-                         std::size_t const batchLearnable)
-    {
-        rlt::zero_gradient(device_, actor_);
-        rlt::forward(device_, actor_, trainingRaw_, trainingActorOutput_);
-        rlt::set_all(device_, trainingActorDerivative_, 0.F);
-        for (Index row = 0; row < kTrainingBatch; ++row)
-        {
-            Transition const* const transition = BatchTransition(offset, row);
-            if (transition == nullptr || !transition->available)
-                continue;
-
-            float currentLogProbability = 0.F;
-            constexpr float kTwoPi = 6.28318530717958647692F;
-            for (Index action = 0;
-                 action < static_cast<Index>(
-                              GeneralizedObservationLayout::ActionSize);
-                 ++action)
-            {
-                float const mean = rlt::get(
-                    trainingActorOutput_, row, action);
-                float const logStd = rlt::get(
-                    actor_.log_std.parameters, 0, action);
-                float const deviation = std::exp(logStd);
-                float const normalized =
-                    (transition->action[action] - mean) / deviation;
-                currentLogProbability +=
-                    -0.5F * normalized * normalized - logStd
-                    - 0.5F * std::log(kTwoPi);
-            }
-            float const ratio = std::exp(std::clamp(
-                currentLogProbability - transition->oldLogProbability,
-                -20.F, 20.F));
-            float const logRatio = std::clamp(
-                currentLogProbability - transition->oldLogProbability,
-                -20.F, 20.F);
-            float const clipped = std::clamp(
-                ratio, 1.F - PPOParameters::EPSILON_CLIP,
-                1.F + PPOParameters::EPSILON_CLIP);
-            float const surrogate = ratio * transition->advantage;
-            float const clippedSurrogate = clipped * transition->advantage;
-            diagnostics_.policyLoss -= std::min(surrogate, clippedSurrogate);
-            diagnostics_.approximateKl += std::max(
-                0.F, ratio - 1.F - logRatio);
-            if (std::abs(ratio - 1.F) > PPOParameters::EPSILON_CLIP)
-                diagnostics_.clipFraction += 1.F;
-            float const logProbabilityDerivative =
-                surrogate <= clippedSurrogate
-                    ? -transition->advantage * ratio
-                          / static_cast<float>(batchLearnable)
-                    : 0.F;
-            for (Index action = 0;
-                 action < static_cast<Index>(
-                              GeneralizedObservationLayout::ActionSize);
-                 ++action)
-            {
-                float const mean = rlt::get(
-                    trainingActorOutput_, row, action);
-                float const logStd = rlt::get(
-                    actor_.log_std.parameters, 0, action);
-                diagnostics_.entropy += logStd
-                    + 0.5F * (1.F + std::log(kTwoPi));
-                float const variance = std::exp(2.F * logStd);
-                float const difference = transition->action[action] - mean;
-                float const derivative =
-                    logProbabilityDerivative * difference / variance;
-                rlt::set(
-                    trainingActorDerivative_, row, action,
-                    derivative);
-                diagnostics_.actorDerivativeL1 += std::abs(derivative);
-                float const normalizedSquared =
-                    difference * difference / variance;
-                float const logStdGradient =
-                    logProbabilityDerivative * (normalizedSquared - 1.F)
-                    - PPOParameters::ACTION_ENTROPY_COEFFICIENT
-                          / static_cast<float>(batchLearnable);
-                rlt::increment(actor_.log_std.gradient, 0, action,
-                               logStdGradient);
-                diagnostics_.logStdGradientL1 +=
-                    std::abs(logStdGradient);
-            }
-        }
-        rlt::backward(device_, actor_, trainingRaw_,
-                      trainingActorDerivative_, trainingActorBuffer_);
-        rlt::step(device_, actorOptimizer_, actor_);
-    }
-
-/**
- * @brief Exécute une étape d'évolution ou de calcul du composant.
- */
-    void TrainCriticBatch(std::size_t const offset,
-                          std::size_t const criticRows)
-    {
-        rlt::zero_gradient(device_, critic_);
-        rlt::forward(device_, critic_, trainingCritic_,
-                     trainingCriticOutput_);
-        rlt::set_all(device_, trainingCriticDerivative_, 0.F);
-        for (Index row = 0; row < kTrainingBatch; ++row)
-        {
-            Transition const* const transition = BatchTransition(offset, row);
-            if (transition == nullptr)
-                continue;
-            float const value = rlt::get(trainingCriticOutput_, row, 0);
-            float const difference = value - transition->returnValue;
-            diagnostics_.valueLoss += difference * difference;
-            float const derivative =
-                2.F * difference
-                / static_cast<float>(criticRows);
-            rlt::set(trainingCriticDerivative_, row, 0, derivative);
-            diagnostics_.criticDerivativeL1 += std::abs(derivative);
-        }
-        rlt::backward(device_, critic_, trainingCritic_,
-                      trainingCriticDerivative_, trainingCriticBuffer_);
-        rlt::step(device_, criticOptimizer_, critic_);
-    }
-
 /**
  * @brief Réalise l'opération Allocate; voir les préconditions et effets dans son corps C++.
  */
@@ -1347,8 +1164,6 @@ private:
         inferenceCompactAllocated_ = true;
         rlt::malloc(device_, inferenceOutput_);
         inferenceOutputAllocated_ = true;
-        rlt::malloc(device_, inferenceActorBuffer_);
-        inferenceActorBufferAllocated_ = true;
         rlt::malloc(device_, trainingRaw_);
         trainingRawAllocated_ = true;
         rlt::malloc(device_, trainingCritic_);
@@ -1385,8 +1200,6 @@ private:
             rlt::free(device_, trainingCritic_);
         if (trainingRawAllocated_)
             rlt::free(device_, trainingRaw_);
-        if (inferenceActorBufferAllocated_)
-            rlt::free(device_, inferenceActorBuffer_);
         if (inferenceOutputAllocated_)
             rlt::free(device_, inferenceOutput_);
         if (inferenceCompactAllocated_)
@@ -1401,8 +1214,8 @@ private:
 
     ActiveTeamCounts counts_{};
     std::size_t rolloutTeamSteps_{};
-    std::vector<Transition> transitions_;
-    std::vector<std::size_t> trainingOrder_;
+    /** @brief Construction seed, recorded in the checkpoint headers. */
+    std::uint32_t seed_{};
     GeneralizedOptimizationGuard optimizationGuard_{};
     Device device_{};
     Engine rng_{};
@@ -1414,9 +1227,6 @@ private:
     rlt::MatrixDynamic<InferenceRawSpecification> inferenceRaw_{};
     rlt::MatrixDynamic<InferenceCompactSpecification> inferenceCompact_{};
     rlt::MatrixDynamic<InferenceOutputSpecification> inferenceOutput_{};
-    typename Actor::template Buffer<
-        static_cast<Index>(TeamCapacity::MaximumBlueMobiles)>
-        inferenceActorBuffer_{};
     rlt::MatrixDynamic<TrainingRawSpecification> trainingRaw_{};
     rlt::MatrixDynamic<TrainingCriticSpecification> trainingCritic_{};
     rlt::MatrixDynamic<TrainingActionSpecification> trainingActorOutput_{};
@@ -1433,21 +1243,27 @@ private:
     std::array<CentralCriticObservation,
                TeamCapacity::MaximumBlueMobiles> pendingAgentCritic_{};
     GeneralizedTrainingDiagnostics diagnostics_{};
-    std::size_t collectedTeamSteps_{};
+    /** @brief Team rows handed to the trainer and its sampled actions (no allocation per team step). */
+    std::array<float const*, TeamCapacity::MaximumBlueMobiles> teamObservations_{};
+    std::array<float const*, TeamCapacity::MaximumBlueMobiles> teamCritics_{};
+    std::array<ppokit::runtime::AgentPresence, TeamCapacity::MaximumBlueMobiles> teamPresence_{};
+    std::array<float, TeamCapacity::MaximumBlueMobiles * GeneralizedObservationLayout::ActionSize> teamMeans_{};
+    std::array<float, TeamCapacity::MaximumBlueMobiles * GeneralizedObservationLayout::ActionSize> teamActions_{};
+    Clock::time_point updateStarted_{};
+    Clock::time_point baselinesDone_{};
+    Clock::time_point advantagesDone_{};
     std::size_t lastTeamActionCount_{};
     std::size_t lastTeamTransitionCount_{};
     std::uint64_t completedUpdates_{};
     std::uint64_t totalActionsSampled_{};
     std::uint64_t totalTransitionsRecorded_{};
     std::uint64_t actorEvaluationCount_{};
-    bool pending_{};
 
     bool actorAllocated_{};
     bool criticAllocated_{};
     bool inferenceRawAllocated_{};
     bool inferenceCompactAllocated_{};
     bool inferenceOutputAllocated_{};
-    bool inferenceActorBufferAllocated_{};
     bool trainingRawAllocated_{};
     bool trainingCriticAllocated_{};
     bool trainingActorOutputAllocated_{};
@@ -1456,6 +1272,21 @@ private:
     bool trainingCriticDerivativeAllocated_{};
     bool trainingActorBufferAllocated_{};
     bool trainingCriticBufferAllocated_{};
+
+    /** @brief Layer probes, created at the first probed update. */
+    using CriticProbes = ppokit::backend::rltools::MlpProbes<Critic>;
+    std::unique_ptr<ppokit::graph::GraphProbes> actorProbes_;
+    std::unique_ptr<CriticProbes> criticProbes_;
+    GeneralizedLayerProbes lastProbes_{};
+    bool probing_{};
+    /** @brief True during a probed update: the models feed the probes. */
+    bool probeActive_{};
+
+    // Declared last: the trainer refers to the models and the generator, which refer
+    // to the networks and buffers above.
+    TeamModels models_{*this};
+    TeamRandom random_{*this};
+    Trainer trainer_;
 };
 
 } // namespace ppo::examples::bluedefense::defenders

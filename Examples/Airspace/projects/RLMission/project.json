@@ -1,0 +1,39 @@
+{
+  "schema": "ppokit.project/1",
+  "name": "Airspace_RLMission",
+  "libraries": {
+    "environment": "rlmission_environment",
+    "network": "ppokit_graph_network"
+  },
+  "program": {
+    "executable": "ppokit-run",
+    "train": [
+      "train",
+      "--project",
+      "{project}"
+    ],
+    "evaluate": [
+      "eval",
+      "--project",
+      "{project}"
+    ],
+    "inference": [
+      "play",
+      "--project",
+      "{project}",
+      "--episodes",
+      "1000000",
+      "--realtime",
+      "--step-seconds",
+      "0.2"
+    ]
+  },
+  "settings": "../../settings/Scenarios/Playground.json",
+  "checkpoints": {
+    "training": "../../models/RLMission/training.ppokit",
+    "training_policy": "../../models/RLMission/latest/policy.ppokit",
+    "policy": "../../models/RLMission/eval/policy.ppokit"
+  },
+  "journal": "../../models/RLMission/metrics.jsonl",
+  "networkEditable": false
+}

@@ -8,11 +8,14 @@
 */
 #pragma once
 
+#include <cstdint>
 #include <type_traits>
 #include <functional>
 #include <random>
 #include <vector>
 #include <atomic>
+
+#include "entt/entt.hpp"
 
 namespace ppo::model {
 
@@ -77,6 +80,15 @@ constexpr double EPS = 1e-8;
 double wrapMinusPi2Pi(double az);
 
 /**
+* @brief The engine the entity initializers of `registry` draw from (sInitializationRandom).
+* @details Created from the system's entropy when the registry has none yet; a caller seeds
+* it for reproducible episodes (Environment::SeedInitialization).
+* @param registry The world.
+* @return The registry's initialization engine.
+*/
+std::mt19937_64& InitializationEngine(entt::registry& registry);
+
+/**
 * @brief Utility random generator with persistent registered attributes.
 */
 class RandomGenerator
@@ -93,14 +105,14 @@ private:
 
 public:
     /**
-    * @brief Seeds the generator with entropy from the operating system.
+    * @brief Seeds the generator from `source` (the world's initialization engine).
+    * @param source Engine whose next draws seed this generator.
     */
-    RandomGenerator()
+    explicit RandomGenerator(std::mt19937_64& source)
     {
-        std::random_device rd;
         std::seed_seq seq{
-            rd(), rd(), rd(), rd(),
-            rd(), rd(), rd(), rd()
+            static_cast<std::uint32_t>(source()), static_cast<std::uint32_t>(source()),
+            static_cast<std::uint32_t>(source()), static_cast<std::uint32_t>(source())
         };
         m_rng.seed(seq);
     }

@@ -22,13 +22,13 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     target_compile_features(TrainingSettingsTests PRIVATE cxx_std_17)
     target_link_libraries(TrainingSettingsTests PRIVATE GenericSerializer)
     target_compile_definitions(TrainingSettingsTests PRIVATE
-        PPO_SETTINGS_ROOT="${CMAKE_SOURCE_DIR}/resources/settings")
+        PPO_SETTINGS_ROOT="${CMAKE_SOURCE_DIR}/Examples/Airspace/settings")
     add_test(NAME TrainingSettingsTests
         COMMAND TrainingSettingsTests)
-    add_executable(SerializerSaveSafetyTests
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/serializer_safety_tests.cpp)
-    target_compile_features(SerializerSaveSafetyTests PRIVATE cxx_std_17)
-    target_link_libraries(SerializerSaveSafetyTests PRIVATE GenericSerializer)
-    add_test(NAME SerializerSaveSafetyTests
-        COMMAND SerializerSaveSafetyTests)
+    add_executable(SerializerLoadTests
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/serializer_load_tests.cpp)
+    target_compile_features(SerializerLoadTests PRIVATE cxx_std_17)
+    target_link_libraries(SerializerLoadTests PRIVATE GenericSerializer)
+    add_test(NAME SerializerLoadTests
+        COMMAND SerializerLoadTests)
 endif()

@@ -1,0 +1,48 @@
+{
+  "schema": "ppokit.task/1",
+  "name": "team_line",
+  "namespace": "team_line",
+  "agents": {
+    "min": 1,
+    "max": 3
+  },
+  "observation": {
+    "line": {
+      "fields": [
+        "offset",
+        "elapsed"
+      ]
+    }
+  },
+  "actions": {
+    "move": {
+      "head": "gaussian",
+      "names": [
+        "velocity"
+      ],
+      "bounds": [
+        -1,
+        1
+      ],
+      "map": "clip"
+    }
+  },
+  "rewards": {
+    "Progress": {
+      "label": "Distance gained",
+      "weight": 1.0
+    },
+    "Arrival": {
+      "label": "Within the radius",
+      "weight": 1.0
+    }
+  },
+  "metrics": {
+    "reached": {
+      "kind": "flag"
+    },
+    "begun": {
+      "kind": "number"
+    }
+  }
+}
