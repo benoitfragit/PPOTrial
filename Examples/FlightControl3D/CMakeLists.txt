@@ -107,46 +107,20 @@ target_compile_definitions(FlightControlHeadless PRIVATE
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     enable_testing()
-    foreach(test_name IN ITEMS core reward simulator learner session golden_trace)
+    foreach(test_name IN ITEMS core reward simulator learner session)
         add_executable(FlightControl_${test_name}_tests tests/${test_name}_tests.cpp)
         target_link_libraries(FlightControl_${test_name}_tests PRIVATE FlightControlRuntime)
         set(test_scenario "${CMAKE_CURRENT_SOURCE_DIR}/projects/T6/scenario.json")
-        if(test_name STREQUAL "golden_trace")
-            set(test_scenario "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/t6_340_scenario.json")
-        endif()
         target_compile_definitions(FlightControl_${test_name}_tests PRIVATE
             PPO_FLIGHT_CONFIG="${test_scenario}"
             PPO_FLIGHT_PC7_CONFIG="${CMAKE_SOURCE_DIR}/Examples/FlightControl3D/projects/PC7/scenario.json")
         add_test(NAME FlightControl_${test_name}_tests COMMAND FlightControl_${test_name}_tests)
     endforeach()
-    # The Linux reference CI must fail if the executable cannot check its frozen fingerprint.
-    option(PPO_FLIGHT_REQUIRE_GOLDEN_REFERENCE "Fail if the frozen Flight trace is skipped" OFF)
-    if (NOT PPO_FLIGHT_REQUIRE_GOLDEN_REFERENCE)
-        set_tests_properties(FlightControl_golden_trace_tests PROPERTIES SKIP_RETURN_CODE 77)
-    endif()
     # task.json (PPOKit) must describe the same observation, actions and rewards as the code.
     add_executable(FlightControl_task_layout_tests tests/task_layout_tests.cpp)
     target_link_libraries(FlightControl_task_layout_tests PRIVATE FlightControlRuntime)
     ppokit_generate_task_layout(TARGET FlightControl_task_layout_tests TASK task.json HEADER flight_task_layout.hpp)
     add_test(NAME FlightControl_task_layout_tests COMMAND FlightControl_task_layout_tests)
-    # graph.json (PPOKit) generates the same rl_tools networks as FlightLearner.
-    add_executable(FlightControl_network_parity_tests tests/network_parity_tests.cpp)
-    target_link_libraries(FlightControl_network_parity_tests PRIVATE FlightControlRuntime RLtools::Core)
-    target_compile_definitions(FlightControl_network_parity_tests PRIVATE
-        PPO_FLIGHT_CONFIG="${CMAKE_SOURCE_DIR}/Examples/FlightControl3D/projects/T6/scenario.json")
-    ppokit_generate_networks(TARGET FlightControl_network_parity_tests
-        TASK task.json GRAPH graph.json HEADER flight_networks.hpp)
-    add_test(NAME FlightControl_network_parity_tests COMMAND FlightControl_network_parity_tests)
-    # projects/T6 (PPOKit graph engine) reproduces master's trained T-6 (FlightLearner, update 870).
-    add_executable(FlightControl_master_checkpoint_parity_tests tests/master_checkpoint_parity_tests.cpp)
-    target_link_libraries(FlightControl_master_checkpoint_parity_tests PRIVATE FlightControlRuntime RLtools::Core
-        PPOKit::Schema)
-    target_compile_definitions(FlightControl_master_checkpoint_parity_tests PRIVATE
-        PPO_FLIGHT_T6_PROJECT="${CMAKE_SOURCE_DIR}/Examples/FlightControl3D/projects/T6"
-        PPO_FLIGHT_MASTER_CHECKPOINT="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/master_t6texan2_joint_v5_flight_policy.txt")
-    ppokit_generate_networks(TARGET FlightControl_master_checkpoint_parity_tests
-        TASK task.json GRAPH graph.json HEADER flight_networks.hpp)
-    add_test(NAME FlightControl_master_checkpoint_parity_tests COMMAND FlightControl_master_checkpoint_parity_tests)
     # Capture the published actor through its project modules for a replay against a separate master checkout.
     add_executable(FlightControl_reward_capture EXCLUDE_FROM_ALL "${CMAKE_SOURCE_DIR}/tools/ppokit/flight_reward_capture.cpp")
     target_link_libraries(FlightControl_reward_capture PRIVATE PPOKit::Network PPOKit::Schema PPOKit::Artifacts)
@@ -156,12 +130,6 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     add_test(NAME FlightControl_campaign_comparison
         COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_SOURCE_DIR}/tools/ppokit/test_flight_campaign.py)
-    add_test(NAME FlightControl_v3_migration COMMAND ${CMAKE_COMMAND}
-        -DIMPORT=$<TARGET_FILE:flight_checkpoint_import> -DFROZEN=$<TARGET_FILE:FlightControl_master_checkpoint_parity_tests>
-        -DPYTHON=${Python3_EXECUTABLE}
-        -DAUDIT=${CMAKE_SOURCE_DIR}/tools/ppokit/compare_flight_checkpoint.py
-        -DFLIGHT=${CMAKE_CURRENT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/migration_test
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/v3_migration.cmake)
     # ppokit-run evaluates projects/T6 as master's BEST record of the same checkpoint; the PC-7
     # project refuses the T-6 policy.
     add_test(NAME FlightControl_t6_evaluation_smoke

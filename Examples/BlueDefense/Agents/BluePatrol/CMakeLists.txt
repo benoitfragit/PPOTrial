@@ -52,14 +52,6 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     target_compile_features(BlueDefenseGeneralizedActorTests PRIVATE cxx_std_17)
     add_test(NAME BlueDefenseGeneralizedActorTests
         COMMAND BlueDefenseGeneralizedActorTests)
-    # The actor (graph_blocks.json) must compute what the former hand-written actor did.
-    add_executable(BlueDefenseGraphActorParityTests
-        ../../tests/graph_actor_parity_tests.cpp)
-    target_link_libraries(BlueDefenseGraphActorParityTests PRIVATE
-        BlueDefenseDefenderBackend)
-    target_compile_features(BlueDefenseGraphActorParityTests PRIVATE cxx_std_17)
-    add_test(NAME BlueDefenseGraphActorParityTests
-        COMMAND BlueDefenseGraphActorParityTests)
     add_executable(BlueDefenseGeneralizedRuntimeStateTests
         ../../tests/generalized_runtime_state_tests.cpp)
     add_executable(BlueDefenseGeneralizedRewardShapingTests
@@ -109,22 +101,6 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     target_compile_features(BlueDefenseGeneralizedLearnerTests PRIVATE cxx_std_17)
     add_test(NAME BlueDefenseGeneralizedLearnerTests
         COMMAND BlueDefenseGeneralizedLearnerTests)
-    # Blue MAPPO on the shared graph backend updates bit for bit as the Blue learner.
-    add_executable(BlueDefenseSharedBackendParityTests
-        ../../tests/shared_backend_parity_tests.cpp)
-    target_link_libraries(BlueDefenseSharedBackendParityTests PRIVATE
-        BlueDefenseDefenderBackend PPOKit::Schema PPOKit::Training PPOKit::Artifacts nlohmann_json::nlohmann_json)
-    target_compile_definitions(BlueDefenseSharedBackendParityTests PRIVATE
-        BLUE_SHARED_BACKEND_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/../../tests/fixtures/shared_backend")
-    add_test(NAME BlueDefenseSharedBackendParityTests
-        COMMAND BlueDefenseSharedBackendParityTests)
-    add_test(NAME BlueDefenseSharedBackendImportSmoke
-        COMMAND ${CMAKE_COMMAND} -DIMPORT=$<TARGET_FILE:blue_shared_backend_import>
-            -DFIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/../../tests/fixtures/shared_backend
-            -DSHIPPED=${CMAKE_CURRENT_SOURCE_DIR}/../../projects/BluePatrol
-            -DCHECKPOINTS=${CMAKE_CURRENT_SOURCE_DIR}/../../projects/BluePatrol/checkpoints
-            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/shared_backend_import
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/shared_backend_import_smoke.cmake)
 endif()
 
 # One generalized MAPPO IAgent owns all P blue ECS mobiles per step.

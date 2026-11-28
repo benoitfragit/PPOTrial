@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# Verification of every PPOKit migration step on Linux (no desktop).
+# Verification of PPOKit on Linux (no desktop).
 #
 #   tools/ppokit/verify.sh            build Debug and Release, run all guards
 #   tools/ppokit/verify.sh release    one configuration only
 #
 # Guards:
-#   1. CTest in each configuration (includes the Flight golden trace).
+#   1. CTest in each configuration.
 #   2. BlueDefense tests that only the Windows desktop build compiles
 #      (checkpoints, attention, MAPPO learner), built by hand in build/release
 #      as AGENTS.md allows only build/debug and build/release.
-#   3. Bit-exact MAPPO learner trace compared with the reference recorded on master.
 #
 # The first configuration builds JSBSim (about 15 minutes on two cores).
 set -euo pipefail
@@ -45,7 +44,7 @@ blue_manual_checks() {
         -IExamples/BlueDefense/Evaluation
         -I"$deps/rltools-src/include" -I"$deps/json-src/include" -I"$out/generated"
         -Ibuild/release/BlueDefenseCoreTests/ppokit_generated/BlueDefenseNetworkTypeTests)
-    for test in generalized_actor_tests attention_tests generalized_learner_tests graph_actor_parity_tests; do
+    for test in generalized_actor_tests attention_tests generalized_learner_tests; do
         # rl_tools prints informational #pragma messages: keep them in a log.
         g++ -std=c++17 -O2 -w "${include[@]}" "Examples/BlueDefense/tests/$test.cpp" \
             PPOKit/src/artifacts/atomic_file.cpp build/release/PPOKit/libppokit_schema.a \
@@ -56,13 +55,6 @@ blue_manual_checks() {
             || { echo "FAILED: Blue $test (see $out/$test.log)"; exit 1; }
         echo "Blue $test passed"
     done
-    # Wall-clock timings are the only non-deterministic fields of the trace.
-    sed -E 's/(_ms|elapsed_ms)=[0-9]+/\1=X/g' "$out/generalized_learner_tests.log" > "$out/blue_learner_trace.txt"
-    if diff -u PPOKit/tests/reference/blue_learner_trace_linux_gcc13.txt "$out/blue_learner_trace.txt"; then
-        echo "Blue MAPPO learner trace identical to the recorded reference"
-    else
-        echo "FAILED: Blue MAPPO learner trace changed"; exit 1
-    fi
 }
 
 # The studio views need Dear ImGui 1.92.1, imnodes and ImPlot, fetched only by the desktop

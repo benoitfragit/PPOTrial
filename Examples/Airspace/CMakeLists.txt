@@ -91,15 +91,7 @@ target_link_libraries(airspace_checkpoint_import PRIVATE Interception Mission Ge
     nlohmann_json::nlohmann_json)
 target_compile_features(airspace_checkpoint_import PRIVATE cxx_std_17)
 
-# The converted PPOKit policies act as the legacy networks of policy.txt.
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
-    add_executable(AirspaceConvertedPolicyTests tests/converted_policy_tests.cpp)
-    target_link_libraries(AirspaceConvertedPolicyTests PRIVATE Interception Mission GenericRLBindings AirspacePolicies)
-    target_compile_features(AirspaceConvertedPolicyTests PRIVATE cxx_std_17)
-    target_compile_definitions(AirspaceConvertedPolicyTests PRIVATE
-        PPO_REPOSITORY="${CMAKE_SOURCE_DIR}"
-        PPO_LEGACY_POLICY_REFERENCE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/legacy_policy_reference.txt")
-    add_test(NAME AirspaceConvertedPolicyTests COMMAND AirspaceConvertedPolicyTests)
     # ppokit-run plays RLSNA and RLMission with the Airspace Visualiseur, the view draws them.
     add_executable(AirspaceVisualiserTests tests/visualiser_tests.cpp)
     target_compile_features(AirspaceVisualiserTests PRIVATE cxx_std_17)

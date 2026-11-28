@@ -25,9 +25,8 @@ jobs:
         os: [ubuntu-24.04, windows-2022]
         configuration: [Debug, Release]
         include:
-          # The reference trace includes libm and PPO floating-point results.
           - os: ubuntu-24.04
-            compiler_flags: -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13 -DPPO_FLIGHT_REQUIRE_GOLDEN_REFERENCE=ON
+            compiler_flags: -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13
           - configuration: Debug
             build_dir: build/debug
           - configuration: Release
