@@ -94,13 +94,6 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         BlueDefenseDefenderBackend)
     add_test(NAME BlueDefenseGeneralizedAdvantageTests
         COMMAND BlueDefenseGeneralizedAdvantageTests)
-    add_executable(BlueDefenseGeneralizedLearnerTests
-        ../../tests/generalized_learner_tests.cpp)
-    target_link_libraries(BlueDefenseGeneralizedLearnerTests PRIVATE
-        BlueDefenseDefenderBackend)
-    target_compile_features(BlueDefenseGeneralizedLearnerTests PRIVATE cxx_std_17)
-    add_test(NAME BlueDefenseGeneralizedLearnerTests
-        COMMAND BlueDefenseGeneralizedLearnerTests)
 endif()
 
 # One generalized MAPPO IAgent owns all P blue ECS mobiles per step.

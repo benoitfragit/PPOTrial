@@ -21,6 +21,18 @@ class BlueCheckpointTests(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         return path
 
+    def test_common_graph_header(self) -> None:
+        training = self.write("graph/latest.ppokit", fixtures.graph_artifact("training", 5250))
+        actor = self.write("graph/policy.ppokit", fixtures.graph_artifact("policy", 5250))
+        self.assertEqual(blue_checkpoint.read_graph(training, "training"), 5250)
+        self.assertEqual(blue_checkpoint.read_graph(actor, "policy"), 5250)
+        with self.assertRaises(ValueError):
+            blue_checkpoint.read_graph(training, "policy")
+        for text in (fixtures.policy(), fixtures.former_policy()):
+            legacy = self.write("legacy.ppokit", text)
+            with self.assertRaises(ValueError):
+                blue_checkpoint.read_graph(legacy, "policy")
+
     def test_training_artifact(self) -> None:
         path = self.write("latest.ppokit", fixtures.training(5250, 2, 1))
         checkpoint = blue_checkpoint.read(path, "training")

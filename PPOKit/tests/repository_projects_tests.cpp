@@ -121,7 +121,7 @@ void CheckVisualiser(schema::Project const& project, std::string const& library,
 }
 
 /**
- * @brief Check the shared BluePatrol project and its isolated historical configuration.
+ * @brief Check the BluePatrol project using the shared graph backend.
  */
 void CheckBluePatrol(schema::Project const& project)
 {
@@ -131,12 +131,6 @@ void CheckBluePatrol(schema::Project const& project)
     Check(project.Checkpoints() == project.root / "checkpoints/shared", "shared run state is isolated");
     Check(project.externalCurriculumProgress == "checkpoints/shared/curriculum-status.json",
         "the external curriculum publishes the common engine's Studio status file");
-    schema::Project const legacy = schema::LoadProject(project.root / "project.legacy.json");
-    Check(legacy.networkLibrary == "blue_network" && !legacy.networkEditable
-            && legacy.Checkpoints() == project.root / "checkpoints"
-            && std::filesystem::is_regular_file(legacy.LatestCheckpoint())
-            && std::filesystem::is_regular_file(legacy.Policy()),
-        "the historical learner and its checkpoints remain available");
     Check(std::filesystem::is_regular_file(project.LatestCheckpoint()) && std::filesystem::is_regular_file(project.Policy())
             && project.LatestCheckpoint().filename() == "latest.ppokit"
             && project.Policy().filename() == "policy.ppokit",
@@ -391,11 +385,8 @@ int main()
         Check(ReadFile(patrol.Task()) == ReadFile(blue / "task.json"),
             "BluePatrol/task.json is the task the Blue agent is compiled with");
         nlohmann::json const network = nlohmann::json::parse(ReadFile(patrol.Network()));
-        nlohmann::json const shared = nlohmann::json::parse(ReadFile(
-            repository / "Examples/BlueDefense/tests/fixtures/shared_backend/network.json"));
-        Check(network.at("actor") == shared.at("actor") && network.at("critic") == shared.at("critic")
-                && network.at("team_critic").at("pad_features") == true,
-            "BluePatrol uses the parity-tested shared actor and padded team critic");
+        Check(network.at("team_critic").at("pad_features") == true,
+            "BluePatrol uses the padded team critic");
         CheckVisualiser(patrol, "blue_visualiser", "blue_watch@2");
         Check(std::filesystem::is_regular_file(patrol.root / "blue_patrol_training.json"),
             "BluePatrol keeps its MAPPO training file");

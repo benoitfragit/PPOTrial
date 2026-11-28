@@ -847,7 +847,7 @@ class ProgressiveGateTests(unittest.TestCase):
         train = (root / "mappo-training-windows.yml").read_text(encoding="utf-8")
         restart = (root / "mappo-restart-progressive.yml").read_text(
             encoding="utf-8")
-        self.assertIn("Examples/BlueDefense/projects/BluePatrol/checkpoints/best/**", train)
+        self.assertIn("Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/best/**", train)
         self.assertIn('inputs[resume_run_id]=${SOURCE_RUN_ID}', restart)
         self.assertIn("persisted common curriculum generation", restart)
         self.assertNotIn("adaptive-curriculum-progress.json", restart)

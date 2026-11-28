@@ -28,29 +28,18 @@ target_link_libraries(PPOBlueDefenseExample PUBLIC
     BlueDefenseDefenderBackend BlueDefensePatrolRuntime
     PRIVATE PPOKit::Schema)
 
-# BluePatrol for ppokit-run: the world (P blues against N RLMission reds, the blue team
-# driven from outside) and the team's networks (the generalized MAPPO learner and the
-# production actor, whose V7/V10 checkpoint files they keep).
+# BluePatrol environment for the common graph network in ppokit-run.
 add_library(blue_environment SHARED Environment/blue_environment.cpp)
 target_link_libraries(blue_environment PRIVATE PPOBlueDefenseExample PPOKit::Core PPOKit::Schema)
 set_target_properties(blue_environment PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON
     PREFIX "")
 ppokit_bind_task_contract(TARGET blue_environment TASK Agents/BluePatrol/task.json)
 ppokit_register_program(blue_environment)
-# Historical V7/V10 numerical oracle. Production projects use ppokit_graph_network;
-# build this adapter only when a converter or qualification target requests it.
-add_library(blue_network SHARED EXCLUDE_FROM_ALL Network/blue_network.cpp)
-target_include_directories(blue_network PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/Scenario")
-target_link_libraries(blue_network PRIVATE BlueDefenseDefenderBackend PPOBlueDefenseSpawn PPOLayout
-    PPOKit::Schema nlohmann_json::nlohmann_json)
-set_target_properties(blue_network PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON PREFIX "")
-ppokit_bind_task_contract(TARGET blue_network TASK Agents/BluePatrol/task.json)
-
 # Former V7/V10 checkpoints -> PPOKit artifacts, checked by an identical round trip.
-add_executable(blue_checkpoint_import Tools/blue_checkpoint_import.cpp)
+add_executable(blue_checkpoint_import EXCLUDE_FROM_ALL Tools/blue_checkpoint_import.cpp)
 target_link_libraries(blue_checkpoint_import PRIVATE BlueDefenseDefenderBackend)
 # Blue MAPPO artifacts (rl_tools backend) -> shared graph backend, checked by reload and actions.
-add_executable(blue_shared_backend_import Tools/blue_shared_backend_import.cpp)
+add_executable(blue_shared_backend_import EXCLUDE_FROM_ALL Tools/blue_shared_backend_import.cpp)
 target_link_libraries(blue_shared_backend_import PRIVATE BlueDefenseDefenderBackend PPOKit::Schema PPOKit::Training
     PPOKit::Artifacts)
 target_compile_definitions(blue_shared_backend_import PRIVATE
@@ -60,9 +49,7 @@ add_library(blue_visualiser MODULE Visualiser/blue_visualiser.cpp)
 target_link_libraries(blue_visualiser PRIVATE PPOKit::ComponentSdk PPOKit::Live)
 set_target_properties(blue_visualiser PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON PREFIX "")
 ppokit_register_program(blue_visualiser)
-if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
-    add_dependencies(blue_shared_backend_import blue_visualiser)
-endif()
+add_dependencies(blue_shared_backend_import blue_visualiser)
 if (TARGET PPOKitRepositoryProjectsTests)
     # BluePatrol's network.json names the Visualiseur: the repository check opens it.
     add_dependencies(PPOKitRepositoryProjectsTests blue_visualiser)
@@ -97,11 +84,10 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_executable(BlueDefenseVisualiserTests tests/visualiser_tests.cpp)
     target_compile_features(BlueDefenseVisualiserTests PRIVATE cxx_std_17)
     target_link_libraries(BlueDefenseVisualiserTests PRIVATE PPOKit::View PPOLayout nlohmann_json::nlohmann_json)
-    add_dependencies(BlueDefenseVisualiserTests ppokit-run blue_environment blue_network blue_visualiser ppokit_graph_network)
+    add_dependencies(BlueDefenseVisualiserTests ppokit-run blue_environment blue_visualiser ppokit_graph_network)
     target_compile_definitions(BlueDefenseVisualiserTests PRIVATE
         PPOKIT_RUN="$<TARGET_FILE:ppokit-run>"
         BLUE_ENVIRONMENT_LIBRARY="$<TARGET_FILE:blue_environment>"
-        BLUE_NETWORK_LIBRARY="$<TARGET_FILE:blue_network>"
         BLUE_GRAPH_NETWORK_LIBRARY="$<TARGET_FILE:ppokit_graph_network>"
         BLUE_VISUALISER_LIBRARY="$<TARGET_FILE:blue_visualiser>")
     add_test(NAME BlueDefenseVisualiserTests COMMAND BlueDefenseVisualiserTests)

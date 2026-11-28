@@ -44,7 +44,7 @@ blue_manual_checks() {
         -IExamples/BlueDefense/Evaluation
         -I"$deps/rltools-src/include" -I"$deps/json-src/include" -I"$out/generated"
         -Ibuild/release/BlueDefenseCoreTests/ppokit_generated/BlueDefenseNetworkTypeTests)
-    for test in generalized_actor_tests attention_tests generalized_learner_tests; do
+    for test in generalized_actor_tests attention_tests; do
         # rl_tools prints informational #pragma messages: keep them in a log.
         g++ -std=c++17 -O2 -w "${include[@]}" "Examples/BlueDefense/tests/$test.cpp" \
             PPOKit/src/artifacts/atomic_file.cpp build/release/PPOKit/libppokit_schema.a \

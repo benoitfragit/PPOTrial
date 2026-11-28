@@ -111,6 +111,30 @@ def read(path: Path, kind: str | None = None) -> BlueCheckpoint:
     return checkpoint
 
 
+def read_graph(path: Path, kind: str) -> int:
+    """Validate the common backend header; the native loader verifies the tensors."""
+    if kind not in KINDS:
+        raise ValueError(f"Unknown Blue checkpoint kind: {kind}")
+    if not path.is_file() or path.stat().st_size == 0:
+        raise ValueError(f"Missing or empty Blue checkpoint: {path}")
+    with path.open("r", encoding="utf-8") as stream:
+        try:
+            header = json.loads(stream.readline())
+        except (ValueError, UnicodeError):
+            raise ValueError(f"Expected a common graph artifact (convert legacy checkpoint first): {path}") from None
+        identity = header.get("identity") if isinstance(header, dict) else None
+        if (not isinstance(identity, dict) or header.get("schema") != SCHEMA
+                or header.get("kind") != kind or identity.get("task") != TASK
+                or identity.get("backend") != "graph" or identity.get("scalar") != "f32"
+                or identity.get("observation_size") != OBSERVATION_SIZE
+                or identity.get("action_size") != ACTION_SIZE
+                or not identity.get("semantic_v1")
+                or type(header.get("updates")) is not int or header["updates"] < 0
+                or not stream.readline().startswith("actor ")):
+            raise ValueError(f"Expected a common graph {kind} artifact (convert legacy checkpoint first): {path}")
+        return header["updates"]
+
+
 def read_updates(path: Path) -> int:
     """The completed PPO update count of a training checkpoint."""
     updates = read(path, "training").updates
@@ -235,6 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     adopt.add_argument("root", type=Path, help="the project's checkpoints folder")
     check = commands.add_parser("check", help="validate Blue checkpoints of one kind")
     check.add_argument("--kind", choices=KINDS, required=True)
+    check.add_argument("--graph-only", action="store_true", help="require a common graph artifact")
     check.add_argument("paths", type=Path, nargs="+")
     args = parser.parse_args(argv)
     try:
@@ -243,6 +268,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"[BLUE_CHECKPOINT] {former} -> {current}", flush=True)
             return 0
         for path in args.paths:
+            if args.graph_only:
+                updates = read_graph(path, args.kind)
+                print(f"[BLUE_CHECKPOINT] {path}: {args.kind} (graph) updates={updates}", flush=True)
+                continue
             checkpoint = read(path, args.kind)
             updates = "n/a" if checkpoint.updates is None else checkpoint.updates
             print(f"[BLUE_CHECKPOINT] {path}: {checkpoint.kind} "

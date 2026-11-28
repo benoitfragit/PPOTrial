@@ -53,10 +53,11 @@ la compatibilité de checkpoints, les projets du dépôt et le scaffold `reach`.
 
 ## Compatibilité conservée
 
-- `project.legacy.json`, `blue_network`, `FlightControlLearner`,
-  `FlightControlRuntime` et `FlightControlHeadless` ne sont plus des chemins de
-  production. Ils sont `EXCLUDE_FROM_ALL` et construits seulement par les
-  convertisseurs, tests de parité et qualifications qui les nomment.
+- L’ancien projet BluePatrol, sa DLL `blue_network` et ses trois checkpoints
+  historiques ont été retirés. Les convertisseurs Blue restent disponibles
+  hors build par défaut pour importer explicitement les archives.
+- `FlightControlLearner`, `FlightControlRuntime` et `FlightControlHeadless`
+  restent hors des chemins de production.
 - Les anciens modèles Airspace au format texte et les outils de qualification et
   de conversion Flight ont été retirés. Les modèles PPOKit livrés n’ont pas été
   modifiés. Les chemins Blue historiques encore utilisés par la CI et les

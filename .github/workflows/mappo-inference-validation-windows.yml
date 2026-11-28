@@ -12,16 +12,16 @@ on:
   workflow_dispatch:
     inputs:
       source_run_id:
-        description: "Source Progressive Blue Defense run ID (default run 73)"
+        description: "Source run ID with common PPOKit graph artifacts"
         required: true
         type: string
-        default: "41948019589"
       model_gate:
-        description: "Read-only BEST actor to load from source run"
+        description: "Read-only BEST policy: common validation suite or an archived gate"
         required: true
         type: choice
-        default: "2v2"
+        default: "validation"
         options:
+          - validation
           - 1v0
           - 2v0
           - 1v1
@@ -102,7 +102,7 @@ jobs:
           if (-not [long]::TryParse($env:SOURCE_RUN_ID, [ref]$id) -or $id -le 0) {
             throw "source_run_id must be a positive GitHub workflow run ID"
           }
-          if ($env:MODEL_GATE -notin @('1v0','2v0','1v1','2v1','2v2')) {
+          if ($env:MODEL_GATE -notin @('validation','1v0','2v0','1v1','2v1','2v2')) {
             throw "Unsupported model gate"
           }
           if ($env:EVALUATE_GATE -notin @('all','patrol','combat','1v0','2v0','1v1','2v1','2v2')) {
@@ -132,64 +132,74 @@ jobs:
           name: blue-mappo-checkpoints
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ github.token }}
-          path: Examples/BlueDefense/projects/BluePatrol/checkpoints
+          path: ${{ runner.temp }}/blue-source
 
       - name: Verify BEST champion provenance, then stage actor locally
         env:
           MODEL_GATE: ${{ inputs.model_gate }}
         run: |
-          $root = "Examples/BlueDefense/projects/BluePatrol/checkpoints"
-          $best = Join-Path $root "best/$env:MODEL_GATE"
-          $metadataFile = Join-Path $best "champion.json"
-          # Champions of earlier runs keep their former V10/V7 names.
-          $actor = Join-Path $best "policy.ppokit"
-          if (-not (Test-Path -LiteralPath $actor -PathType Leaf)) {
-            $actor = Join-Path $best "blue_patrol_generalized_v10.txt"
+          $root = Join-Path $env:RUNNER_TEMP "blue-source"
+          if (Test-Path (Join-Path $root "shared") -PathType Container) {
+            $root = Join-Path $root "shared"
           }
-          $training = Join-Path $best "latest.ppokit"
-          if (-not (Test-Path -LiteralPath $training -PathType Leaf)) {
-            $training = Join-Path $best "blue_patrol_generalized_training_v7.txt"
-          }
-          foreach ($file in @($metadataFile, $actor, $training)) {
-            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
-              throw "Missing verified BEST checkpoint component: $file"
+          if ($env:MODEL_GATE -eq "validation") {
+            $best = Join-Path $root "best"
+            $metadataFile = Join-Path $best "validation.json"
+            if (-not (Test-Path -LiteralPath $metadataFile -PathType Leaf)) {
+              throw "Selected run has no common validation BEST manifest"
             }
-          }
-          $manifest = Get-Content -LiteralPath $metadataFile -Raw | ConvertFrom-Json
-          if ($manifest.version -ne 1 -or $manifest.gate -ne $env:MODEL_GATE -or
-              $manifest.evaluatedForGate -ne $true -or
-              $manifest.updates -lt 1) {
-            throw "Source run's selected BEST checkpoint is not evaluated/compatible"
-          }
-          foreach ($file in @($actor, $training)) {
-            $fileName = [IO.Path]::GetFileName($file)
-            $expected = $manifest.sha256.PSObject.Properties[$fileName].Value
-            $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
-            if ([string]::IsNullOrWhiteSpace($expected) -or $actual -ne $expected) {
-              throw "Invalid BEST checkpoint checksum: $file"
+            $manifest = Get-Content -LiteralPath $metadataFile -Raw | ConvertFrom-Json
+            if ($manifest.schema -ne "ppokit.best/2" -or $manifest.suite -ne "validation" -or
+                $manifest.report.suite -ne "validation" -or $manifest.update -lt 1 -or
+                [string]::IsNullOrWhiteSpace($manifest.policy) -or
+                [IO.Path]::GetFileName($manifest.policy) -ne $manifest.policy) {
+              throw "Invalid common validation BEST manifest"
             }
+            $actor = Join-Path $best $manifest.policy
+            $expected = $manifest.sha256
+          } else {
+            # Gate-specific selection is never substituted by an unrelated suite BEST.
+            $best = Join-Path $root "best/$env:MODEL_GATE"
+            $metadataFile = Join-Path $best "champion.json"
+            if (-not (Test-Path -LiteralPath $metadataFile -PathType Leaf)) {
+              throw "Selected run has no certified BEST for the requested gate; select validation for common suite BEST"
+            }
+            $manifest = Get-Content -LiteralPath $metadataFile -Raw | ConvertFrom-Json
+            if ($manifest.version -ne 1 -or $manifest.gate -ne $env:MODEL_GATE -or
+                $manifest.evaluatedForGate -ne $true -or $manifest.updates -lt 1) {
+              throw "Source run's selected BEST checkpoint is not evaluated/compatible"
+            }
+            $actor = Join-Path $best "policy.ppokit"
+            $expected = $manifest.sha256.PSObject.Properties["policy.ppokit"].Value
+            $training = Join-Path $best "latest.ppokit"
+            if (-not (Test-Path -LiteralPath $training -PathType Leaf)) {
+              throw "Missing certified gate training checkpoint"
+            }
+            $trainingHash = (Get-FileHash -LiteralPath $training -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($trainingHash -ne $manifest.sha256.PSObject.Properties["latest.ppokit"].Value) {
+              throw "Invalid gate BEST training checksum"
+            }
+            python tools/ci/blue_checkpoint.py check --graph-only --kind training $training
+            if ($LASTEXITCODE -ne 0) { throw "Legacy gate checkpoint requires explicit conversion" }
           }
-          # Contract of either format (observation 10, sizes, unified guidance).
-          python tools/ci/blue_checkpoint.py check --kind policy $actor
-          $actorValid = $LASTEXITCODE -eq 0
-          python tools/ci/blue_checkpoint.py check --kind training $training
-          if (-not $actorValid -or $LASTEXITCODE -ne 0) {
-            throw "BEST checkpoint schema is not the expected unified policy"
+          if (-not (Test-Path -LiteralPath $actor -PathType Leaf) -or
+              [string]::IsNullOrWhiteSpace($expected) -or
+              (Get-FileHash -LiteralPath $actor -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
+            throw "Missing or invalid certified BEST actor"
           }
-          # CI-local copy: no change to source run, repository or uploaded model.
-          # The C++ loader reads a former V10 actor by content under the new name.
-          $destination = Join-Path $root "prod/policy.ppokit"
+          python tools/ci/blue_checkpoint.py check --graph-only --kind policy $actor
+          if ($LASTEXITCODE -ne 0) { throw "BEST must be a common graph policy; convert legacy archives explicitly" }
+          # Stage separately from the committed production model.
+          $destination = "Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/inference/policy.ppokit"
           New-Item -ItemType Directory -Path (Split-Path $destination) -Force | Out-Null
           Copy-Item -LiteralPath $actor -Destination $destination -Force
-          if ((Get-FileHash $destination -Algorithm SHA256).Hash -ne
-              (Get-FileHash $actor -Algorithm SHA256).Hash) {
+          if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
             throw "Staged inference actor does not match the certified BEST"
           }
           New-Item -ItemType Directory "build/inference-validation" -Force | Out-Null
-          $manifest | ConvertTo-Json -Depth 10 |
+          $manifest | ConvertTo-Json -Depth 100 |
             Set-Content "build/inference-validation/selected-best.json" -Encoding utf8
-          Write-Host "Verified actor for gate $env:MODEL_GATE, update $($manifest.updates)"
-          Write-Host "Original BEST success $($manifest.successPercent)%"
+          Write-Host "Verified immutable BEST actor for $env:MODEL_GATE"
 
       - name: Verify unchanged red production model
         run: |

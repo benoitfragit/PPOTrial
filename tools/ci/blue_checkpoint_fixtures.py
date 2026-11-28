@@ -65,3 +65,10 @@ def former_training(updates: int, blue: int = 4, red: int = 4,
                        blue_checkpoint.GUIDANCE])
     return (f"{header}\nACTOR\n{former_policy_header(blue, red, observation_version)}"
             f"{body}UPDATES {updates}\nRNG\nEND_BLUE_TEAM_TRAINING\n")
+
+
+def graph_artifact(kind: str, updates: int = 0) -> str:
+    """A common graph header with a minimal stand-in payload."""
+    header = json.loads(artifact(kind, updates).splitlines()[0])
+    header["identity"].update(backend="graph", semantic_v1="9750bd0a5e6ef43b")
+    return json.dumps(header) + "\nactor 15\n"

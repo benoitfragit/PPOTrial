@@ -4,7 +4,7 @@
 
 Blue MAPPO trains as the PPOKit project `Examples/BlueDefense/projects/BluePatrol`
 under `ppokit-run` (environment DLL `blue_environment`, team network DLL
-`blue_network`), without changing the red production `RLMission` agent. The
+`ppokit_graph_network`), without changing the red production `RLMission` agent. The
 former `PPO.exe` headless training mode has been removed.
 
 - Blue team: RLTools generalized shared MAPPO actor and centralized critic.
@@ -23,14 +23,14 @@ former `PPO.exe` headless training mode has been removed.
 
 ```powershell
 cmake -S . -B build/release -G "Visual Studio 17 2022" -A x64 -DCMAKE_CONFIGURATION_TYPES=Release -DPPO_BUILD_DESKTOP=ON
-cmake --build build/release --config Release --target ppokit-run blue_environment blue_network blue_visualiser --parallel 2
+cmake --build build/release --config Release --target ppokit-run blue_environment ppokit_graph_network blue_visualiser --parallel 2
 & build/release/PPOKit/Release/ppokit-run.exe train --project Examples/BlueDefense/projects/BluePatrol --until-update 4000 --max-seconds 14400
 ```
 
 `--max-seconds S` ends the training at the first update boundary after S
 seconds, as if it were the last update (campaigns included). Production
 inference is `ppokit-run play --project Examples/BlueDefense/projects/BluePatrol
---policy checkpoints/prod/policy.ppokit --realtime`, watched with
+--policy checkpoints/shared/prod/policy.ppokit --realtime`, watched with
 `ppokit-viewer --view <build>/Examples/BlueDefense/Release/blue_visualiser.dll --port 47001`;
 `ppokit-studio` launches the same commands from the project's `project.json`.
 The CI does not call `ppokit-run train` directly: `tools/ci/mappo_curriculum.py`
@@ -55,20 +55,18 @@ standalone local curriculum script has been retired.
 
 The learner writes these files at completed PPO-update boundaries:
 
-- `Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/policy.ppokit`:
+- `Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/latest/policy.ppokit`:
   inference actor (PPOKit artifact, kind `policy`).
-- `Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/latest.ppokit`:
+- `Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/latest/latest.ppokit`:
   **full training state** (PPOKit artifact, kind `training`).
-- `Examples/BlueDefense/projects/BluePatrol/checkpoints/prod/policy.ppokit`:
+- `Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/prod/policy.ppokit`:
   promoted actor only after successful evaluation, when present (score in
   `policy.ppokit.score`).
 
-Artifacts of earlier runs hold the former `blue_patrol_generalized_v10.txt`
-(`BLUE_TEAM_MAPPO_V10`) and `blue_patrol_generalized_training_v7.txt`
-(`BLUE_TEAM_TRAINING_V7`) files. The loaders still read that format by
-content; after restoring such an artifact the workflows move these files to
-the new names (`python tools/ci/blue_checkpoint.py adopt`), and BEST champions
-of earlier runs are read under their former names.
+Archived V7/V10 or former backend models require explicit offline conversion
+before a current workflow can use them. New runs restore common graph artifacts
+and their associated generation state only. The selected run is never silently
+replaced by the committed checkpoint.
 
 Training-state serialization includes actor, critic, Adam moments,
 optimizer scalars, RNG and completed PPO updates. Partial in-progress rollout
@@ -138,11 +136,11 @@ ID. This preserves all ten original GitHub Actions inputs (the platform permits
 no more than ten). A numeric ID continues the existing run-source behavior.
 Branch mode starts a fresh curriculum from the exact selected commit:
 
-- `Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/policy.ppokit`:
+- `Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/latest/policy.ppokit`:
   the LATEST actor corresponding to the full training state.
-- `Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/latest.ppokit`:
+- `Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/latest/latest.ppokit`:
   critic, Adam, RNG and PPO update counter; this is the actual training seed.
-- `Examples/BlueDefense/projects/BluePatrol/checkpoints/prod/policy.ppokit`:
+- `Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/prod/policy.ppokit`:
   separate production inference incumbent, preserved without treating its
   score as a curriculum-gate certification.
 

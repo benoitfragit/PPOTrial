@@ -98,12 +98,12 @@ PpokitDraw RecordingDraw(Recording& recording)
 fs::path CopyProject(fs::path const& folder, int port)
 {
     fs::path const original(PPO_BLUEDEFENSE_PROJECT);
-    fs::create_directories(folder / "checkpoints" / "prod");
+    fs::create_directories(folder / "checkpoints" / "shared" / "prod");
     Json scenario = ReadJson(original / "scenario.json");
     // The scenario names its agent profiles relative to its folder.
     scenario["agentProfiles"] = (fs::path(PPO_SHARED_SETTINGS) / "AgentProfiles.json").generic_string();
     WriteJson(folder / "scenario.json", scenario);
-    for (char const* file : {"blue_patrol_training.json", "task.json", "checkpoints/prod/policy.ppokit"})
+    for (char const* file : {"blue_patrol_training.json", "task.json", "training.json", "checkpoints/shared/prod/policy.ppokit"})
     {
         fs::copy_file(original / file, folder / file, fs::copy_options::overwrite_existing);
     }
@@ -111,7 +111,7 @@ fs::path CopyProject(fs::path const& folder, int port)
     network["observers"]["nodes"]["watch"]["config"] = {{"port", port}, {"rate", 240}};
     WriteJson(folder / "network.json", network);
     Json project = ReadJson(original / "project.json");
-    project["libraries"] = {{"environment", BLUE_ENVIRONMENT_LIBRARY}, {"network", BLUE_NETWORK_LIBRARY}};
+    project["libraries"] = {{"environment", BLUE_ENVIRONMENT_LIBRARY}, {"network", BLUE_GRAPH_NETWORK_LIBRARY}};
     fs::path const curriculum = (original / project.at("externalCurriculum").get<std::string>()).lexically_normal();
     fs::copy_file(curriculum, folder / "curriculum.json", fs::copy_options::overwrite_existing);
     project["externalCurriculum"] = "curriculum.json";
@@ -148,12 +148,6 @@ void TrainingFrames(fs::path const& folder, std::shared_ptr<ppokit::view::ViewLi
     settings["ppo"]["minibatch"] = 256;
     settings["ppo"]["epochs"] = 1;
     WriteJson(project / "training.json", settings);
-    auto configuration = ReadJson(project / "project.json");
-    configuration["libraries"]["network"] = BLUE_GRAPH_NETWORK_LIBRARY;
-    configuration["checkpoints"] = {{"root", "checkpoints/shared"},
-        {"training", "checkpoints/shared/latest/latest.ppokit"},
-        {"policy", "checkpoints/shared/latest/policy.ppokit"}};
-    WriteJson(project / "project.json", configuration);
 
     std::atomic<int> code{-1};
     std::thread run([&] { code = RunPpokit("train --fresh --updates 1 --project \"" + project.string() + "\""); });
@@ -193,7 +187,7 @@ int main()
             // Paced (5 ms a step): the watch sends at most `rate` frames a second of wall time,
             // and an episode played as fast as possible lasts a fraction of a second.
             code = RunPpokit("play --episodes 1 --realtime --step-seconds 0.005"
-                " --policy checkpoints/prod/policy.ppokit --project \""
+                " --policy checkpoints/shared/prod/policy.ppokit --project \""
                 + project.string() + "\"");
         });
         // Receive while the episode plays, so the socket's buffer never fills.

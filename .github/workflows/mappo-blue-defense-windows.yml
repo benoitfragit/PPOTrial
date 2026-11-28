@@ -62,19 +62,31 @@ jobs:
           name: blue-mappo-checkpoints
           run-id: ${{ inputs.resume_run_id }}
           github-token: ${{ github.token }}
-          path: Examples/BlueDefense/projects/BluePatrol/checkpoints
+          path: ${{ runner.temp }}/blue-resume
 
-      - name: Adopt the former Blue checkpoint names of the restored run (optional)
+      - name: Restore common graph checkpoints from the selected run
         if: ${{ inputs.resume_run_id != '' }}
         run: |
-          # Earlier runs saved blue_patrol_generalized_v10.txt / _training_v7.txt; the
-          # loaders read that format by content, under the PPOKit artifact names.
-          python tools/ci/blue_checkpoint.py adopt Examples/BlueDefense/projects/BluePatrol/checkpoints
-          if ($LASTEXITCODE -ne 0) { throw "Cannot adopt the restored Blue checkpoints" }
+          $source = Join-Path $env:RUNNER_TEMP "blue-resume"
+          # Older common-engine artifacts retained the shared/ directory.
+          if (Test-Path (Join-Path $source "shared/latest/latest.ppokit") -PathType Leaf) {
+            $source = Join-Path $source "shared"
+          }
+          $training = Join-Path $source "latest/latest.ppokit"
+          $actor = Join-Path $source "latest/policy.ppokit"
+          python tools/ci/blue_checkpoint.py check --graph-only --kind training $training
+          if ($LASTEXITCODE -ne 0) { throw "Selected run has no common graph training checkpoint; convert legacy archives explicitly" }
+          python tools/ci/blue_checkpoint.py check --graph-only --kind policy $actor
+          if ($LASTEXITCODE -ne 0) { throw "Selected run has no matching common graph policy" }
+          $destination = "Examples/BlueDefense/projects/BluePatrol/checkpoints/shared"
+          # Resume training state and BEST without replacing the registered branch PROD.
+          Get-ChildItem -LiteralPath $source | Where-Object { $_.Name -ne "prod" } | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination $destination -Recurse -Force
+          }
 
       - name: Verify existing RLMission production model
         run: |
-          $red = "Examples/Airspace/models/RLMission/prod/policy.txt"
+          $red = "Examples/Airspace/models/RLMission/prod/policy.ppokit"
           if (-not (Test-Path -LiteralPath $red -PathType Leaf)) {
             throw "The unchanged red production RLMission model is missing: $red"
           }
@@ -128,7 +140,7 @@ jobs:
           New-Item -ItemType Directory -Path $smoke -Force | Out-Null
           $actor = Join-Path $smoke "policy.ppokit"
           # The committed bytes (a pipe in PowerShell would rewrite the line endings).
-          cmd /c "git show HEAD:Examples/BlueDefense/projects/BluePatrol/checkpoints/prod/policy.ppokit > `"$actor`""
+          cmd /c "git show HEAD:Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/prod/policy.ppokit > `"$actor`""
           if ($LASTEXITCODE -ne 0) { throw "Cannot extract the committed production actor" }
           & build/release/PPOKit/Release/ppokit-run.exe play --episodes 1 `
             --project Examples/BlueDefense/projects/BluePatrol/project.json --policy $actor
@@ -258,14 +270,13 @@ jobs:
             }
             Write-Host "$path : $($file.Length) bytes"
           }
-          # Contract of either format: observation 10, network sizes, capacities,
-          # unified guidance semantics and P/N range.
-          python tools/ci/blue_checkpoint.py check --kind training $training
+          # Check the common graph header; ppokit-run validates the complete artifact.
+          python tools/ci/blue_checkpoint.py check --graph-only --kind training $training
           if ($LASTEXITCODE -ne 0) {
             throw "Unexpected full-training checkpoint format"
           }
           if ($progressive) {
-            python tools/ci/blue_checkpoint.py check --kind policy $actor
+            python tools/ci/blue_checkpoint.py check --graph-only --kind policy $actor
             if ($LASTEXITCODE -ne 0) {
               throw "Progressive checkpoint is not a unified-guidance actor with full optimizer"
             }
@@ -281,14 +292,13 @@ jobs:
         with:
           name: blue-mappo-checkpoints
           path: |
-            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/latest/policy.ppokit
-            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/latest/latest.ppokit
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/latest/**
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/prod/**
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/best/**
             Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/metrics.jsonl
             Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/generation.json
             Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/environment_state/**
             Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/curriculum-status.json
-            Examples/BlueDefense/projects/BluePatrol/checkpoints/prod/policy.ppokit
-            Examples/BlueDefense/projects/BluePatrol/checkpoints/prod/policy.ppokit.score
           if-no-files-found: warn
           retention-days: 30
 

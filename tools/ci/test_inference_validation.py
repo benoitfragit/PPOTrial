@@ -106,13 +106,10 @@ class InferenceValidationTests(unittest.TestCase):
                 self.assertEqual(suite["episodes"], 1)
 
     def test_readonly_run_restores_the_project(self):
-        for name, text in (("policy artifact", fixtures.policy(2, 0)),
-                           ("former V10 actor", fixtures.former_policy(2, 0))):
-            with self.subTest(actor=name):
-                self.run_readonly(text)
+        self.run_readonly(fixtures.graph_artifact("policy", 12))
 
     def test_training_or_foreign_actor_is_refused(self):
-        for text in (fixtures.training(12), "BLUE_TEAM_MAPPO_V10 10 9 test\n"):
+        for text in (fixtures.graph_artifact("training", 12), fixtures.policy(), fixtures.former_policy()):
             with self.subTest(text=text[:40]):
                 with self.assertRaises(ValueError):
                     self.run_readonly(text)
@@ -123,8 +120,8 @@ class InferenceValidationTests(unittest.TestCase):
             runner = root / "ppokit-run"
             runner.write_bytes(b"not executed - subprocess is mocked")
             project = root / "BluePatrol"
-            model_root = project / "checkpoints"
-            actor = model_root / "prod/policy.ppokit"
+            model_root = project / "checkpoints" / "shared"
+            actor = model_root / "inference/policy.ppokit"
             actor.parent.mkdir(parents=True)
             actor.write_text(actor_text, encoding="utf-8")
             scenario_file = project / "scenario.json"

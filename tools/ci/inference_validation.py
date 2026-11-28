@@ -26,13 +26,13 @@ import blue_checkpoint
 GATES = (("1v0", 1, 0), ("2v0", 2, 0), ("1v1", 1, 1),
          ("2v1", 2, 1), ("2v2", 2, 2))
 PROJECT = Path("Examples/BlueDefense/projects/BluePatrol")
-MODEL_ROOT = PROJECT / "checkpoints"
+MODEL_ROOT = PROJECT / "checkpoints" / "shared"
 SCENARIO_CONFIG = PROJECT / "scenario.json"
 TASK = PROJECT / "task.json"
 SUITE_NAME = "inference"
 SUITE_FILE = PROJECT / "eval" / f"{SUITE_NAME}.json"
 REPORT = MODEL_ROOT / f"evaluation_{SUITE_NAME}.json"
-ACTOR = Path("checkpoints/prod") / blue_checkpoint.POLICY_NAME
+ACTOR = Path("checkpoints/shared/inference") / blue_checkpoint.POLICY_NAME
 
 
 def digest(path: Path) -> str:
@@ -179,8 +179,8 @@ def run(args: argparse.Namespace) -> int:
     runner = Path(args.ppokit_run).resolve()
     if not runner.is_file() or not actor.is_file():
         raise FileNotFoundError("Missing ppokit-run Release or promoted blue actor")
-    # A promoted actor: a policy artifact, or a former V10 file of an earlier run.
-    blue_checkpoint.read(actor, "policy")
+    # The staged actor must use the same backend as the project.
+    blue_checkpoint.read_graph(actor, "policy")
     names = metric_names(json.loads(TASK.read_text(encoding="utf-8")))
     baseline = model_fingerprints(MODEL_ROOT)
     actor_hash = digest(actor)
