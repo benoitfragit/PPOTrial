@@ -30,7 +30,8 @@
 namespace {
 
 namespace fs = std::filesystem;
-using Json = nlohmann::json;
+// Preserve the network node order when changing observer settings in a project copy.
+using Json = nlohmann::ordered_json;
 
 int failures = 0;
 
