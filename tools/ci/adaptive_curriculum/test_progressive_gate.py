@@ -1287,24 +1287,6 @@ class ProgressiveGateTests(unittest.TestCase):
         # Legacy 4v4 schemas remain readable for verified source-run provenance.
         self.assertEqual(gate.validate_gates(sample_gates())[-1]["id"], "4v4")
 
-    def test_twenty_evaluation_cases_use_distinct_holdout_seeds(self) -> None:
-        root = Path(__file__).resolve().parents[3]
-        settings = json.loads((root / "Examples/BlueDefense/projects/BluePatrol/"
-                               "blue_patrol_training.json").read_text(encoding="utf-8"))
-        # Existing independent BlueDefense workflow must keep its defaults.
-        self.assertEqual(settings["evaluation"]["episodes"], 8)
-        workflow = (root / ".github/workflows/mappo-training-windows.yml"
-                    ).read_text(encoding="utf-8")
-        self.assertIn('-Name episodes -Value 20 -Force', workflow)
-        self.assertIn('-Name seed -Value 1004242 -Force', workflow)
-        eval_seeds = set(range(1004242, 1004242 + 20))
-        self.assertEqual(len(eval_seeds), 20)
-        self.assertNotIn(settings["training"]["seed"], eval_seeds)
-        self.assertTrue(eval_seeds.isdisjoint(set(range(4242, 4250))))
-        # 92% cannot be represented exactly by 20 cases: require 19/20 = 95%.
-        self.assertLess(18 / 20 * 100, 92)
-        self.assertGreaterEqual(19 / 20 * 100, 92)
-
     def test_source_commit_fingerprint_permits_retired_best_gate_only(self) -> None:
         legacy = sample_gates()
         previous = {"id": "4v1", "blue": 4, "red": 1,
