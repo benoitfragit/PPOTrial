@@ -1,16 +1,12 @@
 /**
  * @file Examples/Airspace/Scenario/airspacemeta.cpp
- * @brief Construction, données et arbitrage du scénario airspacemeta.
- * @details Référence de l'unité, de ses types et de ses fonctions C++.
- * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ * @brief The entity and agent factories of the Airspace scenarios.
  */
 #include "airspacemeta.hpp"
 #include "metaregistry.hpp"
 #include "mobile.hpp"
 #include "restrictedzone.hpp"
 #include "objective.hpp"
-#include "components.hpp"
-#include "airspacecomponents.hpp"
 #include "interception.hpp"
 #include "targetselector.hpp"
 
@@ -19,44 +15,6 @@
 
 namespace ppo::examples::airspace {
 namespace {
-using namespace entt::literals;
-using ppo::reflection::eMetaCategory;
-using ppo::reflection::sMetaDescriptor;
-using ppo::reflection::EntityFactory;
-using ppo::reflection::AgentFactory;
-
-template<typename Type>
-/**
-* @brief Registers one reflected entity type and its scenario factory.
-* @param scenarioName Scenario-visible type name.
-* @param factory Factory used to instantiate the entity.
-*/
-void
-RegisterEntityType(char const* scenarioName, EntityFactory factory)
-{
-    entt::meta_factory<Type>{}
-        .type(scenarioName)
-        .custom<sMetaDescriptor>(eMetaCategory::Entity, scenarioName);
-
-    ppo::reflection::RegisterEntityFactory(scenarioName, factory);
-}
-
-template<typename Type>
-/**
-* @brief Registers one reflected agent type and its scenario factory.
-* @param scenarioName Scenario-visible type name.
-* @param factory Factory used to instantiate the agent.
-*/
-void
-RegisterAgentType(char const* scenarioName, AgentFactory factory)
-{
-    entt::meta_factory<Type>{}
-        .type(scenarioName)
-        .custom<sMetaDescriptor>(eMetaCategory::Agent, scenarioName);
-
-    ppo::reflection::RegisterAgentFactory(scenarioName, factory);
-}
-
 
 /**
 * @brief Creates one Mobile entity through the environment factory.
@@ -161,134 +119,34 @@ CreateTargetSelectorProdAgent(ppo::model::Environment& environment,
 }
 
 
-/**
- * @brief Met à jour ou enregistre les données sous la responsabilité.
- */
-void RegisterAirspaceEnums()
-{
-    entt::meta_factory<ppo::model::eEntityType>{}
-        .data<ppo::model::eEntityType::Objective>("Objective"_hs)
-        .data<ppo::model::eEntityType::Missile>("Missile"_hs)
-        .data<ppo::model::eEntityType::Mobile>("Mobile"_hs)
-        .data<ppo::model::eEntityType::Aircraft>("Aircraft"_hs)
-        .data<ppo::model::eEntityType::RestrictedZone>("RestrictedZone"_hs)
-        .data<ppo::model::eEntityType::SAM>("SAM"_hs);
-}
-
-/**
- * @brief Met à jour ou enregistre les données sous la responsabilité.
- */
-void RegisterAirspaceComponents()
-{
-    entt::meta_factory<ppo::model::sSNAState>{}
-        .type("SNAState"_hs)
-        .custom<sMetaDescriptor>(eMetaCategory::Component, "SNAState")
-        .data<&ppo::model::sSNAState::m_target>("m_target"_hs)
-        .data<&ppo::model::sSNAState::m_pk>("m_pk"_hs)
-        .data<&ppo::model::sSNAState::m_target_x>("m_target_x"_hs)
-        .data<&ppo::model::sSNAState::m_target_y>("m_target_y"_hs)
-        .data<&ppo::model::sSNAState::m_target_dx>("m_target_dx"_hs)
-        .data<&ppo::model::sSNAState::m_target_dy>("m_target_dy"_hs)
-        .data<&ppo::model::sSNAState::m_closingspeed>("m_closingspeed"_hs)
-        .data<&ppo::model::sSNAState::m_target_los>("m_target_los"_hs)
-        .data<&ppo::model::sSNAState::m_target_los_rate>("m_target_los_rate"_hs)
-        .data<&ppo::model::sSNAState::m_maxNoescapeZone>("m_maxNoescapeZone"_hs)
-        .data<&ppo::model::sSNAState::m_escapezone>("m_escapezone"_hs)
-        .data<&ppo::model::sSNAState::m_noescapezone>("m_noescapezone"_hs)
-        .data<&ppo::model::sSNAState::m_maxShootAngle>("m_maxShootAngle"_hs)
-        .data<&ppo::model::sSNAState::m_nbmissiles>("m_nbmissiles"_hs)
-        .data<&ppo::model::sSNAState::m_maxnbmissiles>("m_maxnbmissiles"_hs);
-
-    entt::meta_factory<ppo::model::sSNAControlState>{}
-        .type("SNAControlState"_hs)
-        .custom<sMetaDescriptor>(eMetaCategory::Component, "SNAControlState")
-        .data<&ppo::model::sSNAControlState::m_accCmd>("m_accCmd"_hs)
-        .data<&ppo::model::sSNAControlState::m_rotSpeedCmd>("m_rotSpeedCmd"_hs);
-
-    entt::meta_factory<ppo::model::sPseudoLidarState>{}
-        .type("PseudoLidarState"_hs)
-        .custom<sMetaDescriptor>(eMetaCategory::Component, "PseudoLidarState")
-        .data<&ppo::model::sPseudoLidarState::m_nearestCollisionRanges>("m_nearestCollisionRanges"_hs)
-        .data<&ppo::model::sPseudoLidarState::m_nearestCollisionDistances>("m_nearestCollisionDistances"_hs)
-        .data<&ppo::model::sPseudoLidarState::m_angleSpanRadians>("m_angleSpanRadians"_hs);
-
-    entt::meta_factory<ppo::model::sFlightModelState>{}
-        .type("FlightModelState"_hs)
-        .custom<sMetaDescriptor>(eMetaCategory::Component, "FlightModelState")
-        .data<&ppo::model::sFlightModelState::m_acc>("m_acc"_hs)
-        .data<&ppo::model::sFlightModelState::m_accpsi>("m_accpsi"_hs)
-        .data<&ppo::model::sFlightModelState::m_maxAcc>("m_maxAcc"_hs)
-        .data<&ppo::model::sFlightModelState::m_maxAccRot>("m_maxAccRot"_hs)
-        .data<&ppo::model::sFlightModelState::m_maxSpeed>("m_maxSpeed"_hs)
-        .data<&ppo::model::sFlightModelState::m_minSpeed>("m_minSpeed"_hs)
-        .data<&ppo::model::sFlightModelState::m_fuel>("m_fuel"_hs)
-        .data<&ppo::model::sFlightModelState::m_fuelconsumption>("m_fuelconsumption"_hs)
-        .data<&ppo::model::sFlightModelState::m_maxfuel>("m_maxfuel"_hs);
-
-
-    entt::meta_factory<rl::StatesAndActions>{}
-        .type("InterceptionStateModel"_hs)
-        .custom<sMetaDescriptor>(eMetaCategory::Component, "InterceptionStateModel")
-        .data<&rl::StatesAndActions::m_states>("m_states"_hs)
-        .data<&rl::StatesAndActions::m_actions>("m_actions"_hs);
-
-    entt::meta_factory<rl::StatesAndActionsForMission>{}
-        .type("MissionStateModel"_hs)
-        .custom<sMetaDescriptor>(eMetaCategory::Component, "MissionStateModel");
-}
-
-/**
- * @brief Met à jour ou enregistre les données sous la responsabilité.
- */
+/** @brief The entity factories of the Airspace scenarios (with their historical names). */
 void RegisterAirspaceEntities()
 {
-    RegisterEntityType<ppo::model::Mobile>("Mobile", &CreateMobile);
-    // Keep historical scenario and reflection names as aliases.
+    ppo::reflection::RegisterEntityFactory("Mobile", &CreateMobile);
     ppo::reflection::RegisterEntityFactory("Aircraft", &CreateMobile);
-    ppo::reflection::RegisterTypeAlias("Aircraft", "Mobile");
-    entt::meta_factory<ppo::model::Mobile>{}.base<ppo::model::Entity>();
-
-    RegisterEntityType<ppo::model::RestrictedZone>("RestrictedZone", &CreateRestrictedZone);
+    ppo::reflection::RegisterEntityFactory("RestrictedZone", &CreateRestrictedZone);
     ppo::reflection::RegisterEntityFactory("SAM", &CreateRestrictedZone);
-    ppo::reflection::RegisterTypeAlias("SAM", "RestrictedZone");
-    entt::meta_factory<ppo::model::RestrictedZone>{}.base<ppo::model::Entity>();
-
-    RegisterEntityType<ppo::model::Objective>("Objective", &CreateObjective);
-    entt::meta_factory<ppo::model::Objective>{}.base<ppo::model::Entity>();
-
+    ppo::reflection::RegisterEntityFactory("Objective", &CreateObjective);
 }
 
-/**
- * @brief Met à jour ou enregistre les données sous la responsabilité.
- */
+/** @brief The agent factories of the Airspace scenarios. */
 void RegisterAirspaceAgents()
 {
-    RegisterAgentType<rl::SNATrainingAgent>("SNATrainingAgent", &CreateSNATrainingAgent);
-    entt::meta_factory<rl::SNATrainingAgent>{}.base<ppo::model::IAgent>();
-
-    RegisterAgentType<rl::SNAProdAgent>("SNAProdAgent", &CreateSNAProdAgent);
-    entt::meta_factory<rl::SNAProdAgent>{}.base<ppo::model::IAgent>();
-
-    RegisterAgentType<rl::TargetSelectorTrainingAgent>("TargetSelectorTrainingAgent", &CreateTargetSelectorTrainingAgent);
-    entt::meta_factory<rl::TargetSelectorTrainingAgent>{}.base<ppo::model::IAgent>();
-
-    RegisterAgentType<rl::TargetSelectorProdAgent>("TargetSelectorProdAgent", &CreateTargetSelectorProdAgent);
-    entt::meta_factory<rl::TargetSelectorProdAgent>{}.base<ppo::model::IAgent>();
-
+    ppo::reflection::RegisterAgentFactory("SNATrainingAgent", &CreateSNATrainingAgent);
+    ppo::reflection::RegisterAgentFactory("SNAProdAgent", &CreateSNAProdAgent);
+    ppo::reflection::RegisterAgentFactory("TargetSelectorTrainingAgent", &CreateTargetSelectorTrainingAgent);
+    ppo::reflection::RegisterAgentFactory("TargetSelectorProdAgent", &CreateTargetSelectorProdAgent);
 }
 } // namespace
 
 /**
- * @brief Met à jour ou enregistre les données sous la responsabilité.
+ * @brief Registers the Airspace factories, once.
  */
 void RegisterAirspaceMeta()
 {
-    ppo::reflection::RegisterAllMeta();
     static std::once_flag once;
     std::call_once(once, []()
     {
-        RegisterAirspaceEnums();
-        RegisterAirspaceComponents();
         RegisterAirspaceEntities();
         RegisterAirspaceAgents();
     });

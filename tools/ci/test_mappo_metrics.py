@@ -1,5 +1,6 @@
 """Deterministic smoke tests for the dependency-free MAPPO telemetry report."""
 import csv
+import json
 import os
 import subprocess
 import sys
@@ -9,7 +10,8 @@ from pathlib import Path
 
 from mappo_metrics import (
     FIELDS, evaluation_loss_summary, evaluation_summary, read_eval_episodes,
-    read_eval_losses, read_optimizer_updates, read_rows, sparkline, summary,
+    read_eval_losses, read_journal_rows, read_optimizer_updates, read_rows,
+    sparkline, summary,
     write_chart, write_loss_csv, write_optimizer_csv,
 )
 
@@ -172,6 +174,79 @@ class MappoMetricsTests(unittest.TestCase):
             report = summary([], "", optimizer_updates=updates)
             self.assertIn("PPO optimizer diagnostics", report)
             self.assertIn("mappo-optimizer.csv", report)
+
+
+    def test_journal_rows_follow_updates_and_campaigns(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / "metrics.jsonl"
+            events = [
+                {"event": "start", "task": "blue_patrol"},
+                {"event": "update", "update": 1, "elapsed_s": 2.0, "steps": 2048,
+                 "episode_return_mean": -5.0},
+                {"event": "start", "task": "blue_patrol"},  # A resumed process.
+                {"event": "update", "update": 2, "elapsed_s": 3.0, "steps": 2048,
+                 "episode_return_mean": -4.0},
+                {"event": "evaluation", "update": 2, "suite": "validation", "episodes": 8,
+                 "metrics": {"score.mean": 61.5, "mission_success.rate": 0.25}},
+                {"event": "update", "update": 3, "elapsed_s": 7.0, "steps": 2048,
+                 "episode_return_mean": -3.0},
+                {"event": "evaluation", "update": 3, "suite": "validation", "episodes": 8,
+                 "metrics": {"score.mean": 55.0, "mission_success.rate": 0.125}},
+            ]
+            journal.write_text("\n".join(json.dumps(e) for e in events)
+                               + '\n{"event": "upd', encoding="utf-8")
+            rows = read_journal_rows(journal)
+            self.assertEqual([r["updates"] for r in rows], [1, 2, 2, 3, 3])
+            self.assertEqual([r["elapsed_seconds"] for r in rows], [2.0, 5.0, 5.0, 9.0, 9.0])
+            self.assertEqual([r["eval_completed"] for r in rows], [0, 0, 1, 1, 2])
+            self.assertEqual(rows[-1]["latest_score"], 55.0)
+            self.assertEqual(rows[-1]["best_score"], 61.5)
+            self.assertEqual(rows[-1]["eval_success_rate"], 0.125)
+            self.assertEqual(rows[2]["evaluation_cases_done"], 8.0)
+            self.assertEqual(rows[3]["instant_reward"], -3.0)
+            self.assertEqual(set(rows[0]), set(FIELDS))
+            # The lines of the resumed runs are skipped.
+            later = read_journal_rows(journal, from_line=5)
+            self.assertEqual([r["updates"] for r in later], [3, 3])
+            self.assertEqual(later[-1]["best_score"], 55.0)
+
+    def test_cli_reads_a_journal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = root / "metrics.jsonl"
+            journal.write_text(json.dumps({"event": "update", "update": 4, "elapsed_s": 1.0,
+                                           "steps": 2048}) + "\n", encoding="utf-8")
+            completed = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("mappo_metrics.py")),
+                 "--journal", str(journal), "--out", str(root / "out")],
+                capture_output=True, encoding="utf-8", errors="replace", check=False)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn("Completed PPO updates: **4**", completed.stdout)
+
+
+    def test_campaigns_of_successive_processes_are_numbered_in_the_log(self):
+        def episode(campaign, case):
+            return (f"[MAPPO_EVAL_EPISODE] campaign={campaign} case={case} seed=1 "
+                    f"steps=9 P=1 N=0 blue_alive=1 terminal=timeout blue_1=alive\n")
+
+        def loss(campaign, case):
+            return (f"[MAPPO_EVAL_LOSS] campaign={campaign} case={case} seed=1 step=3 "
+                    f"blue=blue_1 source=unknown speed=1 low_speed=1 fuel_empty=0\n")
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "training.log"
+            # Two block processes, each numbering its campaign 1; then a process whose
+            # single-case campaigns are 1 and 2, and a loss before its case's row.
+            log.write_text(
+                episode(1, 1) + episode(1, 2)
+                + loss(1, 1) + episode(1, 1) + episode(1, 2)
+                + episode(1, 1) + episode(2, 1) + loss(2, 1), encoding="utf-8")
+            episodes = read_eval_episodes(log)
+            self.assertEqual([e["campaign"] for e in episodes], ["1", "1", "2", "2", "3", "4"])
+            self.assertEqual([e["logged_campaign"] for e in episodes],
+                             ["1", "1", "1", "1", "1", "2"])
+            losses = read_eval_losses(log)
+            self.assertEqual([l["campaign"] for l in losses], ["2", "5"])
+            self.assertIn("**#4**, **1 episodes**", evaluation_summary(episodes)[0])
 
 
 if __name__ == "__main__":

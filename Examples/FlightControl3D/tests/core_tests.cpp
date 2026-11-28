@@ -17,7 +17,7 @@
 #include "flight_observation.hpp"
 #include "flight_reward.hpp"
 #include "flight_aircraft_performance.hpp"
-#include "../Renderer/flight_display.hpp"
+#include "flight_display.hpp"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <limits>
@@ -1495,6 +1495,12 @@ void DisplayReferences()
     auto const position=RunwayCameraPosition(c.runway);
     Check(RunwayCameraFieldOfView(position,FromRunway(c.runway,-200,0,100))
         >RunwayCameraFieldOfView(position,FromRunway(c.runway,-6000,0,400)),"distant aircraft get a narrower field of view");
+    Check(Near(RewardProgressFraction(-25,100,-100),0.25)
+        && Near(RewardProgressFraction(25,50,-100),0.5)
+        && Near(RewardProgressFraction(-200,100,-100),1)
+        && Near(RewardProgressFraction(-25,50,0),0.5)
+        && Near(RewardProgressFraction(0,0,0),0),
+        "signed episode bars use active Stop/Crash references, saturate and handle zero weights");
 }
 } // namespace
 

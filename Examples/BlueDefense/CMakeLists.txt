@@ -10,7 +10,7 @@ target_include_directories(PPOBlueDefenseSpawn PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/Scenario"
     "${CMAKE_CURRENT_SOURCE_DIR}/Agents/BluePatrol/Core")
 target_include_directories(PPOBlueDefenseSpawn PRIVATE
-    "${PROJECT_SOURCE_DIR}/Framework/Simulation/World2D/data")
+    "${CMAKE_SOURCE_DIR}/Examples/Shared/World2D/data")
 target_link_libraries(PPOBlueDefenseSpawn PUBLIC nlohmann_json::nlohmann_json)
 
 add_library(PPOBlueDefenseExample STATIC
@@ -25,7 +25,42 @@ target_include_directories(PPOBlueDefenseExample PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/Scenario")
 target_link_libraries(PPOBlueDefenseExample PUBLIC
     PPOAirspaceExample PPOBlueDefenseSpawn
-    BlueDefenseDefenderBackend BlueDefensePatrolRuntime)
+    BlueDefenseDefenderBackend BlueDefensePatrolRuntime
+    PRIVATE PPOKit::Schema)
+
+# BluePatrol environment for the common graph network in ppokit-run.
+add_library(blue_environment SHARED Environment/blue_environment.cpp)
+target_link_libraries(blue_environment PRIVATE PPOBlueDefenseExample PPOKit::Core PPOKit::Schema)
+set_target_properties(blue_environment PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON
+    PREFIX "")
+ppokit_bind_task_contract(TARGET blue_environment TASK Agents/BluePatrol/task.json)
+ppokit_register_program(blue_environment)
+# Former V7/V10 checkpoints -> PPOKit artifacts, checked by an identical round trip.
+add_executable(blue_checkpoint_import EXCLUDE_FROM_ALL Tools/blue_checkpoint_import.cpp)
+target_link_libraries(blue_checkpoint_import PRIVATE BlueDefenseDefenderBackend)
+# Blue MAPPO artifacts (rl_tools backend) -> shared graph backend, checked by reload and actions.
+add_executable(blue_shared_backend_import EXCLUDE_FROM_ALL Tools/blue_shared_backend_import.cpp)
+target_link_libraries(blue_shared_backend_import PRIVATE BlueDefenseDefenderBackend PPOKit::Schema PPOKit::Training
+    PPOKit::Artifacts)
+target_compile_definitions(blue_shared_backend_import PRIVATE
+    PPOKIT_PROGRAM_REGISTRY="${CMAKE_BINARY_DIR}/ppokit_programs_$<CONFIG>.txt")
+# The BlueDefense Visualiseur: an observer block of network.json and a 2D view for ppokit-viewer.
+add_library(blue_visualiser MODULE Visualiser/blue_visualiser.cpp)
+target_link_libraries(blue_visualiser PRIVATE PPOKit::ComponentSdk PPOKit::Live)
+set_target_properties(blue_visualiser PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON PREFIX "")
+ppokit_register_program(blue_visualiser)
+add_dependencies(blue_shared_backend_import blue_visualiser)
+if (TARGET PPOKitRepositoryProjectsTests)
+    # BluePatrol's network.json names the Visualiseur: the repository check opens it.
+    add_dependencies(PPOKitRepositoryProjectsTests blue_visualiser)
+    target_compile_definitions(PPOKitRepositoryProjectsTests PRIVATE PPOKIT_BLUE_LIBRARIES=1)
+endif()
+
+if (TARGET PPOKitPublishedModelsTests)
+    add_dependencies(PPOKitPublishedModelsTests blue_environment blue_visualiser ppokit_graph_network)
+    add_test(NAME PPOKitPublishedModels_BluePatrol COMMAND PPOKitPublishedModelsTests
+        "${CMAKE_CURRENT_SOURCE_DIR}/projects/BluePatrol" "${CMAKE_CURRENT_BINARY_DIR}/published_models_BluePatrol" resume)
+endif()
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_executable(BlueDefenseGeneralizedLeaderRuntimeTests
@@ -35,24 +70,27 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         "${CMAKE_CURRENT_SOURCE_DIR}/Scenario")
     target_link_libraries(BlueDefenseGeneralizedLeaderRuntimeTests PRIVATE
         BlueDefensePatrolRuntime)
-    set(_leader_test_actor "${CMAKE_CURRENT_BINARY_DIR}/leader-test-actor.txt")
-    set(_leader_test_marker "${CMAKE_CURRENT_BINARY_DIR}/leader-test-actor.marker")
-    add_test(NAME BlueDefenseLeaderFixtureSetup
-        COMMAND BlueDefenseInferenceCheckpointFixture
-            prepare "${_leader_test_actor}" "${_leader_test_marker}")
-    set_tests_properties(BlueDefenseLeaderFixtureSetup PROPERTIES
-        FIXTURES_SETUP BlueLeaderActor)
     add_test(NAME BlueDefenseGeneralizedLeaderRuntimeTests
-        COMMAND BlueDefenseGeneralizedLeaderRuntimeTests "${_leader_test_actor}")
-    set_tests_properties(BlueDefenseGeneralizedLeaderRuntimeTests PROPERTIES
-        FIXTURES_REQUIRED BlueLeaderActor)
-    add_test(NAME BlueDefenseLeaderFixtureCleanup
-        COMMAND BlueDefenseInferenceCheckpointFixture
-            cleanup "${_leader_test_actor}" "${_leader_test_marker}")
-    set_tests_properties(BlueDefenseLeaderFixtureCleanup PROPERTIES
-        FIXTURES_CLEANUP BlueLeaderActor)
-    unset(_leader_test_actor)
-    unset(_leader_test_marker)
+        COMMAND BlueDefenseGeneralizedLeaderRuntimeTests)
+
+    # The DLL's world steps with the time step and limits of Environment.json.
+    add_executable(BlueDefenseWorldSettingsTests tests/world_settings_tests.cpp)
+    target_compile_features(BlueDefenseWorldSettingsTests PRIVATE cxx_std_17)
+    target_link_libraries(BlueDefenseWorldSettingsTests PRIVATE PPOBlueDefenseExample GenericEnv PPOLayout
+        nlohmann_json::nlohmann_json)
+    add_test(NAME BlueDefenseWorldSettingsTests COMMAND BlueDefenseWorldSettingsTests)
+
+    # The Visualiseur end to end: BluePatrol play and training send frames to BlueView.
+    add_executable(BlueDefenseVisualiserTests tests/visualiser_tests.cpp)
+    target_compile_features(BlueDefenseVisualiserTests PRIVATE cxx_std_17)
+    target_link_libraries(BlueDefenseVisualiserTests PRIVATE PPOKit::View PPOLayout nlohmann_json::nlohmann_json)
+    add_dependencies(BlueDefenseVisualiserTests ppokit-run blue_environment blue_visualiser ppokit_graph_network)
+    target_compile_definitions(BlueDefenseVisualiserTests PRIVATE
+        PPOKIT_RUN="$<TARGET_FILE:ppokit-run>"
+        BLUE_ENVIRONMENT_LIBRARY="$<TARGET_FILE:blue_environment>"
+        BLUE_GRAPH_NETWORK_LIBRARY="$<TARGET_FILE:ppokit_graph_network>"
+        BLUE_VISUALISER_LIBRARY="$<TARGET_FILE:blue_visualiser>")
+    add_test(NAME BlueDefenseVisualiserTests COMMAND BlueDefenseVisualiserTests)
 
     add_executable(BlueDefenseSpawnTests tests/spawn_tests.cpp)
     target_compile_features(BlueDefenseSpawnTests PRIVATE cxx_std_17)
@@ -74,33 +112,4 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         PRIVATE PPOBlueDefenseExample)
     add_test(NAME BlueDefenseGeneralizedInitializerTests
         COMMAND BlueDefenseGeneralizedInitializerTests)
-
-    # Regression: Play advances the promoted actor without training/evaluation,
-    # while the training scenario retains its existing ECS behavior.
-    add_executable(BlueDefensePatrolRuntimeSmokeTest tests/patrol_runtime_smoke.cpp)
-    target_compile_features(BlueDefensePatrolRuntimeSmokeTest PRIVATE cxx_std_17)
-    target_link_libraries(BlueDefensePatrolRuntimeSmokeTest PRIVATE
-        PPOBlueDefenseExample GenericSerializer GenericEnv)
-    # The smoke executable links the legacy LibTorch desktop libraries;
-    # provide their runtime DLLs alongside the test binary on Windows.
-    if (WIN32)
-        add_custom_command(TARGET BlueDefensePatrolRuntimeSmokeTest POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CMAKE_BINARY_DIR}/libtorch/lib"
-                "$<TARGET_FILE_DIR:BlueDefensePatrolRuntimeSmokeTest>")
-    endif()
-    add_test(NAME BlueDefenseInferenceRuntimeSmoke
-        COMMAND BlueDefensePatrolRuntimeSmokeTest blue-defense-inference)
-    set_tests_properties(BlueDefenseInferenceRuntimeSmoke PROPERTIES
-        FIXTURES_REQUIRED BlueInferenceActor)
-
-    # Renderer contract: both enabled and disabled hostile zones must remain
-    # identifiable through the public ECS snapshot and m_destroyed flag.
-    add_executable(BlueDefenseRestrictedZoneSnapshotTests
-        tests/restricted_zone_snapshot_tests.cpp)
-    target_compile_features(BlueDefenseRestrictedZoneSnapshotTests PRIVATE cxx_std_17)
-    target_link_libraries(BlueDefenseRestrictedZoneSnapshotTests PRIVATE
-        PPOBlueDefenseExample GenericEnv)
-    add_test(NAME BlueDefenseRestrictedZoneSnapshotTests
-        COMMAND BlueDefenseRestrictedZoneSnapshotTests)
 endif()

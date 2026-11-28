@@ -2,7 +2,7 @@
  * @file flight_config.hpp
  * @brief Strict, versioned scenario configuration of FlightControl3D.
  *
- * Role in the chain: the scenario JSON (resources/settings/Scenarios/FlightControl3D_*.json)
+ * Role in the chain: the scenario JSON (scenario.json of a project in Examples/FlightControl3D/projects)
  * is parsed once by LoadConfig into a Config value that every stage reads: the simulator
  * (time step, aircraft), the mission (limits), the rewards (weights), the spawns (start
  * envelope), the learner (PPO hyperparameters) and the session (evaluation, diagnostics).
@@ -234,6 +234,17 @@ struct DeckMotionSettings final
     }
 };
 
+/** @brief Deck motion of an episode as shown by the Visualiseur. */
+struct DeckState final
+{
+    /** @brief Forward speed and swell of the episode; all zero for a static deck. */
+    DeckMotionSettings motion{};
+    /** @brief Current deck height above its mean height, in metres. */
+    double heaveMeters{};
+    /** @brief Current swell angle 2 pi t / period + phase, in radians; the heave is amplitude * sin. */
+    double swellAngle{};
+};
+
 /**
  * @brief One curriculum stage beyond the approach levels ("curriculum.stages" JSON array).
  *
@@ -358,6 +369,8 @@ struct DiagnosticsSettings final
 struct RuntimeSettings final
 {
     bool maxSpeed{};
+    /** @brief Selects the archived 2 km guidance for projects predating the 1.2 km profile. */
+    bool legacyCentreline = false;
 };
 
 /** @brief Independent validation campaigns ("evaluation" JSON section). */
@@ -408,6 +421,13 @@ struct Config final
  * @throws std::invalid_argument for an invalid document, std::exception for unreadable JSON.
  */
 Config LoadConfig(std::filesystem::path const& path);
+
+/**
+ * @brief The environment a policy of this configuration is trained in, as task.json
+ *        "contract" names it: the aircraft and the version of the observation and guidance
+ *        contract, e.g. "t6texan2@8". Checkpoints of another contract are refused.
+ */
+std::string EnvironmentContract(Config const& config);
 
 /**
  * @brief Checks the cross-field invariants of a configuration.

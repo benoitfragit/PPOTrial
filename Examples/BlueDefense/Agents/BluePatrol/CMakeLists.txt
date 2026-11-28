@@ -5,7 +5,16 @@ target_include_directories(BlueDefenseDefenderBackend INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../Evaluation"
     "${CMAKE_CURRENT_SOURCE_DIR}/Runtime"
     "${CMAKE_CURRENT_SOURCE_DIR}/Training")
-target_link_libraries(BlueDefenseDefenderBackend INTERFACE RLtools::Core GenericRLCore)
+target_link_libraries(BlueDefenseDefenderBackend INTERFACE
+    RLtools::Core PPOKit::Core PPOKit::Artifacts PPOKit::Schema)
+# The centralized critic is generated from graph.json (PPOKit).
+ppokit_generate_networks(TARGET BlueDefenseDefenderBackend
+    TASK task.json GRAPH graph.json HEADER blue_patrol_networks.hpp)
+# The attention actor is the block graph of graph_blocks.json, embedded with its task so
+# that loading a checkpoint never depends on the working directory.
+ppokit_embed_files(TARGET BlueDefenseDefenderBackend HEADER blue_actor_graph_files.hpp
+    NAMESPACE ppo::examples::bluedefense::defenders::embedded
+    FILES BlueTaskJson task.json BlueGraphBlocksJson graph_blocks.json)
 
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_executable(BlueDefenseTeamDomainTests ../../tests/team_domain_tests.cpp)
@@ -30,9 +39,7 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     add_test(NAME BlueDefensePatrolDefenseTests COMMAND BlueDefensePatrolDefenseTests)
     add_executable(BlueDefensePatrolGeometryTests ../../tests/patrol_geometry_tests.cpp)
     target_link_libraries(BlueDefensePatrolGeometryTests PRIVATE
-        BlueDefenseDefenderBackend nlohmann_json::nlohmann_json)
-    target_compile_definitions(BlueDefensePatrolGeometryTests PRIVATE
-        PPO_SETTINGS_ROOT="${CMAKE_SOURCE_DIR}/resources/settings")
+        BlueDefenseDefenderBackend nlohmann_json::nlohmann_json PPOLayout)
     add_test(NAME BlueDefensePatrolGeometryTests COMMAND BlueDefensePatrolGeometryTests)
     add_executable(BlueDefenseAttentionTests ../../tests/attention_tests.cpp)
     target_link_libraries(BlueDefenseAttentionTests PRIVATE BlueDefenseDefenderBackend)
@@ -45,31 +52,6 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     target_compile_features(BlueDefenseGeneralizedActorTests PRIVATE cxx_std_17)
     add_test(NAME BlueDefenseGeneralizedActorTests
         COMMAND BlueDefenseGeneralizedActorTests)
-    # The promoted actor is a runtime artifact, not a tracked source file.
-    # Supply a deterministic, untrained actor only for inference smoke tests.
-    # CTest fixtures preserve any existing user's production checkpoint.
-    add_executable(BlueDefenseInferenceCheckpointFixture
-        ../../tests/inference_checkpoint_fixture.cpp)
-    target_link_libraries(BlueDefenseInferenceCheckpointFixture PRIVATE
-        BlueDefenseDefenderBackend)
-    target_compile_features(BlueDefenseInferenceCheckpointFixture PRIVATE
-        cxx_std_17)
-    set(_blue_inference_model
-        "${CMAKE_SOURCE_DIR}/resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt")
-    set(_blue_inference_marker
-        "${CMAKE_BINARY_DIR}/blue_inference_fixture.marker")
-    add_test(NAME BlueDefenseInferenceFixtureSetup
-        COMMAND $<TARGET_FILE:BlueDefenseInferenceCheckpointFixture>
-            prepare "${_blue_inference_model}" "${_blue_inference_marker}")
-    set_tests_properties(BlueDefenseInferenceFixtureSetup PROPERTIES
-        FIXTURES_SETUP BlueInferenceActor)
-    add_test(NAME BlueDefenseInferenceFixtureCleanup
-        COMMAND $<TARGET_FILE:BlueDefenseInferenceCheckpointFixture>
-            cleanup "${_blue_inference_model}" "${_blue_inference_marker}")
-    set_tests_properties(BlueDefenseInferenceFixtureCleanup PROPERTIES
-        FIXTURES_CLEANUP BlueInferenceActor)
-    unset(_blue_inference_model)
-    unset(_blue_inference_marker)
     add_executable(BlueDefenseGeneralizedRuntimeStateTests
         ../../tests/generalized_runtime_state_tests.cpp)
     add_executable(BlueDefenseGeneralizedRewardShapingTests
@@ -112,13 +94,6 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
         BlueDefenseDefenderBackend)
     add_test(NAME BlueDefenseGeneralizedAdvantageTests
         COMMAND BlueDefenseGeneralizedAdvantageTests)
-    add_executable(BlueDefenseGeneralizedLearnerTests
-        ../../tests/generalized_learner_tests.cpp)
-    target_link_libraries(BlueDefenseGeneralizedLearnerTests PRIVATE
-        BlueDefenseDefenderBackend)
-    target_compile_features(BlueDefenseGeneralizedLearnerTests PRIVATE cxx_std_17)
-    add_test(NAME BlueDefenseGeneralizedLearnerTests
-        COMMAND BlueDefenseGeneralizedLearnerTests)
 endif()
 
 # One generalized MAPPO IAgent owns all P blue ECS mobiles per step.
@@ -131,7 +106,7 @@ add_library(BlueDefensePatrolRuntime STATIC
     Core/patrol_defense.hpp
     Core/patrol_geometry.hpp
     Core/team_capacity.hpp
-    ../../Evaluation/generalized_evaluation_campaign.hpp
+    ../../Evaluation/generalized_evaluation_case.hpp
     ../../Evaluation/generalized_evaluation_metrics.hpp
     ../../Evaluation/patrol_evaluation_settings.hpp
     Runtime/generalized_patrol_team_agent.hpp
@@ -155,6 +130,7 @@ target_compile_features(BlueDefensePatrolRuntime PUBLIC cxx_std_17)
 target_include_directories(BlueDefensePatrolRuntime PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../Scenario")
 target_link_libraries(BlueDefensePatrolRuntime PUBLIC
-    BlueDefenseDefenderBackend GenericEnv SharedWorld LegacyAgentAPI
+    PPOKit::Training BlueDefenseDefenderBackend GenericEnv SharedWorld LegacyAgentAPI
     nlohmann_json::nlohmann_json)
+
 

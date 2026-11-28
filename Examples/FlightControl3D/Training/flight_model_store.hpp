@@ -94,6 +94,8 @@ public:
     void SetRewardContract(RewardSettings const& settings, std::string const& signature);
     /** @brief Path of the latest training checkpoint. */
     std::filesystem::path Latest() const;
+    /** @brief Run journal (metrics.jsonl) of the training runs of this model directory. */
+    std::filesystem::path RunJournal() const;
     /** @brief Curriculum level saved beside the latest checkpoint. */
     std::filesystem::path CurriculumLevel() const;
     /**

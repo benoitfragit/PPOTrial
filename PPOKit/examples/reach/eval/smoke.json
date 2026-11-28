@@ -1,0 +1,11 @@
+{
+  "schema": "ppokit.eval/1",
+  "suite": "reach_smoke",
+  "seeds": [1001, 1002, 1003, 1004, 1005],
+  "episodes": 4,
+  "policy": "deterministic",
+  "gates": {
+    "success_rate": ">= 0.9",
+    "mean_length": "<= 30"
+  }
+}

@@ -1,5 +1,24 @@
 # Generic RL core (incremental extraction from PPOTrial master)
 
+> **LibTorch removed (November 2026).** The red agents' production weights are now
+> `policy.txt` (converted from `model.pt`, same actions, `AirspacePolicies`) and their
+> training uses PPOKit graph learners (`Examples/Airspace/Agents/Bindings`). The LibTorch classes
+> described below no longer exist; this page is kept for history.
+>
+> **In-world execution removed with `PPO.exe`.** Since then the core keeps only
+> `agent_contract.hpp`, `buffers.hpp`, `environment.hpp` (`Observation`, `Action`,
+> `IPolicy`) and `multi_agent.hpp` (`ResetAgents`/`StepAgents`, used by
+> `Environment::EndStep` and by the Airspace `EvaluationCampaign`). `IEnvironment`,
+> `ILearner`, `EpisodeRunner` (`runner.hpp`), `RunEvaluation` (`evaluation.hpp`),
+> `learning_monitor.hpp`, `team_episode.hpp` and `sEvaluatorState`
+> (`evaluator_state.hpp`) are gone. The `Environment` has no worker thread and no
+> snapshots: an environment DLL steps it (`BeginStep`/`EndStep`). The Airspace
+> `Evaluator` and its thread are gone too; the evaluation suites, their scores and
+> the promotion are run by `ppokit-run`. `IAgent` keeps only
+> `Init`/`ChooseAction`/`SetNewState` (no agent-state snapshot, real-time command,
+> `IEvaluator` or `PPOParamters`; `ppoparameters.hpp` and the forwarding headers
+> are deleted). The sections below describe the former design.
+
 ## Status and dependency boundaries
 
 This is a structural extraction. No neural network, PPO mathematics, simulation
@@ -16,9 +35,9 @@ directly for the existing shared multi-agent world would be incorrect.
 | `GenericPPO` | Existing PPO implementation and RLAgent; optional TorchLearner bridge | LibTorch, GenericRLCore |
 | `GenericRLBindings` | Legacy TrainingAgent and ProdAgent domain-model adapter templates | GenericPPO, GenericSerializer |
 | `GenericEntities` | Existing simulation entities and components | EnTT, JSON, GenericRLCore |
-| `GenericEnv` | Existing EnTT simulation worker and snapshots | entities, PPO runtime |
-| `Evaluation` | Existing evaluator thread, fixed evaluation scenarios/scorer and promotion | entities, env, PPO |
-| `Renderer`, `Main` | Existing desktop and orchestration | the above and graphics |
+| `GenericEnv` | EnTT simulation world stepped by its caller (formerly a worker thread with snapshots) | entities, PPO runtime |
+| `Evaluation` | Formerly the evaluator thread, fixed evaluation scenarios/scorer and promotion; now `AirspaceEvaluation`, only the `EvaluationCampaign` played by the environment DLLs' suites (promotion in `ppokit-run`) | entities, env, PPO |
+| `Renderer`, `Main` | Former desktop host (`PPO.exe`) and its renderer; removed, replaced by the PPOKit programs `ppokit-run`, `ppokit-viewer` and `ppokit-studio` | the above and graphics |
 
 The `TrainingAgent<Policy, Model>` and `ProdAgent<Policy, Model>` templates
 remain in `Bindings/data` as domain-specific adapters, **but their backend
@@ -128,7 +147,7 @@ without referring to EnTT, torch or network dimensions. `ResetAgents`
 maintains the caller's order; `StepAgents` executes all decisions, advances the
 world once, resolves outcomes once, and delivers feedback to every agent. A
 rollout-reset request from one agent does not skip feedback for later agents.
-It is used by the original environment and evaluator.
+It is used by `Environment::EndStep` and by the Airspace `EvaluationCampaign` (formerly also by the evaluator).
 
 `ppo/core/evaluation.hpp` provides the synchronous `RunEvaluation` campaign
 scheduler. It manages test/step iteration, cancellation, early termination and
@@ -144,7 +163,7 @@ destruction rules are not merged.
 
 ## Read-only compatibility smoke test
 
-`Tests/model_checkpoint_tests.cpp` loads both existing production archives
+`Examples/Airspace/tests/policy_checkpoint_tests.cpp` loads both existing production archives
 (`RLSNA` 6 inputs/2 outputs and `RLMission` 152 inputs/3 outputs) with the
 unchanged production wrappers. It checks inference shape, finite values and
 repeatability without optimizer updates, serializing anything or writing to

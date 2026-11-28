@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import progressive_gate as gate
+import blue_checkpoint_fixtures as fixtures
 import dispatch_next_gate as dispatcher
 
 
@@ -63,25 +64,29 @@ class ProgressiveGateTests(unittest.TestCase):
 
     def checkpoint(self, number: int) -> None:
         gate.existing.LATEST.parent.mkdir(parents=True, exist_ok=True)
-        gate.existing.LATEST.write_text(
-            f"BLUE_TEAM_TRAINING_V7 7 10 200 UNIFIED_PHYSICAL_GUIDANCE_V1\n"
-            f"UPDATES {number}\n",
-            encoding="utf-8")
+        gate.existing.LATEST.write_text(fixtures.training(number), encoding="utf-8")
         gate.champion.LATEST_ACTOR.write_text(
-            f"BLUE_TEAM_MAPPO_V10 10 10 200 UNIFIED_PHYSICAL_GUIDANCE_V1\n"
-            f"ACTOR_UPDATE {number}\n",
-            encoding="utf-8")
+            fixtures.policy(body=f"ACTOR_UPDATE {number}\n"), encoding="utf-8")
+
+    def journal(self, update: int, success: float, score: float) -> None:
+        """ppokit-run's journal event of a campaign of the suite at `update`."""
+        gate.existing.JOURNAL.parent.mkdir(parents=True, exist_ok=True)
+        event = {"event": "evaluation", "update": update, "suite": "validation",
+                 "episodes": 8, "passed": True,
+                 "metrics": {"score.mean": score, "mission_success.rate": success}}
+        with gate.existing.JOURNAL.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(event) + "\n")
 
     def evaluation(self, stage: dict, success: float,
                    score: float = 55.0) -> str:
+        """A campaign of ppokit-run at the saved update: journal event and log lines."""
+        update = gate.existing.read_updates()
+        self.journal(update, success, score)
         return (
-            f"[BLUE MAPPO V10] Saved actor and training checkpoint at "
-            f"update {gate.existing.read_updates()}\n"
-            f"[BLUE MAPPO V10] Starting deterministic P={stage['blue']} "
-            f"N={stage['red']} evaluation after update "
-            f"{gate.existing.read_updates()} (8 cases)\n"
-            f"[BLUE MAPPO V10] Evaluation #1 P={stage['blue']} "
-            f"N={stage['red']} score={score} success={success}\n")
+            f"[MAPPO_EVAL_EPISODE] campaign=1 case=1 seed=4242 steps=900 "
+            f"P={stage['blue']} N={stage['red']} blue_alive=1 red_alive=0 "
+            f"objective_alive=1 leader_alive=1 terminal=timeout\n"
+            f"evaluation 'validation' at update {update}: 8 episodes, passed\n")
 
     def test_reduced_bootstrap_resumes_2v2_on_windows_crlf(self) -> None:
         """A verified LF bootstrap must survive Git CRLF checkout on Windows."""
@@ -179,12 +184,16 @@ class ProgressiveGateTests(unittest.TestCase):
             gate.select_training_stage(stages, 1, -1, 8)
 
     def test_campaign_matching_not_score_or_other_gate(self) -> None:
+        self.journal(10, 0.5, 80.0)
+        self.journal(20, 0.875, 95.0)
+        self.journal(30, 1.0, 99.0)  # Another process: not in this log.
         p = Path("evaluation.log")
+        episode = ("[MAPPO_EVAL_EPISODE] campaign={0} case=1 seed=4242 steps=9 "
+                   "P=1 N=0 blue_alive=1 terminal=timeout\n")
         p.write_text(
-            "Evaluation #1 P=4 N=4 score=99 success=1\n"
-            "Evaluation #1 P=1 N=0 score=80 success=0.50\n"
-            "Evaluation #2 P=1 N=0 score=95 success=0.875 "
-            "blue-survival=1\n", encoding="utf-8")
+            episode.format(1) + "evaluation 'validation' at update 10: 8 episodes\n"
+            + episode.format(2) + "evaluation 'validation' at update 20: 8 episodes\n",
+            encoding="utf-8")
         self.assertEqual(gate.matching_success(p, 1, 0), 87.5)
         self.assertEqual(gate.matching_success(p, 1, 1), None)
 
@@ -427,9 +436,8 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertEqual(record["successPercent"], 87.5)
         self.assertEqual(record["score"], 55)
         self.assertEqual(state["bestSuccessPercent"], 87.5)
-        self.assertIn("UPDATES 10", (
-            gate.champion.ROOT / "1v0" /
-            gate.champion.TRAINING_NAME).read_text())
+        self.assertEqual(gate.existing.read_updates(
+            gate.champion.ROOT / "1v0" / gate.champion.TRAINING_NAME), 10)
 
     def test_gate_transition_restores_exact_previous_champion_pair(self) -> None:
         self.checkpoint(100)
@@ -471,11 +479,17 @@ class ProgressiveGateTests(unittest.TestCase):
 
     def test_incomplete_evaluation_cannot_promote(self) -> None:
         path = Path("incomplete.log")
+        # A process stopped during its campaign: episodes but no completed campaign.
         path.write_text(
-            "[BLUE MAPPO V10] Saved actor and training checkpoint at update 40\n"
-            "[BLUE MAPPO V10] Starting deterministic P=1 N=0 "
-            "evaluation after update 40 (8 cases)\n"
-            "[BLUE MAPPO V10] Evaluation #1 P=1 N=0 score=80 success=1\n")
+            "[MAPPO_EVAL_EPISODE] campaign=1 case=1 seed=4242 steps=9 P=1 N=0 "
+            "blue_alive=1 terminal=timeout\n", encoding="utf-8")
+        self.assertIsNone(gate.champion.evaluation_at_update(path, 1, 0, 40))
+        path.write_text(path.read_text(encoding="utf-8")
+                        + "evaluation 'validation' at update 40: 8 episodes\n",
+                        encoding="utf-8")
+        # The campaign ended but its journal event is missing (journal not written).
+        self.assertIsNone(gate.champion.evaluation_at_update(path, 1, 0, 40))
+        self.journal(40, 1.0, 80.0)
         self.assertIsNone(gate.champion.evaluation_at_update(path, 1, 0, 50))
         self.assertIsNone(gate.champion.evaluation_at_update(path, 2, 0, 40))
         self.assertEqual(
@@ -504,32 +518,42 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertEqual(gate.existing.read_updates(), 240)
         self.assertEqual(state["gate"], "1v1")
 
-    def test_promote_requires_completed_matching_v7_save(self) -> None:
+    def test_promote_requires_completed_matching_update(self) -> None:
         stage = sample_gates()["gates"][0]
         self.checkpoint(40)
         path = Path("evaluated.log")
         full = self.evaluation(stage, 0.875)
-        path.write_text(full.replace(
-            "[BLUE MAPPO V10] Saved actor and training checkpoint at update 40\n",
-            ""), encoding="utf-8")
+        path.write_text(full.replace("at update 40", "at update 39"), encoding="utf-8")
         self.assertIsNone(gate.champion.evaluation_at_update(path, 1, 0, 40))
-        path.write_text(full.replace("checkpoint at update 40",
-                                     "checkpoint at update 39"), encoding="utf-8")
+        path.write_text(full.replace("evaluation 'validation'", "evaluation 'other'"),
+                        encoding="utf-8")
         self.assertIsNone(gate.champion.evaluation_at_update(path, 1, 0, 40))
         path.write_text(full, encoding="utf-8")
         self.assertEqual(gate.champion.evaluation_at_update(path, 1, 0, 40),
                          {"score": 55.0, "successPercent": 87.5})
+        # The journal's last campaign of that update counts (a rerun of the update).
+        self.journal(40, 1.0, 70.0)
+        self.assertEqual(gate.champion.evaluation_at_update(path, 1, 0, 40),
+                         {"score": 70.0, "successPercent": 100.0})
 
-    def test_interleaved_evaluation_start_uses_verified_save(self) -> None:
+    def test_evaluation_of_another_scenario_or_none_cannot_promote(self) -> None:
         self.checkpoint(40)
-        path = Path("interleaved.log")
-        path.write_text(
-            "[BLUE MAPPO V10] Saved actor and training checkpoint at update 40\n"
-            "[BLUE MAPPO V10] Starting deterministic P=1 N=0 "
-            "evaluation after upd[BLUE PATROL] Episode\n"
-            "ate 40 (8 cases)\n"
-            "[BLUE MAPPO V10] Evaluation #1 P=1 N=0 score=75 success=0.875\n",
-            encoding="utf-8")
+        self.journal(40, 0.875, 75.0)
+        path = Path("scenario.log")
+        done = "evaluation 'validation' at update 40: 8 episodes\n"
+        episode = ("[MAPPO_EVAL_EPISODE] campaign=1 case=1 seed=4242 steps=9 "
+                   "P={0} N={1} blue_alive=1 terminal=timeout\n")
+        path.write_text(done, encoding="utf-8")  # No episode: P/N unknown.
+        self.assertIsNone(gate.champion.evaluation_at_update(path, 1, 0, 40))
+        path.write_text(episode.format(1, 0) + episode.format(2, 0) + done,
+                        encoding="utf-8")
+        self.assertIsNone(gate.champion.evaluation_at_update(path, 1, 0, 40))
+        path.write_text(episode.format(1, 0) + done, encoding="utf-8")
+        self.assertEqual(gate.champion.evaluation_at_update(path, 1, 0, 40),
+                         {"score": 75.0, "successPercent": 87.5})
+        # A partial last journal line (a process stopped mid-write) is ignored.
+        with gate.existing.JOURNAL.open("a", encoding="utf-8") as stream:
+            stream.write('{"event": "evaluation", "upd')
         self.assertEqual(gate.champion.evaluation_at_update(path, 1, 0, 40),
                          {"score": 75.0, "successPercent": 87.5})
 
@@ -818,69 +842,36 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertEqual(gate.existing.SCENARIO_FILE.read_bytes(),
                          self.scenario_bytes)
 
-    def test_both_workflows_publish_and_restart_from_best_pairs(self) -> None:
+    def test_resume_workflow_delegates_the_complete_generation(self) -> None:
         root = Path(__file__).resolve().parents[3] / ".github/workflows"
         train = (root / "mappo-training-windows.yml").read_text(encoding="utf-8")
         restart = (root / "mappo-restart-progressive.yml").read_text(
             encoding="utf-8")
-        self.assertIn("resources/model/BluePatrol/best/**", train)
-        self.assertIn("resources/model/BluePatrol/best/**", restart)
-        self.assertIn("champion.restore_latest(source_gate)", restart)
-        self.assertIn("champion.seed(start_gate, source_gate)", restart)
+        self.assertIn("Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/best/**", train)
+        self.assertIn('inputs[resume_run_id]=${SOURCE_RUN_ID}', restart)
+        self.assertIn("persisted common curriculum generation", restart)
+        self.assertNotIn("adaptive-curriculum-progress.json", restart)
+        self.assertNotIn("champion.", restart)
 
-    def test_workflow_resume_powershell_argument_splatting(self) -> None:
-        """Run 32 regression: optional flags must remain whole argv tokens."""
+    def test_workflow_calls_the_common_curriculum_engine(self) -> None:
+        """Configuration generation and runtime flags remain separate argv tokens."""
         workflow = (Path(__file__).resolve().parents[3] /
                     ".github/workflows/mappo-training-windows.yml")
         content = workflow.read_text(encoding="utf-8")
         step = content.split(
             "      - name: Train one progressive MAPPO gate (time- and success-bounded)\n",
             1)[1].split("      - name: Validate resumable checkpoint\n", 1)[0]
-        self.assertIn("$pythonArgs = @(", step)
-        self.assertIn("& python @pythonArgs", step)
-        self.assertIn('$pythonArgs += "--resume"', step)
-        self.assertIn('$pythonArgs += "--auto-advance"', step)
-        self.assertIn('$pythonArgs += "--per-gate-thresholds"', step)
-        self.assertNotIn("@resume @advance", step)
-        powershell = shutil.which("pwsh")
-        if powershell is None:
-            return  # Structural checks still run without PowerShell.
-        block = textwrap.dedent(step.split("        run: |\n", 1)[1].split(
-            "          if ($LASTEXITCODE", 1)[0])
-        cases = (
-            ("", "false", "true", ()),
-            ("41690261169", "false", "true", ("--resume",)),
-            ("41690261169", "true", "true", ("--resume", "--auto-advance")),
-            ("", "false", "false", ("--per-gate-thresholds",)),
-        )
-        for resume_id, auto_advance, same_threshold, flags in cases:
-            with self.subTest(resume=resume_id, auto_advance=auto_advance,
-                              uniform=same_threshold):
-                environment = os.environ.copy()
-                environment.update({
-                    "GATE": "1v0", "MAX_TEAM_SIZE": "2", "SUCCESS_PERCENT": "75",
-                    "MAX_SECONDS": "3600", "RESUME_RUN_ID": resume_id,
-                    "AUTO_ADVANCE": auto_advance,
-                    "SAME_THRESHOLD_ALL_GATES": same_threshold,
-                })
-                script = (
-                    "function python { $script:captured = @($args) }\n"
-                    + block
-                    + "\nWrite-Output ('ARGV=' + "
-                    "(ConvertTo-Json -InputObject $script:captured -Compress))"
-                )
-                completed = subprocess.run(
-                    [powershell, "-NoProfile", "-NonInteractive",
-                     "-Command", script],
-                    env=environment, capture_output=True, text=True,
-                    timeout=20, check=False)
-                self.assertEqual(completed.returncode, 0, completed.stderr)
-                output = completed.stdout.rsplit("ARGV=", 1)[1].strip()
-                self.assertEqual(json.loads(output), [
-                    "-u", "tools/ci/adaptive_curriculum/progressive_gate.py",
-                    "--gate", "1v0", "--max-team-size", "2",
-                    "--threshold-percent", "75", "--max-seconds", "3600",
-                    "--block-updates", "20", *flags])
+        self.assertIn("$planArgs = @(", step)
+        self.assertIn("tools/ci/adaptive_curriculum/common_plan.py", step)
+        self.assertIn("& python @planArgs", step)
+        self.assertIn("$runArgs = @(", step)
+        self.assertIn("--curriculum", step)
+        self.assertIn('$runArgs += "--resume"', step)
+        self.assertIn('$runArgs += "--fresh"', step)
+        self.assertIn('$runArgs += "--until-curriculum"', step)
+        self.assertIn('$runArgs += "--one-curriculum-stage"', step)
+        self.assertIn("ppokit-run.exe @runArgs", step)
+        self.assertNotIn("progressive_gate.py", step)
 
     def test_gate_dispatch_accepts_windows_and_linux_line_endings(self) -> None:
         """Run 33: identical gates must dispatch despite checkout CRLF/LF."""
@@ -936,7 +927,8 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertIn("Train one progressive MAPPO gate", prog)
         self.assertNotIn("Train one progressive MAPPO gate", blue)
 
-    def test_both_workflows_cache_complete_runtime_and_verify_libtorch(self) -> None:
+    def test_both_workflows_cache_complete_ppokit_runtime(self) -> None:
+        """ppokit-run and the three BlueDefense DLLs, cached and smoke-tested."""
         root = Path(__file__).resolve().parents[3] / ".github/workflows"
         for name in ("mappo-training-windows.yml",
                      "mappo-blue-defense-windows.yml"):
@@ -944,14 +936,25 @@ class ProgressiveGateTests(unittest.TestCase):
                 contents = (root / name).read_text(encoding="utf-8")
                 self.assertIn("actions/cache/restore@v4", contents)
                 self.assertIn("actions/cache/save@v4", contents)
-                self.assertIn("build/release/Main/Release", contents)
-                self.assertIn("torch_cpu.dll", contents)
-                self.assertIn("c10.dll", contents)
-                self.assertIn("& $exe --example blue-defense --check-example",
-                              contents)
+                for runtime in ("build/release/PPOKit/Release/ppokit-run.exe",
+                                "Release/blue_environment.dll",
+                                "Release/ppokit_graph_network.dll",
+                                "build/release/ppokit_programs_Release.txt"):
+                    self.assertIn(runtime, contents)
+                self.assertNotIn("PPO.exe --", contents)
+                self.assertNotIn("Main/Release", contents)
+                self.assertNotIn("torch_cpu.dll", contents)
+                self.assertNotIn("PPO_LIBTORCH_VARIANT", contents)
+                self.assertIn("-DPPO_BUILD_WORLD=ON", contents)
+                self.assertIn("ppokit-run.exe play --episodes 1", contents)
                 self.assertIn("if: steps.runtime_probe.outputs.usable != 'true'",
                               contents)
-                self.assertIn("libtorch291cpu-${{ github.sha }}", contents)
+                self.assertIn("ppokit-blue-runtime-${{ runner.os }}", contents)
+                # Telemetry: this run's lines of the journal, which travels with the checkpoints.
+                self.assertIn("--journal Examples/BlueDefense/projects/BluePatrol/"
+                              "checkpoints/shared/metrics.jsonl", contents)
+                self.assertIn("--journal-from-line $from", contents)
+                self.assertNotIn("mappo-training.csv", contents)
 
     def test_auto_advance_is_explicit_and_validated(self) -> None:
         config = gate.GATES_FILE.read_bytes()
@@ -1259,8 +1262,8 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertNotIn("1v2", expected)
         restart = (root / ".github/workflows/mappo-restart-progressive.yml"
                    ).read_text(encoding="utf-8")
-        choices = restart.split("      start_gate:\n", 1)[1].split(
-            "      success_percent:\n", 1)[0]
+        choices = restart.split("      progressive_gate:\n", 1)[1].split(
+            "      max_team_size:\n", 1)[0]
         self.assertEqual(re.findall(r"^          - (\dv\d+)$",
                                     choices, re.MULTILINE), full_ids)
         training = (root / ".github/workflows/mappo-training-windows.yml"
@@ -1284,24 +1287,6 @@ class ProgressiveGateTests(unittest.TestCase):
         # Legacy 4v4 schemas remain readable for verified source-run provenance.
         self.assertEqual(gate.validate_gates(sample_gates())[-1]["id"], "4v4")
 
-    def test_twenty_evaluation_cases_use_distinct_holdout_seeds(self) -> None:
-        root = Path(__file__).resolve().parents[3]
-        settings = json.loads((root / "resources/settings/Training/"
-                               "BluePatrol.json").read_text(encoding="utf-8"))
-        # Existing independent BlueDefense workflow must keep its defaults.
-        self.assertEqual(settings["evaluation"]["episodes"], 8)
-        workflow = (root / ".github/workflows/mappo-training-windows.yml"
-                    ).read_text(encoding="utf-8")
-        self.assertIn('-Name episodes -Value 20 -Force', workflow)
-        self.assertIn('-Name seed -Value 1004242 -Force', workflow)
-        eval_seeds = set(range(1004242, 1004242 + 20))
-        self.assertEqual(len(eval_seeds), 20)
-        self.assertNotIn(settings["training"]["seed"], eval_seeds)
-        self.assertTrue(eval_seeds.isdisjoint(set(range(4242, 4250))))
-        # 92% cannot be represented exactly by 20 cases: require 19/20 = 95%.
-        self.assertLess(18 / 20 * 100, 92)
-        self.assertGreaterEqual(19 / 20 * 100, 92)
-
     def test_source_commit_fingerprint_permits_retired_best_gate_only(self) -> None:
         legacy = sample_gates()
         previous = {"id": "4v1", "blue": 4, "red": 1,
@@ -1320,20 +1305,17 @@ class ProgressiveGateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "fingerprint"):
             gate.validate_source_gate_fingerprint(damaged, digest, "4v1")
 
-    def test_restart_bootstrap_uses_run_62_best_not_cancelled_run_63(self) -> None:
+    def test_resume_client_has_no_baked_historical_run_or_state_rewriter(self) -> None:
         root = Path(__file__).resolve().parents[3]
         restart = (root / ".github/workflows/mappo-restart-progressive.yml"
                    ).read_text(encoding="utf-8")
-        self.assertIn('default: "41865674608"', restart)
-        self.assertIn('default: "2v2"', restart)
+        self.assertIn("source_run_id:", restart)
+        self.assertIn("required: true", restart)
+        self.assertIn('inputs[resume_run_id]=${SOURCE_RUN_ID}', restart)
+        self.assertIn("complete PPOKit generation", restart)
+        self.assertNotIn("41865674608", restart)
         self.assertNotIn("41866496491", restart)
-        self.assertIn("champion.restore_latest(source_gate)", restart)
-        self.assertIn("champion.seed(start_gate, source_gate)", restart)
-        self.assertIn("validate_source_gate_fingerprint(", restart)
-        self.assertIn("gateConfigSha256=hashlib.sha256(gates_bytes).hexdigest()",
-                      restart)
-        self.assertIn("validatedGates=rehearsal_history", restart)
-        self.assertIn("evaluated 4v1 BEST pair", restart)
+        self.assertNotIn("adaptive-curriculum-progress.json", restart)
 
 
     def test_rehearsal_preserves_previous_relevant_gates(self) -> None:
@@ -1354,11 +1336,6 @@ class ProgressiveGateTests(unittest.TestCase):
         self.assertEqual(
             gate.select_training_stage(stages, names.index(target),
                                        7, 8, retained)["id"], "1v0")
-        restart = (root / ".github/workflows/mappo-restart-progressive.yml"
-                   ).read_text(encoding="utf-8")
-        self.assertIn("rehearsal_history = validated_rehearsal_history(", restart)
-        self.assertIn("source_names.index(gate_id)", restart)
-        self.assertIn("validatedGates=rehearsal_history", restart)
 
     def test_replay_history_requires_an_evaluated_best_for_each_gate(self) -> None:
         stages = gate.validate_gates(sample_gates())
@@ -1381,18 +1358,17 @@ class ProgressiveGateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unknown resumed gate"):
             gate.validated_rehearsal_history(stages, "unknown", [])
 
-    def test_only_training_workflow_owns_automatic_gate_dispatch(self) -> None:
+    def test_automatic_promotion_stays_inside_the_common_engine(self) -> None:
         root = Path(__file__).resolve().parents[3] / ".github/workflows"
         training = (root / "mappo-training-windows.yml").read_text(
             encoding="utf-8")
         restart = (root / "mappo-restart-progressive.yml").read_text(
             encoding="utf-8")
-        self.assertIn("needs.train.result == 'success' && github.run_attempt == 1",
-                      training)
-        self.assertIn("name: blue-mappo-checkpoints\n          path: build/mappo-checkpoint",
-                      training)
+        self.assertIn('$runArgs += "--until-curriculum"', training)
+        self.assertNotIn("dispatch_next_gate.py", training)
+        self.assertNotIn("\n  advance:", training)
         self.assertNotIn("workflow_run:", restart)
-        self.assertNotIn("continue_same_threshold:", restart)
+        self.assertNotIn("adaptive-curriculum-progress.json", restart)
         self.assertIn("same_threshold_all_gates:", restart)
 
 

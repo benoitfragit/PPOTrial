@@ -405,8 +405,19 @@ DiagnosticsSettings ReadDiagnostics(Json const& section)
 
 RuntimeSettings ReadRuntime(Json const& section)
 {
-    Keys(section, {"maxSpeed"});
     RuntimeSettings runtime{};
+    if (section.contains("centrelineInterceptMeters"))
+    {
+        Keys(section, {"maxSpeed", "centrelineInterceptMeters"});
+        auto const distance = Number(section, "centrelineInterceptMeters");
+        Require(distance == 1200.0 || distance == 2000.0, "unsupported centreline intercept profile");
+        runtime.legacyCentreline = distance == 2000.0;
+    }
+    else
+    {
+        Keys(section, {"maxSpeed"});
+        runtime.legacyCentreline = true;
+    }
     runtime.maxSpeed = Boolean(section, "maxSpeed");
     return runtime;
 }
@@ -784,5 +795,11 @@ void Validate(Config const& config)
     ValidateMission(config);
     ValidateInitial(config);
     ValidateLearning(config);
+}
+
+std::string EnvironmentContract(Config const& config)
+{
+    return config.aircraft + "@" + std::to_string(ContractVersion)
+        + (config.runtime.legacyCentreline ? "" : "-centreline1200");
 }
 } // namespace ppo::examples::flight

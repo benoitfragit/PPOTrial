@@ -355,7 +355,7 @@ ApproachReference ResolveApproachReference(Config const& config, MissionState co
     // final, then to 300 m near and past it, so a lateral offset decays well
     // before the threshold instead of being flown straight to the aim point.
     double const lookahead = std::clamp(aimAlong - local.north, CentrelineLookaheadMeters,
-        InterceptLookaheadMeters);
+        config.runtime.legacyCentreline ? 2000.0 : InterceptLookaheadMeters);
     double const targetAlong = local.north + lookahead;
     // A large offset is intercepted at a bounded angle, as on a localizer.
     double const maximumRight = lookahead * std::tan(MaximumInterceptAngleDegrees * DegreesToRadians);

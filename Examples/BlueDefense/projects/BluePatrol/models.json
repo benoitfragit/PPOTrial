@@ -1,0 +1,18 @@
+{
+  "schema": "ppokit.models/1",
+  "policies": {
+    "PROD": {
+      "path": "checkpoints/shared/prod/policy.ppokit",
+      "sha256": "ba73abb4e6c8b455c1770108bf3188dbadc43a94932a9bebd9a04e17655cce2c",
+      "source": {
+        "commit": "b5ea31967f16d5fb2390268648715da5c6fe1b10",
+        "path": "resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt",
+        "sha256": "9e7a26403e6d22fbd6e96c4f83cd30d18c0c9e9099b7e3db5ff4359af78a116e",
+        "update": 5250,
+        "run": "https://github.com/benoitfragit/PPOTrial/actions/runs/42639806607",
+        "artifact_id": 13699304800
+      },
+      "artifact_update": 0
+    }
+  }
+}

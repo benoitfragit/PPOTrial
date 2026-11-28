@@ -100,10 +100,12 @@ est neutralisé au même pas qu'une sortie de limite avec objectif et Bleu survi
 ## Observation et checkpoints
 
 - observation : version 10 ;
-- acteur : `BLUE_TEAM_MAPPO_V10`, fichier
-  `blue_patrol_generalized_v10.txt` ;
-- état complet : `BLUE_TEAM_TRAINING_V7`, fichier
-  `blue_patrol_generalized_training_v7.txt`.
+- acteur : artefact PPOKit `policy.ppokit` (contrat de politique 10) ;
+- état complet : artefact PPOKit `latest.ppokit`.
+
+Les anciens fichiers `blue_patrol_generalized_v10.txt` (`BLUE_TEAM_MAPPO_V10`)
+et `blue_patrol_generalized_training_v7.txt` (`BLUE_TEAM_TRAINING_V7`) restent
+lisibles par contenu, avec les mêmes contrôles de contrat.
 
 Le changement de version est volontaire malgré des dimensions identiques. Le
 premier entraînement V10 doit repartir de zéro. Une reprise ultérieure exige
@@ -126,10 +128,11 @@ est journalisée une seule fois. Le HTML affiche ces événements séparément p
 épisode, sans joindre les trajectoires de plusieurs épisodes. Les statistiques
 de distance latérale utilisent la valeur absolue ; le log garde le signe.
 
-Le snapshot ECS transporte séparément dix entrées de rendu. La case
-`Show patrol waypoints`, persistée comme `Show patrol references`, contrôle les
-marqueurs `WP1` à `WP10` dans la vue 3D et la mini-carte. L'actif est doré, les
-futurs sont verts et les validés sont gris. Cet overlay est en lecture seule et
+La scène de l'équipe (`GeneralizedTeamScene`) transporte séparément les
+waypoints pour le rendu ; `blue_environment` les envoie dans la ligne
+`waypoints` du monde, et le Visualiseur `blue_visualiser` dessine les marqueurs
+`WP1` à `WP10` dans ppokit-viewer pendant leur suivi. L'actif est doré, les
+futurs sont verts et les validés sont gris. Ce rendu est en lecture seule et
 n'intervient ni dans la politique, ni dans la physique, ni dans les rewards.
 
 ## Validation attendue

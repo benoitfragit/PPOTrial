@@ -20,6 +20,9 @@
 #pragma once
 
 #include "flight_config.hpp"
+
+#include "ppokit/runtime/curriculum.hpp"
+
 #include <filesystem>
 #include <optional>
 
@@ -39,11 +42,11 @@ namespace ppo::examples::flight {
 class FlightCurriculum final
 {
 public:
-    explicit FlightCurriculum(CurriculumSettings const& settings) noexcept;
+    explicit FlightCurriculum(CurriculumSettings const& settings);
     /** @brief Current level, from 0 to Levels() - 1. */
     std::size_t Level() const noexcept
     {
-        return level_;
+        return engine_.Stage();
     }
     /** @brief Number of levels: the approach levels, then one level per stage. */
     std::size_t Levels() const noexcept
@@ -55,27 +58,41 @@ public:
     /** @brief Stops recorded in the current window. */
     std::size_t WindowStops() const noexcept
     {
-        return stops_;
+        return engine_.WindowSuccesses();
     }
     /** @brief Airborne episodes recorded in the current window. */
     std::size_t WindowEpisodes() const noexcept
     {
-        return episodes_;
+        return engine_.WindowEpisodes();
     }
     /**
      * @brief Records the outcome of an airborne training episode.
      * @param stopped True when the episode ended with a confirmed stop.
      * @return True when this episode completes a window that promotes the level.
      */
-    bool Record(bool stopped) noexcept;
+    bool Record(bool stopped);
+    /** @brief Common status snapshot shown by the Studio. */
+    std::string StatusJson() const { return engine_.StatusJson(); }
+    /** @brief Exact common-engine state embedded in the environment checkpoint. */
+    std::string StateJson() const { return engine_.StateJson(); }
+    /**
+     * @brief Restores and validates an exact common-engine state.
+     * @param state Versioned state produced by StateJson().
+     */
+    void RestoreJson(std::string const& state) { engine_.RestoreJson(state); }
     /** @brief Restores a saved level, clamped to the configured levels, with an empty window. */
     void Restore(std::size_t level) noexcept;
+    /**
+     * @brief Resumes a training run where it was saved: its level and its current window.
+     * @throws std::invalid_argument for a level beyond the configured ones or a window with
+     *         more stops than episodes.
+     */
+    void Resume(std::size_t level, std::size_t windowEpisodes, std::size_t windowStops);
 
 private:
     CurriculumSettings settings_;
-    std::size_t level_{};
-    std::size_t episodes_{};
-    std::size_t stops_{};
+    /** @brief The single PPOKit engine; this class only maps Flight level names and outcomes. */
+    ppokit::runtime::CurriculumEngine engine_;
 };
 
 /**

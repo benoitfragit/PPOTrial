@@ -5,29 +5,34 @@
  * Les implémentations sont accessibles via le navigateur de sources Doxygen.
  */
 #include "generalized_patrol_team_agent.hpp"
-#include "generalized_patrol_production_policy.hpp"
 #include "generalized_episode_outcome.hpp"
 #include "generalized_leader_succession.hpp"
 
 #include "generalized_cooperative_reward.hpp"
-#include "generalized_patrol_learner.hpp"
 #include "generalized_reward_shaping.hpp"
 #include "initializer.hpp"
 #include "components.hpp"
 #include "sharedworldcomponents.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
-#include <fstream>
 #include <iomanip>
-#include <limits>
 #include <iostream>
+#include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
-#include <utility>
 
 namespace ppo::examples::bluedefense::defenders {
 namespace {
+
+/**
+ * @brief Evaluation campaigns started in this process (their case 0). ppokit-run
+ *        creates one world per seed of a campaign, hence one controller per seed: the
+ *        campaign numbers of the diagnostic rows are those of the process.
+ */
+std::atomic<std::size_t> externalCampaignsStarted{0U};
 
 /**
  * @brief Réalise l'opération GeneralizedMobileFromEcs; voir les préconditions et effets dans son corps C++.
@@ -284,24 +289,15 @@ GeneralizedPatrolMappoAgent::GeneralizedPatrolMappoAgent(
     std::size_t const redCount,
     ppo::model::BaseEntity& objective,
     Parameters parameters,
-    PatrolTrainingSettings training,
-    GeneralizedPatrolExecutionMode const executionMode,
-    std::filesystem::path actorCheckpoint,
-    std::filesystem::path trainingCheckpoint,
-    std::filesystem::path productionCheckpoint)
+    PatrolTrainingSettings training)
     : registry_(objective.registry()), objectiveId_(objective.uniqid()),
       counts_{blueCount, redCount}, parameters_(parameters),
-      training_(training), executionMode_(executionMode),
-      actorCheckpoint_(std::move(actorCheckpoint)),
-      trainingCheckpoint_(std::move(trainingCheckpoint)),
-      productionCheckpoint_(std::move(productionCheckpoint)),
-      evaluation_(training.evaluation)
+      training_(training)
 {
     guardIds_.fill(entt::null);
     attackerIds_.fill(entt::null);
     if (registry_ == nullptr || !Valid(counts_) || !Valid(parameters_)
-        || !Valid(training_) || actorCheckpoint_.empty()
-        || trainingCheckpoint_.empty() || productionCheckpoint_.empty())
+        || !Valid(training_))
     {
         throw std::invalid_argument(
             "Invalid generalized blue MAPPO configuration");
@@ -321,61 +317,8 @@ GeneralizedPatrolMappoAgent::GeneralizedPatrolMappoAgent(
         }
         attackerIds_[index] = attackers[index]->uniqid();
     }
-
+    // The learner, the production actor and the campaigns live outside the world.
     rewardWeights_ = MapGeneralizedRewardWeights(training_);
-    if (executionMode_ != GeneralizedPatrolExecutionMode::Training)
-    {
-        productionPolicy_ =
-            std::make_unique<GeneralizedPatrolProductionPolicy>(
-                counts_, productionCheckpoint_);
-        std::cout << "[BLUE MAPPO V10] Loaded promoted production actor for "
-                     "deterministic inference.\n";
-        if (executionMode_ == GeneralizedPatrolExecutionMode::ProductionEvaluation)
-        {
-            // The initial ECS reset uses this first deterministic case.
-            // No learner or optimizer is constructed, and no actor is written.
-            evaluation_.Start();
-            PrepareEvaluationCase();
-            std::cout << "[BLUE MAPPO V10] Starting inference-only P="
-                      << counts_.blueMobiles << " N=" << counts_.redMobiles
-                      << " (" << evaluation_.TestCount() << " cases)\n";
-        }
-    }
-    else
-    {
-        learner_ = std::make_unique<GeneralizedPatrolLearner>(
-            counts_, training_.seed, training_.rolloutSteps);
-        if (std::filesystem::exists(trainingCheckpoint_))
-        {
-            // Observation v10 is semantically incompatible with v9. The strict
-            // reader checks its schema before mutating the actor or optimizer.
-            learner_->LoadTrainingState(trainingCheckpoint_);
-            std::cout << "[BLUE MAPPO V10] Resumed matching training update "
-                      << learner_->StepCount() << ".\n";
-        }
-        else if (std::filesystem::exists(actorCheckpoint_))
-        {
-            learner_->LoadActor(actorCheckpoint_);
-            std::cout << "[BLUE MAPPO V10] Loaded matching actor.\n";
-        }
-        else
-        {
-            std::cout << "[BLUE MAPPO V10] Fresh random actor and critic; update=0.\n";
-        }
-        lastSavedUpdate_ = learner_->StepCount();
-        finished_ = learner_->StepCount() >= training_.maxUpdates;
-        LoadPromotedScore();
-    }
-}
-
-/**
- * @brief Libère les ressources détenues par l'objet de GeneralizedPatrolMappoAgent.
- * @details Consulte ou modifie des composants ECS.
- */
-GeneralizedPatrolMappoAgent::~GeneralizedPatrolMappoAgent()
-{
-    if (executionMode_ == GeneralizedPatrolExecutionMode::Training)
-        SaveAtUpdateBoundary();
 }
 
 void GeneralizedPatrolMappoAgent::Init()
@@ -387,9 +330,8 @@ void GeneralizedPatrolMappoAgent::Init()
     noThreatLap_.Reset();
     roleRewardSums_ = {};
     roleRewardSteps_ = {};
-    currentReward_ = 0.F;
-    lastRewardChannels_.fill(0.F);
     hasBeforeStep_ = false;
+    externalPrepared_ = false;
     episodeDone_ = false;
 }
 
@@ -617,7 +559,7 @@ void GeneralizedPatrolMappoAgent::WritePatrolProgress(
         ? std::min(waypointSequencer_.ActiveWaypointIndex() + 1U,
             GeneralizedPatrolWaypointSequencer::WaypointCount) : 0U;
     std::cout << "[MAPPO_PATROL_PROGRESS] phase="
-              << (evaluation_.InProgress() ? "evaluation" : "training")
+              << (EvaluationEpisode() ? "evaluation" : "training")
               << " episode=" << diagnosticEpisode_
               << " P=" << counts_.blueMobiles << " N=" << counts_.redMobiles
               << " steps=" << episodeStep_ << " event=" << event
@@ -726,97 +668,357 @@ void GeneralizedPatrolMappoAgent::WritePatrolDiagnostics(
 }
 
 /**
- * @brief Capture l'état ECS, construit les observations v10 et calcule les commandes synchronisées; utilise l'acteur déterministe lors d'une campagne d'évaluation.
- * @details Consulte ou modifie des composants ECS.
+ * @brief Applies the actions ppokit-run's policy wrote for the observations of
+ *        PrepareExternalStep; errors reach the caller of the world step.
  */
 void GeneralizedPatrolMappoAgent::ChooseAction()
 {
-    bool const trainingMode =
-        executionMode_ == GeneralizedPatrolExecutionMode::Training;
-    if (episodeDone_
-        || (trainingMode && finished_ && !evaluation_.InProgress())
-        || (executionMode_ == GeneralizedPatrolExecutionMode::ProductionEvaluation
-            && finished_)
-        || registry_ == nullptr)
+    if (episodeDone_ || registry_ == nullptr)
         return;
-    try
-    {
-        Parameters const parameters = ReadParameters();
-        beforeStep_ = ReadState(parameters);
-        std::array<GeneralizedObservation,
-                   TeamCapacity::MaximumBlueMobiles> observations{};
-        BlueTeamRoles const& roles = Roles();
-        beforeTargets_ = waypointSequencer_.PhysicalTargets(
-            parameters, beforeStep_, roles, training_.noThreatPatrol);
-        if (registry_->ctx().contains<InitializerContext>())
-        {
-            auto& context = registry_->ctx().get<InitializerContext>();
-            PublishPatrolReferenceOverlay(
-                context, beforeTargets_, roles, beforeStep_);
-            PublishPatrolWaypointOverlay(context, waypointSequencer_);
-        }
-        BuildObservations(parameters, beforeStep_, observations, beforeTargets_);
+    if (!externalPrepared_)
+        throw std::logic_error("Blue step without PrepareExternalStep");
+    lastActions_ = exchange_.actions;
+    ApplyActions();
+    externalPrepared_ = false;
+}
 
-        beforeAvailability_.fill(false);
-        for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
-            beforeAvailability_[index] = beforeStep_.blues[index].available;
-        if (!trainingMode)
-        {
-            if (!productionPolicy_)
-                throw std::logic_error("Missing generalized production policy");
-            lastActions_ = productionPolicy_->Evaluate(
-                observations, beforeAvailability_);
-        }
-        else
-        {
-            lastActions_ = evaluation_.InProgress()
-                ? learner_->EvaluateActions(observations, beforeAvailability_)
-                : learner_->ChooseActions(observations, beforeAvailability_);
-        }
-        for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
-        {
-            ppo::model::BaseEntity blue{registry_, guardIds_[index]};
-            auto [control] = blue.get<ppo::model::sSNAControlState>();
-            control.m_rotSpeedCmd = Clamp(lastActions_[index][0], -1.F, 1.F);
-            control.m_accCmd = Clamp(lastActions_[index][1], -1.F, 1.F);
-        }
-        hasBeforeStep_ = true;
-    }
-    catch (std::exception const& error)
+/**
+ * @brief Reads the world before the step: state, targets, overlays, observations, blues alive.
+ */
+void GeneralizedPatrolMappoAgent::PrepareStep(
+    std::array<GeneralizedObservation, TeamCapacity::MaximumBlueMobiles>& observations)
+{
+    Parameters const parameters = ReadParameters();
+    beforeStep_ = ReadState(parameters);
+    BlueTeamRoles const& roles = Roles();
+    beforeTargets_ = waypointSequencer_.PhysicalTargets(
+        parameters, beforeStep_, roles, training_.noThreatPatrol);
+    if (registry_->ctx().contains<InitializerContext>())
     {
-        std::cerr << "[BLUE MAPPO V10][MAPPO_ERROR] caught_at="
-                  << __FILE__ << ':' << __LINE__
-                  << " phase=ChooseAction update="
-                  << (learner_ ? learner_->StepCount() : 0U)
-                  << " episode_step=" << episodeStep_
-                  << " cause=" << error.what() << '\n';
-        bool const initializationFailed =
-            registry_->ctx().contains<InitializerContext>()
-            && (registry_->ctx().get<InitializerContext>()
-                    .patrolGeometrySamplingFailed
-                || registry_->ctx().get<InitializerContext>()
-                    .episodeLayoutGenerationFailed);
-        if (evaluation_.InProgress())
+        auto& context = registry_->ctx().get<InitializerContext>();
+        PublishPatrolReferenceOverlay(
+            context, beforeTargets_, roles, beforeStep_);
+        PublishPatrolWaypointOverlay(context, waypointSequencer_);
+    }
+    BuildObservations(parameters, beforeStep_, observations, beforeTargets_);
+
+    beforeAvailability_.fill(false);
+    for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
+        beforeAvailability_[index] = beforeStep_.blues[index].available;
+}
+
+/**
+ * @brief Applies lastActions_, clamped, to the blue controls; the step awaits SetNewState.
+ */
+void GeneralizedPatrolMappoAgent::ApplyActions()
+{
+    for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
+    {
+        ppo::model::BaseEntity blue{registry_, guardIds_[index]};
+        auto [control] = blue.get<ppo::model::sSNAControlState>();
+        control.m_rotSpeedCmd = Clamp(lastActions_[index][0], -1.F, 1.F);
+        control.m_accCmd = Clamp(lastActions_[index][1], -1.F, 1.F);
+    }
+    hasBeforeStep_ = true;
+}
+
+bool GeneralizedPatrolMappoAgent::EvaluationEpisode() const noexcept
+{
+    return externalEvaluation_;
+}
+
+void GeneralizedPatrolMappoAgent::PrepareExternalStep()
+{
+    if (registry_ == nullptr)
+        throw std::logic_error("Blue controller without a world");
+    PrepareStep(exchange_.observations);
+    exchange_.available = beforeAvailability_;
+    CaptureScene(beforeStep_, beforeTargets_);
+    externalPrepared_ = true;
+}
+
+void GeneralizedPatrolMappoAgent::CaptureScene(
+    GeneralizedRuntimeState const& state, GeneralizedPatrolTargets const& targets)
+{
+    GeneralizedTeamScene& scene = exchange_.scene;
+    scene.state = state;
+    scene.targets = targets;
+    BlueTeamRoles const& roles = Roles();
+    scene.leader = roles.IsValid() ? roles.LeaderPhysicalIndex() : 0U;
+    // The defended area and the outer failure rectangle: half the world's bounds, the outer
+    // one scaled by hardBoundaryScale.
+    scene.hasDefendedArea = registry_->ctx().contains<ppo::model::sEnvironmentState>();
+    if (scene.hasDefendedArea)
+    {
+        auto const& world = registry_->ctx().get<ppo::model::sEnvironmentState>();
+        scene.defendedArea = {0.F, 0.F, 0.5F * world.m_maxNorth, 0.5F * world.m_maxEast};
+        scene.hardHalfNorth = scene.defendedArea.m_halfNorth * parameters_.hardBoundaryScale;
+        scene.hardHalfEast = scene.defendedArea.m_halfEast * parameters_.hardBoundaryScale;
+    }
+    scene.followingWaypoints = waypointSequencer_.Following();
+    scene.activeWaypoint = waypointSequencer_.ActiveWaypointIndex();
+    scene.validatedWaypoints = waypointSequencer_.ValidatedWaypointCount();
+    for (std::size_t index = 0U; index < scene.waypoints.size(); ++index)
+        scene.waypoints[index] = waypointSequencer_.Waypoints()[index].pose;
+    CaptureSceneOverlays(scene);
+}
+
+void GeneralizedPatrolMappoAgent::CaptureSceneOverlays(GeneralizedTeamScene& scene) const
+{
+    BlueTeamRoles const& roles = Roles();
+    for (std::size_t slot = 0U; slot < TeamCapacity::MaximumBlueMobiles; ++slot)
+    {
+        scene.roles[slot] = GeneralizedTeamScene::NoRole;
+        scene.blueCones[slot] = {};
+        scene.lidars[slot] = {};
+        if (slot >= counts_.blueMobiles)
+            continue;
+        if (roles.IsValid())
         {
-            evaluation_.Cancel();
-            RestoreTrainingInitializer();
+            auto const assignment = roles.Assignment(slot);
+            if (assignment && assignment->role == BlueRole::Leader)
+                scene.roles[slot] = GeneralizedTeamScene::LeaderRole;
+            else if (assignment)
+                scene.roles[slot] = static_cast<int>(assignment->formationSlot) + 1;
         }
-        if (trainingMode && learner_)
+        entt::entity const blue = guardIds_[slot];
+        if (!registry_->valid(blue))
+            continue;
+        if (auto const* sna = registry_->try_get<ppo::model::sSNAState>(blue))
+            scene.blueCones[slot] = {sna->m_noescapezone, sna->m_maxShootAngle};
+        if (auto const* lidar = registry_->try_get<ppo::model::sPseudoLidarState>(blue))
         {
-            learner_->AbortPendingStep();
-            if (learner_->OptimizationFailed())
-                finished_ = true; // Do not replay a possibly partial Adam update.
-        }
-        hasBeforeStep_ = false;
-        episodeDone_ = true;
-        if (initializationFailed)
-        {
-            finished_ = true;
-            std::cerr << "[BLUE MAPPO V10][MAPPO_FATAL] Episode bootstrap failed; "
-                         "stopping instead of retrying the same invalid reset.\n";
-            throw;
+            SceneLidar& target = scene.lidars[slot];
+            target.ranges = lidar->m_nearestCollisionRanges;
+            target.distances = lidar->m_nearestCollisionDistances;
+            target.span = lidar->m_angleSpanRadians;
+            target.valid = true;
         }
     }
+    for (std::size_t red = 0U; red < TeamCapacity::MaximumRedMobiles; ++red)
+    {
+        scene.redCones[red] = {};
+        entt::entity const id = attackerIds_[red];
+        if (red < counts_.redMobiles && registry_->valid(id))
+        {
+            if (auto const* sna = registry_->try_get<ppo::model::sSNAState>(id))
+                scene.redCones[red] = {sna->m_noescapezone, sna->m_maxShootAngle};
+        }
+    }
+    scene.zoneCount = 0U;
+    auto zones = registry_->view<ppo::model::sEntityState, ppo::model::sSNAState>();
+    for (entt::entity const zone : zones)
+    {
+        auto const& state = zones.get<ppo::model::sEntityState>(zone);
+        if (state.m_type != ppo::model::eEntityType::RestrictedZone || state.m_destroyed)
+            continue;
+        if (scene.zoneCount < GeneralizedTeamScene::ZoneCapacity)
+        {
+            scene.zones[scene.zoneCount] = {state.m_x, state.m_y,
+                zones.get<ppo::model::sSNAState>(zone).m_noescapezone,
+                state.m_side == ppo::model::eEntitySide::Hostile};
+        }
+        ++scene.zoneCount;
+    }
+    scene.track = {};
+    scene.references = {};
+    if (registry_->ctx().contains<InitializerContext>())
+    {
+        auto const& context = registry_->ctx().get<InitializerContext>();
+        if (context.patrolGeometryReady && context.patrolTrackOverlay.m_sampleCount >= 2U)
+            scene.track = context.patrolTrackOverlay;
+        if (context.patrolReferenceOverlay.Valid())
+            scene.references = context.patrolReferenceOverlay;
+    }
+}
+
+void GeneralizedPatrolMappoAgent::PublishExternalStep(
+    std::array<GeneralizedObservation, TeamCapacity::MaximumBlueMobiles> const& observations,
+    std::array<bool, TeamCapacity::MaximumBlueMobiles> const& availability,
+    std::array<float, TeamCapacity::MaximumBlueMobiles> const& rewards,
+    GeneralizedCooperativeRewards const& breakdown, bool const terminated, bool const truncated,
+    GeneralizedEvaluationSample const& sample)
+{
+    exchange_.next = observations;
+    exchange_.nextAvailable = availability;
+    exchange_.rewards = rewards;
+    // Weighted channels per slot (before the clamp), for the journal of ppokit-run.
+    for (std::size_t index = 0U; index < TeamCapacity::MaximumBlueMobiles; ++index)
+    {
+        for (std::size_t channel = 0U; channel < rewardWeights_.size(); ++channel)
+        {
+            exchange_.weightedChannels[index][channel] = index < counts_.blueMobiles
+                ? rewardWeights_[channel] * breakdown.perBlue[index].values[channel]
+                : 0.F;
+        }
+    }
+    exchange_.terminated = terminated;
+    exchange_.truncated = truncated;
+    if (!terminated && !truncated)
+        return;
+    // The episode results with the roles after the step.
+    if (EvaluateGeneralizedEpisode(Roles(), sample, exchange_.episode)
+        != GeneralizedEvaluationStatus::Recorded)
+    {
+        throw std::runtime_error("Invalid generalized patrol evaluation sample");
+    }
+}
+
+void GeneralizedPatrolMappoAgent::StartExternalEvaluationCase(
+    GeneralizedEvaluationCase const& test, std::size_t const caseIndex)
+{
+    if (registry_ == nullptr
+        || !registry_->ctx().contains<InitializerContext>())
+    {
+        throw std::runtime_error(
+            "Missing initializer context for generalized evaluation case");
+    }
+    // The case's reset: its patrol side and racetrack phase, from its seed.
+    auto& context = registry_->ctx().get<InitializerContext>();
+    context.evaluationOverride = true;
+    context.evaluationSide = test.side;
+    context.evaluationPhaseFraction = test.phaseFraction;
+    context.rng.seed(test.seed);
+    context.next = 0U;
+    externalEvaluation_ = true;
+    // The case numbers of the diagnostic rows: a campaign starts at its case 0.
+    externalCampaign_ = caseIndex == 0U
+        ? externalCampaignsStarted.fetch_add(1U) + 1U
+        : externalCampaignsStarted.load();
+    externalCase_ = test;
+    externalCaseIndex_ = caseIndex;
+}
+
+void GeneralizedPatrolMappoAgent::EndExternalEvaluation() noexcept
+{
+    if (!externalEvaluation_)
+        return;
+    RestoreTrainingInitializer();
+    externalEvaluation_ = false;
+}
+
+GeneralizedPatrolMappoAgent::EvaluationCaseLabel
+GeneralizedPatrolMappoAgent::ExternalCaseLabel() const noexcept
+{
+    return {externalCampaign_, externalCaseIndex_ + 1U, externalCase_.seed};
+}
+
+char const* GeneralizedPatrolMappoAgent::EvaluationTerminal(
+    GeneralizedRuntimeState const& after, bool const noThreatRemains,
+    bool const patrolCompleted, bool const truncated) const noexcept
+{
+    std::size_t const livingBlue = AliveCount(after.blues, counts_.blueMobiles);
+    if (!after.objectiveAvailable)
+        return "objective_lost";
+    if (livingBlue == 0U)
+        return "all_blues_lost";
+    if (noThreatRemains)
+        return "reds_cleared";
+    if (after.failed)
+        return "boundary_failure";
+    if (patrolCompleted)
+        return "patrol_complete";
+    return truncated ? "timeout" : "unknown";
+}
+
+void GeneralizedPatrolMappoAgent::WriteEvaluationLosses(
+    EvaluationCaseLabel const& label, GeneralizedRuntimeState const& after) const
+{
+    for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
+    {
+        if (!beforeStep_.blues[index].available
+            || after.blues[index].available)
+            continue;
+
+        entt::entity const blueId = guardIds_[index];
+        auto const* flight = registry_->valid(blueId)
+            ? registry_->try_get<ppo::model::sFlightModelState>(blueId)
+            : nullptr;
+        bool const lowSpeed = flight != nullptr
+            && 2.F * after.blues[index].speed < flight->m_minSpeed;
+        bool const fuelEmpty = flight != nullptr
+            && flight->m_fuel
+                < std::numeric_limits<float>::epsilon();
+
+        // Each row in one write: other output never cuts it.
+        std::ostringstream row;
+        row << "[MAPPO_EVAL_LOSS]";
+        row << " campaign=" << label.campaign
+                  << " case=" << label.caseNumber
+                  << " seed=" << label.seed
+                  << " step=" << episodeStep_
+                  << " blue=blue_" << index + 1U
+                  << " source=" << GeneralizedBlueLossCause(
+                         *registry_, blueId)
+                  << " speed_before=" << beforeStep_.blues[index].speed
+                  << " speed=" << after.blues[index].speed
+                  << " accel_cmd=" << lastActions_[index][1]
+                  << " flight_model=" << static_cast<int>(flight != nullptr)
+                  << " low_speed=" << static_cast<int>(lowSpeed)
+                  << " fuel_empty=" << static_cast<int>(fuelEmpty);
+        if (flight != nullptr)
+            row << " min_speed=" << flight->m_minSpeed
+                      << " low_speed_threshold=" << 0.5F * flight->m_minSpeed
+                      << " fuel_remaining=" << flight->m_fuel
+                      << " fuel_capacity=" << flight->m_maxfuel;
+        row << '\n';
+        std::cout << row.str() << std::flush;
+    }
+}
+
+void GeneralizedPatrolMappoAgent::WriteEvaluationEpisode(
+    EvaluationCaseLabel const& label, GeneralizedRuntimeState const& after,
+    char const* const terminal, GeneralizedEvaluationSample const& sample) const
+{
+    std::size_t const livingBlue = AliveCount(after.blues, counts_.blueMobiles);
+    std::size_t const livingRed = AliveCount(after.reds, counts_.redMobiles);
+    // The row in one write: other output never cuts it.
+    std::ostringstream row;
+    row << "[MAPPO_EVAL_EPISODE]";
+    row << " campaign=" << label.campaign
+              << " case=" << label.caseNumber
+              << " seed=" << label.seed
+              << " steps=" << episodeStep_
+              << " P=" << counts_.blueMobiles
+              << " N=" << counts_.redMobiles
+              << " blue_alive=" << livingBlue
+              << " red_alive=" << livingRed
+              << " objective_alive=" << after.objectiveAvailable
+              << " leader_alive="
+              << after.blues[Roles().LeaderPhysicalIndex()].available
+              << " terminal=" << terminal;
+    for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
+    {
+        row << " blue_" << index + 1U << '='
+                  << GeneralizedBlueLossCause(
+                         *registry_, guardIds_[index]);
+    }
+    // The episode's normalized qualities, as the campaign averages them.
+    GeneralizedEpisodeEvaluation episodeResult{};
+    if (EvaluateGeneralizedEpisode(Roles(), sample, episodeResult)
+        == GeneralizedEvaluationStatus::Recorded)
+    {
+        row << std::setprecision(9)
+                  << " patrol_quality=" << episodeResult.patrolQuality
+                  << " formation_quality=" << episodeResult.formationQuality
+                  << std::setprecision(6);
+    }
+    row << '\n';
+    std::cout << row.str() << std::flush;
+}
+
+void GeneralizedPatrolMappoAgent::SetRewardWeights(GeneralizedRewardValues const& weights)
+{
+    for (std::size_t index = 0; index < weights.size(); ++index)
+    {
+        float const weight = weights[index];
+        // The historical slider limits only changed channels. The configured
+        // own-loss weight is 24 and must survive changes to other channels.
+        if (!std::isfinite(weight) || weight < 0.F
+            || (weight > 10.F && weight != rewardWeights_[index]))
+            throw std::invalid_argument("Changed Blue reward weights must be finite, from 0 to 10");
+    }
+    rewardWeights_ = weights;
 }
 
 /**
@@ -912,7 +1114,7 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
             after, pendingThreats, waypointSequencer_,
             Roles().LeaderPhysicalIndex(), lapCompleted,
             training_.noThreatPatrol, parameters.dt, episodeStep_,
-            evaluation_.InProgress()
+            EvaluationEpisode()
                 ? training_.evaluation.maxSteps : parameters.episodeSteps);
         bool const noThreatRemains = outcome.noThreatRemains;
         bool const patrolCompleted = outcome.patrolCompleted;
@@ -920,144 +1122,10 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         bool const terminated = outcome.terminated;
         bool const truncated = outcome.truncated;
 
-        if (executionMode_
-            == GeneralizedPatrolExecutionMode::ProductionInference)
-        {
-            // Production inference owns no reward, rollout, optimizer,
-            // checkpoint, or evaluation path. The ECS still controls mission
-            // termination and resets exactly as it does during training.
-            hasBeforeStep_ = false;
-            episodeDone_ = terminated || truncated;
-            currentReward_ = 0.F;
-            lastRewardChannels_.fill(0.F);
-            return episodeDone_;
-        }
-
         if (waypointUpdate != GeneralizedWaypointUpdate::Invalidated
             || sequenceWasValid)
         {
             WritePatrolProgress(parameters, waypointUpdate);
-        }
-
-        if (evaluation_.InProgress())
-        {
-            evaluation_.ObserveStep();
-            // Diagnostics only: record the first alive-to-destroyed transition.
-            // The ECS remains authoritative; no physics or training input changes.
-            for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
-            {
-                if (!beforeStep_.blues[index].available
-                    || after.blues[index].available)
-                    continue;
-
-                entt::entity const blueId = guardIds_[index];
-                auto const* flight = registry_->valid(blueId)
-                    ? registry_->try_get<ppo::model::sFlightModelState>(blueId)
-                    : nullptr;
-                bool const lowSpeed = flight != nullptr
-                    && 2.F * after.blues[index].speed < flight->m_minSpeed;
-                bool const fuelEmpty = flight != nullptr
-                    && flight->m_fuel
-                        < std::numeric_limits<float>::epsilon();
-                auto const test = evaluation_.CurrentCase();
-
-                std::cout << "[MAPPO_EVAL_LOSS] update="
-                          << (learner_ ? learner_->StepCount() : 0U)
-                          << " campaign=" << evaluation_.CompletedCampaigns() + 1U
-                          << " case=" << evaluation_.TestsFinished() + 1U
-                          << " seed=" << test.seed
-                          << " step=" << episodeStep_
-                          << " blue=blue_" << index + 1U
-                          << " source=" << GeneralizedBlueLossCause(
-                                 *registry_, blueId)
-                          << " speed_before=" << beforeStep_.blues[index].speed
-                          << " speed=" << after.blues[index].speed
-                          << " accel_cmd=" << lastActions_[index][1]
-                          << " flight_model=" << static_cast<int>(flight != nullptr)
-                          << " low_speed=" << static_cast<int>(lowSpeed)
-                          << " fuel_empty=" << static_cast<int>(fuelEmpty);
-                if (flight != nullptr)
-                    std::cout << " min_speed=" << flight->m_minSpeed
-                              << " low_speed_threshold=" << 0.5F * flight->m_minSpeed
-                              << " fuel_remaining=" << flight->m_fuel
-                              << " fuel_capacity=" << flight->m_maxfuel;
-                std::cout << '\n';
-            }
-            hasBeforeStep_ = false;
-            episodeDone_ = terminated || truncated;
-            currentReward_ = 0.F;
-            if (episodeDone_)
-            {
-                WritePatrolDiagnostics(parameters, after, afterTargets,
-                    "evaluation", outcome.DiagnosticCause());
-                // One bounded diagnostic row per evaluation episode. The
-                // production physics and the training rollout stay untouched.
-                auto const test = evaluation_.CurrentCase();
-                std::size_t const livingBlue =
-                    AliveCount(after.blues, counts_.blueMobiles);
-                std::size_t const livingRed =
-                    AliveCount(after.reds, counts_.redMobiles);
-                char const* const outcome = !after.objectiveAvailable
-                    ? "objective_lost"
-                    : livingBlue == 0U ? "all_blues_lost"
-                    : noThreatRemains ? "reds_cleared"
-                    : after.failed ? "boundary_failure"
-                    : patrolCompleted ? "patrol_complete"
-                    : truncated ? "timeout" : "unknown";
-                std::cout << "[MAPPO_EVAL_EPISODE] update="
-                          << (learner_ ? learner_->StepCount() : 0U)
-                          << " campaign=" << evaluation_.CompletedCampaigns() + 1U
-                          << " case=" << evaluation_.TestsFinished() + 1U
-                          << " seed=" << test.seed
-                          << " steps=" << episodeStep_
-                          << " P=" << counts_.blueMobiles
-                          << " N=" << counts_.redMobiles
-                          << " blue_alive=" << livingBlue
-                          << " red_alive=" << livingRed
-                          << " objective_alive=" << after.objectiveAvailable
-                          << " leader_alive="
-                          << after.blues[Roles().LeaderPhysicalIndex()].available
-                          << " terminal=" << outcome;
-                for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
-                {
-                    std::cout << " blue_" << index + 1U << '='
-                              << GeneralizedBlueLossCause(
-                                     *registry_, guardIds_[index]);
-                }
-                std::cout << '\n';
-                bool const hasMore = evaluation_.FinishEpisode(
-                    Roles(), BuildEvaluationSample(
-                        parameters, after,
-                        missionFailed, truncated, patrolCompleted, afterTargets));
-                if (hasMore)
-                {
-                    PrepareEvaluationCase();
-                }
-                else
-                {
-                    RestoreTrainingInitializer();
-                    if (executionMode_ == GeneralizedPatrolExecutionMode::Training
-                        && evaluation_.Improved())
-                        PromoteEvaluatedActor();
-                    if (executionMode_
-                        == GeneralizedPatrolExecutionMode::ProductionEvaluation)
-                        finished_ = true;
-                    GeneralizedEvaluationMetrics const metrics =
-                        evaluation_.Metrics();
-                    std::cout << "[BLUE MAPPO V10] Evaluation #"
-                              << evaluation_.CompletedCampaigns()
-                              << " P=" << counts_.blueMobiles
-                              << " N=" << counts_.redMobiles
-                              << " score=" << metrics.score
-                              << " success=" << metrics.missionSuccessRate
-                              << " blue-survival=" << metrics.blueSurvivalRate
-                              << " red-neutralization="
-                              << metrics.redNeutralizationRate
-                              << " objective-survival="
-                              << metrics.objectiveSurvivalRate << '\n';
-                }
-            }
-            return episodeDone_;
         }
 
         GeneralizedRewardTransition transition{};
@@ -1153,17 +1221,13 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
         {
             throw std::runtime_error("Invalid generalized reward transition");
         }
-        GeneralizedPatrolLearner::Rewards rewards{};
-        float rewardSum = 0.F;
-        std::size_t rewardCount = 0U;
+        std::array<float, TeamCapacity::MaximumBlueMobiles> rewards{};
         for (std::size_t index = 0U; index < counts_.blueMobiles; ++index)
         {
             rewards[index] = rewardBreakdown.perBlue[index].Total(
                 rewardSettings);
             if (beforeAvailability_[index])
             {
-                rewardSum += rewards[index];
-                ++rewardCount;
                 std::size_t const role = roles.Assignment(index)->role == BlueRole::Leader
                     ? 0U : 1U;
                 ++roleRewardSteps_[role];
@@ -1172,155 +1236,41 @@ bool GeneralizedPatrolMappoAgent::SetNewState()
                         * rewardBreakdown.perBlue[index].values[channel];
             }
         }
-        currentReward_ = rewardCount == 0U ? 0.F
-            : rewardSum / static_cast<float>(rewardCount);
-        lastRewardChannels_ = rewardBreakdown.team.values;
+        if (externalEvaluation_)
+            WriteEvaluationLosses(ExternalCaseLabel(), after);
         if (terminated || truncated)
             WritePatrolDiagnostics(parameters, after, afterTargets,
-                "training", outcome.DiagnosticCause());
+                externalEvaluation_ ? "evaluation" : "training", outcome.DiagnosticCause());
 
-        bool const updated = learner_->Observe(
-            observations, rewards, availability, terminated, truncated);
+        GeneralizedEvaluationSample sample{};
+        if (terminated || truncated)
+            sample = BuildEvaluationSample(parameters, after,
+                missionFailed, truncated, patrolCompleted, afterTargets);
+        if (externalEvaluation_ && (terminated || truncated))
+        {
+            WriteEvaluationEpisode(ExternalCaseLabel(), after,
+                EvaluationTerminal(after, noThreatRemains, patrolCompleted, truncated), sample);
+        }
+        PublishExternalStep(observations, availability, rewards,
+            rewardBreakdown, terminated, truncated, sample);
+        CaptureScene(after, afterTargets);
         hasBeforeStep_ = false;
         episodeDone_ = terminated || truncated;
-        if (updated)
-        {
-            finished_ = learner_->StepCount() >= training_.maxUpdates;
-            bool const evaluate = ShouldEvaluateGeneralizedUpdate(
-                learner_->StepCount(), training_.checkpointEvery, finished_);
-            SaveAtUpdateBoundary(evaluate);
-            if (evaluate)
-            {
-                StartEvaluation();
-                episodeDone_ = true;
-            }
-        }
-        // A PPO update is an optimizer boundary, not an episode boundary.
-        // Continuing here is essential when an episode spans several
-        // rollouts (for example N=0 with a 4096-step horizon and a 2048-step
-        // rollout). Only the physical mission outcome requests an ECS reset.
         return episodeDone_;
     }
     catch (std::exception const& error)
     {
         std::cerr << "[BLUE MAPPO V10][MAPPO_ERROR] caught_at="
                   << __FILE__ << ':' << __LINE__
-                  << " phase=SetNewState update="
-                  << (learner_ ? learner_->StepCount() : 0U)
-                  << " episode_step=" << episodeStep_
-                  << " collected="
-                  << (learner_ ? learner_->CollectedTeamSteps() : 0U)
-                  << " capacity="
-                  << (learner_ ? learner_->RolloutSize() : 0U)
+                  << " phase=SetNewState episode_step=" << episodeStep_
                   << " cause=" << error.what() << '\n';
-        if (evaluation_.InProgress())
-        {
-            evaluation_.Cancel();
-            RestoreTrainingInitializer();
-        }
-        if (learner_)
-        {
-            learner_->AbortPendingStep();
-            if (learner_->OptimizationFailed())
-                finished_ = true; // Fail-stop until a valid checkpoint is loaded.
-        }
         hasBeforeStep_ = false;
         episodeDone_ = true;
         return true;
     }
 }
 
-/**
- * @brief Enregistre l'acteur et l'état complet uniquement à une frontière PPO stable et selon la cadence configurée.
- * @details Consulte ou modifie des composants ECS.
- */
-void GeneralizedPatrolMappoAgent::SaveAtUpdateBoundary(
-    bool const force) noexcept
-{
-    if (!learner_ || learner_->HasPendingAction()
-        || learner_->CollectedTeamSteps() != 0U
-        || learner_->StepCount() == lastSavedUpdate_)
-    {
-        return;
-    }
-    if (!force
-        && learner_->StepCount() % training_.saveEveryUpdates != 0U
-        && learner_->StepCount() < training_.maxUpdates)
-    {
-        return;
-    }
-    try
-    {
-        learner_->SaveActor(actorCheckpoint_);
-        learner_->SaveTrainingState(trainingCheckpoint_);
-        lastSavedUpdate_ = learner_->StepCount();
-        std::cout << "[BLUE MAPPO V10] Saved actor and training checkpoint at update "
-                  << lastSavedUpdate_ << '\n';
-    }
-    catch (std::exception const& error)
-    {
-        std::cerr << "[BLUE MAPPO V10] Checkpoint failed: "
-                  << error.what() << '\n';
-    }
-}
-
-/**
- * @brief Sauvegarde le RNG de l'entraînement et lance les épisodes de campagne déterministes sans collecter de rollout.
- * @details Consulte ou modifie des composants ECS. Peut signaler un état invalide par exception.
- */
-void GeneralizedPatrolMappoAgent::StartEvaluation()
-{
-    if (registry_ == nullptr
-        || !registry_->ctx().contains<InitializerContext>())
-    {
-        throw std::runtime_error(
-            "Missing initializer context for generalized evaluation");
-    }
-    auto& context = registry_->ctx().get<InitializerContext>();
-    trainingRng_ = context.rng;
-    trainingRngSaved_ = true;
-    evaluation_.Start();
-    try
-    {
-        PrepareEvaluationCase();
-    }
-    catch (...)
-    {
-        evaluation_.Cancel();
-        RestoreTrainingInitializer();
-        throw;
-    }
-    std::cout << "[BLUE MAPPO V10] Starting deterministic P="
-              << counts_.blueMobiles << " N=" << counts_.redMobiles
-              << " evaluation after update " << learner_->StepCount()
-              << " (" << evaluation_.TestCount() << " cases)\n";
-}
-
-/**
- * @brief Configure la graine, la direction et la phase de l'hippodrome pour le prochain cas d'évaluation.
- * @details Consulte ou modifie des composants ECS. Peut signaler un état invalide par exception.
- */
-void GeneralizedPatrolMappoAgent::PrepareEvaluationCase()
-{
-    if (registry_ == nullptr
-        || !registry_->ctx().contains<InitializerContext>())
-    {
-        throw std::runtime_error(
-            "Missing initializer context for generalized evaluation case");
-    }
-    GeneralizedEvaluationCase const test = evaluation_.CurrentCase();
-    auto& context = registry_->ctx().get<InitializerContext>();
-    context.evaluationOverride = true;
-    context.evaluationSide = test.side;
-    context.evaluationPhaseFraction = test.phaseFraction;
-    context.rng.seed(test.seed);
-    context.next = 0U;
-}
-
-/**
- * @brief Désactive les overrides de campagne et restaure le RNG de formation.
- * @details Consulte ou modifie des composants ECS.
- */
+/** @brief Ends an evaluation case's reset overrides: the next reset draws a training episode. */
 void GeneralizedPatrolMappoAgent::RestoreTrainingInitializer() noexcept
 {
     if (registry_ == nullptr
@@ -1332,212 +1282,6 @@ void GeneralizedPatrolMappoAgent::RestoreTrainingInitializer() noexcept
     context.evaluationOverride = false;
     context.next = 0U;
     context.ClearEpisodeInitializationFailures();
-    if (trainingRngSaved_)
-    {
-        context.rng = trainingRng_;
-        trainingRngSaved_ = false;
-    }
-}
-
-/**
- * @brief Sauvegarde le meilleur acteur évalué et sa note après une campagne réussie.
- * @details Utilise des fichiers ou chemins.
- */
-void GeneralizedPatrolMappoAgent::PromoteEvaluatedActor() noexcept
-{
-    try
-    {
-        learner_->SaveActor(productionCheckpoint_);
-        SavePromotedScore();
-        std::cout << "[BLUE MAPPO V10] Promoted evaluated generalized actor to "
-                  << productionCheckpoint_.string() << '\n';
-    }
-    catch (std::exception const& error)
-    {
-        std::cerr << "[BLUE MAPPO V10] Actor promotion failed: "
-                  << error.what() << '\n';
-    }
-}
-
-/**
- * @brief Lit la note du meilleur acteur précédemment promu.
- * @details Utilise des fichiers ou chemins.
- */
-void GeneralizedPatrolMappoAgent::LoadPromotedScore() noexcept
-{
-    try
-    {
-        if (!std::filesystem::exists(productionCheckpoint_))
-            return;
-        auto scorePath = productionCheckpoint_;
-        scorePath += ".score";
-        std::ifstream stream{scorePath};
-        std::string magic;
-        std::size_t blueCount = 0U;
-        std::size_t redCount = 0U;
-        float score = 0.F;
-        if (stream >> magic >> blueCount >> redCount >> score
-            && magic == "BLUE_PATROL_GENERALIZED_EVALUATION_V1"
-            && blueCount == counts_.blueMobiles
-            && redCount == counts_.redMobiles)
-        {
-            evaluation_.RestoreBestScore(score);
-        }
-    }
-    catch (...)
-    {
-        // Optional malformed metadata only forces a fresh evaluation baseline.
-    }
-}
-
-/**
- * @brief Sauvegarde la note de promotion avec remplacement transactionnel du fichier.
- * @details Utilise des fichiers ou chemins. Peut signaler un état invalide par exception.
- */
-void GeneralizedPatrolMappoAgent::SavePromotedScore()
-{
-    auto scorePath = productionCheckpoint_;
-    scorePath += ".score";
-    if (scorePath.has_parent_path())
-        std::filesystem::create_directories(scorePath.parent_path());
-    auto temporary = scorePath;
-    temporary += ".tmp";
-    auto backup = scorePath;
-    backup += ".bak";
-    {
-        std::ofstream stream{temporary, std::ios::trunc};
-        if (!stream)
-            throw std::runtime_error(
-                "Cannot create generalized blue evaluation score");
-        stream << "BLUE_PATROL_GENERALIZED_EVALUATION_V1 "
-               << counts_.blueMobiles << ' ' << counts_.redMobiles << ' '
-               << std::setprecision(9) << evaluation_.BestScore() << '\n';
-        if (!stream)
-            throw std::runtime_error(
-                "Cannot write generalized blue evaluation score");
-    }
-    std::error_code ignored;
-    std::filesystem::remove(backup, ignored);
-    bool const existed = std::filesystem::exists(scorePath);
-    if (existed)
-        std::filesystem::rename(scorePath, backup);
-    try
-    {
-        std::filesystem::rename(temporary, scorePath);
-    }
-    catch (...)
-    {
-        if (existed)
-            std::filesystem::rename(backup, scorePath);
-        throw;
-    }
-    if (existed)
-        std::filesystem::remove(backup, ignored);
-}
-
-/**
- * @brief Applique les commandes utilisateur et les réglages de récompense après vérification des valeurs.
- */
-void GeneralizedPatrolMappoAgent::ProcessCommand(
-    ppo::model::sAgentRealTimeCommand const& command) noexcept
-{
-    if (command.m_id != id_
-        || executionMode_
-            == GeneralizedPatrolExecutionMode::ProductionInference)
-        return;
-    if (command.m_type
-        == ppo::model::sAgentRealTimeCommand::eTypeCommand::RewardClamp
-        && std::isfinite(command.m_rewardClamp)
-        && command.m_rewardClamp > 0.F)
-    {
-        training_.rewardClamp = command.m_rewardClamp;
-    }
-    else if (command.m_type
-        == ppo::model::sAgentRealTimeCommand::eTypeCommand::RewardScaling
-        && command.m_rewardScalingType < rewardWeights_.size()
-        && std::isfinite(command.m_rewardScaling)
-        && command.m_rewardScaling >= 0.F
-        && command.m_rewardScaling <= 10.F)
-    {
-        rewardWeights_[command.m_rewardScalingType] =
-            command.m_rewardScaling;
-    }
-}
-
-ppo::model::sAgentStateSnaphot
-/**
- * @brief Publie le snapshot du contrôleur, de la collecte PPO, des rewards et de l'évaluation pour la télémétrie et l'IHM.
- * @details Applique des bornes numériques.
- */
-GeneralizedPatrolMappoAgent::GetSnapshot() const noexcept
-{
-    ppo::model::sAgentStateSnaphot snapshot{};
-    snapshot.m_id = id_;
-    bool const trainingMode =
-        executionMode_ == GeneralizedPatrolExecutionMode::Training;
-    snapshot.m_name = trainingMode
-        ? "Blue generalized shared MAPPO"
-        : (executionMode_ == GeneralizedPatrolExecutionMode::ProductionEvaluation
-            ? "Blue generalized MAPPO inference evaluation"
-            : "Blue generalized MAPPO production inference");
-    snapshot.m_common.m_step = static_cast<long long>(episodeStep_);
-    snapshot.m_common.m_maxStep = static_cast<long long>(
-        trainingMode ? training_.rolloutSteps : parameters_.episodeSteps);
-    snapshot.m_common.m_reward = currentReward_;
-    snapshot.m_common.m_rewardClamp = training_.rewardClamp;
-    snapshot.m_common.m_checkpoint = static_cast<unsigned int>(
-        trainingMode ? training_.checkpointEvery : 0U);
-    // The renderer uses m_version as the completed PPO update counter.
-    // The observation schema version remains in the V10 policy checkpoint.
-    snapshot.m_common.m_version = learner_
-        ? static_cast<unsigned int>(std::min<std::uint64_t>(
-            learner_->StepCount(), std::numeric_limits<unsigned int>::max()))
-        : 0U;
-    snapshot.m_common.m_done = episodeDone_;
-    snapshot.m_common.m_training = trainingMode
-        && !finished_ && !evaluation_.InProgress();
-    if (trainingMode && learner_)
-    {
-        snapshot.m_common.m_step = static_cast<long long>(
-            learner_->CollectedTeamSteps());
-    }
-    if (trainingMode
-        || executionMode_ == GeneralizedPatrolExecutionMode::ProductionEvaluation)
-    {
-        GeneralizedEvaluationMetrics const metrics = evaluation_.Metrics();
-        snapshot.m_common.m_notation = evaluation_.BestScore();
-        snapshot.m_common.m_latestEvaluationNotation = metrics.score;
-        snapshot.m_common.m_completedEvaluations =
-            evaluation_.CompletedCampaigns();
-        snapshot.m_common.m_hasLatestEvaluation = evaluation_.HasLatest();
-        snapshot.m_common.m_latestEvaluationSuccessRate =
-            metrics.missionSuccessRate;
-        snapshot.m_common.m_latestEvaluationSurvivalRate =
-            metrics.blueSurvivalRate;
-        snapshot.m_common.m_latestEvaluationTestCount =
-            static_cast<unsigned int>(evaluation_.TestCount());
-        snapshot.m_common.m_evaluationTestsFinished =
-            static_cast<unsigned int>(evaluation_.TestsFinished());
-        snapshot.m_common.m_evaluationTimeoutTests =
-            static_cast<unsigned int>(std::lround(
-                metrics.timeoutRate * static_cast<float>(metrics.episodes)));
-        snapshot.m_common.m_latestEvaluationTimeoutRate = metrics.timeoutRate;
-        snapshot.m_common.m_evaluationStepsExecuted =
-            evaluation_.StepsExecuted();
-        snapshot.m_common.m_evaluationStepsPerSecond =
-            evaluation_.StepsPerSecond();
-        snapshot.m_common.m_evaluationElapsedSeconds =
-            evaluation_.ElapsedSeconds();
-        snapshot.m_common.m_evaluationprogress = evaluation_.Progress();
-        snapshot.m_common.m_evaluationinprogress = evaluation_.InProgress();
-    }
-    snapshot.m_scalings.assign(
-        rewardWeights_.begin(), rewardWeights_.end());
-    snapshot.m_rewards.assign(
-        lastRewardChannels_.begin(), lastRewardChannels_.end());
-    snapshot.m_rewardnames.assign(kGeneralizedRewardChannelNames.begin(),
-                                  kGeneralizedRewardChannelNames.end());
-    return snapshot;
 }
 
 } // namespace ppo::examples::bluedefense::defenders

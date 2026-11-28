@@ -1,0 +1,11 @@
+{
+  "schema": "ppokit.eval/1",
+  "suite": "campaign",
+  "seeds": { "first": 0, "count": 100 },
+  "episodes": 1,
+  "policy": "deterministic",
+  "during_training": { "every_updates": 5 },
+  "best": [
+    { "metric": "score.mean", "prefer": "higher" }
+  ]
+}

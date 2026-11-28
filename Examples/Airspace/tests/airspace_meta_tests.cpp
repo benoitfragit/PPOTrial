@@ -24,22 +24,6 @@ int main()
     ppo::examples::airspace::RegisterAirspaceMeta();
     ppo::examples::airspace::RegisterAirspaceMeta();
 
-    for (auto const* name : {"Aircraft", "SAM", "Mobile", "RestrictedZone", "Objective",
-                             "SNATrainingAgent", "SNAProdAgent",
-                             "TargetSelectorTrainingAgent", "TargetSelectorProdAgent",
-                             "SNAState", "FlightModelState", "PseudoLidarState",
-                             "InterceptionStateModel", "MissionStateModel"})
-    {
-        if (!ResolveType(name))
-            throw std::runtime_error(name);
-    }
-
-
-    // Each pair of scenario names must resolve to the same reflected C++ class.
-    if (ResolveType("Aircraft") != ResolveType("Mobile")
-        || ResolveType("SAM") != ResolveType("RestrictedZone"))
-        throw std::runtime_error("Legacy reflection aliases do not match");
-
     ppo::model::Environment env;
     auto objective = CreateEntity("Objective", env, "", ppo::model::eEntitySide::Friend);
     if (objective == nullptr || !objective->has<ppo::model::sEntityState>())
@@ -68,5 +52,13 @@ int main()
     }
     if (CreateEntity("NoSuchEntity", env, "", ppo::model::eEntitySide::Friend))
         throw std::runtime_error("Unknown entity should not be created");
+    // The four Airspace agents have their factories (each on its own aircraft).
+    for (auto const* name : {"SNATrainingAgent", "SNAProdAgent", "TargetSelectorTrainingAgent",
+                             "TargetSelectorProdAgent"})
+    {
+        auto aircraft = CreateEntity("Aircraft", env, "aircraft", ppo::model::eEntitySide::Friend);
+        if (aircraft == nullptr || CreateAgent(name, env, *aircraft) == nullptr)
+            throw std::runtime_error(name);
+    }
     return 0;
 }

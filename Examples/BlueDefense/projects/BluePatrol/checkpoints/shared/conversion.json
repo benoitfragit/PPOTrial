@@ -1,0 +1,23 @@
+{
+  "schema": "ppokit.blue-conversion/1",
+  "artifacts": [
+    {
+      "source": "checkpoints/latest/latest.ppokit",
+      "source_sha256": "f289757887178c7c9590bf877e7e39ff80df12961d2a68210439a5d21e0caced",
+      "converted": "checkpoints/shared/latest/latest.ppokit",
+      "converted_sha256": "7a74bf0b5234901daa1cfc9b4be2c79978fbda104ce3988bb6f4ae3e29af4363"
+    },
+    {
+      "source": "checkpoints/latest/policy.ppokit",
+      "source_sha256": "dfb217900e4eb443bd57037b50724374641c1b84a3ace6028373dfc51b6c95e2",
+      "converted": "checkpoints/shared/latest/policy.ppokit",
+      "converted_sha256": "d3ccd7420ee160b99e40561818f2c322f809e7f2e90e93b7926876908d5e8072"
+    },
+    {
+      "source": "checkpoints/prod/policy.ppokit",
+      "source_sha256": "dfb217900e4eb443bd57037b50724374641c1b84a3ace6028373dfc51b6c95e2",
+      "converted": "checkpoints/shared/prod/policy.ppokit",
+      "converted_sha256": "ba73abb4e6c8b455c1770108bf3188dbadc43a94932a9bebd9a04e17655cce2c"
+    }
+  ]
+}

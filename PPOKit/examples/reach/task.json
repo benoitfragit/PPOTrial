@@ -1,0 +1,23 @@
+{
+  "schema": "ppokit.task/1",
+  "name": "reach",
+  "namespace": "reach_example",
+  "observation": {
+    "target": { "fields": ["dx", "dy"] },
+    "clock": { "fields": ["elapsed"] }
+  },
+  "actions": {
+    "move": { "head": "gaussian", "names": ["vx", "vy"], "bounds": [-1, 1], "map": "clip" }
+  },
+  "rewards": {
+    "Progress": { "label": "Progress to the target", "weight": 1.0 },
+    "Time": { "label": "Time spent", "weight": 1.0 },
+    "Goal": { "label": "Target reached", "weight": 1.0 }
+  },
+  "metrics": {
+    "success": { "kind": "flag" }
+  },
+  "scenario": {
+    "start_distance": { "type": "float", "range": [0.2, 1.5], "default": 0.5 }
+  }
+}

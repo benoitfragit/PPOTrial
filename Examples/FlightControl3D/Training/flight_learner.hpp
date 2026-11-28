@@ -23,13 +23,19 @@
 #pragma once
 
 #include "flight_policy.hpp"
+#include "ppokit/runtime/probe_record.hpp"
 #include <memory>
+#include <vector>
 
 namespace ppo::examples::flight {
 
 /** @brief One collected transition and its GAE outputs. */
 struct Transition final
 {
+    /** @brief For PPOKit's advantage functions: every Flight transition trains the actor. */
+    using ScalarType = double;
+    static constexpr bool learnable = true;
+
     Observation observation{};
     PolicyAction action{};
     /** @brief Sum of the channel rewards of the action. */
@@ -41,7 +47,7 @@ struct Transition final
     /** @brief GAE advantage, then its normalized value during Optimize. */
     double advantage{};
     /** @brief Critic regression target: raw advantage + value. */
-    double target{};
+    double valueTarget{};
     bool terminated{};
     bool truncated{};
 };
@@ -81,10 +87,19 @@ struct LearningStats final
     std::size_t criticSteps{};
     /** @brief Actor minibatches skipped by the KL guard. */
     std::size_t actorKlSkips{};
+    /** @brief Share of the value-target variance the critic explained before the update (1 is perfect). */
+    double explainedVariance{};
     /** @brief Mean weighted reward contribution per actor action and channel. */
     std::array<double, RewardCount> meanRewards{};
     /** @brief False before the first PPO update in this process, including after resume. */
     bool hasRewardMeans{};
+};
+
+/** @brief What each layer of the actor and critic output during a probed update. */
+struct FlightLayerProbes final
+{
+    std::vector<ppokit::runtime::BlockProbe> actor;
+    std::vector<ppokit::runtime::BlockProbe> critic;
 };
 
 /** @brief RLtools MLPs with a diagonal Gaussian PPO actor; no JSBSim/ECS dependency. */
@@ -119,6 +134,13 @@ public:
     /** @brief Runs one PPO update on the full rollout and empties it. */
     void Optimize();
     LearningStats const& Stats() const noexcept;
+    /**
+     * @brief Probes the layers (outputs, dead and saturated units, gradient sizes) of the
+     *        next updates. Read-only: a probed update gives the same weights as an unprobed one.
+     */
+    void ProbeLayers(bool probing) noexcept;
+    /** @brief Layer probes of the last update run while probing (empty before). */
+    FlightLayerProbes const& LayerProbes() const noexcept;
     /** @brief Transitions collected since the last update. */
     std::size_t Collected() const noexcept;
     /** @brief Update checkpoint metadata at an empty PPO rollout boundary. */

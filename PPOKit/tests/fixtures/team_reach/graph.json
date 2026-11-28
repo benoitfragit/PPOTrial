@@ -1,0 +1,19 @@
+{
+  "schema": "ppokit.graph/2",
+  "actor": {
+    "nodes": {
+      "agent":  { "type": "input", "from": "observation.agent" },
+      "trunk":  { "type": "mlp", "layers": 1, "width": 16, "activation": "tanh" },
+      "policy": { "type": "gaussian_head" }
+    },
+    "edges": [ ["agent", "trunk"], ["trunk", "policy"] ]
+  },
+  "critic": {
+    "nodes": {
+      "team":  { "type": "input", "from": "critic.team" },
+      "trunk": { "type": "mlp", "layers": 1, "width": 32, "activation": "tanh" },
+      "value": { "type": "value" }
+    },
+    "edges": [ ["team", "trunk"], ["trunk", "value"] ]
+  }
+}

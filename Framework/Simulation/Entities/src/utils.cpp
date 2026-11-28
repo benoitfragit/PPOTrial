@@ -7,8 +7,10 @@
 * @license MIT
 */
 #include "utils.hpp"
+#include "components.hpp"
 
 #include <math.h>
+#include <random>
 
 namespace ppo::model {
 
@@ -28,4 +30,20 @@ wrapMinusPi2Pi(double az)
 
     return az;
 }
+
+/**
+* @brief The registry's initialization engine, created from the system's entropy if absent.
+*/
+std::mt19937_64&
+InitializationEngine(entt::registry& registry)
+{
+    if (!registry.ctx().contains<sInitializationRandom>())
+    {
+        std::random_device entropy;
+        std::seed_seq seed{ entropy(), entropy(), entropy(), entropy() };
+        registry.ctx().emplace<sInitializationRandom>().m_engine.seed(seed);
+    }
+    return registry.ctx().get<sInitializationRandom>().m_engine;
+}
+
 }

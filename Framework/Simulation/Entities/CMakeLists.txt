@@ -15,9 +15,7 @@ add_library(${PROJECT_NAME}
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/data)
 
-target_link_libraries(${PROJECT_NAME} PUBLIC GenericSerializer GenericRLCore EnTT::EnTT)
-
-set(RESOURCE_PATH "${CMAKE_SOURCE_DIR}/resources/settings")
-target_compile_definitions(${PROJECT_NAME} PUBLIC RESOURCE_PATH="${RESOURCE_PATH}")
+# PPOLayout carries the folders of the shared world and of each example.
+target_link_libraries(${PROJECT_NAME} PUBLIC GenericSerializer EnTT::EnTT PPOLayout)
 
 add_dependencies(${PROJECT_NAME} GenericSerializer)

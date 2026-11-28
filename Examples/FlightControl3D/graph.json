@@ -1,0 +1,15 @@
+{
+  "schema": "ppokit.graph/1",
+  "actor": {
+    "model": "mlp",
+    "hidden": { "layers": 2, "width": 128 },
+    "activation": "tanh",
+    "log_std": "state_independent"
+  },
+  "critic": {
+    "model": "mlp",
+    "input": "observation",
+    "hidden": { "layers": 2, "width": 128 },
+    "activation": "tanh"
+  }
+}

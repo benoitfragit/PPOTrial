@@ -5,12 +5,16 @@
  *
  * Protects: desktop continuation without losing a rollout, warm starts across reward
  * changes, the frozen learner during validation, BEST promotion and its immutability, the
- * reward-tuning round trip through the scenario file, and the curriculum persistence.
+ * reward-tuning round trip through the scenario file, the curriculum persistence and the
+ * run journal (metrics.jsonl) of the model directory, continued on resume, and the
+ * studio's weight requests.
  *
  * Read next: Runtime/flight_session.cpp, Training/flight_model_store.cpp.
  */
 #include "test_support.hpp"
 #include "flight_session.hpp"
+#include "ppokit/runtime/run_log.hpp"
+#include "ppokit/runtime/weight_request.hpp"
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -205,7 +209,7 @@ void RewardTuning()
     auto config=LoadConfig(scenario);
     config.training.rolloutSteps=4;config.training.minibatch=4;config.training.epochs=1;config.training.hiddenWidth=32;
     config.training.maxUpdates=3;config.training.resume=false;config.evaluation.everyUpdates=100;
-    FlightSession session(config,true,directory.path/"model",std::nullopt,TrainingBudget::TotalUpdates,scenario);
+    FlightSession session(config,true,directory.path/"model",std::nullopt,TrainingBudget::TotalUpdates,scenario,true);
     auto const direction=static_cast<std::size_t>(Reward::Direction);
     auto const path=static_cast<std::size_t>(Reward::Path);
     auto const before=directory.path/"before.txt",after=directory.path/"after.txt";
@@ -227,6 +231,66 @@ void RewardTuning()
     auto const state=session.Snapshot();
     Check(!state.rewardTuningPending && Near(state.rewardSettings.weights[path],12)
         && state.learning.hasRewardMeans && state.learning.updates==1,"queued edits activate after the rollout boundary");
+    auto const journal=ppokit::runtime::LoadRunLog(directory.path/"model"/"metrics.jsonl");
+    Check(journal.weightChanges.size()==2 && journal.weightChanges[0].fromUpdate==1
+        && Near(journal.weightChanges[0].weights[direction],0.1) && journal.weightChanges[1].fromUpdate==2
+        && Near(journal.weightChanges[1].weights[path],12),"the journal records each weight change and its first update");
+}
+/** @brief The studio's weight requests apply at the next update, whole or not at all, and are answered. */
+void StudioWeightRequests()
+{
+    TemporaryDirectory directory("flight-weight-requests-");
+    auto const scenario=directory.path/"scenario.json";
+    std::filesystem::copy_file(PPO_FLIGHT_CONFIG,scenario);
+    auto config=LoadConfig(scenario);
+    config.training.rolloutSteps=4;config.training.minibatch=4;config.training.epochs=1;config.training.hiddenWidth=32;
+    config.training.maxUpdates=3;config.training.resume=false;config.evaluation.everyUpdates=100;
+    auto const model=directory.path/"model";
+    FlightSession session(config,true,model,std::nullopt,TrainingBudget::TotalUpdates,scenario,true);
+    auto const journal=model/"metrics.jsonl";
+    Check(ppokit::runtime::LoadRunLog(journal).header.acceptsWeightRequests,"a session with a scenario file reads requests");
+    auto const path=static_cast<std::size_t>(Reward::Path);
+    ppokit::runtime::WriteWeightRequest(journal,1,{{"Path",7.0}});
+    for(int step=0;step<4;++step) session.Tick();
+    auto const answer=ppokit::runtime::ReadWeightAnswer(journal);
+    Check(answer && answer->id==1 && answer->applied && answer->message.rfind("Applied from update 2.",0)==0,
+        "the request is applied at the first update and answered");
+    Check(Near(session.Snapshot().rewardSettings.weights[path],7.0) && Near(LoadConfig(scenario).reward.weights[path],7.0),
+        "the new weight is active and saved to the scenario like a slider edit");
+    auto const log=ppokit::runtime::LoadRunLog(journal);
+    Check(log.weightChanges.size()==1 && log.weightChanges[0].fromUpdate==2,"the change is journaled");
+    // Crash must stay non-positive: the whole request is refused and nothing changes.
+    ppokit::runtime::WriteWeightRequest(journal,2,{{"Path",9.0},{"Crash",5.0}});
+    for(int step=0;step<4;++step) session.Tick();
+    auto const refused=ppokit::runtime::ReadWeightAnswer(journal);
+    Check(refused && refused->id==2 && !refused->applied && refused->message.rfind("Refused:",0)==0
+        && Near(session.Snapshot().rewardSettings.weights[path],7.0),"an invalid request changes nothing");
+}
+/** @brief Training writes metrics.jsonl in its model directory; a resumed session continues it. */
+void RunJournal()
+{
+    auto const c=SmallConfig();
+    TemporaryDirectory directory("flight-run-journal-");
+    auto const file=directory.path/"metrics.jsonl";
+    {
+        FlightSession session(c,true,directory.path,std::nullopt,TrainingBudget::AdditionalUpdates);
+        for(int i=0;i<1000 && !session.Finished();++i) session.Tick();
+    }
+    auto journal=ppokit::runtime::LoadRunLog(file);
+    Check(journal.header.task=="flight_control_3d" && journal.header.channels.size()==RewardCount
+        && journal.header.channels[2].label=="Vertical speed"
+        && Near(journal.header.channels[0].weight,c.reward.weights[0]),"the journal header names the task and its channels");
+    Check(journal.updates.size()==1 && journal.updates[0].update==1
+        && journal.updates[0].rewards.steps==c.training.rolloutSteps
+        && journal.updates[0].rewards.channels.size()==RewardCount
+        && !journal.updates[0].ppo.empty() && journal.updates[0].ppo[0].first=="policy_loss",
+        "each update journals its PPO statistics and the reward summary of its rollout");
+    {
+        FlightSession resumed(c,true,directory.path,std::nullopt,TrainingBudget::AdditionalUpdates);
+        for(int i=0;i<1000 && !resumed.Finished();++i) resumed.Tick();
+    }
+    journal=ppokit::runtime::LoadRunLog(file);
+    Check(journal.updates.size()==2 && journal.updates[1].update==2,"a resumed session appends to the same journal");
 }
 /** @brief Crash poses and details remain available to the renderer across episode resets. */
 void CrashRenderingSnapshot()
@@ -334,10 +398,30 @@ void CurriculumPersistence()
 }
 } // namespace
 
+/** @brief A scenario of a PPOKit project keeps its models in the project; elsewhere, beside it. */
+void ProjectModelDirectory()
+{
+    auto const config=LoadConfig(PPO_FLIGHT_CONFIG);
+    Check(ModelDirectoryFor(PPO_FLIGHT_CONFIG,config)
+            ==std::filesystem::path{PPO_FLIGHT_CONFIG}.parent_path()/"checkpoints",
+        "the T-6 project keeps its models in its checkpoints/");
+    auto const project=std::filesystem::temp_directory_path()/"flight_project_model_directory";
+    std::filesystem::remove_all(project);
+    std::filesystem::create_directories(project);
+    Check(ModelDirectoryFor(project/"scenario.json",config)
+            ==(project/config.training.checkpointDirectory).lexically_normal(),
+        "a scenario outside a project keeps its models in <checkpointDirectory> beside it");
+    std::ofstream(project/"project.json")<<R"({"schema": "ppokit.project/1", "name": "t6"})";
+    Check(ModelDirectoryFor(project/"scenario.json",config)==project/"checkpoints",
+        "a scenario of a project keeps its models in the project's checkpoints/");
+    std::filesystem::remove_all(project);
+}
+
 int main()
 {
     try
     {
+        ProjectModelDirectory();
         DesktopContinuation();
         ChangedTrainingContract();
         TrainingValidationAndBest();
@@ -347,6 +431,8 @@ int main()
         CurriculumProgression();
         T6PromotionAndBestThresholds();
         CurriculumPersistence();
+        RunJournal();
+        StudioWeightRequests();
     }
     catch(std::exception const& e) { std::cerr<<e.what()<<'\n';return 1; }
     std::cout<<"Shared desktop/headless session regressions passed\n";

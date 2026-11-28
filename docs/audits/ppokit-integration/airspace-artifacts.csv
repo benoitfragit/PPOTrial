@@ -1,0 +1,5 @@
+model,version,pt_sha256,actor_tensors,inference_actor_exact,training_actor_exact,training_critic_exact,training_m1_exact,training_m2_exact,legacy_adam_steps,ppokit_adam_steps
+RLMission,prod,e97ae256f66368f5c147b497ccc032011f91e4c2761094777869e5021b482b70,14,1,0,0,0,0,7453,8197
+RLMission,eval,eb237aa1427e705d1dd1026700ef6f600a04f71a1433a9ad418564571bfdbe0d,14,1,1,1,1,1,8197,8197
+RLSNA,prod,97acfe7578130181e66aaaf21da464000e5a1c92fe46f71682d2391149b7c986,8,1,0,0,0,0,3187,3340
+RLSNA,eval,7d3b7300250db14809eb10c12a97dfa435c010a8ae787489b66613a32c434f9b,8,1,1,1,1,1,3340,3340

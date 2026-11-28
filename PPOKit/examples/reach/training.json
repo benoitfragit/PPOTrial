@@ -1,0 +1,13 @@
+{
+  "schema": "ppokit.train/1",
+  "ppo": {
+    "rollout_steps": 512,
+    "minibatch": 64,
+    "epochs": 4,
+    "actor_learning_rate": 0.0003,
+    "critic_learning_rate": 0.001,
+    "target_kl": 0.02,
+    "seed": 1
+  },
+  "probes": { "every": 10 }
+}

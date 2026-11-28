@@ -1,0 +1,25 @@
+{
+    "formatVersion": 2,
+    "agentProfiles": "../../../Shared/settings/AgentProfiles.json",
+    "entities": {
+        "blue": {
+            "type": "Aircraft",
+            "platform": "evalaircraft",
+            "side": "Friend",
+            "target": "red",
+            "agents": [
+                {
+                    "profile": "RLSNA",
+                    "mode": "training"
+                }
+            ]
+        },
+        "red": {
+            "type": "Aircraft",
+            "platform": "evalaircraft",
+            "side": "Hostile",
+            "target": "blue",
+            "agents": []
+        }
+    }
+}

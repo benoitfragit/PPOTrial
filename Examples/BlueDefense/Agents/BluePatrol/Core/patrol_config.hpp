@@ -128,27 +128,52 @@ ParsePatrolGeometrySettings(nlohmann::json const& document)
 }
 
 /**
+ * @brief Files the BluePatrol settings come from: shared world files and the MAPPO training file.
+ * @details A PPOKit project keeps its own training file; the world files stay shared.
+ */
+struct PatrolSettingsFiles final
+{
+    /** @brief Environment.json: world size and time step. */
+    std::filesystem::path environment;
+    /** @brief Platforms/Mobile/defender_car.json: flight model of the blue defenders. */
+    std::filesystem::path defenderPlatform;
+    /** @brief The project's blue_patrol_training.json: rewards, geometry ranges and MAPPO settings. */
+    std::filesystem::path training;
+};
+
+/**
+ * @brief The BluePatrol settings files.
+ * @param shared Folder of the shared world settings (Environment.json, Platforms/).
+ * @param training The MAPPO training file (a project's blue_patrol_training.json).
+ * @return Environment.json and the defender platform of @p shared, and @p training.
+ */
+inline PatrolSettingsFiles PatrolSettingsIn(std::filesystem::path const& shared,
+                                            std::filesystem::path const& training)
+{
+    return {shared / "Environment.json", shared / "Platforms/Mobile/defender_car.json", training};
+}
+
+/**
  * @brief Loads and validates the episode-level racetrack and wedge ranges.
- * @param settings Root resources/settings directory.
+ * @param files Settings files (only the training file is read).
  * @return Validated ranges expressed in metres and radians.
  */
 inline PatrolGeometrySettings
-LoadPatrolGeometrySettings(std::filesystem::path const& settings)
+LoadPatrolGeometrySettings(PatrolSettingsFiles const& files)
 {
-    return ParsePatrolGeometrySettings(
-        ReadPatrolJson(settings / "Training/BluePatrol.json"));
+    return ParsePatrolGeometrySettings(ReadPatrolJson(files.training));
 }
 
 /**
  * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ * @param files Settings files: world, defender platform and training.
  */
-inline Parameters LoadPatrolParameters(std::filesystem::path const& settings)
+inline Parameters LoadPatrolParameters(PatrolSettingsFiles const& files)
 {
-    auto const world = ReadPatrolJson(settings / "Environment.json").at("environment");
-    auto const flight = ReadPatrolJson(settings / "Platforms/Mobile/defender_car.json")
+    auto const world = ReadPatrolJson(files.environment).at("environment");
+    auto const flight = ReadPatrolJson(files.defenderPlatform)
         .at("parameters").at("FlightModel");
-    auto const patrolDocument = ReadPatrolJson(
-        settings / "Training/BluePatrol.json");
+    auto const patrolDocument = ReadPatrolJson(files.training);
     Parameters parameters{};
     parameters.halfNorth = 0.5F * world.at("maxNorth").get<float>();
     parameters.halfEast = 0.5F * world.at("maxEast").get<float>();
@@ -193,7 +218,7 @@ inline Parameters LoadPatrolParameters(std::filesystem::path const& settings)
             defense, "teammateVulnerabilityWeight");
 
     PatrolGeometrySettings const geometrySettings =
-        LoadPatrolGeometrySettings(settings);
+        LoadPatrolGeometrySettings(files);
     PatrolSamplingConstraints const constraints{
         parameters.halfNorth, parameters.halfEast, parameters.cruiseSpeed,
         parameters.maxRotationRate, parameters.collisionDistance};
@@ -301,12 +326,11 @@ ParsePatrolTrainingSettings(nlohmann::json const& document)
     return result;
 }
 
-/** @brief Loads validated blue MAPPO settings from the resource directory. */
+/** @brief Loads validated blue MAPPO settings from the training file. */
 inline PatrolTrainingSettings
-LoadPatrolTrainingSettings(std::filesystem::path const& settings)
+LoadPatrolTrainingSettings(PatrolSettingsFiles const& files)
 {
-    return ParsePatrolTrainingSettings(
-        ReadPatrolJson(settings / "Training/BluePatrol.json"));
+    return ParsePatrolTrainingSettings(ReadPatrolJson(files.training));
 }
 
 } // namespace ppo::examples::bluedefense::defenders

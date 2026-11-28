@@ -1,0 +1,39 @@
+{
+  "schema": "ppokit.project/1",
+  "name": "Airspace_RLSNA",
+  "libraries": {
+    "environment": "rlsna_environment",
+    "network": "ppokit_graph_network"
+  },
+  "program": {
+    "executable": "ppokit-run",
+    "train": [
+      "train",
+      "--project",
+      "{project}"
+    ],
+    "evaluate": [
+      "eval",
+      "--project",
+      "{project}"
+    ],
+    "inference": [
+      "play",
+      "--project",
+      "{project}",
+      "--episodes",
+      "1000000",
+      "--realtime",
+      "--step-seconds",
+      "0.2"
+    ]
+  },
+  "settings": "../../settings/Scenarios/RLSNATraining.json",
+  "checkpoints": {
+    "training": "../../models/RLSNA/training.ppokit",
+    "training_policy": "../../models/RLSNA/latest/policy.ppokit",
+    "policy": "../../models/RLSNA/eval/policy.ppokit"
+  },
+  "journal": "../../models/RLSNA/metrics.jsonl",
+  "networkEditable": true
+}

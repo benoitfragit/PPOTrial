@@ -4,8 +4,10 @@
  */
 #pragma once
 
+#include "generalized_artifact.hpp"
 #include "generalized_attention_actor.hpp"
 #include "generalized_checkpoint.hpp"
+#include "generalized_critic_network.hpp"
 #include "generalized_observation.hpp"
 #include "team_capacity.hpp"
 
@@ -38,7 +40,8 @@ public:
     /**
      * @brief Loads a promoted generalized actor for deterministic inference.
      * @param counts Active P/N composition of the current scenario.
-     * @param checkpoint Strict generalized V10 production checkpoint.
+     * @param checkpoint PPOKit policy (or training) artifact of these networks, or a former
+     *        strict V10 file.
      * @throws std::invalid_argument If @p counts or @p checkpoint is invalid.
      * @throws std::runtime_error If the checkpoint cannot be read.
      */
@@ -54,15 +57,14 @@ public:
         try
         {
             Allocate();
-            std::ifstream stream{checkpoint};
-            if (!stream)
+            if (IsPpokitArtifact(checkpoint))
             {
-                throw std::runtime_error(
-                    "Cannot open generalized blue production checkpoint: "
-                    + checkpoint.string());
+                (void)LoadGeneralizedPolicyArtifact<GeneralizedCriticConfig::Network>(checkpoint, actor_);
             }
-            (void)ReadGeneralizedPolicy(
-                stream, actor_, true);
+            else
+            {
+                LoadV10(checkpoint);
+            }
         }
         catch (...)
         {
@@ -136,6 +138,19 @@ public:
     }
 
 private:
+    /** @brief Reads a former strict V10 actor file. */
+    void LoadV10(std::filesystem::path const& checkpoint)
+    {
+        std::ifstream stream{checkpoint};
+        if (!stream)
+        {
+            throw std::runtime_error(
+                "Cannot open generalized blue production checkpoint: "
+                + checkpoint.string());
+        }
+        (void)ReadGeneralizedPolicy(stream, actor_, true);
+    }
+
     using ActorSpecification = TrainingConfig::NN::ACTOR_SPEC;
     using Actor = GeneralizedAttentionActor<ActorSpecification>;
     using InputSpecification = rlt::matrix::Specification<

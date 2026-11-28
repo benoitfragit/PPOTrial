@@ -1,0 +1,130 @@
+{
+  "schema": "ppokit.task/1",
+  "name": "rl_mission",
+  "namespace": "rl_mission",
+  "observation": {
+    "tracks": {
+      "set": {
+        "capacity": 10,
+        "features": 9,
+        "mask": "last"
+      }
+    },
+    "ammo": {
+      "size": 1
+    },
+    "lidar": {
+      "size": 61
+    }
+  },
+  "actions": {
+    "motion": {
+      "head": "gaussian",
+      "names": [
+        "turn",
+        "acceleration"
+      ],
+      "bounds": [
+        -1,
+        1
+      ],
+      "map": "clip"
+    },
+    "fire": {
+      "head": "bernoulli",
+      "names": [
+        "fire"
+      ]
+    }
+  },
+  "rewards": {
+    "main_target_destruction": {
+      "label": "Main target destruction",
+      "weight": 1.0
+    },
+    "secondary_target_destruction": {
+      "label": "Secondary target destruction",
+      "weight": 1.0
+    },
+    "ownship_destruction": {
+      "label": "Ownship destruction",
+      "weight": 1.0
+    },
+    "wingmen_destruction": {
+      "label": "Wingmen destruction",
+      "weight": 1.0
+    },
+    "civilian_destruction": {
+      "label": "Civilian destruction",
+      "weight": 1.0
+    },
+    "missionfailure": {
+      "label": "MissionFailure",
+      "weight": 1.0
+    },
+    "intercept": {
+      "label": "Intercept",
+      "weight": 1.0
+    },
+    "danger": {
+      "label": "Danger",
+      "weight": 1.0
+    },
+    "out_of_area": {
+      "label": "Out Of Area",
+      "weight": 1.0
+    },
+    "range": {
+      "label": "Range",
+      "weight": 1.0
+    },
+    "fuel": {
+      "label": "Fuel",
+      "weight": 1.0
+    },
+    "neardanger": {
+      "label": "NearDanger",
+      "weight": 1.0
+    }
+  },
+  "metrics": {
+    "score": {
+      "kind": "number",
+      "label": "Evaluator score of the case"
+    },
+    "target_destroyed": {
+      "kind": "flag",
+      "label": "Primary target destroyed"
+    },
+    "player_destroyed": {
+      "kind": "flag",
+      "label": "Evaluated aircraft destroyed"
+    },
+    "primary_pk": {
+      "kind": "number",
+      "label": "Largest probability of kill on the primary target"
+    },
+    "secondary_destroyed": {
+      "kind": "number",
+      "label": "Hostile secondary targets destroyed"
+    },
+    "timed_out": {
+      "kind": "flag",
+      "label": "Step limit reached"
+    }
+  },
+  "world": {
+    "entities": {
+      "size": 160
+    },
+    "scene": {
+      "fields": [
+        "work_half_north",
+        "work_half_east",
+        "entity_count",
+        "controlled_pk",
+        "controlled_missiles"
+      ]
+    }
+  }
+}

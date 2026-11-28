@@ -117,8 +117,9 @@ Workflow "MAPPO training (Windows Release)" :
 Le budget horaire peut interrompre le programme avant 1200 updates. Reprendre
 alors uniquement avec l'ID de ce nouveau run V3, son empreinte JSON et ses
 checkpoints. Le runtime ne migre automatiquement aucun ancien poids.
-L'acteur est blue_patrol_generalized_v10.txt ; l'état complet est
-blue_patrol_generalized_training_v7.txt, enveloppe V7 avec observation 10.
+L'acteur est policy.ppokit ; l'état complet est latest.ppokit, artefacts
+PPOKit avec observation 10 (anciennement blue_patrol_generalized_v10.txt et
+blue_patrol_generalized_training_v7.txt, enveloppe V7, toujours lisibles).
 Les anciens candidats restent sous leurs anciens noms.
 
 Les journaux contiennent MAPPO_PATROL_EPISODE (distance, distance qualifiée,

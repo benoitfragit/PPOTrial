@@ -7,19 +7,21 @@ on:
       - '.github/workflows/mappo-inference-validation-windows.yml'
       - 'tools/ci/inference_validation.py'
       - 'tools/ci/test_inference_validation.py'
+      - 'tools/ci/blue_checkpoint.py'
+      - 'tools/ci/test_blue_checkpoint.py'
   workflow_dispatch:
     inputs:
       source_run_id:
-        description: "Source Progressive Blue Defense run ID (default run 73)"
+        description: "Source run ID with common PPOKit graph artifacts"
         required: true
         type: string
-        default: "41948019589"
       model_gate:
-        description: "Read-only BEST actor to load from source run"
+        description: "Read-only BEST policy: common validation suite or an archived gate"
         required: true
         type: choice
-        default: "2v2"
+        default: "validation"
         options:
+          - validation
           - 1v0
           - 2v0
           - 1v1
@@ -71,7 +73,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run isolated deterministic regression tests
-        run: python -m unittest discover -s tools/ci -p "test_inference_validation.py" -v
+        run: |
+          python -m unittest discover -s tools/ci -p "test_inference_validation.py" -v
+          python -m unittest discover -s tools/ci -p "test_blue_checkpoint.py" -v
 
   infer:
     if: github.event_name == 'workflow_dispatch'
@@ -98,7 +102,7 @@ jobs:
           if (-not [long]::TryParse($env:SOURCE_RUN_ID, [ref]$id) -or $id -le 0) {
             throw "source_run_id must be a positive GitHub workflow run ID"
           }
-          if ($env:MODEL_GATE -notin @('1v0','2v0','1v1','2v1','2v2')) {
+          if ($env:MODEL_GATE -notin @('validation','1v0','2v0','1v1','2v1','2v2')) {
             throw "Unsupported model gate"
           }
           if ($env:EVALUATE_GATE -notin @('all','patrol','combat','1v0','2v0','1v1','2v1','2v2')) {
@@ -128,61 +132,78 @@ jobs:
           name: blue-mappo-checkpoints
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ github.token }}
-          path: resources/model/BluePatrol
+          path: ${{ runner.temp }}/blue-source
 
       - name: Verify BEST champion provenance, then stage actor locally
         env:
           MODEL_GATE: ${{ inputs.model_gate }}
         run: |
-          $root = "resources/model/BluePatrol"
-          $best = Join-Path $root "best/$env:MODEL_GATE"
-          $metadataFile = Join-Path $best "champion.json"
-          $actor = Join-Path $best "blue_patrol_generalized_v10.txt"
-          $training = Join-Path $best "blue_patrol_generalized_training_v7.txt"
-          foreach ($file in @($metadataFile, $actor, $training)) {
-            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
-              throw "Missing verified BEST checkpoint component: $file"
+          $root = Join-Path $env:RUNNER_TEMP "blue-source"
+          if (Test-Path (Join-Path $root "shared") -PathType Container) {
+            $root = Join-Path $root "shared"
+          }
+          if ($env:MODEL_GATE -eq "validation") {
+            $best = Join-Path $root "best"
+            $metadataFile = Join-Path $best "validation.json"
+            if (-not (Test-Path -LiteralPath $metadataFile -PathType Leaf)) {
+              throw "Selected run has no common validation BEST manifest"
             }
-          }
-          $manifest = Get-Content -LiteralPath $metadataFile -Raw | ConvertFrom-Json
-          if ($manifest.version -ne 1 -or $manifest.gate -ne $env:MODEL_GATE -or
-              $manifest.evaluatedForGate -ne $true -or
-              $manifest.updates -lt 1) {
-            throw "Source run's selected BEST checkpoint is not evaluated/compatible"
-          }
-          foreach ($file in @($actor, $training)) {
-            $fileName = [IO.Path]::GetFileName($file)
-            $expected = $manifest.sha256.PSObject.Properties[$fileName].Value
-            $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
-            if ([string]::IsNullOrWhiteSpace($expected) -or $actual -ne $expected) {
-              throw "Invalid BEST checkpoint checksum: $file"
+            $manifest = Get-Content -LiteralPath $metadataFile -Raw | ConvertFrom-Json
+            if ($manifest.schema -ne "ppokit.best/2" -or $manifest.suite -ne "validation" -or
+                $manifest.report.suite -ne "validation" -or $manifest.update -lt 1 -or
+                [string]::IsNullOrWhiteSpace($manifest.policy) -or
+                [IO.Path]::GetFileName($manifest.policy) -ne $manifest.policy) {
+              throw "Invalid common validation BEST manifest"
             }
+            $actor = Join-Path $best $manifest.policy
+            $expected = $manifest.sha256
+          } else {
+            # Gate-specific selection is never substituted by an unrelated suite BEST.
+            $best = Join-Path $root "best/$env:MODEL_GATE"
+            $metadataFile = Join-Path $best "champion.json"
+            if (-not (Test-Path -LiteralPath $metadataFile -PathType Leaf)) {
+              throw "Selected run has no certified BEST for the requested gate; select validation for common suite BEST"
+            }
+            $manifest = Get-Content -LiteralPath $metadataFile -Raw | ConvertFrom-Json
+            if ($manifest.version -ne 1 -or $manifest.gate -ne $env:MODEL_GATE -or
+                $manifest.evaluatedForGate -ne $true -or $manifest.updates -lt 1) {
+              throw "Source run's selected BEST checkpoint is not evaluated/compatible"
+            }
+            $actor = Join-Path $best "policy.ppokit"
+            $expected = $manifest.sha256.PSObject.Properties["policy.ppokit"].Value
+            $training = Join-Path $best "latest.ppokit"
+            if (-not (Test-Path -LiteralPath $training -PathType Leaf)) {
+              throw "Missing certified gate training checkpoint"
+            }
+            $trainingHash = (Get-FileHash -LiteralPath $training -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($trainingHash -ne $manifest.sha256.PSObject.Properties["latest.ppokit"].Value) {
+              throw "Invalid gate BEST training checksum"
+            }
+            python tools/ci/blue_checkpoint.py check --graph-only --kind training $training
+            if ($LASTEXITCODE -ne 0) { throw "Legacy gate checkpoint requires explicit conversion" }
           }
-          $actorHeader = Get-Content -LiteralPath $actor -TotalCount 1
-          $trainingHeader = Get-Content -LiteralPath $training -TotalCount 1
-          if (-not $actorHeader.StartsWith("BLUE_TEAM_MAPPO_V10 10 10 ") -or
-              -not $trainingHeader.StartsWith("BLUE_TEAM_TRAINING_V7 7 10 ") -or
-              -not $actorHeader.Contains("UNIFIED_PHYSICAL_GUIDANCE_V1") -or
-              -not $trainingHeader.Contains("UNIFIED_PHYSICAL_GUIDANCE_V1")) {
-            throw "BEST checkpoint schema is not the expected unified V10 policy"
+          if (-not (Test-Path -LiteralPath $actor -PathType Leaf) -or
+              [string]::IsNullOrWhiteSpace($expected) -or
+              (Get-FileHash -LiteralPath $actor -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
+            throw "Missing or invalid certified BEST actor"
           }
-          # CI-local copy: no change to source run, repository or uploaded model.
-          $destination = Join-Path $root "prod/blue_patrol_generalized_v10.txt"
+          python tools/ci/blue_checkpoint.py check --graph-only --kind policy $actor
+          if ($LASTEXITCODE -ne 0) { throw "BEST must be a common graph policy; convert legacy archives explicitly" }
+          # Stage separately from the committed production model.
+          $destination = "Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/inference/policy.ppokit"
           New-Item -ItemType Directory -Path (Split-Path $destination) -Force | Out-Null
           Copy-Item -LiteralPath $actor -Destination $destination -Force
-          if ((Get-FileHash $destination -Algorithm SHA256).Hash -ne
-              (Get-FileHash $actor -Algorithm SHA256).Hash) {
+          if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
             throw "Staged inference actor does not match the certified BEST"
           }
           New-Item -ItemType Directory "build/inference-validation" -Force | Out-Null
-          $manifest | ConvertTo-Json -Depth 10 |
+          $manifest | ConvertTo-Json -Depth 100 |
             Set-Content "build/inference-validation/selected-best.json" -Encoding utf8
-          Write-Host "Verified actor for gate $env:MODEL_GATE, update $($manifest.updates)"
-          Write-Host "Original BEST success $($manifest.successPercent)%"
+          Write-Host "Verified immutable BEST actor for $env:MODEL_GATE"
 
       - name: Verify unchanged red production model
         run: |
-          if (-not (Test-Path "resources/model/RLMission/prod/model.pt" -PathType Leaf)) {
+          if (-not (Test-Path "Examples/Airspace/models/RLMission/prod/policy.ppokit" -PathType Leaf)) {
             throw "Missing unchanged RLMission production model"
           }
 
@@ -190,55 +211,53 @@ jobs:
         id: runtime_cache
         uses: actions/cache/restore@v4
         with:
-          path: build/release/Main/Release
-          key: mappo-runtime-${{ runner.os }}-x64-msvc2022-Release-libtorch291cpu-${{ github.sha }}
+          path: |
+            build/release/PPOKit/Release
+            build/release/Examples/BlueDefense/Release
+            build/release/ppokit_programs_Release.txt
+          key: ppokit-blue-runtime-${{ runner.os }}-x64-msvc2022-Release-${{ github.sha }}
 
       - name: Validate runtime cache
         id: runtime_probe
         run: |
-          $root = "build/release/Main/Release"
-          $usable = $false
-          if ("${{ steps.runtime_cache.outputs.cache-hit }}" -eq "true" -and
-              (Test-Path "$root/PPO.exe" -PathType Leaf) -and
-              (Test-Path "$root/torch_cpu.dll" -PathType Leaf) -and
-              (Test-Path "$root/c10.dll" -PathType Leaf)) {
-            try {
-              & "$root/PPO.exe" --example blue-defense-evaluation --check-example
-              $usable = $LASTEXITCODE -eq 0
-            } catch {
-              Write-Warning "Cached binary is unusable: $_"
-            }
+          $usable = "${{ steps.runtime_cache.outputs.cache-hit }}" -eq "true"
+          foreach ($file in @("build/release/PPOKit/Release/ppokit-run.exe",
+                              "build/release/Examples/BlueDefense/Release/blue_environment.dll",
+                              "build/release/PPOKit/Release/ppokit_graph_network.dll",
+                              "build/release/Examples/BlueDefense/Release/blue_visualiser.dll",
+                              "build/release/ppokit_programs_Release.txt")) {
+            if (-not (Test-Path $file -PathType Leaf)) { $usable = $false }
           }
           "usable=$($usable.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
 
       - name: Configure x64 Release using existing build directory
         if: steps.runtime_probe.outputs.usable != 'true'
         run: |
+          # ppokit-run and the BlueDefense DLLs only: the ECS world without graphics.
           cmake -S . -B build/release -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_CONFIGURATION_TYPES=Release `
-            -DPPO_LIBTORCH_VARIANT=Release `
-            -DPPO_BUILD_DESKTOP=ON `
+            -DPPO_BUILD_DESKTOP=OFF `
+            -DPPO_BUILD_WORLD=ON `
             -DPPO_BUILD_CORE_TESTS=OFF `
             -DPPO_BUILD_CHECKPOINT_TESTS=OFF
           if ($LASTEXITCODE -ne 0) { throw "Release configure failed" }
 
-      - name: Compile evaluation-enabled PPO.exe Release
+      - name: Compile ppokit-run and the BlueDefense DLLs (Release)
         if: steps.runtime_probe.outputs.usable != 'true'
         run: |
-          cmake --build build/release --config Release --parallel 2
+          cmake --build build/release --config Release --parallel 2 `
+            --target ppokit-run blue_environment ppokit_graph_network blue_visualiser
           if ($LASTEXITCODE -ne 0) { throw "Release build failed" }
 
-      - name: Verify headless evaluation example bootstraps
-        run: |
-          & "build/release/Main/Release/PPO.exe" --example blue-defense-evaluation --check-example
-          if ($LASTEXITCODE -ne 0) { throw "Inference evaluation scenario failed to initialize" }
-
-      - name: Cache validated Release binary and LibTorch DLLs
+      - name: Cache validated Release binaries
         if: steps.runtime_probe.outputs.usable != 'true'
         uses: actions/cache/save@v4
         with:
-          path: build/release/Main/Release
-          key: mappo-runtime-${{ runner.os }}-x64-msvc2022-Release-libtorch291cpu-${{ github.sha }}
+          path: |
+            build/release/PPOKit/Release
+            build/release/Examples/BlueDefense/Release
+            build/release/ppokit_programs_Release.txt
+          key: ppokit-blue-runtime-${{ runner.os }}-x64-msvc2022-Release-${{ github.sha }}
 
       - name: Unit-test inference validation and reporting
         run: |
@@ -254,6 +273,7 @@ jobs:
           THRESHOLD: ${{ inputs.success_percent }}
         run: |
           python -u tools/ci/inference_validation.py `
+            --ppokit-run build/release/PPOKit/Release/ppokit-run.exe `
             --source-run-id $env:SOURCE_RUN_ID `
             --gate $env:EVALUATE_GATE `
             --episodes $env:CASES `

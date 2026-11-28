@@ -1,0 +1,5 @@
+{
+  "schema": "ppokit.train/1",
+  "ppo": { "rollout_steps": 16, "minibatch": 8, "epochs": 2, "seed": 3 },
+  "optimizer": { "adam": "rltools" }
+}

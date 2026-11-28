@@ -15,11 +15,11 @@
  * Reward weights edited from the desktop are saved to the scenario JSON at once but only
  * applied at a PPO rollout boundary, so a rollout never mixes two reward contracts.
  *
- * Not here: the physics (Simulator/), PPO math (Training/), drawing (Renderer/). The
- * renderer only reads the value-only FlightSnapshot.
+ * Not here: the physics (Simulator/), PPO math (Training/). The value-only FlightSnapshot
+ * is what the removed desktop renderer read; the Visualiseur of ppokit-run reads the
+ * environment DLL's world instead (Core/flight_world.hpp).
  *
- * Read next: flight_session.cpp, flight_headless.cpp (log and CSV formats),
- * flight_example.cpp (desktop ECS bridge).
+ * Read next: flight_session.cpp, flight_headless.cpp (log and CSV formats).
  */
 #pragma once
 
@@ -28,6 +28,12 @@
 #include "flight_learner.hpp"
 #include "flight_model_store.hpp"
 #include "flight_reward_tuning.hpp"
+
+#include "ppokit/runtime/reward_ledger.hpp"
+#include "ppokit/runtime/run_log.hpp"
+#include "ppokit/runtime/weight_request.hpp"
+
+#include <chrono>
 
 namespace ppo::examples::flight {
 
@@ -163,11 +169,12 @@ public:
      * @param inferenceEpisodes Evaluation budget, defaulting to the configured validation episodes.
      * @param budget Whether maxUpdates is a total or an additional update budget.
      * @param scenarioPath Scenario file updated by the reward controls; empty disables them.
+     * @param legacyInbox Enable command files only for an explicitly selected older external client.
      */
     FlightSession(Config config, bool training, std::filesystem::path modelDirectory,
         std::optional<std::size_t> inferenceEpisodes = std::nullopt,
         TrainingBudget budget = TrainingBudget::TotalUpdates,
-        std::filesystem::path scenarioPath = {});
+        std::filesystem::path scenarioPath = {}, bool legacyInbox = false);
     /** @brief Advances the session by one policy action (training, validation or inference). */
     void Tick();
     /** @brief Starts the next training or inference episode. */
@@ -185,6 +192,31 @@ public:
     }
     /** @brief Save an existing reward coefficient and queue it for a safe boundary. */
     bool SetRewardTuning(std::size_t index, double value) noexcept;
+    /**
+     * @brief Saves latest and its curriculum level now, for a stop asked between two updates.
+     * @pre Called right after an update, when the rollout buffer is empty.
+     */
+    void SaveCheckpoint()
+    {
+        SaveLatest();
+    }
+    /**
+     * @brief Applies a weight change asked by the studio, whole or not at all.
+     * @details Right after an update (empty buffer) it takes effect at once; otherwise at
+     * the next update boundary.
+     * @return The answer for the studio.
+     */
+    ppokit::runtime::WeightAnswer ApplyWeightRequest(ppokit::runtime::WeightRequest const& request);
+    /** @brief The run journal, or null when the session writes none (evaluation). */
+    ppokit::runtime::RunLogWriter* Journal() noexcept
+    {
+        return journal_ ? &*journal_ : nullptr;
+    }
+    /** @brief Weighted reward channels of the window being collected, for the live status. */
+    ppokit::runtime::RewardLedger const& Ledger() const noexcept
+    {
+        return rewardLedger_;
+    }
 
 private:
     Config config_;
@@ -228,6 +260,14 @@ private:
     FlightDiagnostics lastDiagnostics_{};
     std::array<double, RewardCount> episodeRewardSums_{};
     std::array<double, RewardCount> validationEpisodeRewardSums_{};
+    /** @brief Per-channel reward summary of the training steps since the last update. */
+    ppokit::runtime::RewardLedger rewardLedger_;
+    /** @brief Run journal (metrics.jsonl of the model directory) of a training session, absent in inference. */
+    std::optional<ppokit::runtime::RunLogWriter> journal_;
+    /** @brief Start of this session, origin of the journal's elapsed times. */
+    std::chrono::steady_clock::time_point journalStart_{};
+    /** @brief Weight requests of the studio, read at update boundaries (training with a scenario file). */
+    std::optional<ppokit::runtime::WeightRequestInbox> weightRequests_;
 
     /**
      * @brief Retains terminal crash details and any finite physical pose across episode resets.
@@ -252,6 +292,19 @@ private:
     void AdvanceCurriculum(MissionState const& episode);
     /** @brief Saves latest and its curriculum level together. */
     void SaveLatest();
+    /** @brief Opens the run journal of a training session, resuming it with latest. */
+    void OpenJournal(bool legacyInbox);
+    /** @brief Appends the update just optimised to the run journal. */
+    void JournalUpdate();
+    /** @brief Appends the layer probes of the update just optimised to the run journal. */
+    void JournalProbes();
+    /**
+     * @brief Applies a weight request of the studio, all or nothing, and answers it.
+     * @details Runs right after an update, when the buffer is empty: the new weights
+     * apply from the next update, are saved to the scenario file like the desktop sliders
+     * and journaled.
+     */
+    void TakeWeightRequest();
     /** @brief Runs one PPO update and its periodic checkpoint and validation. */
     void OptimizeAndCheckpoint();
     /** @brief Seed of the training or inference environment. */
@@ -259,5 +312,15 @@ private:
     /** @brief Rebuilds the training environment with a deterministic update-specific seed. */
     void CreateTrainingEnvironment();
 };
+
+/**
+ * @brief Model folder of a scenario: `<project>/checkpoints` for a scenario inside a PPOKit
+ *        project (Examples/FlightControl3D/projects/<name>), else `<checkpointDirectory>`
+ *        beside a scenario outside any project.
+ * @param scenarioPath Scenario file.
+ * @param config Its validated content.
+ * @return Folder of latest, BEST, curriculum level and run journal.
+ */
+std::filesystem::path ModelDirectoryFor(std::filesystem::path const& scenarioPath, Config const& config);
 
 } // namespace ppo::examples::flight

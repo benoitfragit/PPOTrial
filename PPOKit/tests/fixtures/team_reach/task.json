@@ -1,0 +1,17 @@
+{
+  "schema": "ppokit.task/1",
+  "name": "team_reach",
+  "namespace": "ppokit::tests::team_reach",
+  "observation": {
+    "agent": { "fields": ["position", "target"] }
+  },
+  "critic": {
+    "team": { "fields": ["position_0", "target_0", "position_1", "target_1", "position_2", "target_2"] }
+  },
+  "actions": {
+    "move": { "head": "gaussian", "names": ["velocity"], "bounds": [-1, 1], "map": "clip" }
+  },
+  "rewards": {
+    "Distance": { "label": "Mean distance of the team to its targets" }
+  }
+}

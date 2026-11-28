@@ -1,66 +1,108 @@
 # PPOTrial
 
-Simulateur C++17 avec environnement ECS, agents de reinforcement learning et
-interface graphique. Les défenseurs bleus sont pilotés par **un unique
-contrôleur MAPPO P/N**. Les attaquants rouges utilisent RLMission en production.
+PPOTrial est un ensemble de démonstrateurs de reinforcement learning en C++17,
+entraînés et exécutés avec PPOKit (`ppokit-run`, `ppokit-viewer`, `ppokit-studio`) :
+
+- **RLMission** : démonstrateur PPO 2D pour un agent individuel.
+- **Blue MAPPO** : démonstrateur MA-PPO 2D pour une équipe de 1 à 9 Bleus face à
+  0 à 10 Rouges ; les Rouges utilisent RLMission en production.
+- **FlightControl3D** : démonstrateur PPO 3D d'approche et d'atterrissage.
 
 ## Démarrage
 
 ```powershell
-cmake -S . -B build/debug -G "Visual Studio 17 2022" -A x64 -DCMAKE_CONFIGURATION_TYPES=Debug -DPPO_LIBTORCH_VARIANT=Debug -DPPO_BUILD_DESKTOP=ON
+cmake -S . -B build/debug -G "Visual Studio 17 2022" -A x64 -DCMAKE_CONFIGURATION_TYPES=Debug -DPPO_BUILD_DESKTOP=ON
 cmake --build build/debug --config Debug
-build/debug/Main/Debug/PPO.exe --list-examples
-build/debug/Main/Debug/PPO.exe --example blue-defense
-build/debug/Main/Debug/PPO.exe --example blue-defense-inference
+ppokit-run train --project Examples/BlueDefense/projects/BluePatrol
+ppokit-run play  --project Examples/BlueDefense/projects/BluePatrol --model PROD --realtime
+ppokit-run eval  --project Examples/Airspace/projects/RLMission
 ```
 
 Les builds x64 utilisent toujours `build/debug` et `build/release`, conformément
-à `AGENTS.md` et aux deux raccourcis présents à la racine.
-Sans `--example`, l'application affiche le sélecteur graphique. Avec
-`--check-example`, l'exemple est initialisé sans démarrer la fenêtre.
+à `AGENTS.md`. Chaque exemple est un projet PPOKit (`project.json` : DLL
+d'environnement et de réseau, commandes Train, Evaluate et Inference) ;
+`Lancer_PPOKit_Studio.bat` ouvre le studio, qui lance ces commandes, et
+`ppokit-viewer` montre le monde d'une partie (Visualiseur du projet).
 
 ## Exemples
 
-| ID CLI / sélection IHM | Description | Configuration |
+| Projet | Description | Visualiseur |
 |---|---|---|
-| `airspace` | Environnement historique d'agents LibTorch | `Scenarios/Playground.json` |
-| `blue-defense` | Entraînement MAPPO P/N contre RLMission | `Scenarios/BlueDefense.json` |
-| `blue-defense-inference` | Inférence déterministe avec l'acteur promu `prod` | `Scenarios/BlueDefense.json` |
-| `flight-control-3d` | Entraînement PPO T-6 Joint avec JSBSim | `Scenarios/FlightControl3D_T6_Joint.json` |
-| `flight-control-3d-inference` | Évaluation du BEST d'atterrissage validé | `Scenarios/FlightControl3D_T6_Joint.json` |
+| `Examples/Airspace/projects/RLMission` | Démonstrateur PPO 2D RLMission : entraînement, jeu et évaluation | `airspace_visualiser` (vue 2D tactique) |
+| `Examples/Airspace/projects/RLSNA` | Exemple PPO 2D complémentaire : interception RLSNA | `airspace_visualiser` |
+| `Examples/BlueDefense/projects/BluePatrol` | Démonstrateur MA-PPO 2D : équipe bleue contre RLMission | `blue_visualiser` (vue 2D) |
+| `Examples/FlightControl3D/projects/T6`, `PC7` | Démonstrateur PPO 3D : approche et atterrissage JSBSim | `flight_visualiser` (vue 3D) |
 
-FlightControl3D utilise le scénario d'atterrissage T-6 configuré dans
-`resources/settings/Scenarios/FlightControl3D_T6_Joint.json`. L'entraînement
-reprend `latest` depuis `resources/model/FlightControl3D/t6texan2_joint_v5`,
-avec les poids, les états Adam et le générateur aléatoire du checkpoint. Le
-modèle est distinct du BEST d'atterrissage qualifié requis par le mode inférence.
-Le dépôt fournit les deux états issus du [run CI 53](https://github.com/benoitfragit/PPOTrial/actions/runs/45572775396)
-(commit `d16cb00afb58a3bff8645d6a67824b3c09beac3a`) : `latest` reprend à
-l'update 870 et au niveau de curriculum 12 ; `best/current.json` désigne la
-génération validée à cet update (19 arrêts sur 20, difficulté 1, graines
-4342–4361). Les entraînements ultérieurs modifient `latest` et peuvent promouvoir
-un nouveau BEST ; utiliser une copie du répertoire pour préserver cet état initial.
-Les checkpoints sont conservés sans conversion de fins de ligne, nécessaire à la
-vérification de leur empreinte sous Linux comme sous Windows. La validation CI
-ne remplace pas une évaluation supplémentaire sur d'autres graines.
+### Organisation du dépôt
 
-Un second avion, le Pilatus PC-7 JSBSim, a son propre scénario
-(`FlightControl3D_PC7_Joint.json`, modèle `resources/model/FlightControl3D/pc7_joint_v1`)
-et son lanceur `Lancer_FlightControl3D_PC7_Curriculum_Release.bat`. Chaque avion a
-son propre modèle. `FlightControlHeadless --trim --config FICHIER` donne le point
+Chaque exemple garde dans `Examples/<Nom>` son code, ses réglages, ses modèles
+et ses projets PPOKit ; les couches qu'ils partagent sont dans `Examples/Shared`.
+
+~~~text
+PPOKit/                     framework commun (schémas, learners, studio)
+Framework/                  ECS, environnement piloté par l'appelant, chargement des réglages, contrat des agents
+Examples/
+├── Shared/
+│   ├── World2D/            entités 2D partagées (mobile, zones, SNA, LiDAR)
+│   ├── settings/           Environment.json, AgentProfiles.json, Platforms/
+│   └── 3D/                 modèles 3D des vues
+├── Airspace/               agents rouges RLMission et RLSNA
+│   ├── projects/           RLMission, RLSNA (projets ppokit-run)
+│   ├── settings/           Scenarios/, Training/, Evaluation/
+│   └── models/             RLMission/ et RLSNA/ (training.ppokit, prod/ et eval/)
+├── BlueDefense/
+│   ├── projects/BluePatrol scenario.json, blue_patrol_training.json, checkpoints/
+│   └── curricula/          BluePatrolCurriculumV3.json
+└── FlightControl3D/
+    └── projects/T6, PC7    scenario.json, checkpoints/ (T6 : task, network, training, eval/)
+~~~
+
+Le T-6 (`Examples/FlightControl3D/projects/T6`) s'entraîne avec `ppokit-run` : la
+simulation est la DLL `flight_environment` (scénario `scenario.json`), le réseau la
+DLL `ppokit_graph_network` (`network.json`, `training.json`), et le Visualiseur
+`flight_visualiser` envoie le vol à `ppokit-viewer`. Le checkpoint
+`checkpoints/latest.ppokit` reprend l'update 870 au niveau de curriculum 12 du
+run CI 53. Les poids, les deux moments d'Adam et l'état aléatoire du learner
+proviennent de l'archive FlightControlHeadless. À difficulté maximale, les deux
+moteurs obtiennent 19 arrêts sur 20 avec les graines 4342–4361 et 20 sur 20 avec
+les graines 90001–90020. L'update 340 du niveau 11 reste une référence de test.
+[Run CI 53](https://github.com/benoitfragit/PPOTrial/actions/runs/45572775396) ·
+[Comparaisons par tenseur et par épisode](docs/audits/ppokit-integration/README.md)
+
+La suite `eval/validation.json` reprend la validation de
+FlightControlHeadless : 20 épisodes indépendants toutes les 10 updates, 92 % d'arrêts
+sur la piste, BEST classé par difficulté, taux d'arrêt puis distance d'arrêt
+(`checkpoints/best/`), entraînement fini quand une validation passe sur la tâche
+complète. `Lancer_FlightControl3D_Curriculum_Release.bat` ouvre le projet dans le
+studio (Train, Evaluate, Inference, View).
+
+```
+ppokit-run train --project Examples/FlightControl3D/projects/T6 [--until-passed validation]
+ppokit-run eval  --project Examples/FlightControl3D/projects/T6 [--best]
+ppokit-run play  --project Examples/FlightControl3D/projects/T6 --best --realtime --step-seconds 0.002
+```
+
+Le Pilatus PC-7 JSBSim a son propre scénario dans `Examples/FlightControl3D/projects/PC7`.
+Le projet utilise les mêmes DLL et la même architecture de réseau que le T-6.
+Le premier entraînement du projet livré part de zéro. Son BEST historique,
+l'update 610, provient du [run PC-7](https://github.com/benoitfragit/PPOTrial/actions/runs/45460292649).
+Le lanceur `Lancer_FlightControl3D_PC7_Curriculum_Release.bat` ouvre le projet dans le Studio.
+Chaque avion a son propre modèle. `FlightControlHeadless --trim --config FICHIER` donne le point
 neutre des actions d'un avion (`initial.elevatorTrim` et `initial.throttle`) : trim
 JSBSim quand il fonctionne, sinon trim par vol simulé (cas du turbopropulseur du PC-7).
 
-`Lancer_FlightControl3D_Curriculum_Release.bat` utilise `--auto-run` : il évalue
-et entraîne directement la politique d'atterrissage du T-6. Ajouter
-`--max-speed` supprime la temporisation de 2 ms entre les itérations et réduit
-la fréquence d'actualisation de l'interface. Sans cette option, le vol n'est pas
-cadencé en temps réel : sa vitesse dépend du temps de calcul. Le pas de temps
-simulé reste identique dans les deux modes.
+L'inférence d'un projet de vol (bouton Inference du studio) fait voler la
+politique en accéléré (`ppokit-run play --realtime --step-seconds 0.002`) : chaque
+action avance de 0,1 seconde simulée, avec une attente de 2 ms comme dans l'ancien
+FlightControl3D. La vitesse effective dépend du calcul et du système. Pour un vol
+proche du temps réel, utiliser `--step-seconds 0.1`. Le vol continue épisode après
+épisode jusqu'au Stop, sans toucher au curriculum ; `ppokit-viewer` montre la scène
+3D, le profil d'approche et les panneaux de FlightControl3D (vol, commandes et
+récompenses, diagnostics, raisons du crash).
 
 La piste mesure 3 600 × 120 m et sa zone plane s'étend à 50 m de chaque
-bord. La tâche complète part à 7–14 km du seuil et à 2,5–12° de chaque côté de
-l'axe ; le cap est tiré indépendamment entre −20° et +20° du cap de piste.
+bord. Le profil d’approche de base part à 7–14 km du seuil et à 2,5–12° de chaque côté de
+l’axe, avec un cap tiré indépendamment entre −20° et +20° du cap de piste.
 L'altitude initiale suit le plan de 3° qui passe à 15 m au-dessus du seuil, avec
 une variation de ±60 m. Un curriculum adaptatif commence par des finales courtes
 alignées et élargit les départs à mesure que les arrêts réussissent ; les
@@ -68,11 +110,12 @@ validations jouent le même mélange (roulages, finales courtes à très déport
 jusqu'au niveau courant, et seule la tâche complète peut valider la CI. Pour le T-6,
 une promotion demande au moins 28 arrêts sur 30 épisodes d'entraînement en vol ;
 un BEST demande au moins 19 arrêts sur 20 épisodes de validation. Le niveau déjà
-sauvegardé reste acquis. Le train reste verrouillé
-sorti une fois commandé. La piste est fixe pendant un épisode, sauf dans les deux
-dernières étapes : `swell` fait pilonner le pont dans une houle (±0,6 m, période 9 s)
-et `moving-deck` le fait en plus avancer à 6 m/s ; ces constantes se règlent dans
-l'objet `deckMotion` de chaque étape du scénario. L'IHM dessine alors les crêtes de
+sauvegardé reste acquis. Le train reste verrouillé sorti une fois commandé.
+Dans `swell`, la houle fait pilonner le pont (±0,6 m, période 9 s).
+Dans `moving-deck`, le pont avance aussi à 6 m/s. Ces paramètres viennent de
+`deckMotion` dans chaque étape. Le dernier niveau, `runway-heading-offset`,
+place l’avion à 3–7 km sur l’axe et le plan, avec une route initiale décalée
+de 0 à 10° de part ou d’autre de la piste. Pour les étapes de pont mobile, la vue dessine les crêtes de
 houle et le sillage du pont, et le panneau Runway affiche sa vitesse et son pilonnement.
 
 La caméra `Runway`, placée à 300 m du seuil ou à mi-piste si elle est courte,
@@ -83,18 +126,18 @@ L'architecture du code et le guide de reprise sont dans
 [FlightControl3D : architecture](docs/FlightControl3D_Architecture.md).
 Les résultats d'une politique doivent être évalués sur des graines indépendantes.
 
-Les deux modes BlueDefense utilisent **exactement la même scène**, la même
-physique et le même contrôleur ECS `GeneralizedPatrolMappoAgent`. La section
+L'entraînement et l'inférence de BluePatrol utilisent **exactement la même
+scène**, la même physique et le même contrôleur ECS `GeneralizedPatrolMappoAgent`. La section
 JSON `blueDefense` exige
 `blueTeam.activeCount` de 1 à 9 et `redTeam.activeCount` de 0 à 10.
 Les entités sont créées dynamiquement depuis les templates
 `blue_template` et `red_template` ; un seul contrôleur distribue toutes
 les actions Bleues.
 
-Le mode `blue-defense` charge l'état d'entraînement `latest`. Le mode
-`blue-defense-inference` charge uniquement l'acteur promu dans `prod`, produit
-des actions déterministes et ne possède aucun rollout, critic, optimizer,
-reward d'apprentissage, sauvegarde ou campagne d'évaluation. Dans les deux
+L'entraînement (`ppokit-run train`) reprend l'état d'entraînement `latest`.
+L'inférence (`ppokit-run play --model PROD`) charge
+uniquement l'acteur promu dans `prod`, produit des actions déterministes et ne
+possède aucun rollout, critic, optimizer, sauvegarde ou campagne d'évaluation. Dans les deux
 cas, les Rouges conservent leur contrôleur RLMission production historique.
 
 ## Apprentissage MAPPO
@@ -119,21 +162,38 @@ cas, les Rouges conservent leur contrôleur RLMission production historique.
 - Capteurs : 61 rayons LiDAR ; zones interdites rouges et enveloppes de
   sécurité autour des Bleus. Les collisions physiques restent terminales.
 
-Les **15 canaux de récompense** du snapshot IHM sont : Patrol tracking,
+Les **15 canaux de récompense** sont : Patrol tracking,
 Formation keeping, Pursuit progress, Control effort, Blue survival,
 Red neutralization, Threat containment, Objective survival,
 Mission outcome, Timeout, Blue separation, Restricted zone clearance
 Boundary clearance, Low speed risk et Own loss.
 
-Les paramètres, le rollout et les poids de récompense sont définis dans
-`resources/settings/Training/BluePatrol.json`.
+La géométrie et les poids de récompense de l'environnement sont définis dans
+`Examples/BlueDefense/projects/BluePatrol/blue_patrol_training.json`. Le learner
+partagé lit ses paramètres PPO et son rollout dans le `training.json` du projet.
+La comparaison des réglages et des modèles avec master est détaillée dans
+[l'audit PPOKit](docs/audits/ppokit-integration/customization-master-2026-11-27.md).
+
+Dans PPOKit Studio, **Environment** permet de modifier les nombres et booléens
+du scénario BluePatrol. La sauvegarde initialise une copie isolée avec le
+chargeur BlueDefense et refuse les configurations invalides. Les changements
+s'appliquent au prochain lancement. **Curriculum** présente le fichier partagé
+`tools/ci/adaptive_curriculum/gates.json` : ses seuils, durées, options de zones,
+avancement et période de répétition sont modifiables ; la séquence triangulaire
+et les effectifs restent fixés par le contrat CI. Ce curriculum appartient au
+lanceur CI : le bouton Train de Studio ne l'exécute pas. Modifier le fichier
+change son empreinte et peut imposer un nouveau bootstrap des progrès CI.
 
 ## Sauvegardes et compatibilité
 
-Les modèles généralisés se trouvent sous `resources/model/BluePatrol` :
-`latest/blue_patrol_generalized_v10.txt` pour l'acteur et
-`latest/blue_patrol_generalized_training_v7.txt` pour l'état complet
-d'apprentissage. La promotion après évaluation utilise `prod/`.
+Les modèles du projet partagé se trouvent sous
+`Examples/BlueDefense/projects/BluePatrol/checkpoints/shared` :
+`latest/policy.ppokit` pour l'acteur, `latest/latest.ppokit` pour l'état
+complet d'apprentissage et `prod/policy.ppokit` pour le modèle de production.
+Les anciens fichiers `blue_patrol_generalized_v10.txt`
+et `blue_patrol_generalized_training_v7.txt` (formats V10/V7) restent lisibles :
+les chargeurs reconnaissent le format au contenu, et la CI place ceux des runs
+précédents sous les nouveaux noms.
 
 Le guidage de patrouille de l'observation V10 n'a plus la sémantique V9 : les
 checkpoints du run 22 restent archivés, mais ne sont ni chargés ni migrés vers
@@ -141,56 +201,23 @@ V10. Un nouvel entraînement est requis. Les lecteurs historiques conservés ne
 réactivent pas d'ancien agent ou entraînement 2v2.
 Les règles RLMission et les modèles des Rouges restent inchangés.
 
-## IHM
+## Vues
 
-Le sélecteur lit les exemples depuis `Examples/src/examplecatalog.cpp`,
-sans cardinalité fixe. Après Play, les voitures sont pilotées par l'ECS
-normal. Dans l'entrée `blue-defense-inference`, le bouton Play existant lance
-directement l'acteur de production sans apprentissage ni évaluation.
-
-Le mode multi-caméras est activé par défaut : la vue tactique est découpée en
-P vues, une par Bleu, dans une grille 1×1 à 3×3. La distance, la hauteur et le
-champ de vision sont partagés par toutes les caméras. La case
-`Multiple blue cameras` permet de retrouver la vue tactique unique.
-
-Les voitures utilisent un modèle procédural plus lisible avec éclairage,
-vitrages, roues et accent de rôle. Un badge doré **L** identifie le leader de
-l'épisode et un badge cyan **E** chaque équipier, dans la vue 3D, les vignettes
-multi-caméras et la mini-carte. Le suivi privilégie un Bleu vivant, se recale
-immédiatement lors d'un changement de cible ou d'un reset et reste indépendant
-du nombre d'images par seconde. L'inspection affiche uniquement les données
-opérationnelles utiles ; le navigateur de méta-réflexion a été retiré de l'IHM.
-
-La case `Show patrol references` de **World and display settings** affiche les
-références exactes du dernier calcul fourni à MAPPO, dans la vue 3D et sur la
-mini-carte. Un anneau repère la projection instantanée utilisée pour mesurer le
-suivi ; une flèche repère la cible anticipée et son cap, effectivement encodés
-dans l'observation. Le leader `L` est doré et les slots `W1` à `W8` sont cyan.
-Cet overlay à capacité fixe est exclusivement visuel et ne modifie ni la
-politique, ni les rewards, ni la physique.
-
-La case `Show patrol waypoints`, placée au même endroit, affiche `WP1` à
-`WP10` en vue 3D et sur la mini-carte. Le waypoint actif est doré, les futurs
-waypoints sont verts et ceux déjà validés sont grisés. L'état de la case est
-persisté comme celui des références de patrouille.
-
-### Curriculum 2v2 local avec IHM
-
-Le lanceur Windows [Lancer_MAPPO_2v2_Balanced_GUI.bat](Lancer_MAPPO_2v2_Balanced_GUI.bat)
-construit `build/release`, valide le checkpoint complet du run 84 à l'update
-1790 puis exécute automatiquement le même profil `balanced_v1` que la CI avec
-la fenêtre tactique visible. Un cycle de 20 blocs contient 3 rappels `1v0`, 4
-`2v0`, 2 `1v1`, 3 `2v1` et 8 blocs principaux `2v2`. Chaque fenêtre se ferme
-automatiquement après la campagne d'évaluation du bloc, puis le bloc suivant
-s'ouvre avec la composition correspondante.
-
-Le checkpoint source est sauvegardé avec ses SHA-256 sous
-`build/local-mappo-gui/session-*/source-run84`. Les JSON d'entraînement et de
-scénario, l'acteur `prod`, `Renderer.json` et `imgui.ini` sont restaurés octet
-pour octet à l'arrêt ; seul `latest` progresse. Fermer la fenêtre interrompt
-proprement le curriculum, et relancer le BAT reprend le même bloc. Python 3.12
-est requis. Les commandes de prévol et options d'exploitation sont documentées
-dans [Entraînement MAPPO distant et local](docs/remote-mappo-training.md).
+`ppokit-viewer` affiche le monde que le Visualiseur d'un projet envoie après
+chaque pas. Dans Studio, Train ouvre cette vue automatiquement si le projet en
+possède une ; **View** permet de la rouvrir. Pendant l'entraînement, l'image
+peut rester figée durant l'optimisation ou les sauvegardes et reprendre à la
+collecte suivante. La vue 2D de BluePatrol montre, vue de dessus, la zone défendue,
+le rectangle d'échec, les zones interdites, l'objectif, l'hippodrome du leader
+et ses waypoints (`WP1`…, actif doré, validés grisés), chaque Bleu avec son
+cap, sa trace, son badge de rôle (`L` doré, `W1`… cyan), son cône
+d'engagement, ses rayons LiDAR et sa référence de patrouille, chaque Rouge avec
+son cap, sa trace et son cône, les explosions. La vue 2D d'Airspace
+(RLMission, RLSNA) reprend la mini-carte tactique de l'ancien PPO.exe : zone
+de travail, avions, objectifs, zones interdites, cônes d'engagement, traces,
+avion contrôlé et halo de sa cible principale. Ces vues sont purement
+visuelles : elles ne modifient ni la politique, ni les récompenses, ni la
+physique.
 
 ## Validation
 

@@ -6,7 +6,6 @@
  */
 #include "airspaceexample.hpp"
 #include "airspaceworldrules.hpp"
-#include "airspacemeta.hpp"
 #include "randominitializersystem.hpp"
 
 #include "components.hpp"
@@ -15,10 +14,14 @@
 #include "environment.hpp"
 #include "metaregistry.hpp"
 #include "scenarioconfig.hpp"
+#include "serializer.hpp"
 
 #include <filesystem>
 #include <map>
+#include <memory>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace ppo::examples::airspace {
 namespace {
@@ -37,6 +40,13 @@ RequiresPlatform(std::string const& entityType) noexcept
         || entityType == "Aircraft" || entityType == "SAM";
 }
 
+/** @brief An agent of the scenario and the entity it controls. */
+struct ScenarioAgent final
+{
+    std::shared_ptr<ppo::model::IAgent> agent;
+    entt::entity entity{ entt::null };
+};
+
 /**
 * @brief Instantiates entities and agents from one scenario file.
 *
@@ -48,7 +58,8 @@ RequiresPlatform(std::string const& entityType) noexcept
 * @return True when all declared entities and agents were created.
 */
 bool
-LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment& environment)
+LoadScenarioAgents(std::filesystem::path const& scenarioPath, ppo::model::Environment& environment,
+                   std::vector<ScenarioAgent>& agents)
 {
     if (!environment.SetEntityInitializer(&ppo::model::RandomInitiliazerSystem::Init)
         || !environment.SetWorldRules(std::make_unique<AirspaceWorldRules>()))
@@ -86,8 +97,12 @@ LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment&
 
         for (auto const& agentName : entityDef.m_agents)
         {
-            if (ppo::reflection::CreateAgent(agentName, environment, *entity.get()) == nullptr)
+            std::shared_ptr<ppo::model::IAgent> agent =
+                ppo::reflection::CreateAgent(agentName, environment, *entity.get());
+            if (agent == nullptr)
                 complete = false;
+            else
+                agents.push_back({ std::move(agent), entity->uniqid() });
         }
 
         if (!entityDef.m_target.empty())
@@ -122,20 +137,34 @@ LoadScenario(std::filesystem::path const& scenarioPath, ppo::model::Environment&
 
 } // namespace
 
-/**
- * @brief Réalise l'opération Definition; voir les préconditions et effets dans son corps C++.
- * @details Utilise des fichiers ou chemins.
- */
-ppo::app::ExampleDefinition Definition()
+ExternalScenario LoadExternalScenario(
+    std::filesystem::path const& scenarioPath, ppo::model::Environment& environment)
 {
-    return {
-        "airspace",
-        "PLAYGROUND",
-        std::filesystem::path("Scenarios") / "Playground.json",
-        &RegisterAirspaceMeta,
-        &LoadScenario,
-        "Original navigation playground and PPO training environment."
-    };
+    // The agents register their settings files against these folders when they are created.
+    auto& serializer = ppo::serialization::Serializer::GetInstance();
+    serializer.SetSearchPaths({std::filesystem::path{PPO_AIRSPACE_SETTINGS},
+                               std::filesystem::path{PPO_SHARED_SETTINGS}});
+    std::vector<ScenarioAgent> agents;
+    if (!LoadScenarioAgents(scenarioPath, environment, agents))
+    {
+        throw std::runtime_error(scenarioPath.string() + ": not a valid Airspace scenario (see the messages above)");
+    }
+    ExternalScenario trained{};
+    for (ScenarioAgent const& candidate : agents)
+    {
+        auto external = std::dynamic_pointer_cast<ppo::model::IExternalTrainingAgent>(candidate.agent);
+        if (external == nullptr)
+            continue;
+        if (trained.agent != nullptr)
+            throw std::runtime_error(scenarioPath.string() + ": more than one agent in training mode");
+        trained = { std::move(external), candidate.entity };
+    }
+    if (trained.agent == nullptr)
+        throw std::runtime_error(scenarioPath.string() + ": no agent in training mode");
+    // The training agent's settings (rollout size, reward clamp and weights).
+    serializer.Load();
+    environment.LoadSettings(std::filesystem::path{PPO_SHARED_SETTINGS} / "Environment.json");
+    return trained;
 }
 
 } // namespace ppo::examples::airspace

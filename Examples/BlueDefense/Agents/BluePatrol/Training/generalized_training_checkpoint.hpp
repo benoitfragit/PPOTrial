@@ -10,6 +10,8 @@
 #include "generalized_critic_network.hpp"
 #include "patrol_training_checkpoint.hpp"
 
+#include "ppokit/artifacts/random_state.hpp"
+
 #include <cstdint>
 #include <filesystem>
 #include <iomanip>
@@ -121,7 +123,8 @@ void WriteGeneralizedTrainingState(
     stream << "OPTIMIZERS\n";
     training_checkpoint_detail::WritePatrolOptimizer(stream, actorOptimizer);
     training_checkpoint_detail::WritePatrolOptimizer(stream, criticOptimizer);
-    stream << "UPDATES " << completedUpdates << "\nRNG\n" << randomEngine
+    stream << "UPDATES " << completedUpdates << "\nRNG\n"
+           << ppokit::artifacts::StandardRandomText(randomEngine)
            << "\nEND_BLUE_TEAM_TRAINING\n";
     if (!stream)
         throw std::runtime_error(
@@ -215,9 +218,11 @@ std::uint64_t ReadGeneralizedTrainingState(
     if (!(stream >> completedUpdates))
         throw std::runtime_error("Invalid generalized PPO update count");
     training_checkpoint_detail::RequirePatrolCheckpointToken(stream, "RNG");
-    // Some standard engines clear skipws while reading their state.
-    if (!(stream >> std::ws >> randomEngine))
-        throw std::runtime_error("Invalid generalized random-engine state");
+    // Standard (MSVC) or libstdc++ form: the checkpoint may come from another platform.
+    std::string randomText;
+    stream >> std::ws;
+    std::getline(stream, randomText);
+    randomEngine = ppokit::artifacts::ParseRandomText(randomText, "generalized blue training checkpoint");
     training_checkpoint_detail::RequirePatrolCheckpointToken(
         stream, "END_BLUE_TEAM_TRAINING");
     std::string trailing;

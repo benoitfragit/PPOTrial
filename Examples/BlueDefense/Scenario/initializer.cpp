@@ -50,7 +50,7 @@ std::optional<std::size_t> GeneralizedBlueIndex(
 }
 
 /**
- * @brief Samples the leader patrol solely for snapshot visualization.
+ * @brief Samples the leader patrol solely for the Visualiseur.
  * @param config Episode context containing a valid immutable geometry.
  */
 void BuildPatrolTrackOverlay(InitializerContext& config) noexcept
@@ -170,7 +170,7 @@ void InitializeEntity(ppo::model::Entity& entity)
                       << " geometry attempts ("
                       << (config.evaluationOverride ? "evaluation" : "training")
                       << ", episode=" << config.episodeIndex + 1U
-                      << "); check Training/BluePatrol.json.\n";
+                      << "); check the project's blue_patrol_training.json.\n";
             return;
         }
         config.patrolGeometry = start->geometry;

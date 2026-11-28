@@ -1,0 +1,23 @@
+{
+  "schema": "ppokit.graph/2",
+  "actor": {
+    "nodes": {
+      "target":   { "type": "input", "from": "observation.target" },
+      "clock":    { "type": "input", "from": "observation.clock" },
+      "features": { "type": "concat" },
+      "trunk":    { "type": "mlp", "layers": 2, "width": 32, "activation": "tanh" },
+      "policy":   { "type": "gaussian_head" }
+    },
+    "edges": [ ["target", "features.in1"], ["clock", "features.in2"], ["features", "trunk"], ["trunk", "policy"] ]
+  },
+  "critic": {
+    "nodes": {
+      "target":   { "type": "input", "from": "observation.target" },
+      "clock":    { "type": "input", "from": "observation.clock" },
+      "features": { "type": "concat" },
+      "trunk":    { "type": "mlp", "layers": 2, "width": 32, "activation": "tanh" },
+      "value":    { "type": "value" }
+    },
+    "edges": [ ["target", "features.in1"], ["clock", "features.in2"], ["features", "trunk"], ["trunk", "value"] ]
+  }
+}

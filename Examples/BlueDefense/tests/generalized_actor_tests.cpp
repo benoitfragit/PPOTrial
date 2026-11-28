@@ -306,8 +306,7 @@ int main()
     GeneralizedActor generalizedActor{};
     rlt::malloc(device, legacyActor);
     rlt::malloc(device, generalizedActor);
-    auto randomEngine = rlt::random::default_engine(
-        typename blue::Device::SPEC::RANDOM{}, 918273U);
+    auto randomEngine = blue::MakePatrolEngine(918273U);
     rlt::init_weights(device, legacyActor, randomEngine);
     rlt::init_weights(device, generalizedActor, randomEngine);
     typename blue::TrainingConfig::NN::ACTOR_OPTIMIZER optimizer{};
@@ -574,8 +573,7 @@ int main()
     typename blue::TrainingConfig::NN::ACTOR_OPTIMIZER loadedActorOptimizer{};
     typename blue::TrainingConfig::NN::CRITIC_OPTIMIZER
         loadedCriticOptimizer{};
-    auto loadedRandomEngine = rlt::random::default_engine(
-        typename blue::Device::SPEC::RANDOM{}, 1U);
+    auto loadedRandomEngine = blue::MakePatrolEngine(1U);
     blue::GeneralizedCheckpointMetadata trainingMetadata{};
     std::stringstream trainingInput{serializedTraining};
     auto const completedUpdates = blue::ReadGeneralizedTrainingState(

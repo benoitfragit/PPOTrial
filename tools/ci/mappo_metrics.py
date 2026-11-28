@@ -6,6 +6,7 @@ import argparse
 from collections import Counter
 import csv
 import html
+import json
 import math
 import os
 import sys
@@ -37,6 +38,79 @@ def read_rows(path: Path) -> List[Dict[str, float]]:
             if all(math.isfinite(value) for value in sample.values()):
                 rows.append(sample)
     return rows
+
+
+def read_journal_rows(path: Path, from_line: int = 0) -> List[Dict[str, float]]:
+    """The telemetry rows of a ppokit-run journal (for example checkpoints/shared/metrics.jsonl).
+
+    One row per PPO update (its rollout, wall time and mean episode return) and one
+    per campaign of the suite (score, success), after the first `from_line` lines
+    (the journal of earlier runs that this run resumed). Wall time is summed over
+    the processes of the run: each restarts its own clock.
+    """
+    if not path.is_file():
+        return []
+    rows: List[Dict[str, float]] = []
+    offset = previous = 0.0
+    completed = 0
+    latest = best = success = 0.0
+    update = 0.0
+    with path.open("r", encoding="utf-8-sig", errors="replace") as stream:
+        for number, line in enumerate(stream):
+            if number < from_line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # Interrupted process may leave a partial final line.
+            kind = event.get("event")
+            if kind == "start":
+                offset += previous
+                previous = 0.0
+            elif kind == "update":
+                try:
+                    elapsed = float(event["elapsed_s"])
+                    update = float(event["update"])
+                    steps = float(event["steps"])
+                    reward = float(event.get("episode_return_mean", 0.0))
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if elapsed < previous:  # A resumed process without a start event.
+                    offset += previous
+                previous = elapsed
+                rows.append(_journal_row(offset + elapsed, update, steps, 0.0, completed,
+                                         latest, best, success, reward))
+            elif kind == "evaluation":
+                metrics = event.get("metrics", {})
+                try:
+                    latest = float(metrics["score.mean"])
+                    success = float(metrics["mission_success.rate"])
+                    episodes = float(event["episodes"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                completed += 1
+                best = latest if completed == 1 else max(best, latest)
+                rows.append(_journal_row(offset + previous, float(event.get("update", update)),
+                                         rows[-1]["rollout_steps"] if rows else 0.0,
+                                         episodes, completed, latest, best, success,
+                                         rows[-1]["instant_reward"] if rows else 0.0))
+    return [row for row in rows if all(math.isfinite(value) for value in row.values())]
+
+
+def _journal_row(elapsed: float, update: float, steps: float, cases: float,
+                 completed: int, latest: float, best: float, success: float,
+                 reward: float) -> Dict[str, float]:
+    """A row of the CSV schema: a campaign row has its cases done, others none."""
+    return {
+        "elapsed_seconds": elapsed, "updates": update,
+        "rollout_steps": steps, "rollout_target": steps,
+        "evaluating": 0.0, "evaluation_progress": 1.0 if cases else 0.0,
+        "evaluation_cases_done": cases, "evaluation_cases_total": cases,
+        "evaluation_steps": 0.0, "evaluation_steps_per_second": 0.0,
+        "training": 1.0, "eval_completed": float(completed),
+        "latest_score": latest, "best_score": best,
+        "eval_success_rate": success, "instant_reward": reward,
+    }
 
 
 def sparkline(values: List[float], width: int = 48) -> str:
@@ -103,28 +177,86 @@ def write_chart(rows: List[Dict[str, float]], out: Path) -> None:
 
 
 
-def read_eval_episodes(path: Path) -> List[Dict[str, str]]:
-    """Read evaluation-only key/value rows from the headless training log."""
+def _episode_fields(payload: str) -> Dict[str, str] | None:
+    """A valid [MAPPO_EVAL_EPISODE] row, or None."""
+    fields = dict(token.split("=", 1) for token in payload.split() if "=" in token)
+    if not all(key in fields for key in ("campaign", "case", "blue_alive", "terminal")):
+        return None
+    try:
+        int(fields["campaign"])
+        int(fields["case"])
+        int(fields["blue_alive"])
+    except ValueError:
+        return None
+    return fields
+
+
+def _loss_fields(payload: str) -> Dict[str, str] | None:
+    """A valid [MAPPO_EVAL_LOSS] row, or None."""
+    fields = dict(token.split("=", 1) for token in payload.split() if "=" in token)
+    if not all(name in fields for name in
+               ("campaign", "case", "blue", "source",
+                "low_speed", "fuel_empty", "speed", "step")):
+        return None
+    try:
+        int(fields["campaign"])
+        int(fields["case"])
+        int(fields["step"])
+        speed = float(fields["speed"])
+        low_speed = int(fields["low_speed"])
+        fuel_empty = int(fields["fuel_empty"])
+    except ValueError:
+        return None
+    if (not math.isfinite(speed) or low_speed not in (0, 1)
+            or fuel_empty not in (0, 1)):
+        return None
+    return fields
+
+
+def read_evaluation_rows(path: Path) -> List[tuple]:
+    """The evaluation rows of a log, in order, each campaign numbered in the log.
+
+    A process numbers its own campaigns from 1, and a run of several processes
+    (one per curriculum block) repeats the numbers. A campaign therefore starts
+    where the process's number changes, or where a row comes back to a case
+    already finished (a case's loss rows precede its episode row). The process's
+    own number stays in "logged_campaign".
+    """
     if not path.is_file():
         return []
-    episodes: List[Dict[str, str]] = []
+    rows: List[tuple] = []
+    sequence = 0
+    label = None
+    finished_case = None
     with path.open("r", encoding="utf-8-sig", errors="replace") as stream:
         for line in stream:
-            if "[MAPPO_EVAL_EPISODE]" not in line:
+            if "[MAPPO_EVAL_EPISODE]" in line:
+                kind = "episode"
+                fields = _episode_fields(line.split("[MAPPO_EVAL_EPISODE]", 1)[1])
+            elif "[MAPPO_EVAL_LOSS]" in line:
+                kind = "loss"
+                fields = _loss_fields(line.split("[MAPPO_EVAL_LOSS]", 1)[1])
+            else:
                 continue
-            payload = line.split("[MAPPO_EVAL_EPISODE]", 1)[1]
-            fields = dict(token.split("=", 1)
-                          for token in payload.split() if "=" in token)
-            if all(key in fields for key in
-                   ("campaign", "case", "blue_alive", "terminal")):
-                try:
-                    int(fields["campaign"])
-                    int(fields["case"])
-                    int(fields["blue_alive"])
-                except ValueError:
-                    continue
-                episodes.append(fields)
-    return episodes
+            if fields is None:
+                continue
+            case = int(fields["case"])
+            if (fields["campaign"] != label
+                    or (finished_case is not None and case <= finished_case)):
+                sequence += 1
+                label = fields["campaign"]
+                finished_case = None
+            if kind == "episode":
+                finished_case = case
+            fields["logged_campaign"] = fields["campaign"]
+            fields["campaign"] = str(sequence)
+            rows.append((kind, fields))
+    return rows
+
+
+def read_eval_episodes(path: Path) -> List[Dict[str, str]]:
+    """Read evaluation-only key/value rows from the headless training log."""
+    return [fields for kind, fields in read_evaluation_rows(path) if kind == "episode"]
 
 
 LOSS_FIELDS = (
@@ -179,34 +311,7 @@ def write_optimizer_csv(updates: List[Dict[str, float]], out: Path) -> None:
 
 def read_eval_losses(path: Path) -> List[Dict[str, str]]:
     """Read one diagnostic record for each newly destroyed evaluation Blue."""
-    if not path.is_file():
-        return []
-    losses: List[Dict[str, str]] = []
-    with path.open("r", encoding="utf-8-sig", errors="replace") as stream:
-        for line in stream:
-            if "[MAPPO_EVAL_LOSS]" not in line:
-                continue
-            payload = line.split("[MAPPO_EVAL_LOSS]", 1)[1]
-            fields = dict(token.split("=", 1)
-                          for token in payload.split() if "=" in token)
-            if not all(name in fields for name in
-                       ("campaign", "case", "blue", "source",
-                        "low_speed", "fuel_empty", "speed", "step")):
-                continue
-            try:
-                int(fields["campaign"])
-                int(fields["case"])
-                int(fields["step"])
-                speed = float(fields["speed"])
-                low_speed = int(fields["low_speed"])
-                fuel_empty = int(fields["fuel_empty"])
-            except ValueError:
-                continue
-            if (not math.isfinite(speed) or low_speed not in (0, 1)
-                    or fuel_empty not in (0, 1)):
-                continue
-            losses.append(fields)
-    return losses
+    return [fields for kind, fields in read_evaluation_rows(path) if kind == "loss"]
 
 
 def write_loss_csv(losses: List[Dict[str, str]], out: Path) -> None:
@@ -368,12 +473,17 @@ def summary(rows: List[Dict[str, float]], run_url: str,
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--csv", type=Path, required=True)
+    sources = parser.add_mutually_exclusive_group(required=True)
+    sources.add_argument("--csv", type=Path, help="PPO.exe's live telemetry CSV")
+    sources.add_argument("--journal", type=Path, help="ppokit-run's run journal (metrics.jsonl)")
+    parser.add_argument("--journal-from-line", type=int, default=0,
+                        help="journal lines of earlier runs to skip")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--summary", type=Path)
     parser.add_argument("--log", type=Path)
     args = parser.parse_args()
-    rows = read_rows(args.csv)
+    rows = (read_rows(args.csv) if args.csv is not None
+            else read_journal_rows(args.journal, args.journal_from_line))
     args.out.mkdir(parents=True, exist_ok=True)
     write_chart(rows, args.out / "mappo-progress.svg")
     evaluation = read_eval_episodes(args.log) if args.log else None

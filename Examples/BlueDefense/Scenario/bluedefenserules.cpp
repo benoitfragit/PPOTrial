@@ -301,48 +301,4 @@ void BlueDefenseWorldRules::AfterStep()
     original_.AfterStep();
 }
 
-void BlueDefenseWorldRules::CopySnapshot(entt::registry& source, entt::registry& target) const
-{
-    original_.CopySnapshot(source, target);
-    // The defended area and the shared LiDAR use exactly the same world bounds.
-    if (target.ctx().contains<ppo::model::sEnvironmentState>())
-    {
-        auto const& world = target.ctx().get<ppo::model::sEnvironmentState>();
-        target.ctx().emplace<ppo::model::sDefendedArea>(
-            ppo::model::sDefendedArea{0.F, 0.F,
-                                      0.5F * world.m_maxNorth,
-                                      0.5F * world.m_maxEast});
-        float const hardScale = defenders::Parameters{}.hardBoundaryScale;
-        target.ctx().emplace<ppo::model::sHardBoundaryOverlay>(
-            ppo::model::sHardBoundaryOverlay{
-                0.5F * world.m_maxNorth * hardScale,
-                0.5F * world.m_maxEast * hardScale});
-    }
-    if (source.ctx().contains<InitializerContext>())
-    {
-        auto const& context = source.ctx().get<InitializerContext>();
-        if (context.patrolGeometryReady
-            && context.patrolTrackOverlay.m_sampleCount >= 2U)
-            target.ctx().emplace<ppo::model::sPatrolTrackOverlay>(
-                context.patrolTrackOverlay);
-        if (context.patrolReferenceOverlay.Valid())
-        {
-            target.ctx().emplace<ppo::model::sPatrolReferenceOverlay>(
-                context.patrolReferenceOverlay);
-        }
-        if (context.patrolWaypointOverlay
-            && context.patrolWaypointOverlay->Valid())
-        {
-            target.ctx().emplace<ppo::model::sPatrolWaypointOverlay>(
-                *context.patrolWaypointOverlay);
-        }
-        if (context.blueTeamRoles && context.blueTeamRoles->IsValid())
-        {
-            target.ctx().emplace<ppo::model::sBlueTeamRoleOverlay>(
-                ppo::model::sBlueTeamRoleOverlay{
-                    context.blueTeamRoles->ActiveBlueCount(),
-                    context.blueTeamRoles->LeaderPhysicalIndex()});
-        }
-    }
-}
 }

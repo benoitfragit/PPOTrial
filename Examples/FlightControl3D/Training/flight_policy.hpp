@@ -1,7 +1,7 @@
 /**
  * @file flight_policy.hpp
- * @brief Diagonal Gaussian and Bernoulli policy: sampling, likelihood, KL, entropy, clipped PPO
- *        loss and GAE delta.
+ * @brief Diagonal Gaussian and Bernoulli policy: sampling, likelihood, KL, entropy and clipped
+ *        PPO loss.
  *
  * Role in the chain: observation -> actor network (flight_learner.cpp) -> **policy** ->
  * physical controls -> environment. The actor outputs one mean per continuous action axis
@@ -19,6 +19,9 @@
  * Likelihoods are those of the latent Gaussian sample and of the Bernoulli draw, not of
  * the clipped physical control: clipping happens afterwards in ToControls.
  *
+ * The per-axis Gaussian formulas and the clipped surrogate are the PPOKit ones
+ * (ppokit/heads/gaussian.hpp, ppokit/core/ppo_surrogate.hpp), shared with BlueDefense.
+ *
  * Not here: the networks and the optimizer (flight_learner.cpp).
  *
  * Read next: flight_learner.cpp (how these terms are used), Core/flight_types.hpp.
@@ -26,7 +29,12 @@
 #pragma once
 
 #include "flight_config.hpp"
+#include "ppokit/core/ppo_surrogate.hpp"
+#include "ppokit/heads/bernoulli.hpp"
+#include "ppokit/heads/gaussian.hpp"
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <limits>
 #include <random>
 #include <stdexcept>
@@ -60,23 +68,6 @@ inline constexpr std::array<char const*, ContinuousActions> ActionNames{
     "elevator", "aileron", "rudder", "throttle", "brake"};
 inline constexpr std::array<char const*, PolicyOutputs> PolicyOutputNames{
     "elevator_mean", "aileron_mean", "rudder_mean", "throttle_mean", "brake_mean", "gear_logit"};
-
-/** @brief Numerically stable softplus log(1 + exp(x)). */
-inline double Softplus(double x) noexcept
-{
-    return std::max(x, 0.0) + std::log1p(std::exp(-std::abs(x)));
-}
-
-/** @brief Numerically stable logistic function 1 / (1 + exp(-x)). */
-inline double Sigmoid(double x) noexcept
-{
-    double const decay = std::exp(-std::abs(x));
-    if (x >= 0)
-    {
-        return 1 / (1 + decay);
-    }
-    return decay / (1 + decay);
-}
 
 /** @brief State-dependent actor means and global Gaussian exploration parameters. */
 struct PolicyDistribution final
@@ -120,18 +111,35 @@ inline bool ActiveAxis(std::size_t axis, bool brakeActive) noexcept
     return axis != BrakeAction || brakeActive;
 }
 
-/**
- * @brief Log-probability of a Bernoulli gear draw: -softplus(-l) for an extension, -softplus(l) otherwise.
- * @param logit Gear logit l; the extension probability is sigmoid(l).
- * @param gearDown Drawn value.
- */
-inline double GearLogProbability(double logit, bool gearDown) noexcept
+/** @brief Filtered physical controls in action-axis order. */
+inline std::array<double, ContinuousActions> Applied(Controls const& controls) noexcept
 {
-    if (gearDown)
+    return {controls.elevator, controls.aileron, controls.rudder, controls.throttle, controls.brake};
+}
+
+/**
+ * @brief Whether a raw action saturates.
+ *
+ * The raw brake maps [-1, 1] to [0, 1] (BrakeCommand), so a non-positive raw brake is
+ * already released; the other axes saturate symmetrically.
+ */
+inline bool RawSaturated(std::size_t axis, double raw, double threshold) noexcept
+{
+    if (axis == BrakeAction)
     {
-        return -Softplus(-logit);
+        return raw <= 0 || raw >= threshold;
     }
-    return -Softplus(logit);
+    return std::abs(raw) >= threshold;
+}
+
+/** @brief Whether an applied control saturates; throttle and brake are one-sided physical ranges. */
+inline bool AppliedSaturated(std::size_t axis, double applied, double threshold) noexcept
+{
+    if (axis >= ThrottleAction)
+    {
+        return applied <= 1 - threshold || applied >= threshold;
+    }
+    return std::abs(applied) >= threshold;
 }
 
 /**
@@ -139,14 +147,14 @@ inline double GearLogProbability(double logit, bool gearDown) noexcept
  *        clipped physical control.
  *
  * log p = sum over active axes of -(z^2 / 2 + log sigma + log(2 pi) / 2), z = (x - mu) / sigma,
- * plus GearLogProbability when the gear is active.
+ * plus the Bernoulli log-probability of the gear draw when the gear is active.
  */
 inline double LogProbability(PolicyDistribution const& policy, PolicyAction const& action) noexcept
 {
     double logProbability = 0;
     if (action.gearActive)
     {
-        logProbability += GearLogProbability(policy.output[GearOutput], action.gearDown);
+        logProbability += ppokit::heads::BernoulliLogProbability(policy.output[GearOutput], action.gearDown);
     }
     for (std::size_t axis = 0; axis < ContinuousActions; ++axis)
     {
@@ -154,9 +162,8 @@ inline double LogProbability(PolicyDistribution const& policy, PolicyAction cons
         {
             continue;
         }
-        double const logStd = policy.logStandardDeviations[axis];
-        double const standardized = (action.raw[axis] - policy.output[axis]) * std::exp(-logStd);
-        logProbability -= 0.5 * standardized * standardized + logStd + 0.5 * std::log(2 * Pi);
+        logProbability += ppokit::heads::GaussianAxisLogDensity(action.raw[axis], policy.output[axis],
+            policy.logStandardDeviations[axis]);
     }
     return logProbability;
 }
@@ -168,7 +175,8 @@ inline double LogProbability(PolicyDistribution const& policy, PolicyAction cons
  */
 inline double GearKl(double previousLogit, double currentLogit) noexcept
 {
-    double const previousProbability = Sigmoid(previousLogit);
+    using ppokit::heads::Softplus;
+    double const previousProbability = ppokit::heads::Sigmoid(previousLogit);
     return previousProbability * (Softplus(-currentLogit) - Softplus(-previousLogit))
         + (1 - previousProbability) * (Softplus(currentLogit) - Softplus(previousLogit));
 }
@@ -202,28 +210,22 @@ inline double PolicyKl(PolicyDistribution const& previous, PolicyDistribution co
     return std::max(0.0, result);
 }
 
-/** @brief Entropy of the gear Bernoulli distribution: softplus(l) - sigmoid(l) l. */
-inline double GearEntropy(double logit) noexcept
-{
-    return Softplus(logit) - Sigmoid(logit) * logit;
-}
-
 /**
  * @brief Analytic entropy of the active axes: sum of log(2 pi e) / 2 + log sigma per active
- *        Gaussian axis, plus GearEntropy when the gear is active.
+ *        Gaussian axis, plus the Bernoulli gear entropy when the gear is active.
  */
 inline double Entropy(PolicyDistribution const& policy, bool brakeActive = true, bool gearActive = false) noexcept
 {
     double entropy = 0;
     if (gearActive)
     {
-        entropy += GearEntropy(policy.output[GearOutput]);
+        entropy += ppokit::heads::BernoulliEntropy(policy.output[GearOutput]);
     }
     for (std::size_t axis = 0; axis < ContinuousActions; ++axis)
     {
         if (ActiveAxis(axis, brakeActive))
         {
-            entropy += 0.5 * std::log(2 * Pi * std::exp(1.0)) + policy.logStandardDeviations[axis];
+            entropy += ppokit::heads::GaussianAxisEntropy(policy.logStandardDeviations[axis]);
         }
     }
     return entropy;
@@ -346,7 +348,7 @@ PolicyAction Sample(PolicyDistribution const& policy, Engine& rng, bool determin
         }
         else
         {
-            action.gearDown = std::bernoulli_distribution(Sigmoid(logit))(rng);
+            action.gearDown = std::bernoulli_distribution(ppokit::heads::Sigmoid(logit))(rng);
         }
     }
     action.logProbability = LogProbability(policy, action);
@@ -372,8 +374,8 @@ struct PolicyLoss final
  * @brief Exact clipped PPO surrogate derivative, including the log-std entropy bonus.
  *
  * r = exp(clamp(log pi_new - log pi_old, -20, 20)). The surrogate -min(r A, clip(r, 1 - eps,
- * 1 + eps) A) has a non-zero gradient only where the unclipped term is the active minimum:
- * A >= 0 and r <= 1 + eps, or A < 0 and r >= 1 - eps. There d loss / d log pi = -A r, and
+ * 1 + eps) A) has a non-zero gradient only where the unclipped term is the minimum
+ * (r A <= clip(r) A). There d loss / d log pi = -A r, and
  * d log pi / d mu = (x - mu) / sigma^2, d log pi / d log sigma = (x - mu)^2 / sigma^2 - 1.
  * The entropy term adds -entropy coefficient to each active log-std derivative. An active
  * gear adds d log p / d l = gearDown - sigmoid(l) and its Bernoulli entropy derivative.
@@ -382,56 +384,34 @@ inline PolicyLoss ClippedLoss(PolicyDistribution const& policy, PolicyAction con
     double advantage, TrainingSettings const& settings) noexcept
 {
     PolicyLoss result{};
-    double const logRatio = LogProbability(policy, action) - action.logProbability;
-    result.ratio = std::exp(std::clamp(logRatio, -MaximumAbsoluteLogRatio, MaximumAbsoluteLogRatio));
-    double const clipped = std::clamp(result.ratio, 1 - settings.clip, 1 + settings.clip);
+    auto const surrogate = ppokit::core::EvaluateClippedSurrogate(LogProbability(policy, action),
+        action.logProbability, advantage, settings.clip, MaximumAbsoluteLogRatio);
+    result.ratio = surrogate.ratio;
     result.entropy = Entropy(policy, action.brakeActive, action.gearActive);
-    result.loss = -std::min(result.ratio * advantage, clipped * advantage) - settings.entropy
-        * result.entropy;
-    bool unclippedActive = result.ratio >= 1 - settings.clip;
-    if (advantage >= 0)
-    {
-        unclippedActive = result.ratio <= 1 + settings.clip;
-    }
-    double logProbabilityDerivative = 0;
-    if (unclippedActive)
-    {
-        logProbabilityDerivative = -advantage * result.ratio;
-    }
+    result.loss = -surrogate.objective - settings.entropy * result.entropy;
     for (std::size_t axis = 0; axis < ContinuousActions; ++axis)
     {
         if (!ActiveAxis(axis, action.brakeActive))
         {
             continue;
         }
-        double const inverseVariance = std::exp(-2 * policy.logStandardDeviations[axis]);
-        double const difference = action.raw[axis] - policy.output[axis];
-        result.outputDerivative[axis] = logProbabilityDerivative * difference * inverseVariance;
+        // Chain rule: d loss / d parameter = d loss / d log pi * d log pi / d parameter.
+        auto const gradient = ppokit::heads::GaussianAxisLogDensityGradient(action.raw[axis],
+            policy.output[axis], policy.logStandardDeviations[axis]);
+        result.outputDerivative[axis] = surrogate.logProbabilityGradient * gradient.mean;
+        // The entropy bonus contributes d entropy / d log-std = 1 per active axis.
         result.logStandardDeviationDerivative[axis] =
-            logProbabilityDerivative * (difference * difference * inverseVariance - 1) - settings.entropy;
+            surrogate.logProbabilityGradient * gradient.logStd - settings.entropy;
     }
     if (action.gearActive)
     {
-        // d log p / d l = gearDown - sigmoid(l); d(-c H) / d l = c l sigmoid(l) (1 - sigmoid(l)).
+        // Chain rule on the logit l, plus the entropy bonus: d(-c H) / d l = -c dH / dl.
         double const logit = policy.output[GearOutput];
-        double const probability = Sigmoid(logit);
-        double const drawn = action.gearDown ? 1.0 : 0.0;
-        result.outputDerivative[GearOutput] = logProbabilityDerivative * (drawn - probability)
-            + settings.entropy * logit * probability * (1 - probability);
+        result.outputDerivative[GearOutput] =
+            surrogate.logProbabilityGradient * ppokit::heads::BernoulliLogProbabilityGradient(logit, action.gearDown)
+            - settings.entropy * ppokit::heads::BernoulliEntropyGradient(logit);
     }
     return result;
-}
-
-/**
- * @brief One-step TD error of GAE: bootstrap on time limits, but never carry value across a reset.
- *
- * delta = r + gamma * V(s') - V(s), with V(s') = 0 only for a terminated (absorbing)
- * transition; a truncated transition keeps its bootstrap.
- */
-inline double AdvantageDelta(double reward, double value, double nextValue, bool terminated,
-    double gamma) noexcept
-{
-    return reward + (terminated ? 0 : gamma * nextValue) - value;
 }
 
 } // namespace ppo::examples::flight

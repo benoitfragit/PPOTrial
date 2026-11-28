@@ -1,0 +1,39 @@
+{
+  "schema": "ppokit.project/1",
+  "name": "FlightControl3D_T6",
+  "libraries": {
+    "environment": "flight_environment",
+    "network": "ppokit_graph_network"
+  },
+  "program": {
+    "executable": "ppokit-run",
+    "train": [
+      "train",
+      "--project",
+      "{project}"
+    ],
+    "evaluate": [
+      "eval",
+      "--project",
+      "{project}",
+      "--best",
+      "--suite",
+      "validation"
+    ],
+    "inference": [
+      "play",
+      "--project",
+      "{project}",
+      "--realtime",
+      "--step-seconds",
+      "0.002",
+      "--best",
+      "--suite",
+      "validation"
+    ]
+  },
+  "nativeCurriculum": "/training/curriculum",
+  "runProfile": "environment/1",
+  "settings": "scenario.json",
+  "networkEditable": true
+}

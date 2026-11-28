@@ -1,0 +1,16 @@
+{
+  "schema": "ppokit.task/1",
+  "name": "switch",
+  "namespace": "ppokit::tests::switch_task",
+  "observation": {
+    "state": { "fields": ["signal", "target"] }
+  },
+  "actions": {
+    "move": { "head": "gaussian", "names": ["position"], "bounds": [-1, 1], "map": "clip" },
+    "press": { "head": "bernoulli", "names": ["press"] }
+  },
+  "rewards": {
+    "Tracking": { "label": "Distance to the target" },
+    "Switch": { "label": "Correct switch decision" }
+  }
+}

@@ -1,20 +1,30 @@
 /**
  * @file Examples/BlueDefense/Scenario/bluedefenseexample.hpp
- * @brief Chargement des modes entraînement et inférence de BlueDefense.
- * @details Référence de l'unité, de ses types et de ses fonctions C++.
- * Les implémentations sont accessibles via le navigateur de sources Doxygen.
+ * @brief Loads a BlueDefense scenario for the environment DLL (blue_environment): its
+ *        entities, red agents, world rules and the blue team's controller.
  */
 #pragma once
-#include "example.hpp"
+
+#include <filesystem>
+#include <memory>
+
+namespace ppo::model {
+class Environment;
+}
+
 namespace ppo::examples::bluedefense {
+namespace defenders {
+class GeneralizedPatrolMappoAgent;
+}
 /**
- * @brief Réalise l'opération Definition; voir les préconditions et effets dans son corps C++.
+ * @brief Loads a BlueDefense scenario whose blue team is driven from outside the world:
+ *        the environment DLL of ppokit-run.
+ * @param path BlueDefense scenario document (scenario.json of a BluePatrol project).
+ * @param environment Destination ECS environment, stepped by its caller.
+ * @return The blue team's controller, or null when the scenario is invalid.
+ * @details Register the Airspace reflection (RegisterAirspaceMeta) first. The world then
+ *          has the time step and limits of the shared Environment.json.
  */
-ppo::app::ExampleDefinition Definition();
-/**
- * @brief Définit le scénario BlueDefense exécuté avec la politique de production.
- */
-ppo::app::ExampleDefinition InferenceDefinition();
-/** @brief Runs a complete deterministic, read-only production actor evaluation. */
-ppo::app::ExampleDefinition EvaluationDefinition();
+std::shared_ptr<defenders::GeneralizedPatrolMappoAgent> LoadExternalScenario(
+    std::filesystem::path const& path, ppo::model::Environment& environment);
 }

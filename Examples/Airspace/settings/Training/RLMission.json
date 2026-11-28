@@ -1,0 +1,23 @@
+{
+    "formatVersion": 2,
+    "rewards": {
+        "clamp": 60.0,
+        "weights": {
+            "Civilian destruction": 0.8999999761581421,
+            "Danger": 0.699999988079071,
+            "Fuel": 0.019999999552965164,
+            "Intercept": 1.0,
+            "Main target destruction": 1.0,
+            "MissionFailure": 1.0,
+            "NearDanger": 0.4000000059604645,
+            "Out Of Area": 0.25,
+            "Ownship destruction": 1.100000023841858,
+            "Range": 0.8999999761581421,
+            "Secondary target destruction": 0.15000000596046448,
+            "Wingmen destruction": 0.800000011920929
+        }
+    },
+    "training": {
+        "rolloutSteps": 2021
+    }
+}

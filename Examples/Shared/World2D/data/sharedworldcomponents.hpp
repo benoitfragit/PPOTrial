@@ -1,0 +1,283 @@
+/**
+* @file sharedworldcomponents.hpp
+* @brief Shared 2D world states; field layout and defaults preserved for legacy models.
+*/
+#pragma once
+
+#include <array>
+#include <cstddef>
+
+#include "entt/entt.hpp"
+#include "entitytypes.hpp"
+
+namespace ppo::model {
+
+/**
+* @brief Situation awareness and engagement state for guidance logic.
+*/
+struct sSNAState
+{
+    /**
+    * @brief Current target entity identifier.
+    */
+    EntityId m_target{ entt::null };
+    /**
+    * @brief Estimated kill probability against the target.
+    */
+    float m_pk{ 0.F };
+    /**
+    * @brief Target north position in meters.
+    */
+    float m_target_x{ 0.F };
+    /**
+    * @brief Target east position in meters.
+    */
+    float m_target_y{ 0.F };
+    /**
+    * @brief Target north velocity in meters per second.
+    */
+    float m_target_dx{ 0.F };
+    /**
+    * @brief Target east velocity in meters per second.
+    */
+    float m_target_dy{ 0.F };
+    /**
+    * @brief Closing speed relative to the target in meters per second.
+    */
+    float m_closingspeed{ 0.F };
+    /**
+    * @brief Current line-of-sight angle in radians.
+    */
+    float m_target_los{ 0.F };
+    /**
+    * @brief Line-of-sight rate in radians per second.
+    */
+    float m_target_los_rate{ 0.F };
+    /**
+    * @brief Maximum no-escape-zone reference for the platform.
+    */
+    float m_maxNoescapeZone{ 8000.F };
+    /**
+    * @brief Escape-zone range in meters.
+    */
+    float m_escapezone{ 0.F };
+    /**
+    * @brief No-escape-zone range in meters.
+    */
+    float m_noescapezone{ 0.F };
+    /**
+    * @brief Maximum launch angle in radians.
+    */
+    float m_maxShootAngle{ 0.F };
+    /**
+    * @brief Remaining missile count.
+    */
+    unsigned short m_nbmissiles{ 0 };
+    /**
+    * @brief Maximum missile count carried by the platform.
+    */
+    unsigned short m_maxnbmissiles{ 0 };
+};
+
+/**
+* @brief Manual commands applied to the guidance and flight controller.
+*/
+struct sSNAControlState
+{
+    /**
+    * @brief Longitudinal acceleration command.
+    */
+    float m_accCmd{ 0.F };
+    /**
+    * @brief Heading-rate command.
+    */
+    float m_rotSpeedCmd{ 0.F };
+};
+
+/**
+* @brief Pseudo-lidar collision sketch used by mission logic and the Visualiseurs.
+*/
+struct sPseudoLidarState
+{
+    /**
+    * @brief Normalized collision ranges for each lidar bin.
+    */
+    std::array<float, 61> m_nearestCollisionRanges{};
+    /**
+    * @brief Raw collision distances for each lidar bin.
+    */
+    std::array<float, 61> m_nearestCollisionDistances{};
+    /**
+    * @brief Angular span covered by the pseudo-lidar in radians.
+    */
+    float m_angleSpanRadians{ 6.2831855F };
+};
+
+/**
+* @brief Simplified flight model state.
+*/
+struct sFlightModelState
+{
+    /**
+    * @brief Current longitudinal acceleration.
+    */
+    float m_acc{ 0.F };
+    /**
+    * @brief Current turn acceleration.
+    */
+    float m_accpsi{ 0.F };
+    /**
+    * @brief Maximum longitudinal acceleration.
+    */
+    float m_maxAcc{ 0.F };
+    /**
+    * @brief Maximum turn acceleration.
+    */
+    float m_maxAccRot{ 0.F };
+    /**
+    * @brief Maximum allowed speed.
+    */
+    float m_maxSpeed{ 0.F };
+    /**
+    * @brief Minimum allowed speed.
+    */
+    float m_minSpeed{ 0.F };
+    /**
+    * @brief Remaining fuel quantity.
+    */
+    float m_fuel{ 0.F };
+    /**
+    * @brief Instantaneous fuel consumption.
+    */
+    float m_fuelconsumption{ 0.F };
+    /**
+    * @brief Maximum fuel quantity.
+    */
+    float m_maxfuel{ 0.F };
+};
+
+// Rendering metadata derived from the current world bounds (sEnvironmentState).
+// View-only: no independent geometry or collision behavior is imposed.
+/** @brief Déclare le type sDefendedArea, utilisé par Interface ou implémentation du composant sharedworldcomponents. */
+struct sDefendedArea
+{
+    float m_north{0.F};
+    float m_east{0.F};
+    float m_halfNorth{0.F};
+    float m_halfEast{0.F};
+};
+
+/**
+ * @brief View-only samples used to draw the leader's analytical patrol.
+ *
+ * These points have no navigation or training semantics: the controller uses
+ * the continuous geometry directly. The fixed-size storage avoids allocations
+ * when the scene is published to the Visualiseur.
+ */
+struct sPatrolTrackOverlay final
+{
+    /** @brief Number of samples reserved for the closed leader curve. */
+    static constexpr std::size_t SampleCapacity = 97U;
+
+    /** @brief North coordinates indexed by sample. */
+    std::array<float, SampleCapacity> m_north{};
+    /** @brief East coordinates indexed by sample. */
+    std::array<float, SampleCapacity> m_east{};
+    /** @brief Number of valid entries in the coordinate arrays. */
+    std::size_t m_sampleCount{};
+};
+
+/**
+ * @brief One role-ordered patrol reference published only for visualization.
+ *
+ * The projected point is the instantaneous position used by patrol-quality
+ * evaluation. The guidance point and heading are the anticipatory reference
+ * encoded in the corresponding agent observation.
+ */
+struct sPatrolReferenceOverlayEntry final
+{
+    /** @brief Instantaneous projected north coordinate in metres. */
+    float m_projectedNorth{};
+    /** @brief Instantaneous projected east coordinate in metres. */
+    float m_projectedEast{};
+    /** @brief Anticipatory guidance north coordinate in metres. */
+    float m_guidanceNorth{};
+    /** @brief Anticipatory guidance east coordinate in metres. */
+    float m_guidanceEast{};
+    /** @brief Anticipatory guidance heading in radians. */
+    float m_guidanceHeading{};
+    /** @brief True when all published coordinates describe an active target. */
+    bool m_valid{};
+};
+
+/**
+ * @brief Fixed-capacity leader and wedge references drawn by the Visualiseur.
+ *
+ * Entry zero is the leader. Entries one through eight are wedge slots W1 to
+ * W8. This view-only data cannot influence observations, rewards, policy
+ * inference, physics, or role assignment.
+ */
+struct sPatrolReferenceOverlay final
+{
+    /** @brief Maximum leader-plus-wedge cardinality supported by BlueDefense. */
+    static constexpr std::size_t ReferenceCapacity = 9U;
+
+    /** @brief References ordered as leader, then stable wedge slot. */
+    std::array<sPatrolReferenceOverlayEntry, ReferenceCapacity> m_references{};
+    /** @brief Number of active role positions, including the leader. */
+    std::size_t m_activeReferenceCount{};
+    /** @brief Render-only patrol visibility; false while any Red is active. */
+    bool m_showInPatrol{};
+
+    /** @brief Returns true when the active prefix fits the fixed storage. */
+    constexpr bool Valid() const noexcept
+    {
+        return m_activeReferenceCount != 0U
+            && m_activeReferenceCount <= ReferenceCapacity;
+    }
+
+    /** @brief Common visibility contract for labels, 3D arrows and minimap. */
+    constexpr bool Visible() const noexcept
+    {
+        return m_showInPatrol && Valid() && m_references[0].m_valid;
+    }
+};
+
+/** @brief One frozen patrol waypoint exposed only to the Visualiseur. */
+struct sPatrolWaypointOverlayEntry final
+{
+    /** @brief North coordinate in simulation metres. */
+    float m_north{};
+    /** @brief East coordinate in simulation metres. */
+    float m_east{};
+    /** @brief Tangent heading in simulation radians. */
+    float m_heading{};
+};
+
+/**
+ * @brief Fixed 26-waypoint sequence generated by the no-threat leader.
+ *
+ * This view is copied out of the controller after waypoint generation. It is
+ * display-only and cannot influence observations, rewards or physics.
+ */
+struct sPatrolWaypointOverlay final
+{
+    /** @brief Exact fixed capacity shared with the patrol sequencer. */
+    static constexpr std::size_t WaypointCount = 26U;
+    /** @brief Immutable episode waypoint poses in strict traversal order. */
+    std::array<sPatrolWaypointOverlayEntry, WaypointCount> m_waypoints{};
+    /** @brief Zero-based active waypoint; 26 means the lap is complete. */
+    std::size_t m_activeWaypointIndex{};
+    /** @brief Number of strictly ordered passage zones already validated. */
+    std::size_t m_validatedWaypointCount{};
+
+    /** @brief Returns true when all 26 frozen entries and indices are valid. */
+    constexpr bool Valid() const noexcept
+    {
+        return m_activeWaypointIndex <= WaypointCount
+            && m_validatedWaypointCount <= WaypointCount
+            && m_activeWaypointIndex == m_validatedWaypointCount;
+    }
+};
+
+} /* ppo::model */

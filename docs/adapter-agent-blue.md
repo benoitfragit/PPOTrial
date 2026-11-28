@@ -16,39 +16,48 @@ Pour une vue synthétique des boîtes, des flux et des sorties, consulter le
 
 ~~~text
 Scénario JSON
-  -> création des entités et du contrôleur Blue
-  -> ChooseAction
+  -> création des entités et du contrôleur Blue (LoadExternalScenario)
+  -> Environment::BeginStep, puis PrepareExternalStep
        -> lecture de l'état ECS
-       -> P observations brutes de 295 valeurs
+       -> P observations brutes de 295 valeurs, publiées dans Exchange()
+  -> ppokit_graph_network (hors du monde)
        -> attention masquée et compactage à 156 valeurs
        -> acteur partagé
-       -> P actions de 2 valeurs
-       -> commandes rotation / accélération
-  -> physique et règles du monde
-  -> SetNewState
-       -> nouvel état ECS et condition de fin
-       -> 15 canaux de reward par trajectoire
+       -> P actions de 2 valeurs, écrites dans Exchange().actions
+  -> Environment::EndStep
+       -> ChooseAction : commandes rotation / accélération
+       -> physique et règles du monde
+       -> SetNewState : nouvel état ECS, condition de fin,
+          15 canaux de reward par Bleu, observations suivantes
+  -> ppokit-run et ppokit_graph_network
        -> P transitions et observations critic de 470 valeurs
        -> mise à jour PPO à la fin du rollout
-       -> checkpoint et évaluation selon la cadence configurée
+  -> ppokit-run
+       -> journal, checkpoints, suites d'évaluation et promotion
 ~~~
 
-Le mode `blue-defense-inference` s'arrête après l'application des actions et la
-détection de fin d'épisode : il ne calcule ni reward d'apprentissage, ni
-rollout, ni optimisation, ni sauvegarde.
+## Exécution
 
-## Modes d'exécution
+Le contrôleur n'a pas de modes d'exécution : il est toujours piloté depuis
+l'extérieur du monde. La DLL d'environnement `blue_environment` fait avancer le
+monde et échange observations, actions, rewards et issue d'épisode avec lui ; le
+learner MAPPO et l'acteur de production du projet principal sont dans la DLL réseau
+`ppokit_graph_network` ; `blue_network` reste utilisé par le projet historique de la CI ;
+le journal, les checkpoints, la promotion et les suites d'évaluation sont dans
+`ppokit-run`. Les anciennes entrées `blue-defense`, `blue-defense-inference` et
+`blue-defense-evaluation` de PPO.exe ont été supprimées avec lui.
 
-| Entrée CLI | Mode du contrôleur | Modèle Blue |
-| --- | --- | --- |
-| `blue-defense` | `Training` | acteur `latest`, critic, rollout, Adam et évaluations périodiques |
-| `blue-defense-inference` | `ProductionInference` | acteur `prod` déterministe uniquement |
-| `blue-defense-evaluation` | `ProductionEvaluation` | acteur `prod` immuable et campagne déterministe, sans PPO |
+| Commande ppokit-run | Modèle Blue |
+| --- | --- |
+| `train` | acteur `latest`, critic, rollout, Adam ; suite `eval/validation.json` jouée selon `checkpointEvery` |
+| `play --model PROD` | acteur `prod` déterministe uniquement |
+| `eval --model PROD` | acteur `prod` immuable et campagne déterministe, sans PPO |
 
-Les trois entrées utilisent le scénario
-[`resources/settings/Scenarios/BlueDefense.json`](../resources/settings/Scenarios/BlueDefense.json).
-Le choix du mode et la création de `GeneralizedPatrolMappoAgent` sont dans
-[`bluedefenseexample.cpp`](../Examples/BlueDefense/Scenario/bluedefenseexample.cpp).
+Les trois commandes utilisent le scénario
+[`Examples/BlueDefense/projects/BluePatrol/scenario.json`](../Examples/BlueDefense/projects/BluePatrol/scenario.json).
+La création de `GeneralizedPatrolMappoAgent` est dans
+[`bluedefenseexample.cpp`](../Examples/BlueDefense/Scenario/bluedefenseexample.cpp)
+(`LoadExternalScenario`).
 
 ## Entrée de l'acteur : observation v10
 
@@ -98,8 +107,8 @@ sécurité des autres Bleus. Les collisions physiques restent résolues
 séparément par les règles du monde.
 
 Le calcul géométrique est dans
-[`restrictedzonelidar.cpp`](../Framework/Simulation/World2D/src/restrictedzonelidar.cpp)
-et l'alimentation du snapshot Blue dans
+[`restrictedzonelidar.cpp`](../Examples/Shared/World2D/src/restrictedzonelidar.cpp)
+et la mise à jour des pseudo-LiDAR Bleus dans
 [`bluedefenserules.cpp`](../Examples/BlueDefense/Scenario/bluedefenserules.cpp).
 
 ### Rôle : indices 68–69
@@ -252,12 +261,12 @@ mobile, chaque composante est bornée dans `[-1, 1]`. En inférence et en
 Les affectations sont dans
 [`GeneralizedPatrolMappoAgent::ChooseAction`](../Examples/BlueDefense/Agents/BluePatrol/Runtime/generalized_patrol_team_agent.cpp).
 La conversion en accélérations physiques est dans
-[`flightmodelsystem.cpp`](../Framework/Simulation/World2D/src/flightmodelsystem.cpp).
+[`flightmodelsystem.cpp`](../Examples/Shared/World2D/src/flightmodelsystem.cpp).
 
 ## Rewards : contrat des 15 canaux
 
-L'ordre est un contrat partagé par l'apprentissage, les snapshots, l'IHM et
-les tests. L'énumération et l'agrégation sont dans
+L'ordre est un contrat partagé par l'apprentissage, les canaux publiés par
+`blue_environment`, le studio et les tests. L'énumération et l'agrégation sont dans
 [`generalized_cooperative_reward.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Core/generalized_cooperative_reward.hpp).
 
 | Index | Canal | Portée | Valeur non pondérée |
@@ -289,13 +298,13 @@ Pour chaque Bleu, le scalaire PPO vaut :
 clamp(somme(canal[i] * poids[i]), -rewardClamp, +rewardClamp)
 ~~~
 
-Les valeurs exposées dans le snapshot sont non pondérées. Les poids affichés
-sont appliqués seulement lors de la réduction vers le scalaire PPO.
+Les canaux publiés par `blue_environment` (`rewardChannels`) sont pondérés,
+avant le clamp ; le tableau ci-dessus donne leurs valeurs non pondérées.
 
 ### Mapping du JSON vers les 15 poids
 
 Le fichier
-[`resources/settings/Training/BluePatrol.json`](../resources/settings/Training/BluePatrol.json)
+[`Examples/BlueDefense/projects/BluePatrol/blue_patrol_training.json`](../Examples/BlueDefense/projects/BluePatrol/blue_patrol_training.json)
 conserve sept clés historiques. Le runtime les projette explicitement avec
 `MapGeneralizedRewardWeights`.
 
@@ -373,18 +382,18 @@ sépare explicitement terminaison et troncature.
 
 | Besoin | Fichiers à modifier ou vérifier |
 | --- | --- |
-| Changer P/N, les spawns ou les zones | [`BlueDefense.json`](../resources/settings/Scenarios/BlueDefense.json), [`spawn_config.cpp`](../Examples/BlueDefense/Scenario/spawn_config.cpp), [`initializer.cpp`](../Examples/BlueDefense/Scenario/initializer.cpp) |
-| Changer la dynamique du véhicule | [`defender_car.json`](../resources/settings/Platforms/Mobile/defender_car.json), [`flightmodelsystem.cpp`](../Framework/Simulation/World2D/src/flightmodelsystem.cpp), [`patrol_config.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Core/patrol_config.hpp) |
-| Changer la géométrie ou les poids existants | [`BluePatrol.json`](../resources/settings/Training/BluePatrol.json), [`patrol_config.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Core/patrol_config.hpp) |
+| Changer P/N, les spawns ou les zones | [`BlueDefense.json`](../Examples/BlueDefense/projects/BluePatrol/scenario.json), [`spawn_config.cpp`](../Examples/BlueDefense/Scenario/spawn_config.cpp), [`initializer.cpp`](../Examples/BlueDefense/Scenario/initializer.cpp) |
+| Changer la dynamique du véhicule | [`defender_car.json`](../Examples/Shared/settings/Platforms/Mobile/defender_car.json), [`flightmodelsystem.cpp`](../Examples/Shared/World2D/src/flightmodelsystem.cpp), [`patrol_config.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Core/patrol_config.hpp) |
+| Changer la géométrie ou les poids existants | [`BluePatrol.json`](../Examples/BlueDefense/projects/BluePatrol/blue_patrol_training.json), [`patrol_config.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Core/patrol_config.hpp) |
 | Changer une feature d'observation | [`generalized_observation.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Core/generalized_observation.hpp), [`generalized_runtime_state.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Runtime/generalized_runtime_state.hpp), [`generalized_attention_actor.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Training/generalized_attention_actor.hpp) |
 | Changer le rôle ou les slots wedge | [`blue_team_roles.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Core/blue_team_roles.hpp), [`patrol_geometry.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Core/patrol_geometry.hpp), [`generalized_runtime_state.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Runtime/generalized_runtime_state.hpp) |
-| Changer les actions | [`patrol_core.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Core/patrol_core.hpp), [`generalized_patrol_team_agent.cpp`](../Examples/BlueDefense/Agents/BluePatrol/Runtime/generalized_patrol_team_agent.cpp), [`flightmodelsystem.cpp`](../Framework/Simulation/World2D/src/flightmodelsystem.cpp) |
+| Changer les actions | [`patrol_core.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Core/patrol_core.hpp), [`generalized_patrol_team_agent.cpp`](../Examples/BlueDefense/Agents/BluePatrol/Runtime/generalized_patrol_team_agent.cpp), [`flightmodelsystem.cpp`](../Examples/Shared/World2D/src/flightmodelsystem.cpp) |
 | Changer l'acteur | [`patrol_rltools.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Training/patrol_rltools.hpp), [`generalized_attention_actor.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Training/generalized_attention_actor.hpp) |
 | Changer le critic | [`generalized_critic_observation.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Training/generalized_critic_observation.hpp), [`generalized_critic_network.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Training/generalized_critic_network.hpp), [`generalized_patrol_learner.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Training/generalized_patrol_learner.hpp) |
 | Changer un reward existant | [`generalized_reward_shaping.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Runtime/generalized_reward_shaping.hpp), [`generalized_cooperative_reward.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Core/generalized_cooperative_reward.hpp), [`generalized_patrol_team_agent.cpp`](../Examples/BlueDefense/Agents/BluePatrol/Runtime/generalized_patrol_team_agent.cpp) |
 | Changer succès, échec ou timeout | [`generalized_episode_outcome.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Runtime/generalized_episode_outcome.hpp), [`generalized_patrol_team_agent.cpp`](../Examples/BlueDefense/Agents/BluePatrol/Runtime/generalized_patrol_team_agent.cpp) |
 | Changer sauvegarde ou compatibilité | [`generalized_checkpoint.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Training/generalized_checkpoint.hpp), [`generalized_training_checkpoint.hpp`](../Examples/BlueDefense/Agents/BluePatrol/Training/generalized_training_checkpoint.hpp) |
-| Changer promotion/évaluation | [`generalized_evaluation_campaign.hpp`](../Examples/BlueDefense/Evaluation/generalized_evaluation_campaign.hpp), méthodes `StartEvaluation` et `PromoteEvaluatedActor` du contrôleur |
+| Changer les cas ou le score d'évaluation | [`generalized_evaluation_case.hpp`](../Examples/BlueDefense/Evaluation/generalized_evaluation_case.hpp), [`generalized_evaluation_metrics.hpp`](../Examples/BlueDefense/Evaluation/generalized_evaluation_metrics.hpp), `StartExternalEvaluationCase` du contrôleur ; la suite, l'agrégation et la promotion sont dans `ppokit-run` (`eval/validation.json`) |
 
 ## Procédures d'adaptation
 
@@ -444,7 +453,7 @@ le même changement :
 - `GeneralizedRewardChannel`, les noms et le nombre de canaux ;
 - le calcul de shaping et l'agrégation par rôle ;
 - le mapping JSON ;
-- le snapshot IHM et la télémétrie ;
+- les canaux publiés par `blue_environment` et le journal ;
 - les checkpoints si le contrat sérialisé change ;
 - les tests numériques et la documentation.
 
@@ -456,9 +465,9 @@ individuelle restent autoritaires.
 
 | Artefact | Rôle |
 | --- | --- |
-| `resources/model/BluePatrol/latest/blue_patrol_generalized_v10.txt` | acteur courant pour reprise et évaluation |
-| `resources/model/BluePatrol/latest/blue_patrol_generalized_training_v7.txt` | acteur, critic, Adam, RNG et compteurs |
-| `resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt` | acteur promu utilisé en production |
+| `Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/policy.ppokit` | acteur courant pour reprise et évaluation |
+| `Examples/BlueDefense/projects/BluePatrol/checkpoints/latest/latest.ppokit` | acteur, critic, Adam, RNG et compteurs |
+| `Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/prod/policy.ppokit` | acteur de production du projet partagé |
 
 Le checkpoint acteur enregistre la version de politique et la version
 d'observation. L'état complet enregistre aussi l'architecture du critic et les
@@ -476,8 +485,8 @@ Tests ciblés selon la modification :
 | GAE, terminal/troncature | `BlueDefenseGeneralizedAdvantageTests`, `BlueDefenseGeneralizedEpisodeOutcomeTests` |
 | patrouille et waypoints | `BlueDefenseGeneralizedPatrolReferenceTests`, `BlueDefenseGeneralizedPatrolWaypointTests`, `BlueDefenseGeneralizedUnifiedGuidanceTests` |
 | acteur, critic, rollout | `BlueDefenseAttentionTests`, `BlueDefenseGeneralizedLearnerTests` |
-| configuration et scène | `BlueDefenseGeneralizedInitializerTests`, `BlueDefenseCombatRuntimeSmoke`, `BlueDefenseInferenceRuntimeSmoke` |
-| checkpoint | `PolicyCheckpointTests` et tests de fixture d'inférence |
+| configuration et scène | `BlueDefenseGeneralizedInitializerTests`, `BlueDefenseWorldSettingsTests`, `BlueDefenseGeneralizedLeaderRuntimeTests` |
+| checkpoint | `PolicyCheckpointTests` |
 
 Les builds x64 doivent réutiliser exclusivement les répertoires imposés :
 

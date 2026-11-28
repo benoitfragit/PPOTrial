@@ -56,7 +56,9 @@ LogScenarioError(std::string const& message, std::filesystem::path const& path)
 } // namespace
 
 /**
-* @brief Resolves one resource-relative path against the project resource root.
+* @brief Resolves a relative scenario path against the shared settings folder.
+* @details Examples pass absolute scenario paths; a relative one names a file of
+*          Examples/Shared/settings.
 */
 std::filesystem::path
 ResolveResourcePath(std::filesystem::path const& path)
@@ -64,7 +66,7 @@ ResolveResourcePath(std::filesystem::path const& path)
     if (path.is_absolute())
         return path;
 
-    return (std::filesystem::path{ RESOURCE_PATH } / path).lexically_normal();
+    return (std::filesystem::path{ PPO_SHARED_SETTINGS } / path).lexically_normal();
 }
 
 /**

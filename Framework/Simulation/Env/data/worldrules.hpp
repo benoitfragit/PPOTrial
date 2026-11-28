@@ -17,7 +17,7 @@ class Entity;
 using WorldEntities = std::vector<std::shared_ptr<Entity>>;
 
 // Scenario extension point; no policy, learning, reward or physics assumptions.
-// Called only on the simulation thread (except initial registration).
+// Called by the environment's steps (Environment::BeginStep / EndStep).
 /** @brief Déclare le type IWorldRules, utilisé par Interface ou implémentation du composant worldrules. */
 class IWorldRules
 {
@@ -43,10 +43,6 @@ public:
  * @details Consulte ou modifie des composants ECS.
  */
     virtual void AfterStep() = 0;
-/**
- * @brief Réalise l'opération CopySnapshot; voir les préconditions et effets dans son corps C++.
- */
-    virtual void CopySnapshot(entt::registry& source, entt::registry& destination) const = 0;
 };
 
 } // namespace ppo::model

@@ -8,13 +8,18 @@ evaluation, EnTT world, renderer, or the Play/Pause/Stop flow.
 
 - Existing `RLSNA` and `RLMission` agents are **examples** of this contract,
   not special cases encoded in `GenericRLCore`.
-- Both still train when Play is selected, through their unchanged
-  `TrainingAgent -> TorchLearner -> RLAgent -> PPO` path.
-- Production and evaluation continue to load their existing `model.pt` files
-  through the same `ProdAgent -> TorchProductionPolicy` path.
+- Their training model is wrapped by `TrainingAgent`, which has no learner: it
+  is driven from outside the world by the environment DLL
+  (`rlmission_environment` under `ppokit-run train`), and the network DLL
+  (`rlmission_network`, built from the agent's `task.json`) learns. The agent
+  reads only `rolloutSteps`, the reward clamp and the reward weights from
+  `settings/Training/<agent>.json`.
+- Production and evaluation load `policy.ppokit` (a PPOKit-trained policy) or,
+  failing that, `policy.txt`, the weights converted from the former LibTorch
+  `model.pt` and computed by `AirspacePolicies` with the same results
+  (`LegacyPolicyTests`; LibTorch parity was checked in CI before LibTorch left).
 - No existing JSON field or scenario key is introduced, renamed or removed.
-- No neural network module name, feature order, normalization, action meaning,
-  reward value, random sequence or checkpoint format is modified.
+- No feature order, normalization, action meaning or reward value is modified.
 
 ## Contract API
 
@@ -84,8 +89,7 @@ policy stays bound to its original layout.
   contracts and train/prod consistency; existing read-only checkpoint loading,
   deterministic inference equivalence and pre-update transition parity
   remain unchanged.
-- `Desktop VS2022 build`: Debug and Release CI runs CMake and CTest against
-  matching LibTorch variants.
+- `Desktop VS2022 build`: Debug and Release CI runs CMake and CTest.
 
 Descriptors use `std::string_view`: declare them with string literals or other
 static-lifetime strings, never temporary configuration strings. They are not

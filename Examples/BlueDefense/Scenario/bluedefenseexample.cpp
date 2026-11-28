@@ -20,6 +20,8 @@
 #include "serializer.hpp"
 #include "sharedworldcomponents.hpp"
 
+#include "ppokit/schema/project.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -32,6 +34,32 @@
 
 namespace ppo::examples::bluedefense {
 namespace {
+
+/** @brief MAPPO training file of a BluePatrol PPOKit project (the scenario is its "settings"). */
+constexpr char ProjectTrainingFile[] = "blue_patrol_training.json";
+
+/** @brief Where a BlueDefense scenario reads its settings. */
+struct BlueDefenseLocations final
+{
+    defenders::PatrolSettingsFiles settings;
+};
+
+/**
+ * @brief Settings files and model folder of a scenario.
+ * @details A BlueDefense scenario lives in a PPOKit project
+ * (Examples/BlueDefense/projects/<name>): it reads the project's training file and keeps
+ * its models in the project's checkpoints/. The world files (Environment.json, platforms)
+ * are shared in Examples/Shared/settings. A scenario outside a project uses the
+ * blue_patrol_training.json and checkpoints/ beside it.
+ */
+BlueDefenseLocations LocationsFor(std::filesystem::path const& scenarioPath)
+{
+    std::filesystem::path const absolute = std::filesystem::absolute(scenarioPath);
+    std::optional<std::filesystem::path> const project = ppokit::schema::ProjectFolderOf(absolute);
+    std::filesystem::path const folder = project.value_or(absolute.parent_path());
+    return {defenders::PatrolSettingsIn(std::filesystem::path{PPO_SHARED_SETTINGS},
+                folder / ProjectTrainingFile)};
+}
 
 /**
  * @brief Identifies a scenario entity usable as a production red template.
@@ -98,83 +126,86 @@ bool SameGeneralizedBlueTemplate(
 }
 
 /**
- * @brief Lit et vérifie des données depuis l'état ou les entrées.
+ * @brief Creates the entities and agents of a BlueDefense scenario in `environment`.
+ * @param path BlueDefense scenario document (its project holds the training settings).
+ * @param environment Destination ECS environment.
+ * @return The blue team's controller, or null when the scenario is invalid.
  */
-bool LoadScenario(
+std::shared_ptr<defenders::GeneralizedPatrolMappoAgent> LoadScenario(
     std::filesystem::path const& path,
-    ppo::model::Environment& environment,
-    defenders::GeneralizedPatrolExecutionMode const executionMode)
+    ppo::model::Environment& environment)
 {
     if (!environment.SetEntityInitializer(&InitializeEntity)
         || !environment.SetWorldRules(std::make_unique<BlueDefenseWorldRules>()))
-        return false;
+        return nullptr;
 
     auto const scenario = ppo::config::LoadScenarioDefinition(path);
     if (scenario.m_entities.empty())
-        return false;
+        return nullptr;
 
     auto const document = ppo::serialization::Serializer::Parse(path);
     if (!document.is_object() || !document.contains("blueDefense")
         || !document["blueDefense"].is_object())
-        return false;
+        return nullptr;
 
     auto const& settings = document["blueDefense"];
     if (settings.contains("patrolOnly") && !settings["patrolOnly"].is_boolean())
-        return false;
+        return nullptr;
     bool const patrolOnly = settings.value("patrolOnly", false);
 
     if (settings.contains("blueController")
         && (!settings["blueController"].is_string()
             || settings["blueController"].get<std::string>() != "mappo"))
-        return false;
+        return nullptr;
     std::string spawnDiagnostic;
     auto const spawnSettings = ParseSpawnSettings(settings, &spawnDiagnostic);
     if (!spawnSettings)
     {
         std::cerr << "[BLUE_DEFENSE] Invalid spawn configuration: "
                   << spawnDiagnostic << '\n';
-        return false;
+        return nullptr;
     }
     if (!document.contains("entities")
         || !document["entities"].is_object())
-        return false;
+        return nullptr;
 
-    // Initial entity spawns precede Serializer::Load. Read its exact file
+    // The initial entity spawns precede LoadSettings: read Environment.json now
     // so the first episode and later resets use the same LiDAR/world limits.
+    BlueDefenseLocations const locations = LocationsFor(path);
     auto const environmentConfig =
-        ppo::serialization::Serializer::Parse(path.parent_path().parent_path() / "Environment.json");
+        ppo::serialization::Serializer::Parse(locations.settings.environment);
     if (!environmentConfig.is_object()
         || !environmentConfig.contains("formatVersion")
         || !environmentConfig["formatVersion"].is_number_integer()
         || environmentConfig["formatVersion"].get<int>() != 2
         || !environmentConfig.contains("environment")
         || !environmentConfig["environment"].is_object())
-        return false;
+        return nullptr;
     auto const& worldConfig = environmentConfig["environment"];
     if (!worldConfig.contains("maxNorth") || !worldConfig["maxNorth"].is_number()
         || !worldConfig.contains("maxEast") || !worldConfig["maxEast"].is_number())
-        return false;
+        return nullptr;
     float const worldNorth = worldConfig["maxNorth"].get<float>();
     float const worldEast = worldConfig["maxEast"].get<float>();
     if (!std::isfinite(worldNorth) || !std::isfinite(worldEast)
         || worldNorth <= 0.F || worldEast <= 0.F)
-        return false;
+        return nullptr;
     std::mt19937 validationRng{0U};
     WorldBounds const worldBounds{0.5F * worldNorth, 0.5F * worldEast};
     if (spawnSettings->objective.mode == ObjectiveSpawnMode::Fixed
         && !GenerateEpisodeSpawnLayout(
             1, *spawnSettings, worldBounds, validationRng))
-        return false;
+        return nullptr;
 
     if (!spawnSettings->blueTeam || !spawnSettings->redTeam)
     {
         std::cerr << "[BLUE MAPPO] Missing P/N team configuration.\n";
-        return false;
+        return nullptr;
     }
     std::size_t const configuredBlueCount = spawnSettings->blueTeam->activeCount;
     std::size_t const configuredRedCount = spawnSettings->redTeam->activeCount;
     if (patrolOnly && configuredRedCount != 0U)
-        return false;
+        return nullptr;
 
     ppo::config::ScenarioEntityDefinition const* blueTemplate = nullptr;
     ppo::config::ScenarioEntityDefinition const* redTemplate = nullptr;
@@ -187,7 +218,7 @@ bool LoadScenario(
             if (!IsGeneralizedBlueTemplate(item)
                 || (blueTemplate != nullptr
                     && !SameGeneralizedBlueTemplate(*blueTemplate, item)))
-                return false;
+                return nullptr;
             blueTemplate = &item;
         }
         else if (item.m_side == ppo::model::eEntitySide::Hostile)
@@ -195,12 +226,12 @@ bool LoadScenario(
             if (!IsProductionRedTemplate(item)
                 || (redTemplate != nullptr
                     && !SameProductionRedTemplate(*redTemplate, item)))
-                return false;
+                return nullptr;
             redTemplate = &item;
         }
     }
     if (!blueTemplate || (configuredRedCount > 0U && !redTemplate))
-        return false;
+        return nullptr;
 
     std::map<std::string, std::shared_ptr<ppo::model::Entity>> entities;
     std::vector<std::shared_ptr<ppo::model::IAgent>> agents;
@@ -218,15 +249,15 @@ bool LoadScenario(
         if ((!objective && !zone)
             || !document["entities"].contains(item.m_name)
             || !item.m_agents.empty() || !item.m_target.empty())
-            return false;
+            return nullptr;
         auto entity = ppo::reflection::CreateEntity(
             item.m_type, environment, item.m_platform, item.m_side);
         if (!entity)
-            return false;
+            return nullptr;
         entity->add<ppo::model::sEntityMetadata>(
             ppo::model::sEntityMetadata{item.m_name, item.m_platform});
         if (!entities.emplace(item.m_name, std::move(entity)).second)
-            return false;
+            return nullptr;
     }
 
     if (blueTemplate != nullptr)
@@ -238,13 +269,13 @@ bool LoadScenario(
                 blueTemplate->m_type, environment, blueTemplate->m_platform,
                 blueTemplate->m_side);
             if (!entity)
-                return false;
+                return nullptr;
             entity->add<ppo::model::sEntityMetadata>(
                 ppo::model::sEntityMetadata{name, blueTemplate->m_platform});
             auto& sensor = entity->add<ppo::model::sPseudoLidarState>();
             sensor.m_nearestCollisionRanges.fill(1.F);
             if (!entities.emplace(name, std::move(entity)).second)
-                return false;
+                return nullptr;
         }
     }
 
@@ -257,7 +288,7 @@ bool LoadScenario(
                 redTemplate->m_type, environment, redTemplate->m_platform,
                 redTemplate->m_side);
             if (!entity)
-                return false;
+                return nullptr;
             entity->add<ppo::model::sEntityMetadata>(
                 ppo::model::sEntityMetadata{name, redTemplate->m_platform});
             auto& sensor = entity->add<ppo::model::sPseudoLidarState>();
@@ -268,11 +299,11 @@ bool LoadScenario(
             auto agent = ppo::reflection::CreateAgent(
                 redTemplate->m_agents.front(), environment, *entity);
             if (!agent)
-                return false;
+                return nullptr;
             agents.push_back(std::move(agent));
 
             if (!entities.emplace(name, std::move(entity)).second)
-                return false;
+                return nullptr;
         }
     }
 
@@ -281,53 +312,52 @@ bool LoadScenario(
     for (auto const& zone : spawnSettings->restrictedZones.items)
     {
         if (entities.count(zone.id) != 0U)
-            return false;
+            return nullptr;
         auto entity = ppo::reflection::CreateEntity(
             "RestrictedZone", environment, zone.platform,
             ppo::model::eEntitySide::Hostile);
         if (!entity)
-            return false;
+            return nullptr;
         entity->add<ppo::model::sEntityMetadata>(
             ppo::model::sEntityMetadata{zone.id, zone.platform});
         if (!entities.emplace(zone.id, std::move(entity)).second)
-            return false;
+            return nullptr;
     }
 
     if (!entities.count("blue_objective")
         || !entities.count("blue_restricted_zone")
         || entities.size() != configuredBlueCount + configuredRedCount + 2U
             + spawnSettings->restrictedZones.items.size())
-        return false;
+        return nullptr;
     auto const objectiveId = entities.at("blue_objective")->uniqid();
     for (std::size_t index = 0U; index < configuredRedCount; ++index)
     {
         auto& red = *entities.at("red_" + std::to_string(index + 1U));
         if (!red.has<ppo::model::sSNAState>())
-            return false;
+            return nullptr;
         auto [sna] = red.get<ppo::model::sSNAState>();
         sna.m_target = objectiveId;
     }
 
     auto* registry = entities.begin()->second->registry();
     if (!registry)
-        return false;
+        return nullptr;
 
-    auto const settingsRoot = path.parent_path().parent_path();
     defenders::Parameters patrolParameters{};
     defenders::PatrolGeometrySettings patrolGeometrySettings{};
     defenders::PatrolTrainingSettings patrolTraining{};
     try
     {
-        patrolParameters = defenders::LoadPatrolParameters(settingsRoot);
+        patrolParameters = defenders::LoadPatrolParameters(locations.settings);
         patrolGeometrySettings =
-            defenders::LoadPatrolGeometrySettings(settingsRoot);
-        patrolTraining = defenders::LoadPatrolTrainingSettings(settingsRoot);
+            defenders::LoadPatrolGeometrySettings(locations.settings);
+        patrolTraining = defenders::LoadPatrolTrainingSettings(locations.settings);
     }
     catch (std::exception const& error)
     {
         std::cerr << "[BLUE MAPPO] Configuration failed: "
                   << error.what() << '\n';
-        return false;
+        return nullptr;
     }
 
     auto& context = registry->ctx().emplace<InitializerContext>();
@@ -340,7 +370,7 @@ bool LoadScenario(
         {
             auto const& entity = entities.at(zone.id);
             if (!entity->has<ppo::model::sSNAState>())
-                return false;
+                return nullptr;
             auto const [sna] = entity->get<ppo::model::sSNAState>();
             zone.lethalRadiusMeters = sna.m_maxNoescapeZone;
             if (context.spawnSettings.restrictedZones.enabled
@@ -350,7 +380,7 @@ bool LoadScenario(
             {
                 std::cerr << "[BLUE_DEFENSE] Invalid physical radius for "
                           << zone.id << '\n';
-                return false;
+                return nullptr;
             }
         }
     }
@@ -361,16 +391,12 @@ bool LoadScenario(
     context.patrolMinimumSeparationMeters = patrolTraining.noThreatPatrol.minimumSeparationMeters;
     context.patrolMaximumSpeed = patrolParameters.maxSpeed;
     context.patrolGeometrySettings = patrolGeometrySettings;
-    auto const modelRoot = std::filesystem::path{RESOURCE_PATH}.parent_path()
-        / "model" / "BluePatrol";
     auto& world = registry->ctx().get<ppo::model::sEnvironmentState>();
     world.m_maxNorth = worldNorth;
     world.m_maxEast = worldEast;
-    // Rendering metadata is derived from these same limits on each snapshot.
 
-    // The legacy desktop does not initialize the very first episode in Run.
-    // Initialize this standalone scenario once; subsequent resets use the
-    // registered initializer via Environment::Run.
+    // The world starts in its INIT state, which does not re-initialize: initialize the
+    // first episode here; later resets use the registered initializer.
     for (auto const& [name, entity] : entities)
     {
         (void)name;
@@ -379,8 +405,9 @@ bool LoadScenario(
     if (context.patrolGeometrySamplingFailed
         || context.episodeLayoutGenerationFailed
         || !context.patrolGeometryReady)
-        return false;
+        return nullptr;
     patrolParameters.geometry = context.patrolGeometry;
+    std::shared_ptr<defenders::GeneralizedPatrolMappoAgent> blueController;
     try
     {
             std::array<ppo::model::BaseEntity*,
@@ -395,136 +422,39 @@ bool LoadScenario(
                 attackers[index] = entities.at(
                     "red_" + std::to_string(index + 1U)).get();
 
-            auto const generalizedLatest = modelRoot / "latest"
-                / "blue_patrol_generalized_v10.txt";
-            auto const generalizedTraining = modelRoot / "latest"
-                / "blue_patrol_generalized_training_v7.txt";
-            auto const generalizedProduction = modelRoot / "prod"
-                / "blue_patrol_generalized_v10.txt";
-            auto controller = environment.CreateAgent<
+            blueController = environment.CreateAgent<
                 defenders::GeneralizedPatrolMappoAgent>(
                     guards, configuredBlueCount, attackers, redCount,
                     *entities.at("blue_objective"), patrolParameters,
-                    patrolTraining, executionMode, generalizedLatest,
-                    generalizedTraining, generalizedProduction);
-            if (!controller)
-                return false;
-            agents.push_back(std::move(controller));
+                    patrolTraining);
+            if (!blueController)
+                return nullptr;
+            agents.push_back(blueController);
     }
     catch (std::exception const& error)
     {
         std::cerr << "[BLUE MAPPO] Configuration failed: "
                   << error.what() << '\n';
-        return false;
+        return nullptr;
     }
-    if (executionMode
-        == defenders::GeneralizedPatrolExecutionMode::ProductionEvaluation)
-    {
-        // The scenario's initial ECS bootstrap preceded the evaluation
-        // controller constructor. That constructor now prepared case #1:
-        // reinitialize every entity under its deterministic seed, side and
-        // racetrack phase before the first simulated step.
-        for (auto const& [name, entity] : entities)
-        {
-            (void)name;
-            entity->Init();
-        }
-        if (context.patrolGeometrySamplingFailed
-            || context.episodeLayoutGenerationFailed
-            || !context.patrolGeometryReady)
-        {
-            return false;
-        }
-    }
-
     for (auto const& agent : agents)
         agent->Init();
 
-    return true;
-}
-
-/**
- * @brief Loads the standard BlueDefense MAPPO training scenario.
- * @param path BlueDefense scenario document.
- * @param environment Destination ECS environment.
- * @return True when every entity and agent was created.
- */
-bool LoadTrainingScenario(std::filesystem::path const& path,
-                          ppo::model::Environment& environment)
-{
-    return LoadScenario(
-        path, environment,
-        defenders::GeneralizedPatrolExecutionMode::Training);
-}
-
-/**
- * @brief Loads the same BlueDefense scenario with the promoted blue actor.
- * @param path BlueDefense scenario document.
- * @param environment Destination ECS environment.
- * @return True when the production policy and all entities were created.
- */
-bool LoadInferenceScenario(std::filesystem::path const& path,
-                           ppo::model::Environment& environment)
-{
-    return LoadScenario(
-        path, environment,
-        defenders::GeneralizedPatrolExecutionMode::ProductionInference);
-}
-
-/** @brief Read-only deterministic campaign using the promoted actor. */
-bool LoadEvaluationScenario(std::filesystem::path const& path,
-                            ppo::model::Environment& environment)
-{
-    return LoadScenario(
-        path, environment,
-        defenders::GeneralizedPatrolExecutionMode::ProductionEvaluation);
+    return blueController;
 }
 
 } // namespace
 
-/**
- * @brief Réalise l'opération Definition; voir les préconditions et effets dans son corps C++.
- * @details Utilise des fichiers ou chemins.
- */
-ppo::app::ExampleDefinition Definition()
+std::shared_ptr<defenders::GeneralizedPatrolMappoAgent> LoadExternalScenario(
+    std::filesystem::path const& path, ppo::model::Environment& environment)
 {
-    return {
-        "blue-defense",
-        "BLUE DEFENSE - MAPPO P/N vs RLMission",
-        std::filesystem::path("Scenarios") / "BlueDefense.json",
-        &ppo::examples::airspace::RegisterAirspaceMeta,
-        &LoadTrainingScenario,
-        "P blue defenders protect an objective against N RLMission attackers."
-    };
-}
-
-/**
- * @brief Définit le scénario BlueDefense exécuté avec la politique de production.
- * @details Réutilise la même scène que l'entraînement sans rollout ni évaluation.
- */
-ppo::app::ExampleDefinition InferenceDefinition()
-{
-    return {
-        "blue-defense-inference",
-        "BLUE DEFENSE - INFERENCE",
-        std::filesystem::path("Scenarios") / "BlueDefense.json",
-        &ppo::examples::airspace::RegisterAirspaceMeta,
-        &LoadInferenceScenario,
-        "Run the promoted blue production model without training or evaluation."
-    };
-}
-
-/** @brief Separate headless inference evaluation; no training or model writes. */
-ppo::app::ExampleDefinition EvaluationDefinition()
-{
-    return {
-        "blue-defense-evaluation",
-        "BLUE DEFENSE - INFERENCE VALIDATION",
-        std::filesystem::path("Scenarios") / "BlueDefense.json",
-        &ppo::examples::airspace::RegisterAirspaceMeta,
-        &LoadEvaluationScenario,
-        "Deterministic evaluation of the unchanged blue production actor."
-    };
+    auto controller = LoadScenario(path, environment);
+    if (controller)
+    {
+        // The time step and limits of the world: the shared Environment.json.
+        environment.LoadSettings(LocationsFor(path).settings.environment);
+    }
+    return controller;
 }
 
 } // namespace ppo::examples::bluedefense

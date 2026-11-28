@@ -4,9 +4,8 @@ project(EntityInitializer LANGUAGES CXX)
 add_library(${PROJECT_NAME}
 	STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/data/randominitializersystem.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/data/checkpointinitializersystem.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/randominitializersystem.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/checkpointinitializersystem.cpp)
+)
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/data)
 

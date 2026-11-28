@@ -7,8 +7,8 @@
 * @license MIT
 */
 #include "serializer.hpp"
+#include <algorithm>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 #include <sstream>
 
@@ -78,15 +78,22 @@ Serializer::ValidateFormatVersion(std::filesystem::path const& file, json const&
 }
 
 /**
-* @brief Hidden serializer implementation storing root path and callback registries.
+* @brief Hidden serializer implementation storing search folders and callback registries.
 */
 struct Serializer::Impl 
 {
-    std::filesystem::path                                                    m_path{};
-    std::unordered_map<std::filesystem::path, std::vector<JsonLoadFunction>> m_loadfunctions{};
-    std::unordered_map<std::filesystem::path, std::vector<JsonSaveFunction>> m_savefunctions{};
-    // A malformed input must not be replaced with defaults at shutdown.
-    std::unordered_set<std::filesystem::path> m_failedLoads{};
+    /** @brief One callback and the registration it came from. */
+    template<typename Function>
+    struct Entry
+    {
+        Registration registration{ 0U };
+        Function     function{};
+    };
+    using LoadEntries = std::vector<Entry<JsonLoadFunction>>;
+
+    std::vector<std::filesystem::path>                        m_paths{};
+    std::unordered_map<std::filesystem::path, LoadEntries>    m_loadfunctions{};
+    Registration                                              m_nextRegistration{ 1U };
 };
 
 /**
@@ -117,54 +124,100 @@ Serializer::GetInstance(void)
 Serializer::~Serializer(void) = default;
 
 /**
-* @brief Sets the root path used to resolve registered files.
+* @brief Sets the ordered folders used to resolve registered files.
 */
-void 
-Serializer::SetPath(std::filesystem::path path)
+void
+Serializer::SetSearchPaths(std::vector<std::filesystem::path> paths)
 {
     if (p_impl == nullptr)
         return;
 
-    p_impl->m_path = path;
+    p_impl->m_paths = std::move(paths);
 }
+
+namespace {
+
+/**
+ * @brief Resolves a registered file against the search folders.
+ * @return First existing candidate, else the candidate in the first folder.
+ */
+std::filesystem::path
+ResolveInSearchPaths(std::vector<std::filesystem::path> const& roots, std::filesystem::path const& path)
+{
+    if (path.is_absolute() || roots.empty())
+        return path;
+    for (auto const& root : roots)
+    {
+        auto candidate = root / path;
+        if (std::filesystem::exists(candidate))
+            return candidate;
+    }
+    return roots.front() / path;
+}
+
+/**
+ * @brief True when at least one search folder exists on disk.
+ */
+bool
+AnySearchPathExists(std::vector<std::filesystem::path> const& roots)
+{
+    for (auto const& root : roots)
+    {
+        if (!root.empty() && std::filesystem::exists(root))
+            return true;
+    }
+    return false;
+}
+
+} // namespace
+
+namespace {
+
+/**
+* @brief Removes the entries of one registration from a callback map.
+*/
+template<typename Map>
+void
+EraseRegistration(Map& map, Serializer::Registration registration) noexcept
+{
+    for (auto& [filepath, entries] : map)
+    {
+        entries.erase(std::remove_if(entries.begin(), entries.end(),
+                                     [registration](auto const& entry)
+                                     { return entry.registration == registration; }),
+                      entries.end());
+    }
+}
+
+} // namespace
 
 /**
 * @brief Registers callbacks associated with one JSON file.
 */
-void 
-Serializer::Register(std::filesystem::path path, JsonLoadFunction load, JsonSaveFunction save)
+Serializer::Registration
+Serializer::Register(std::filesystem::path path, JsonLoadFunction load)
 {
-    if (p_impl == nullptr)
+    if (p_impl == nullptr || load == nullptr)
+        return 0U;
+
+    // Resolved at Load time, so registering before SetSearchPaths is fine.
+    path.make_preferred();
+
+    Registration const registration{ p_impl->m_nextRegistration++ };
+    p_impl->m_loadfunctions[path].push_back({ registration, std::move(load) });
+    return registration;
+}
+
+/**
+* @brief Removes the callbacks of one registration.
+*/
+void
+Serializer::Unregister(Registration registration) noexcept
+{
+    if (p_impl == nullptr || registration == 0U)
         return;
 
-    std::filesystem::path p{ p_impl->m_path / path };
-    p.make_preferred();
-
-    if (load != nullptr)
-    {
-        if (auto Iter = p_impl->m_loadfunctions.find(p);
-            Iter == p_impl->m_loadfunctions.end())
-        {
-            p_impl->m_loadfunctions[p] = { load };
-        }
-        else
-        {
-            Iter->second.push_back(load);
-        }
-    }
-
-    if (save != nullptr)
-    {
-        if (auto Iter = p_impl->m_savefunctions.find(p);
-            Iter == p_impl->m_savefunctions.end())
-        {
-            p_impl->m_savefunctions[p] = { save };
-        }
-        else
-        {
-            Iter->second.push_back(save);
-        }
-    }
+    EraseRegistration(p_impl->m_loadfunctions, registration);
 }
 
 /**
@@ -173,76 +226,37 @@ Serializer::Register(std::filesystem::path path, JsonLoadFunction load, JsonSave
 void
 Serializer::Load(void)
 {
-    if (p_impl == nullptr
-    ||  p_impl->m_path.empty()
-    || !std::filesystem::exists(p_impl->m_path))
+    if (p_impl == nullptr || !AnySearchPathExists(p_impl->m_paths))
         return;
 
-    p_impl->m_failedLoads.clear();
-
-    for (auto& [filepath, loads] : p_impl->m_loadfunctions)
+    for (auto& [registered, loads] : p_impl->m_loadfunctions)
     {
+        if (loads.empty())
+            continue;
+
+        std::filesystem::path const filepath{ ResolveInSearchPaths(p_impl->m_paths, registered) };
         if (!std::filesystem::exists(filepath))
         {
             LogConfigEvent("CFG_MISSING_FILE", filepath, "file not found");
-            p_impl->m_failedLoads.insert(filepath);
             continue;
         }
 
         auto content = Parse(filepath.string());
 
         if (!ValidateFormatVersion(filepath, content))
-        {
-            p_impl->m_failedLoads.insert(filepath);
             continue;
-        }
 
         for (auto& load : loads)
         {
             try
             {
-                load(content);
+                load.function(content);
             }
             catch (std::exception const& exception)
             {
-                p_impl->m_failedLoads.insert(filepath);
                 LogConfigEvent("CFG_LOAD_EXCEPTION", filepath, exception.what());
             }
         }
-    }
-}
-
-/**
-* @brief Builds JSON documents from callbacks and writes them to disk.
-*/
-void
-Serializer::Save(void)
-{
-    if (p_impl == nullptr
-    ||  p_impl->m_path.empty())
-        return;
-
-    if (!std::filesystem::exists(p_impl->m_path))
-        std::filesystem::create_directories(p_impl->m_path);
-
-    // Create one fresh document per registered save target.
-    for (auto& [filepath, saves] : p_impl->m_savefunctions)
-    {
-        if (p_impl->m_failedLoads.count(filepath) != 0U)
-        {
-            LogConfigEvent("CFG_SAVE_SKIPPED", filepath,
-                           "input configuration failed to load; original file preserved");
-            continue;
-        }
-
-        json doc{};
-
-        for (auto& save : saves)
-            save(doc);
-
-        doc["formatVersion"] = kConfigFormatVersion;
-
-        std::ofstream(filepath) << doc.dump(4);
     }
 }
 

@@ -1,0 +1,72 @@
+{
+  "schema": "ppokit.graph/2",
+  "actor": {
+    "nodes": {
+      "own":            { "type": "input", "from": "observation.own" },
+      "lidar":          { "type": "input", "from": "observation.lidar" },
+      "role":           { "type": "input", "from": "observation.role" },
+      "red":            { "type": "input", "from": "observation.red_tracks" },
+      "blue":           { "type": "input", "from": "observation.blue_tracks" },
+      "objective":      { "type": "input", "from": "observation.objective" },
+      "patrol":         { "type": "input", "from": "observation.patrol" },
+      "global":         { "type": "input", "from": "observation.global" },
+      "team_counts":    { "type": "input", "from": "observation.team_counts" },
+
+      "red_embed":      { "type": "entity_encoder", "width": 8, "activation": "tanh" },
+      "red_query":      { "type": "dense", "width": 8, "activation": "tanh" },
+      "red_attend":     { "type": "masked_attention" },
+      "red_mean":       { "type": "masked_pool", "mode": "mean" },
+      "red_max":        { "type": "masked_pool", "mode": "max" },
+
+      "friends":        { "type": "concat_sets" },
+      "friends_embed":  { "type": "entity_encoder", "width": 6, "activation": "tanh" },
+      "friends_query":  { "type": "dense", "width": 6, "activation": "tanh" },
+      "friends_attend": { "type": "masked_attention" },
+      "friends_mean":   { "type": "masked_pool", "mode": "mean" },
+      "friends_max":    { "type": "masked_pool", "mode": "max" },
+
+      "patrol_kept":    { "type": "select", "indices": [0, 1, 2, 3, 4, 5, 6, 7, 9] },
+      "global_kept":    { "type": "select", "indices": [0] },
+
+      "features":       { "type": "concat" },
+      "trunk":          { "type": "mlp", "layers": 2, "width": 128, "activation": "relu" },
+      "policy":         { "type": "gaussian_head" }
+    },
+    "edges": [
+      ["red", "red_embed"], ["own", "red_query"],
+      ["red_query", "red_attend.query"], ["red_embed", "red_attend.set"],
+      ["red_embed", "red_mean"], ["red_embed", "red_max"],
+
+      ["blue", "friends.in1"], ["objective", "friends.in2"],
+      ["friends", "friends_embed"], ["own", "friends_query"],
+      ["friends_query", "friends_attend.query"], ["friends_embed", "friends_attend.set"],
+      ["friends_embed", "friends_mean"], ["friends_embed", "friends_max"],
+
+      ["patrol", "patrol_kept"], ["global", "global_kept"],
+
+      ["own", "features.in1"], ["lidar", "features.in2"],
+      ["red_attend", "features.in3"], ["red_mean", "features.in4"], ["red_max", "features.in5"],
+      ["team_counts", "features.in6"],
+      ["friends_attend", "features.in7"], ["friends_mean", "features.in8"], ["friends_max", "features.in9"],
+      ["patrol_kept", "features.in10"], ["role", "features.in11"], ["global_kept", "features.in12"],
+      ["features", "trunk"], ["trunk", "policy"]
+    ]
+  },
+  "critic": {
+    "nodes": {
+      "own":             { "type": "input", "from": "critic.own" },
+      "team_mean":       { "type": "input", "from": "critic.team_mean" },
+      "team_max":        { "type": "input", "from": "critic.team_max" },
+      "living_fraction": { "type": "input", "from": "critic.living_fraction" },
+      "team_fraction":   { "type": "input", "from": "critic.team_fraction" },
+      "all":             { "type": "concat" },
+      "trunk":           { "type": "mlp", "layers": 2, "width": 256, "activation": "relu" },
+      "value":           { "type": "value" }
+    },
+    "edges": [
+      ["own", "all.in1"], ["team_mean", "all.in2"], ["team_max", "all.in3"],
+      ["living_fraction", "all.in4"], ["team_fraction", "all.in5"],
+      ["all", "trunk"], ["trunk", "value"]
+    ]
+  }
+}

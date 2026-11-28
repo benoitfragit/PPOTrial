@@ -38,17 +38,6 @@ namespace ppo::examples::flight {
  */
 Controls ApplyPhaseControls(Controls controls, Phase phase, InitialSettings const& initial) noexcept;
 
-/** @brief Deck motion of an episode as shown by the renderer. */
-struct DeckState final
-{
-    /** @brief Forward speed and swell of the episode; all zero for a static deck. */
-    DeckMotionSettings motion{};
-    /** @brief Current deck height above its mean height, in metres. */
-    double heaveMeters{};
-    /** @brief Current swell angle 2 pi t / period + phase, in radians; the heave is amplitude * sin. */
-    double swellAngle{};
-};
-
 /** @brief Same transition loop for desktop, headless training and deterministic tests. */
 class FlightEnvironment final
 {
@@ -128,6 +117,23 @@ public:
     {
         config_.reward = settings;
         episodeConfig_.reward = settings;
+    }
+    /** @brief The training stream: what draws the next training episodes, and their next approach side. */
+    struct TrainingStream final
+    {
+        std::mt19937 random;
+        ApproachSide nextSide = ApproachSide::Left;
+    };
+    /** @brief The training stream, to resume it later exactly where it is. */
+    TrainingStream SavedTrainingStream() const
+    {
+        return {rng_, trainingSide_};
+    }
+    /** @brief Continues a training stream saved by SavedTrainingStream. */
+    void ResumeTrainingStream(TrainingStream const& stream)
+    {
+        rng_ = stream.random;
+        trainingSide_ = stream.nextSide;
     }
 
 private:

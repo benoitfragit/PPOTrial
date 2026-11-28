@@ -22,7 +22,7 @@ dans [FlightControl3D : architecture et reprise du code](FlightControl3D_Archite
 | `Core/flight_observation` | Observation normalisée de la politique |
 | `Core/flight_mission` | Machine d'état approche → roulage → arrêt |
 | `Simulator/` | JSBSim natif et boucle de transition |
-| `Training/` | Acteur gaussien PPO (RLtools), checkpoints et BEST (écriture atomique : `flight_atomic_file`) |
+| `Training/` | Acteur gaussien PPO (RLtools), checkpoints et BEST (écriture atomique : `PPOKit::Artifacts`) |
 | `Runtime/` | Session partagée desktop/headless et réglage des récompenses |
 
 ## Géométrie d'approche et guidage
@@ -245,14 +245,10 @@ une nouvelle politique. Un BEST n'est réutilisé que pour une signature exacte.
 
 ## CI
 
-**Actions → FlightControl3D Landing Training → Run workflow** compile
-`FlightControlHeadless` en Release dans `build/release`, puis
-`tools/flight/curriculum_ci.py` enchaîne des blocs de `additional_updates`
-mises à jour PPO. Chaque bloc se termine par une validation indépendante
-(`[FLIGHT_GATE] successes=… episodes=… difficulty=… passed=…`). Le runner s'arrête à la
-première validation réussie sur la tâche complète ; un budget épuisé renvoie le statut `incomplete`
-et un code non nul. `resume_run_id` restaure l'artefact `flight-control-training`,
-dont le checkpoint est vérifié par le chargeur natif avant reprise.
+Les workflows FlightControl3D compilent `ppokit-run` et les bibliothèques du projet
+sélectionné en Release dans `build/release`. Le moteur commun exécute la suite
+`validation` et arrête l’entraînement lorsqu’elle est validée (`--until-passed validation`)
+ou lorsque le budget est atteint. La reprise utilise les artefacts PPOKit du projet.
 
 Ces vérifications ne démontrent aucune convergence PPO : une politique doit être
 jugée sur des évaluations à graines indépendantes.

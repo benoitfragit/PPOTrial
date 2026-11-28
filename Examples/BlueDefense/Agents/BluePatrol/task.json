@@ -1,0 +1,74 @@
+{
+  "schema": "ppokit.task/1",
+  "name": "blue_patrol",
+  "namespace": "ppo::examples::bluedefense::defenders::task",
+  "agents": { "min": 1, "max": 9 },
+  "observation": {
+    "own": { "size": 7 },
+    "lidar": { "size": 61 },
+    "role": { "size": 2 },
+    "red_tracks": { "set": { "capacity": 10, "features": 13, "mask": "last" } },
+    "blue_tracks": { "set": { "capacity": 8, "features": 9, "mask": "last" } },
+    "objective": { "set": { "capacity": 1, "features": 9, "mask": "last" } },
+    "patrol": { "size": 10 },
+    "global": { "size": 2 },
+    "team_counts": { "size": 2 }
+  },
+  "critic": {
+    "own": { "size": 156 },
+    "team_mean": { "size": 156 },
+    "team_max": { "size": 156 },
+    "living_fraction": { "size": 1 },
+    "team_fraction": { "size": 1 }
+  },
+  "actions": {
+    "motion": {
+      "head": "gaussian",
+      "names": ["turn", "acceleration"],
+      "bounds": [-1, 1],
+      "map": "clip"
+    }
+  },
+  "world": {
+    "blue": { "fields": ["blue_present", "blue_alive", "blue_leader", "blue_north", "blue_east", "blue_heading",
+                         "blue_speed", "blue_reference_north", "blue_reference_east"] },
+    "reds": { "size": 50 },
+    "objective": { "fields": ["objective_north", "objective_east", "objective_alive", "area_north", "area_east",
+                              "area_half_north", "area_half_east"] },
+    "waypoints": { "size": 53 },
+    "blue_view": { "fields": ["blue_role", "blue_cone_radius", "blue_cone_half_angle", "blue_projected_north",
+                              "blue_projected_east", "blue_guidance_heading", "blue_reference_shown"] },
+    "red_cones": { "size": 20 },
+    "lidar": { "size": 123 },
+    "zones": { "size": 65 },
+    "bounds": { "fields": ["hard_half_north", "hard_half_east"] },
+    "patrol": { "size": 222 }
+  },
+  "rewards": {
+    "PatrolTracking": { "label": "Patrol tracking" },
+    "FormationKeeping": { "label": "Formation keeping" },
+    "PursuitProgress": { "label": "Pursuit progress" },
+    "ControlEffort": { "label": "Control effort" },
+    "BlueSurvival": { "label": "Blue survival" },
+    "RedNeutralization": { "label": "Red neutralization" },
+    "ThreatContainment": { "label": "Threat containment" },
+    "ObjectiveSurvival": { "label": "Objective survival" },
+    "MissionOutcome": { "label": "Mission outcome" },
+    "Timeout": { "label": "Timeout" },
+    "BlueSeparation": { "label": "Blue separation" },
+    "RestrictedZoneClearance": { "label": "Restricted zone clearance" },
+    "BoundaryClearance": { "label": "Boundary clearance" },
+    "LowSpeedRisk": { "label": "Low speed risk" },
+    "OwnLoss": { "label": "Own loss" }
+  },
+  "metrics": {
+    "objective_survived": { "kind": "flag" },
+    "mission_success": { "kind": "flag" },
+    "timeout": { "kind": "flag" },
+    "blue_survival": { "kind": "number" },
+    "red_neutralization": { "kind": "number" },
+    "leader_patrol_quality": { "kind": "number" },
+    "formation_quality": { "kind": "number" },
+    "score": { "kind": "number" }
+  }
+}

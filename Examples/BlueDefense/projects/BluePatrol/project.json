@@ -1,0 +1,44 @@
+{
+  "schema": "ppokit.project/1",
+  "name": "BluePatrol",
+  "program": {
+    "executable": "ppokit-run",
+    "train": [
+      "train",
+      "--project",
+      "{project}",
+      "--until-curriculum"
+    ],
+    "evaluate": [
+      "eval",
+      "--project",
+      "{project}",
+      "--model",
+      "PROD"
+    ],
+    "inference": [
+      "play",
+      "--project",
+      "{project}",
+      "--model",
+      "PROD",
+      "--episodes",
+      "1000000",
+      "--realtime",
+      "--step-seconds",
+      "0.004"
+    ]
+  },
+  "settings": "scenario.json",
+  "externalCurriculum": "../../../../tools/ci/adaptive_curriculum/gates.json",
+  "externalCurriculumProgress": "checkpoints/shared/curriculum-status.json",
+  "libraries": {
+    "environment": "blue_environment",
+    "network": "ppokit_graph_network"
+  },
+  "checkpoints": {
+    "root": "checkpoints/shared",
+    "training": "checkpoints/shared/latest/latest.ppokit",
+    "policy": "checkpoints/shared/latest/policy.ppokit"
+  }
+}

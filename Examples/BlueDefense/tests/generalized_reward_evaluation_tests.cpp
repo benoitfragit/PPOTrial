@@ -4,7 +4,10 @@
  * @details Référence de l'unité, de ses types et de ses fonctions C++.
  * Les implémentations sont accessibles via le navigateur de sources Doxygen.
  */
-#include "generalized_evaluation_campaign.hpp"
+#include "generalized_cooperative_reward.hpp"
+#include "generalized_evaluation_case.hpp"
+#include "generalized_evaluation_metrics.hpp"
+#include "patrol_core.hpp"
 
 #include <array>
 #include <cmath>
@@ -16,6 +19,50 @@ using namespace ppo::examples::bluedefense::defenders;
 namespace {
 
 constexpr float kTolerance = 1.0e-6F;
+
+/** @brief One episode's results, under the names of its rates (the campaign means of one episode). */
+struct EpisodeMetrics final
+{
+    std::size_t episodes{};
+    float blueSurvivalRate{};
+    float redNeutralizationRate{};
+    float objectiveSurvivalRate{};
+    float leaderPatrolQuality{};
+    float formationQuality{};
+    float missionSuccessRate{};
+    float timeoutRate{};
+    float score{};
+};
+
+/** @brief Records episodes with EvaluateGeneralizedEpisode, as blue_environment does; keeps the last. */
+class EpisodeResults final
+{
+public:
+    void Reset() noexcept { metrics_ = {}; }
+
+    GeneralizedEvaluationStatus Record(BlueTeamRoles const& roles, GeneralizedEvaluationSample const& sample) noexcept
+    {
+        GeneralizedEpisodeEvaluation episode{};
+        GeneralizedEvaluationStatus const status = EvaluateGeneralizedEpisode(roles, sample, episode);
+        if (status != GeneralizedEvaluationStatus::Recorded)
+            return status;
+        ++metrics_.episodes;
+        metrics_.blueSurvivalRate = static_cast<float>(episode.blueSurvival);
+        metrics_.redNeutralizationRate = static_cast<float>(episode.redNeutralization);
+        metrics_.objectiveSurvivalRate = episode.objectiveSurvived ? 1.F : 0.F;
+        metrics_.leaderPatrolQuality = static_cast<float>(episode.patrolQuality);
+        metrics_.formationQuality = static_cast<float>(episode.formationQuality);
+        metrics_.missionSuccessRate = episode.success ? 1.F : 0.F;
+        metrics_.timeoutRate = episode.timeout ? 1.F : 0.F;
+        metrics_.score = static_cast<float>(GeneralizedEpisodeScore(episode));
+        return status;
+    }
+
+    EpisodeMetrics Metrics() const noexcept { return metrics_; }
+
+private:
+    EpisodeMetrics metrics_{};
+};
 
 /**
  * @brief Réalise l'opération Near; voir les préconditions et effets dans son corps C++.
@@ -212,13 +259,13 @@ bool TestOneVersusZero()
     sample.finalState = transition.after;
     sample.leaderPatrolQuality = 0.8F;
     sample.patrolCompleted = true;
-    GeneralizedEvaluationAccumulator evaluation{};
+    EpisodeResults evaluation{};
     if (evaluation.Record(*roles, sample)
         != GeneralizedEvaluationStatus::Recorded)
     {
         return false;
     }
-    GeneralizedEvaluationMetrics const metrics = evaluation.Metrics();
+    EpisodeMetrics const metrics = evaluation.Metrics();
     return metrics.episodes == 1U
         && Near(metrics.blueSurvivalRate, 1.F)
         && Near(metrics.redNeutralizationRate, 1.F)
@@ -251,7 +298,7 @@ bool TestNoRedNeedsCompletedLap()
     sample.finalState = transition.after;
     sample.leaderPatrolQuality = 1.F;
     sample.formationSlotQuality[0] = 1.F;
-    GeneralizedEvaluationAccumulator evaluation{};
+    EpisodeResults evaluation{};
     if (evaluation.Record(*roles, sample) != GeneralizedEvaluationStatus::Recorded
         || !Near(evaluation.Metrics().missionSuccessRate, 0.F))
         return false;
@@ -535,13 +582,13 @@ bool TestTwoVersusTwo()
     sample.leaderPatrolQuality = 0.75F;
     sample.formationSlotQuality[0] = 1.F;
     sample.timeout = true;
-    GeneralizedEvaluationAccumulator evaluation{};
+    EpisodeResults evaluation{};
     if (evaluation.Record(*roles, sample)
         != GeneralizedEvaluationStatus::Recorded)
     {
         return false;
     }
-    GeneralizedEvaluationMetrics const metrics = evaluation.Metrics();
+    EpisodeMetrics const metrics = evaluation.Metrics();
     return Near(metrics.blueSurvivalRate, 0.5F)
         && Near(metrics.redNeutralizationRate, 0.5F)
         && Near(metrics.leaderPatrolQuality, 0.75F)
@@ -584,13 +631,13 @@ bool TestNineVersusTenAndMaskValidation()
     sample.finalState = transition.after;
     sample.leaderPatrolQuality = 0.5F;
     sample.formationSlotQuality.fill(1.F);
-    GeneralizedEvaluationAccumulator evaluation{};
+    EpisodeResults evaluation{};
     if (evaluation.Record(*roles, sample)
         != GeneralizedEvaluationStatus::Recorded)
     {
         return false;
     }
-    GeneralizedEvaluationMetrics const metrics = evaluation.Metrics();
+    EpisodeMetrics const metrics = evaluation.Metrics();
     if (!Near(metrics.blueSurvivalRate, 7.F / 9.F)
         || !Near(metrics.redNeutralizationRate, 0.5F)
         || !Near(metrics.formationQuality, 0.75F))
@@ -684,8 +731,8 @@ bool TestPermutationInvarianceAndInvalidQuality()
     GeneralizedEvaluationSample permutedSample = firstSample;
     permutedSample.finalState = permuted.after;
 
-    GeneralizedEvaluationAccumulator firstEvaluation{};
-    GeneralizedEvaluationAccumulator permutedEvaluation{};
+    EpisodeResults firstEvaluation{};
+    EpisodeResults permutedEvaluation{};
     if (firstEvaluation.Record(*firstRoles, firstSample)
             != GeneralizedEvaluationStatus::Recorded
         || permutedEvaluation.Record(*permutedRoles, permutedSample)
@@ -693,8 +740,8 @@ bool TestPermutationInvarianceAndInvalidQuality()
     {
         return false;
     }
-    GeneralizedEvaluationMetrics const firstMetrics = firstEvaluation.Metrics();
-    GeneralizedEvaluationMetrics const permutedMetrics =
+    EpisodeMetrics const firstMetrics = firstEvaluation.Metrics();
+    EpisodeMetrics const permutedMetrics =
         permutedEvaluation.Metrics();
     if (!Near(firstMetrics.score, permutedMetrics.score)
         || !Near(firstMetrics.blueSurvivalRate,
@@ -736,79 +783,22 @@ bool TestSparseDynamicsAdapter()
         && mask.objectiveAvailable;
 }
 
-/**
- * @brief Contrôle les invariants, masques, bornes ou autres conditions spécifiés par cette opération.
- */
-bool TestEvaluationCadence()
+/** @brief The cases of a suite: their seeds, alternating patrol sides and the four phases in turn. */
+bool TestEvaluationCases()
 {
-    return !ShouldEvaluateGeneralizedUpdate(0U, 10U, false)
-        && !ShouldEvaluateGeneralizedUpdate(1U, 10U, false)
-        && !ShouldEvaluateGeneralizedUpdate(9U, 10U, false)
-        && ShouldEvaluateGeneralizedUpdate(10U, 10U, false)
-        && !ShouldEvaluateGeneralizedUpdate(11U, 10U, false)
-        && ShouldEvaluateGeneralizedUpdate(20U, 10U, false)
-        && ShouldEvaluateGeneralizedUpdate(3U, 10U, true)
-        && !ShouldEvaluateGeneralizedUpdate(0U, 10U, true)
-        && !ShouldEvaluateGeneralizedUpdate(5U, 0U, false)
-        && ShouldEvaluateGeneralizedUpdate(5U, 0U, true);
-}
-
-bool TestDeterministicCampaignBoundary()
-{
-    PatrolEvaluationSettings settings{};
-    settings.episodes = 8U;
-    settings.maxSteps = 4U;
-    settings.seed = 700U;
-    GeneralizedEvaluationCampaign first{settings};
-    GeneralizedEvaluationCampaign second{settings};
-    auto const roles = BlueTeamRoles::Create(1U, 0U);
-    if (!roles)
-        return false;
-
-    first.Start();
-    second.Start();
-    for (std::size_t episode = 0U; episode < settings.episodes; ++episode)
+    for (std::size_t episode = 0U; episode < 8U; ++episode)
     {
-        GeneralizedEvaluationCase const firstCase =
-            first.CurrentCase();
-        GeneralizedEvaluationCase const secondCase =
-            second.CurrentCase();
-        if (firstCase.seed != 700U + episode
-            || firstCase.seed != secondCase.seed
-            || firstCase.side != secondCase.side
-            || !Near(firstCase.phaseFraction, secondCase.phaseFraction)
-            || !Near(firstCase.phaseFraction,
-                     static_cast<float>((episode / 2U) % 4U) / 4.F))
-        {
-            return false;
-        }
-        first.ObserveStep();
-        second.ObserveStep();
-        GeneralizedEvaluationSample sample{};
-        sample.finalState = MakeState(1U, 0U);
-        sample.leaderPatrolQuality = 0.8F;
-        sample.patrolCompleted = true; // Qualified Pvs0 success, not empty N.
-        bool const firstHasMore = first.FinishEpisode(*roles, sample);
-        bool const secondHasMore = second.FinishEpisode(*roles, sample);
-        if (firstHasMore != (episode + 1U < settings.episodes)
-            || firstHasMore != secondHasMore)
+        auto const seed = static_cast<std::uint32_t>(700U + episode);
+        GeneralizedEvaluationCase const test = GeneralizedEvaluationCaseOf(seed, episode);
+        if (test.seed != seed
+            || test.side != (episode % 2U == 0U ? 1 : -1)
+            || !Near(test.phaseFraction, static_cast<float>((episode / 2U) % 4U) / 4.F))
         {
             return false;
         }
     }
-
-    GeneralizedEvaluationMetrics const metrics = first.Metrics();
-    return !first.InProgress() && first.HasLatest() && first.Improved()
-        && first.CompletedCampaigns() == 1U
-        && first.TestsFinished() == settings.episodes
-        && first.StepsExecuted() == settings.episodes
-        && Near(first.Progress(), 1.F)
-        && Near(first.BestScore(), 97.F)
-        && Near(metrics.score, second.Metrics().score)
-        && Near(metrics.blueSurvivalRate, 1.F)
-        && Near(metrics.redNeutralizationRate, 1.F);
+    return true;
 }
-
 
 /** @brief One Red credits pursuit to leader; multi-Red remains cooperative. */
 bool TestSingleRedRoleAttribution()
@@ -873,9 +863,7 @@ int main()
         return 4;
     if (!TestSparseDynamicsAdapter())
         return 5;
-    if (!TestEvaluationCadence())
-        return 22;
-    if (!TestDeterministicCampaignBoundary())
+    if (!TestEvaluationCases())
         return 6;
     return 0;
 }

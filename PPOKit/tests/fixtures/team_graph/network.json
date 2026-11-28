@@ -1,0 +1,35 @@
+{
+  "schema": "ppokit.graph/2",
+  "actor": {
+    "nodes": {
+      "line": { "type": "input", "from": "observation.line" },
+      "embed": { "type": "dense", "width": 4, "activation": "tanh" },
+      "trunk": { "type": "mlp", "layers": 1, "width": 8, "activation": "tanh" },
+      "policy": { "type": "gaussian_head" }
+    },
+    "edges": [ ["line", "embed"], ["embed", "trunk"], ["trunk", "policy"] ]
+  },
+  "critic": {
+    "nodes": {
+      "own": { "type": "input", "from": "critic.own" },
+      "team_mean": { "type": "input", "from": "critic.team_mean" },
+      "team_max": { "type": "input", "from": "critic.team_max" },
+      "living_fraction": { "type": "input", "from": "critic.living_fraction" },
+      "team_fraction": { "type": "input", "from": "critic.team_fraction" },
+      "all": { "type": "concat" },
+      "trunk": { "type": "mlp", "layers": 1, "width": 16, "activation": "relu" },
+      "value": { "type": "value" }
+    },
+    "edges": [ ["own", "all.in1"], ["team_mean", "all.in2"], ["team_max", "all.in3"],
+               ["living_fraction", "all.in4"], ["team_fraction", "all.in5"], ["all", "trunk"],
+               ["trunk", "value"] ]
+  },
+  "team_critic": {
+    "features": "embed",
+    "own": "critic.own",
+    "mean": "critic.team_mean",
+    "max": "critic.team_max",
+    "living_fraction": "critic.living_fraction",
+    "team_fraction": "critic.team_fraction"
+  }
+}

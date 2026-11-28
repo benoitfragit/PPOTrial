@@ -1,0 +1,19 @@
+{
+  "schema": "ppokit.graph/2",
+  "actor": {
+    "nodes": {
+      "state":  { "type": "input", "from": "observation.state" },
+      "trunk":  { "type": "mlp", "layers": 2, "width": 16, "activation": "tanh" },
+      "policy": { "type": "gaussian_head" }
+    },
+    "edges": [ ["state", "trunk"], ["trunk", "policy"] ]
+  },
+  "critic": {
+    "nodes": {
+      "state": { "type": "input", "from": "observation.state" },
+      "trunk": { "type": "mlp", "layers": 2, "width": 16, "activation": "tanh" },
+      "value": { "type": "value" }
+    },
+    "edges": [ ["state", "trunk"], ["trunk", "value"] ]
+  }
+}

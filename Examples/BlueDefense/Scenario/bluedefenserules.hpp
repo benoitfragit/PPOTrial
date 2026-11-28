@@ -29,10 +29,6 @@ public:
  * @details Consulte ou modifie des composants ECS.
  */
     void AfterStep() override;
-/**
- * @brief Réalise l'opération CopySnapshot; voir les préconditions et effets dans son corps C++.
- */
-    void CopySnapshot(entt::registry& source, entt::registry& target) const override;
 private:
     /**
      * @brief Activates red entities whose training delay has elapsed.

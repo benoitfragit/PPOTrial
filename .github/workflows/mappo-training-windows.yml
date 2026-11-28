@@ -78,7 +78,7 @@ on:
         type: boolean
         default: true
       auto_advance:
-        description: "Launch the next independent GitHub run after gate PASS"
+        description: "Continue subsequent stages in this common-engine run after a pass"
         required: true
         type: boolean
         default: false
@@ -109,83 +109,111 @@ jobs:
           name: blue-mappo-checkpoints
           run-id: ${{ inputs.resume_run_id }}
           github-token: ${{ github.token }}
-          path: resources/model/BluePatrol
+          path: ${{ runner.temp }}/blue-resume
+
+      - name: Restore common graph checkpoints from the selected run
+        if: ${{ inputs.resume_run_id != '' }}
+        run: |
+          $source = Join-Path $env:RUNNER_TEMP "blue-resume"
+          # Older common-engine artifacts retained the shared/ directory.
+          if (Test-Path (Join-Path $source "shared/latest/latest.ppokit") -PathType Leaf) {
+            $source = Join-Path $source "shared"
+          }
+          $training = Join-Path $source "latest/latest.ppokit"
+          $actor = Join-Path $source "latest/policy.ppokit"
+          python tools/ci/blue_checkpoint.py check --graph-only --kind training $training
+          if ($LASTEXITCODE -ne 0) { throw "Selected run has no common graph training checkpoint; convert legacy archives explicitly" }
+          python tools/ci/blue_checkpoint.py check --graph-only --kind policy $actor
+          if ($LASTEXITCODE -ne 0) { throw "Selected run has no matching common graph policy" }
+          $destination = "Examples/BlueDefense/projects/BluePatrol/checkpoints/shared"
+          # Resume training state and BEST without replacing the registered branch PROD.
+          Get-ChildItem -LiteralPath $source | Where-Object { $_.Name -ne "prod" } | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination $destination -Recurse -Force
+          }
 
       - name: Verify existing RLMission production model
         run: |
-          $red = "resources/model/RLMission/prod/model.pt"
+          $red = "Examples/Airspace/models/RLMission/prod/policy.ppokit"
           if (-not (Test-Path -LiteralPath $red -PathType Leaf)) {
             throw "The unchanged red production RLMission model is missing: $red"
           }
 
-      - name: Restore Release runtime cache (PPO.exe and LibTorch DLLs)
+      - name: Restore Release runtime cache (ppokit-run and the BlueDefense DLLs)
         id: runtime_cache
         uses: actions/cache/restore@v4
         with:
-          path: build/release/Main/Release
-          key: mappo-runtime-${{ runner.os }}-x64-msvc2022-Release-libtorch291cpu-${{ github.sha }}
+          path: |
+            build/release/PPOKit/Release
+            build/release/Examples/BlueDefense/Release
+            build/release/ppokit_programs_Release.txt
+          key: ppokit-blue-runtime-${{ runner.os }}-x64-msvc2022-Release-${{ github.sha }}
 
-      - name: Validate cached runtime dependencies
+      - name: Validate runtime cache
         id: runtime_probe
         run: |
-          $root = "build/release/Main/Release"
-          $exe = Join-Path $root "PPO.exe"
-          $valid = $false
-          if ("${{ steps.runtime_cache.outputs.cache-hit }}" -eq "true" -and
-              (Test-Path -LiteralPath $exe -PathType Leaf) -and
-              (Test-Path -LiteralPath (Join-Path $root "torch_cpu.dll") -PathType Leaf) -and
-              (Test-Path -LiteralPath (Join-Path $root "c10.dll") -PathType Leaf)) {
-            try {
-              & $exe --example blue-defense --check-example
-              $valid = $LASTEXITCODE -eq 0
-            } catch {
-              Write-Warning "Cached Release runtime failed validation: $_"
-            }
+          $usable = "${{ steps.runtime_cache.outputs.cache-hit }}" -eq "true"
+          foreach ($file in @("build/release/PPOKit/Release/ppokit-run.exe",
+                              "build/release/Examples/BlueDefense/Release/blue_environment.dll",
+                              "build/release/PPOKit/Release/ppokit_graph_network.dll",
+                              "build/release/Examples/BlueDefense/Release/blue_visualiser.dll",
+                              "build/release/ppokit_programs_Release.txt")) {
+            if (-not (Test-Path $file -PathType Leaf)) { $usable = $false }
           }
-          "usable=$($valid.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "usable=$($usable.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
 
-      - name: Configure MSVC 2022 x64 Release and LibTorch 2.9.1 CPU Release
+      - name: Configure MSVC 2022 x64 Release
         if: steps.runtime_probe.outputs.usable != 'true'
         run: |
+          # ppokit-run and the BlueDefense DLLs only: the ECS world without graphics.
           cmake -S . -B build/release -G "Visual Studio 17 2022" -A x64 `
             -DCMAKE_CONFIGURATION_TYPES=Release `
-            -DPPO_LIBTORCH_VARIANT=Release `
-            -DPPO_BUILD_DESKTOP=ON `
+            -DPPO_BUILD_DESKTOP=OFF `
+            -DPPO_BUILD_WORLD=ON `
             -DPPO_BUILD_CORE_TESTS=OFF `
             -DPPO_BUILD_CHECKPOINT_TESTS=OFF
           if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
 
-      - name: Compile PPO.exe Release
+      - name: Compile ppokit-run and the BlueDefense DLLs (Release)
         if: steps.runtime_probe.outputs.usable != 'true'
         run: |
-          cmake --build build/release --config Release --parallel 2
+          cmake --build build/release --config Release --parallel 2 `
+            --target ppokit-run blue_environment ppokit_graph_network blue_visualiser
           if ($LASTEXITCODE -ne 0) { throw "Release build failed" }
 
       - name: Verify Blue Defense runtime and dependencies
         run: |
-          $exe = "build/release/Main/Release/PPO.exe"
-          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
-            throw "Missing PPO.exe Release runtime"
-          }
-          & $exe --example blue-defense --check-example
-          if ($LASTEXITCODE -ne 0) { throw "PPO.exe runtime validation failed" }
+          # One episode of the committed production actor: both DLLs load and the world steps.
+          $smoke = Join-Path $env:RUNNER_TEMP "runtime-smoke"
+          New-Item -ItemType Directory -Path $smoke -Force | Out-Null
+          $actor = Join-Path $smoke "policy.ppokit"
+          # The committed bytes (a pipe in PowerShell would rewrite the line endings).
+          cmd /c "git show HEAD:Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/prod/policy.ppokit > `"$actor`""
+          if ($LASTEXITCODE -ne 0) { throw "Cannot extract the committed production actor" }
+          & build/release/PPOKit/Release/ppokit-run.exe play --episodes 1 `
+            --project Examples/BlueDefense/projects/BluePatrol/project.json --policy $actor
+          if ($LASTEXITCODE -ne 0) { throw "ppokit-run runtime validation failed" }
 
-      - name: Cache validated Release runtime (exe and adjacent DLLs)
+      - name: Cache validated Release binaries
         if: steps.runtime_probe.outputs.usable != 'true'
         uses: actions/cache/save@v4
         with:
-          path: build/release/Main/Release
-          key: mappo-runtime-${{ runner.os }}-x64-msvc2022-Release-libtorch291cpu-${{ github.sha }}
+          path: |
+            build/release/PPOKit/Release
+            build/release/Examples/BlueDefense/Release
+            build/release/ppokit_programs_Release.txt
+          key: ppokit-blue-runtime-${{ runner.os }}-x64-msvc2022-Release-${{ github.sha }}
 
       - name: Validate MAPPO telemetry report logic
         run: |
           python -m unittest discover -s tools/ci -p "test_mappo_metrics.py" -v
           if ($LASTEXITCODE -ne 0) { throw "MAPPO telemetry tests failed" }
 
-      - name: Validate MAPPO curriculum configuration and orchestrator
+      - name: Validate common curriculum clients and historical qualification oracles
         run: |
           python -m unittest discover -s tools/ci -p "test_mappo_curriculum.py" -v
           if ($LASTEXITCODE -ne 0) { throw "MAPPO curriculum tests failed" }
+          python -m unittest discover -s tools/ci -p "test_blue_checkpoint.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "Blue checkpoint tests failed" }
           python -m unittest discover -s tools/ci/adaptive_curriculum -p "test_*.py" -v
           if ($LASTEXITCODE -ne 0) { throw "MAPPO progressive gate tests failed" }
 
@@ -197,16 +225,23 @@ jobs:
           if (-not [long]::TryParse($env:SAVE_EVERY_UPDATES, [ref]$value) -or $value -lt 1) {
             throw "save_every_updates must be a positive integer"
           }
-          $path = "resources/settings/Training/BluePatrol.json"
+          $path = "Examples/BlueDefense/projects/BluePatrol/blue_patrol_training.json"
           $config = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
           $config.training | Add-Member -MemberType NoteProperty -Name saveEveryUpdates -Value $value -Force
-          # Keep the standalone Blue Defense workflow unchanged.
-          $config.evaluation | Add-Member -MemberType NoteProperty -Name episodes -Value 20 -Force
-          $config.evaluation | Add-Member -MemberType NoteProperty -Name seed -Value 1004242 -Force
           $config | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $path -Encoding utf8
+          $evaluationPath = "Examples/BlueDefense/projects/BluePatrol/eval/validation.json"
+          $evaluation = Get-Content -LiteralPath $evaluationPath -Raw | ConvertFrom-Json
+          $evaluation.seeds.first = 1004242
+          $evaluation.seeds.count = 20
+          $evaluation | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $evaluationPath -Encoding utf8
           Write-Host "Checkpoint every $value update(s); progressive evaluation uses 20 independent seeds."
-          # Each run produces fresh telemetry, not restored timestamps.
-          Remove-Item "resources/model/BluePatrol/telemetry/mappo-training.csv" -Force -ErrorAction SilentlyContinue
+          # Each run reports its own telemetry: the journal lines of the resumed runs are skipped.
+          $journal = "Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/metrics.jsonl"
+          $lines = 0
+          if (Test-Path -LiteralPath $journal -PathType Leaf) {
+            $lines = @(Get-Content -LiteralPath $journal).Count
+          }
+          Set-Content -LiteralPath ".mappo-journal-start" -Value $lines -Encoding ascii
           # Must be newer than any restored checkpoint to reject no-op training.
           New-Item -Path ".mappo-training-start" -ItemType File -Force | Out-Null
           (Get-Item ".mappo-training-start").LastWriteTimeUtc = [DateTime]::UtcNow
@@ -226,13 +261,13 @@ jobs:
           # Legacy dispatches did not provide max_team_size; keep 2v2 default.
           $teamSize = $env:MAX_TEAM_SIZE
           if ([string]::IsNullOrWhiteSpace($teamSize)) { $teamSize = "2" }
-          $pythonArgs = @(
-            "-u", "tools/ci/adaptive_curriculum/progressive_gate.py",
-            "--gate", $env:GATE,
+          $plan = Join-Path $env:RUNNER_TEMP "blue-common-curriculum.json"
+          $planArgs = @(
+            "tools/ci/adaptive_curriculum/common_plan.py",
+            "--gates", "tools/ci/adaptive_curriculum/gates.json",
+            "--output", $plan,
             "--max-team-size", $teamSize,
-            "--threshold-percent", $env:SUCCESS_PERCENT,
-            "--max-seconds", $env:MAX_SECONDS,
-            "--block-updates", "20"
+            "--profile", $env:REHEARSAL_PROFILE
           )
           # Older manual/scripted callers have no scenario_variant input.
           $scenarioVariant = $env:SCENARIO_VARIANT
@@ -241,29 +276,37 @@ jobs:
           }
           switch ($scenarioVariant) {
             "fixed_no_zones" {}
-            "fixed_zones" { $pythonArgs += "--hostile-zones" }
+            "fixed_zones" { $planArgs += "--hostile-zones" }
             "randomized_no_zones" {
-              $pythonArgs += @("--objective-layout", "randomized")
+              $planArgs += @("--objective-layout", "randomized")
             }
             "randomized_zones" {
-              $pythonArgs += @("--objective-layout", "randomized", "--hostile-zones")
+              $planArgs += @("--objective-layout", "randomized", "--hostile-zones")
             }
             default { throw "Unknown scenario variant" }
           }
-          if (-not [string]::IsNullOrWhiteSpace($env:REHEARSAL_PROFILE) -and
-              $env:REHEARSAL_PROFILE -ne "legacy") {
-            $pythonArgs += @("--rehearsal-profile", $env:REHEARSAL_PROFILE)
+          if ($env:SAME_THRESHOLD_ALL_GATES -ne "false") {
+            $planArgs += @("--threshold-percent", $env:SUCCESS_PERCENT)
+          }
+          & python @planArgs
+          if ($LASTEXITCODE -ne 0) { throw "Common curriculum configuration failed" }
+          $runArgs = @(
+            "train", "--project", "Examples/BlueDefense/projects/BluePatrol/project.json",
+            "--curriculum", $plan,
+            "--curriculum-stage", $env:GATE,
+            "--max-seconds", $env:MAX_SECONDS
+          )
+          if ($env:AUTO_ADVANCE -eq "true") {
+            $runArgs += "--until-curriculum"
+          } else {
+            $runArgs += "--one-curriculum-stage"
           }
           if (-not [string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID)) {
-            $pythonArgs += "--resume"
+            $runArgs += "--resume"
+          } else {
+            $runArgs += "--fresh"
           }
-          if ($env:AUTO_ADVANCE -eq "true") {
-            $pythonArgs += "--auto-advance"
-          }
-          if ($env:SAME_THRESHOLD_ALL_GATES -eq "false") {
-            $pythonArgs += "--per-gate-thresholds"
-          }
-          & python @pythonArgs
+          & build/release/PPOKit/Release/ppokit-run.exe @runArgs
           if ($LASTEXITCODE -ne 0) { throw "Progressive gate training failed" }
 
       - name: Validate resumable checkpoint
@@ -271,9 +314,9 @@ jobs:
           SCENARIO: progressive-blue-defense
           RESUME_RUN_ID: ${{ inputs.resume_run_id }}
         run: |
-          $root = "resources/model/BluePatrol/latest"
-          $training = Join-Path $root "blue_patrol_generalized_training_v7.txt"
-          $actor = Join-Path $root "blue_patrol_generalized_v10.txt"
+          $root = "Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/latest"
+          $training = Join-Path $root "latest.ppokit"
+          $actor = Join-Path $root "policy.ppokit"
           $start = (Get-Item ".mappo-training-start").LastWriteTimeUtc
           $progressive = $env:SCENARIO -eq "progressive-blue-defense"
           $resume = $progressive -and (-not [string]::IsNullOrWhiteSpace($env:RESUME_RUN_ID))
@@ -293,18 +336,17 @@ jobs:
             }
             Write-Host "$path : $($file.Length) bytes"
           }
-          $trainingHeader = Get-Content -LiteralPath $training -TotalCount 1
-          $actorHeader = Get-Content -LiteralPath $actor -TotalCount 1
-          if (-not $trainingHeader.StartsWith("BLUE_TEAM_TRAINING_V7 7 10 ")) {
+          # Check the common graph header; ppokit-run validates the complete artifact.
+          python tools/ci/blue_checkpoint.py check --graph-only --kind training $training
+          if ($LASTEXITCODE -ne 0) {
             throw "Unexpected full-training checkpoint format"
           }
           if ($progressive) {
-            if (-not $actorHeader.StartsWith("BLUE_TEAM_MAPPO_V10 10 10 ") -or
-                -not $trainingHeader.Contains("UNIFIED_PHYSICAL_GUIDANCE_V1") -or
-                -not $actorHeader.Contains("UNIFIED_PHYSICAL_GUIDANCE_V1")) {
-              throw "Progressive checkpoint is not a unified-guidance V10 actor with full V7 optimizer"
+            python tools/ci/blue_checkpoint.py check --graph-only --kind policy $actor
+            if ($LASTEXITCODE -ne 0) {
+              throw "Progressive checkpoint is not a unified-guidance actor with full optimizer"
             }
-            $progressPath = "resources/model/BluePatrol/adaptive-curriculum-progress.json"
+            $progressPath = "Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/curriculum-status.json"
             if (-not (Test-Path $progressPath -PathType Leaf)) {
               throw "Progressive checkpoint is missing its gate state"
             }
@@ -316,25 +358,15 @@ jobs:
         with:
           name: blue-mappo-checkpoints
           path: |
-            resources/model/BluePatrol/latest/blue_patrol_generalized_v10.txt
-            resources/model/BluePatrol/latest/blue_patrol_generalized_training_v7.txt
-            resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt
-            resources/model/BluePatrol/prod/blue_patrol_generalized_v10.txt.score
-            resources/model/BluePatrol/best/**
-            resources/model/BluePatrol/curriculum-progress.json
-            resources/model/BluePatrol/adaptive-curriculum-progress.json
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/latest/**
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/prod/**
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/best/**
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/metrics.jsonl
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/generation.json
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/environment_state/**
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/curriculum-status.json
           if-no-files-found: warn
           retention-days: 30
-
-      - name: Publish progressive gate result
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: blue-mappo-gate
-          path: build/mappo-telemetry/adaptive-gate-result.json
-          if-no-files-found: warn
-          retention-days: 30
-
       - name: Summarize MAPPO telemetry and render progress charts
         if: always()
         env:
@@ -353,8 +385,11 @@ jobs:
             }
           }
           if (Test-Path "tools/ci/mappo_metrics.py") {
+            $from = 0
+            if (Test-Path ".mappo-journal-start") { $from = [int](Get-Content ".mappo-journal-start" -TotalCount 1) }
             python tools/ci/mappo_metrics.py `
-              --csv resources/model/BluePatrol/telemetry/mappo-training.csv `
+              --journal Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/metrics.jsonl `
+              --journal-from-line $from `
               --log $log `
               --out build/mappo-telemetry `
               --summary $env:GITHUB_STEP_SUMMARY
@@ -377,9 +412,10 @@ jobs:
           New-Item -ItemType Directory -Path "build/mappo-telemetry" -Force | Out-Null
           $hashes = [ordered]@{}
           foreach ($path in @(
-            "resources/settings/Training/BluePatrol.json",
-            "resources/settings/Training/BluePatrolCurriculumV3.json",
-            "resources/settings/Scenarios/BlueDefense.json"
+            "Examples/BlueDefense/projects/BluePatrol/blue_patrol_training.json",
+            "Examples/BlueDefense/projects/BluePatrol/eval/validation.json",
+            "Examples/BlueDefense/curricula/BluePatrolCurriculumV3.json",
+            "Examples/BlueDefense/projects/BluePatrol/scenario.json"
           )) {
             if (Test-Path -LiteralPath $path -PathType Leaf) {
               $hashes[$path] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -408,13 +444,13 @@ jobs:
           $manifest | ConvertTo-Json -Depth 8 | Set-Content `
             -LiteralPath "build/mappo-telemetry/run-manifest.json" -Encoding utf8
 
-      - name: Publish MAPPO telemetry CSV and SVG curves
+      - name: Publish MAPPO telemetry journal and SVG curves
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: blue-mappo-telemetry
           path: |
-            resources/model/BluePatrol/telemetry/mappo-training.csv
+            Examples/BlueDefense/projects/BluePatrol/checkpoints/shared/metrics.jsonl
             build/mappo-telemetry/mappo-summary.md
             build/mappo-telemetry/mappo-progress.svg
             build/mappo-telemetry/mappo-losses.csv
@@ -427,28 +463,3 @@ jobs:
             build/mappo-telemetry/adaptive-gates/**
           if-no-files-found: warn
           retention-days: 30
-
-  advance:
-    name: Dispatch next progressive gate (no build)
-    needs: train
-    if: ${{ needs.train.result == 'success' && github.run_attempt == 1 }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Retrieve the evaluated gate result
-        uses: actions/download-artifact@v4
-        with:
-          name: blue-mappo-gate
-          path: build/mappo-telemetry
-      - name: Retrieve checkpoint state and optimizer
-        uses: actions/download-artifact@v4
-        with:
-          name: blue-mappo-checkpoints
-          path: build/mappo-checkpoint
-      - name: Validate gate and dispatch next independent workflow run
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: python tools/ci/adaptive_curriculum/dispatch_next_gate.py

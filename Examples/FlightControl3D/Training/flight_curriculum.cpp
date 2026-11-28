@@ -5,14 +5,40 @@
  * Read next: flight_curriculum.hpp.
  */
 #include "flight_curriculum.hpp"
+
+#include "ppokit/artifacts/atomic_file.hpp"
+
 #include <algorithm>
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <string>
 
 namespace ppo::examples::flight {
+namespace {
 
-FlightCurriculum::FlightCurriculum(CurriculumSettings const& settings) noexcept : settings_(settings)
+/** @brief Flight's historical levels expressed as a common episode-window plan. */
+ppokit::runtime::OrchestrationPlan FlightPlan(CurriculumSettings const& settings)
+{
+    ppokit::runtime::OrchestrationPlan plan;
+    plan.id = "flight-start-difficulty";
+    for (std::size_t level = 0; level < CurriculumLevels(settings); ++level)
+    {
+        ppokit::runtime::OrchestrationStage stage;
+        stage.name = "level-" + std::to_string(level);
+        stage.payload = nlohmann::json{{"level", level}}.dump();
+        stage.promotion.source = ppokit::runtime::PromotionSource::Episode;
+        stage.promotion.window = settings.windowEpisodes;
+        stage.promotion.threshold = settings.promotionSuccessRate;
+        plan.stages.push_back(std::move(stage));
+    }
+    return plan;
+}
+
+} // namespace
+
+FlightCurriculum::FlightCurriculum(CurriculumSettings const& settings)
+    : settings_(settings), engine_(FlightPlan(settings))
 {
 }
 
@@ -22,43 +48,32 @@ double FlightCurriculum::Difficulty() const noexcept
     {
         return 1.0;
     }
-    return static_cast<double>(level_) / static_cast<double>(Levels() - 1);
+    return static_cast<double>(Level()) / static_cast<double>(Levels() - 1);
 }
 
-bool FlightCurriculum::Record(bool stopped) noexcept
+bool FlightCurriculum::Record(bool stopped)
 {
     // The full task has no further level.
-    if (level_ + 1 >= Levels())
+    if (Level() + 1 >= Levels())
     {
         return false;
     }
-    ++episodes_;
-    if (stopped)
-    {
-        ++stops_;
-    }
-    if (episodes_ < settings_.windowEpisodes)
-    {
-        return false;
-    }
-    double const rate = static_cast<double>(stops_) / static_cast<double>(episodes_);
-    bool const promoted = rate >= settings_.promotionSuccessRate;
-    if (promoted)
-    {
-        ++level_;
-    }
-    // Each decision starts a fresh window, so a promotion is judged only on
-    // episodes drawn from the level being left.
-    episodes_ = 0;
-    stops_ = 0;
-    return promoted;
+    return engine_.RecordEpisode(true, stopped).changed;
 }
 
 void FlightCurriculum::Restore(std::size_t level) noexcept
 {
-    level_ = std::min(level, Levels() - 1);
-    episodes_ = 0;
-    stops_ = 0;
+    engine_.Restore(std::min(level, Levels() - 1), 0, 0);
+}
+
+void FlightCurriculum::Resume(std::size_t level, std::size_t windowEpisodes, std::size_t windowStops)
+{
+    if (level >= Levels())
+    {
+        throw std::invalid_argument("FlightControl3D: curriculum level " + std::to_string(level) + " of "
+            + std::to_string(Levels()) + " levels");
+    }
+    engine_.Restore(level, windowEpisodes, windowStops);
 }
 
 std::optional<std::size_t> LoadCurriculumLevel(std::filesystem::path const& path)
@@ -79,22 +94,9 @@ std::optional<std::size_t> LoadCurriculumLevel(std::filesystem::path const& path
 
 void SaveCurriculumLevel(std::filesystem::path const& path, std::size_t level)
 {
-    if (!path.parent_path().empty())
-    {
-        std::filesystem::create_directories(path.parent_path());
-    }
-    auto temporary = path;
-    temporary += ".tmp";
-    {
-        std::ofstream output(temporary, std::ios::trunc);
-        output << level << '\n';
-        output.flush();
-        if (!output)
-        {
-            throw std::runtime_error("FlightControl3D: curriculum level write failed");
-        }
-    }
-    // A single rename replaces the level atomically; no backup is kept.
-    std::filesystem::rename(temporary, path);
+    // Written beside, then swapped in: a crash never leaves a half-written level, and no backup stays.
+    ppokit::artifacts::WriteFileAtomically(
+        path, [level](std::ostream& output) { output << level << '\n'; }, ppokit::artifacts::AtomicWriteOptions{},
+        "FlightControl3D: curriculum level");
 }
 } // namespace ppo::examples::flight
