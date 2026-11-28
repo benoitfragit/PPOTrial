@@ -151,8 +151,7 @@ ppo::model::GraphNetworkFiles MissionNetworkFiles();
 
 /**
  * @brief Production policy of a model version ("prod" or "eval").
- * @details A policy trained with PPOKit (policy.ppokit) when there is one, else the policy
- *          converted from LibTorch (policy.txt); null, and an idle agent, when neither exists.
+ * @details The PPOKit policy (policy.ppokit); null, and an idle agent, when it is absent.
  */
 std::unique_ptr<ppo::core::IPolicy> MakeMissionPolicy(std::string const& version);
 

@@ -193,7 +193,7 @@ jobs:
 
       - name: Verify unchanged red production model
         run: |
-          if (-not (Test-Path "Examples/Airspace/models/RLMission/prod/policy.txt" -PathType Leaf)) {
+          if (-not (Test-Path "Examples/Airspace/models/RLMission/prod/policy.ppokit" -PathType Leaf)) {
             throw "Missing unchanged RLMission production model"
           }
 

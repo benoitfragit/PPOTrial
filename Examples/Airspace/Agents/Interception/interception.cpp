@@ -7,7 +7,6 @@
 * @license MIT
 */
 #include "interception.hpp"
-#include "interception_policy.hpp"
 #include "airspacecomponents.hpp"
 #include "entity.hpp"
 #include "utils.hpp"
@@ -177,10 +176,6 @@ std::unique_ptr<ppo::core::IPolicy> MakeInterceptionPolicy(std::string const& ve
     {
         return std::make_unique<ppo::model::GraphPolicy<ObservationSize, ActionSize>>(
             InterceptionNetworkFiles(), folder / "policy.ppokit");
-    }
-    if (std::filesystem::exists(folder / "policy.txt"))
-    {
-        return std::make_unique<InterceptionPolicy>(folder / "policy.txt", ObservationSize, ActionSize);
     }
     return nullptr;
 }

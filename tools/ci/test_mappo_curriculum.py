@@ -312,7 +312,7 @@ class CurriculumTests(unittest.TestCase):
         for path in curriculum.FRESH_SEEDS:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("legacy blue seed")
-        red = Path("Examples/Airspace/models/RLMission/prod/policy.txt")
+        red = Path("Examples/Airspace/models/RLMission/prod/policy.ppokit")
         red.parent.mkdir(parents=True, exist_ok=True)
         red.write_text("unchanged red model")
         archived = Path("Examples/BlueDefense/projects/BluePatrol/checkpoints/prod/blue_patrol_generalized_v8.txt")

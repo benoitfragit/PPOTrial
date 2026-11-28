@@ -380,7 +380,7 @@ Les scènes de **Scenarios/Evaluation/RLMission.json** et **RLSNA.json** utilise
 
 Il s'agit d'un extrait de structure ; dans le vrai fichier, chaque test renseigne toutes les entités nécessaires. **Les 100 tests de chaque campagne sont conservés**, avec les mêmes états initiaux.
 
-Les modèles des agents rouges sont dans **Examples/Airspace/models/NOM_DE_PROFIL/**, dont les sous-dossiers **prod/** et **eval/** (`policy.ppokit`, sinon `policy.txt`).
+Les modèles des agents rouges sont dans **Examples/Airspace/models/NOM_DE_PROFIL/**, dont les sous-dossiers **prod/** et **eval/** (`policy.ppokit`).
 
 ## Plateformes et états initiaux nommés
 

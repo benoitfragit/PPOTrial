@@ -24,7 +24,7 @@ Mise à jour : 27 novembre 2026, branche `design/ppokit-framework`, PR #105.
   commun `ppokit_graph_network`. `ppokit-new` génère une DLL d’environnement et
   un projet consommé par `ppokit-run`, sans executable PPO propre.
 
-## Qualification
+## Qualification historique (27 novembre, avant nettoyage)
 
 Les tests déterministes couvrent les décisions et reprises du curriculum, les
 profils Blue historiques, l’édition/rechargement RLMission et RLSNA, Undo/Redo,
@@ -57,9 +57,10 @@ la compatibilité de checkpoints, les projets du dépôt et le scaffold `reach`.
   `FlightControlRuntime` et `FlightControlHeadless` ne sont plus des chemins de
   production. Ils sont `EXCLUDE_FROM_ALL` et construits seulement par les
   convertisseurs, tests de parité et qualifications qui les nomment.
-- Les lecteurs/converteurs des formats Blue V7/V10, Flight historiques et
-  Airspace `policy.txt` restent présents. Aucun modèle historique n’est
-  réentraîné ou modifié.
+- Les anciens modèles Airspace au format texte et les outils de qualification et
+  de conversion Flight ont été retirés. Les modèles PPOKit livrés n’ont pas été
+  modifiés. Les chemins Blue historiques encore utilisés par la CI et les
+  lecteurs nécessaires aux reprises restent présents.
 - Les anciens algorithmes Python de gates sont conservés comme oracles de
   non-régression ; aucun workflow de production ne les appelle pour décider un
   stage ou une promotion.

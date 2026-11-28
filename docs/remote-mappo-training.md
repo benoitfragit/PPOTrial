@@ -8,7 +8,7 @@ under `ppokit-run` (environment DLL `blue_environment`, team network DLL
 former `PPO.exe` headless training mode has been removed.
 
 - Blue team: RLTools generalized shared MAPPO actor and centralized critic.
-- Red team: unchanged `RLMission` production weights (`policy.txt`, converted from LibTorch with identical actions).
+- Red team: unchanged `RLMission` production weights (`policy.ppokit`, converted from the original model).
 - Simulator: the BlueDefense ECS physics, world rules, observations, actions and
   episode resets of the former desktop mode, now stepped only by the
   environment DLL (the in-world execution modes were removed with `PPO.exe`;
@@ -37,51 +37,10 @@ The CI does not call `ppokit-run train` directly: `tools/ci/mappo_curriculum.py`
 runs it block by block (`--until-update`, `--save-every`, `--max-seconds`) and
 promotes PROD after each block as the former `PPO.exe` Training mode did.
 
-## Visual local run-84 2v2 rehearsal
+## Local visual training
 
-For the run-84 investigation, build `ppokit-run`, `ppokit-viewer` and the Blue
-libraries (`blue_environment`, `blue_network`, `blue_visualiser`) in the fixed
-x64 Release tree, then run:
-
-```powershell
-py -3.12 tools/local_mappo_gui_curriculum.py --profile balanced_v1 --expected-source-updates 1790
-```
-
-It validates the V10 actor and complete V7 optimizer checkpoint at update 1790
-(the run-84 pair). The project's committed checkpoint is now at update 5250:
-the script stops unless `checkpoints/latest` holds the run-84 pair, or
-`--source-actor` and `--source-training` name an evaluated BEST pair. Each block is the CI's block
-(`ppokit-run train` on the BluePatrol project), so every block uses the same
-scenario restart semantics as the progressive CI runner. `ppokit-viewer` opens
-once for the session on the run's world (`blue_visualiser`, port read from the
-project's `network.json`); `--no-viewer` trains without it.
-
-The schedule directly calls the production `balanced_v1` selector. Each
-20-block cycle contains `1v0=3`, `2v0=4`, `1v1=2`, `2v1=3`, and `2v2=8`.
-Blocks stop at the next `checkpointEvery` evaluation boundary, exactly like
-the CI gate runner. The default wall-clock budget is 7200 seconds.
-
-Before the first update, the script copies the source actor, full optimizer
-and production actor into `build/local-mappo-gui/session-*/source-run84` and
-records SHA-256 digests. Stable progress is stored in
-`build/local-mappo-gui/state.json`. Interrupting the script (Ctrl+C) stops
-the loop; running it again resumes the same incomplete rehearsal block.
-During any exit, the project's `blue_patrol_training.json` and `scenario.json`,
-the production actor and its score are restored byte-for-byte. `latest`
-intentionally remains at the newest completed PPO update.
-
-Python 3.12 is required. A non-mutating preflight prints the next exact cycle
-and update boundary:
-
-```powershell
-py -3.12 tools/local_mappo_gui_curriculum.py --dry-run
-```
-
-For a short visual inspection, stop after a single completed block:
-
-```powershell
-py -3.12 tools/local_mappo_gui_curriculum.py --max-blocks 1 --max-seconds 1800
-```
+Open `Examples/BlueDefense/projects/BluePatrol` in PPOKit Studio. The former
+standalone local curriculum script has been retired.
 
 ## Checkpoints
 

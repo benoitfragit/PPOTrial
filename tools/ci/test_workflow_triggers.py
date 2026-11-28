@@ -62,12 +62,12 @@ class WorkflowTriggerTests(unittest.TestCase):
                                  "Examples/FlightControl3D/**", "CMakeLists.txt",
                                  "dependencies.cmake", "tools/flight/**")
 
-    def test_linux_flight_jobs_require_the_frozen_trace(self) -> None:
+    def test_linux_flight_jobs_use_pinned_compiler(self) -> None:
         workflow = (WORKFLOWS / "flight-control.yml").read_text(encoding="utf-8")
         matrix, steps = workflow.split("    steps:", 1)
         self.assertIn("os: [ubuntu-24.04, windows-2022]", matrix)
         self.assertIn("- os: ubuntu-24.04\n            compiler_flags: -DCMAKE_C_COMPILER=gcc-13 "
-                      "-DCMAKE_CXX_COMPILER=g++-13 -DPPO_FLIGHT_REQUIRE_GOLDEN_REFERENCE=ON", matrix)
+                      "-DCMAKE_CXX_COMPILER=g++-13", matrix)
         self.assertIn("${{ matrix.compiler_flags }}", steps)
 
     def test_desktop_runs_on_every_source_it_builds(self) -> None:

@@ -308,19 +308,13 @@ Toutes les valeurs sont dans [−1, 1]. `SignedLog(x, r, M) = sign(x)·log(1 + |
 | Je veux… | Où | Invariants et tests qui protègent la zone |
 |---|---|---|
 | Changer un poids de récompense | JSON `reward.weights` | `ValidateReward`, `reward_tests`, signature de contrat (warm start autorisé, BEST revalidé) |
-| Changer une formule de récompense | `Core/flight_reward.cpp` | **Change le modèle** : nouvelle `ContractVersion`, `reward_tests`, `simulator_tests` (ActionLevelPotential), golden trace |
-| Ajouter/retirer une observation | `Core/flight_observation.*` | **Change le contrat** : `ObservationSize`, checkpoint, `ContractVersion`, `core_tests`, golden trace |
+| Changer une formule de récompense | `Core/flight_reward.cpp` | **Change le modèle** : nouvelle `ContractVersion`, `reward_tests`, `simulator_tests` (ActionLevelPotential) |
+| Ajouter/retirer une observation | `Core/flight_observation.*` | **Change le contrat** : `ObservationSize`, checkpoint, `ContractVersion`, `core_tests` |
 | Modifier le guidage | `Core/flight_guidance.cpp` | `core_tests` (AimPointOnRunway, ApproachDirection, FlareTrajectory), signature (mission) |
 | Modifier les critères de crash | `Core/flight_landing.cpp`, `Core/flight_mission.cpp` (`Crashed`) | `core_tests` (Landing, CrashDiagnostics), `simulator_tests` |
-| Modifier les départs ou le curriculum | `Core/flight_spawn.cpp`, `Training/flight_curriculum.cpp` | ordre des tirages aléatoires, `core_tests` (Spawns, CurriculumSpawns, EvaluationStratification), `session_tests`, golden trace |
-| Toucher à l'adaptateur JSBSim | `Simulator/jsbsim_aircraft.cpp` | conventions d'unités/repères/signes, `simulator_tests`, golden trace |
-| Modifier PPO | `Training/flight_policy.hpp`, `Training/flight_learner.cpp` | `learner_tests` (gradients par différences finies, KL), format de checkpoint, golden trace |
-| Changer un journal ou un CSV | `Runtime/flight_session.cpp`, `Runtime/flight_headless.cpp` | parsés par `tools/flight/curriculum_ci.py` et la CI : `python -m unittest tools/flight/test_curriculum_ci.py` |
+| Modifier les départs ou le curriculum | `Core/flight_spawn.cpp`, `Training/flight_curriculum.cpp` | ordre des tirages aléatoires, `core_tests` (Spawns, CurriculumSpawns, EvaluationStratification), `session_tests` |
+| Toucher à l'adaptateur JSBSim | `Simulator/jsbsim_aircraft.cpp` | conventions d'unités/repères/signes, `simulator_tests` |
+| Modifier PPO | `Training/flight_policy.hpp`, `Training/flight_learner.cpp` | `learner_tests` (gradients par différences finies, KL), format de checkpoint |
+| Changer un journal ou un CSV | `Runtime/flight_session.cpp`, `Runtime/flight_headless.cpp` | journaux historiques ; les workflows actuels utilisent `ppokit-run` |
 | Changer l'affichage | `Visualiser/flight_visualiser.cpp` | lecture seule de la ligne de monde ; `visualiser_tests` (build desktop) |
 
-Le test `FlightControl_golden_trace_tests` (`tests/golden_trace_tests.cpp`) calcule une
-empreinte FNV-1a 64 de tout le comportement (épisodes seedés, 7 canaux, frontières,
-2 updates PPO, signature, octets du checkpoint). Une refonte ne doit jamais la changer ; un
-changement volontaire du modèle doit être fait dans une PR séparée qui met à jour la
-référence et explique pourquoi. La référence n'est appliquée que sur Linux x86_64 /
-GCC 13 / libstdc++ ; ailleurs le test est signalé « skipped » (code 77).

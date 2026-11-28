@@ -7,7 +7,6 @@
 * @license MIT
 */
 #include "targetselector.hpp"
-#include "mission_policy.hpp"
 #include "missiontrackfilter.hpp"
 #include "airspacecomponents.hpp"
 #include "utils.hpp"
@@ -641,10 +640,6 @@ std::unique_ptr<ppo::core::IPolicy> MakeMissionPolicy(std::string const& version
     {
         return std::make_unique<ppo::model::GraphPolicy<MissionObservationLayout::kStateDimension,
             MissionObservationLayout::kActionCount>>(MissionNetworkFiles(), folder / "policy.ppokit");
-    }
-    if (std::filesystem::exists(folder / "policy.txt"))
-    {
-        return std::make_unique<MissionPolicy>(folder / "policy.txt");
     }
     return nullptr;
 }

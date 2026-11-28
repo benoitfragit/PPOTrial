@@ -85,12 +85,6 @@ if (TARGET PPOKitPublishedModelsTests)
     endforeach()
 endif()
 
-# Legacy LibTorch checkpoints (exported by Tools/export_legacy_checkpoint.py) -> PPOKit artifacts.
-add_executable(airspace_checkpoint_import Tools/airspace_checkpoint_import.cpp)
-target_link_libraries(airspace_checkpoint_import PRIVATE Interception Mission GenericRLBindings
-    nlohmann_json::nlohmann_json)
-target_compile_features(airspace_checkpoint_import PRIVATE cxx_std_17)
-
 if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     # ppokit-run plays RLSNA and RLMission with the Airspace Visualiseur, the view draws them.
     add_executable(AirspaceVisualiserTests tests/visualiser_tests.cpp)
@@ -129,7 +123,7 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     set_tests_properties(Airspace_ppokit_run_smoke PROPERTIES TIMEOUT 900)
 endif()
 
-# The red policies (policy.ppokit / policy.txt) load and answer without training.
+# The production policies load and answer without training.
 if (PPO_BUILD_CHECKPOINT_TESTS)
     add_executable(PolicyCheckpointTests tests/policy_checkpoint_tests.cpp)
     target_link_libraries(PolicyCheckpointTests PRIVATE Interception Mission GenericRLBindings)

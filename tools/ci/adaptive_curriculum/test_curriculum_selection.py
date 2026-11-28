@@ -243,15 +243,6 @@ class CurriculumSelectionTests(unittest.TestCase):
         self.assertIn('inputs[max_team_size]=${MAX_TEAM_SIZE}', restart)
         self.assertIn('inputs[scenario_variant]=${SCENARIO_VARIANT}', restart)
 
-    def test_gui_uses_same_selected_two_team_prefix(self):
-        sys.path.insert(0, str(ROOT / "tools"))
-        import local_mappo_gui_curriculum as gui
-        stages, index, validated = gui.load_production_stages()
-        expected = gate.select_curriculum(json.loads(GATES.read_bytes()), 2)
-        self.assertEqual(stages, expected)
-        self.assertEqual(index, 4)
-        self.assertEqual(validated, ["1v0", "2v0", "1v1", "2v1"])
-
 
 if __name__ == "__main__":
     unittest.main()

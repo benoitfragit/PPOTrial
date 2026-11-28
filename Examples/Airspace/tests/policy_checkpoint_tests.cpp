@@ -43,7 +43,7 @@ void CheckPolicy(std::unique_ptr<ppo::core::IPolicy> const& policy, std::string 
     std::size_t observationSize, std::size_t actionSize)
 {
     if (policy == nullptr)
-        throw std::runtime_error(label + ": no production policy (policy.txt or policy.ppokit)");
+        throw std::runtime_error(label + ": no production policy (policy.ppokit)");
     ppo::core::Observation const observation = MakeObservation(observationSize);
     ppo::core::Action const first = policy->ChooseAction(observation);
     ppo::core::Action const second = policy->ChooseAction(observation);

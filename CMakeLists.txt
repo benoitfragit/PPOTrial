@@ -35,7 +35,6 @@ endif()
 add_library(PPOLayout INTERFACE)
 target_compile_definitions(PPOLayout INTERFACE
     PPO_SHARED_SETTINGS="${CMAKE_SOURCE_DIR}/Examples/Shared/settings"
-    PPO_SHARED_3D="${CMAKE_SOURCE_DIR}/Examples/Shared/3D"
     PPO_AIRSPACE_SETTINGS="${CMAKE_SOURCE_DIR}/Examples/Airspace/settings"
     PPO_BLUEDEFENSE_PROJECT="${CMAKE_SOURCE_DIR}/Examples/BlueDefense/projects/BluePatrol"
     PPO_FLIGHT_T6_PROJECT="${CMAKE_SOURCE_DIR}/Examples/FlightControl3D/projects/T6"
@@ -45,7 +44,6 @@ target_compile_definitions(PPOLayout INTERFACE
 add_subdirectory(PPOKit PPOKit)
 add_subdirectory(Framework/RL/Core Core)
 add_subdirectory(Framework/RL/Runtime Runtime)
-add_subdirectory(Examples/Airspace/Agents/Policy AirspacePolicies)
 
 # The ECS world (EnTT) and the 2D examples on it, without graphics.
 macro(ppo_add_world)

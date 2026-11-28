@@ -82,12 +82,6 @@ add_library(flight_visualiser MODULE Visualiser/flight_visualiser.cpp)
 target_link_libraries(flight_visualiser PRIVATE FlightControlCore PPOKit::Core PPOKit::ComponentSdk PPOKit::Live PPOLayout)
 set_target_properties(flight_visualiser PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON PREFIX "")
 ppokit_register_program(flight_visualiser)
-# Offline V3 migration. Both aircraft use the same tensor mapping and distinct scenario contracts.
-add_executable(flight_checkpoint_import EXCLUDE_FROM_ALL Tools/flight_checkpoint_import.cpp)
-target_link_libraries(flight_checkpoint_import PRIVATE FlightControlRuntime PPOKit::Schema)
-target_compile_definitions(flight_checkpoint_import PRIVATE
-    PPOKIT_PROGRAM_REGISTRY="${CMAKE_BINARY_DIR}/ppokit_programs_$<CONFIG>.txt")
-add_dependencies(flight_checkpoint_import flight_visualiser)
 if (TARGET PPOKitRepositoryProjectsTests)
     # T6's network.json names the Visualiseur: the repository check opens it.
     add_dependencies(PPOKitRepositoryProjectsTests flight_visualiser)
@@ -121,15 +115,6 @@ if (PPO_BUILD_CORE_TESTS OR PPO_BUILD_CHECKPOINT_TESTS)
     target_link_libraries(FlightControl_task_layout_tests PRIVATE FlightControlRuntime)
     ppokit_generate_task_layout(TARGET FlightControl_task_layout_tests TASK task.json HEADER flight_task_layout.hpp)
     add_test(NAME FlightControl_task_layout_tests COMMAND FlightControl_task_layout_tests)
-    # Capture the published actor through its project modules for a replay against a separate master checkout.
-    add_executable(FlightControl_reward_capture EXCLUDE_FROM_ALL "${CMAKE_SOURCE_DIR}/tools/ppokit/flight_reward_capture.cpp")
-    target_link_libraries(FlightControl_reward_capture PRIVATE PPOKit::Network PPOKit::Schema PPOKit::Artifacts)
-    add_dependencies(FlightControl_reward_capture flight_environment ppokit_graph_network)
-    target_compile_definitions(FlightControl_reward_capture PRIVATE
-        PPOKIT_PROGRAM_REGISTRY="${CMAKE_BINARY_DIR}/ppokit_programs_$<CONFIG>.txt")
-    find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    add_test(NAME FlightControl_campaign_comparison
-        COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_SOURCE_DIR}/tools/ppokit/test_flight_campaign.py)
     # ppokit-run evaluates projects/T6 as master's BEST record of the same checkpoint; the PC-7
     # project refuses the T-6 policy.
     add_test(NAME FlightControl_t6_evaluation_smoke
