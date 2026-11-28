@@ -305,6 +305,8 @@ void CheckAirspace(std::filesystem::path const& airspace, std::string const& fam
         family + "/task.json is the task the " + agent + " agent is compiled with");
     CheckVisualiser(project, "airspace_visualiser", "airspace_watch@1");
 
+#if defined(PPOKIT_AIRSPACE_LIBRARIES)
+    // Editor validation and graph round trips resolve the native observer component.
     schema::TaskSchema const task = schema::LoadTaskSchema(project.Task());
     ppokit::editor::GraphDocument document = ppokit::editor::GraphDocument::Open(ReadFile(project.Network()));
     Check(document.Validate(task).valid, family + " opens as a valid actor/critic graph in the Studio editor");
@@ -363,6 +365,7 @@ void CheckAirspace(std::filesystem::path const& airspace, std::string const& fam
             family + " Redo restores the structural edit");
         document.Undo();
     }
+#endif
 }
 
 } // namespace
